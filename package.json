@@ -1,0 +1,5 @@
+{
+  "name": "sinshin",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}

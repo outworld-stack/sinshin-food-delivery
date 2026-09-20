@@ -1,0 +1,189 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+/* فعال‌سازی تم دارک مبتنی بر کلاس در Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* رنگ‌های اصلی  */
+  --color-primary: #f6339a;
+  /* سرخابی (لایت) */
+  --color-dark-primary: #2fd4d1;
+  /* فیروزه‌ای (دارک) */
+
+  /* فونت‌ها */
+  --font-DanaDemiBold: 'DanaDemiBold';
+  --font-DanaMedium: 'DanaMedium';
+  --font-DanaRegular: 'DanaRegular';
+
+  --font-MorabbaBold: 'MorabbaBold';
+  --font-MorabbaMedium: 'MorabbaMedium';
+  --font-MorabbaLight: 'MorabbaLight';
+
+  --font-FrancoisOneRegular: 'FrancoisOneRegular';
+}
+
+@layer base {
+
+  /* dana font  */
+  @font-face {
+    font-family: 'DanaDemiBold';
+    src: url('/fonts/DanaFaNum-DemiBold.woff2') format('woff2');
+    font-weight: 700;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'DanaMedium';
+    src: url('/fonts/DanaFaNum-Medium.woff2') format('woff2');
+    font-weight: 550;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'DanaRegular';
+    src: url('/fonts/DanaFaNum-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+  }
+
+  /* morabba font  */
+  @font-face {
+    font-family: 'MorabbaBold';
+    src: url('/fonts/Morabba-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'MorabbaMedium';
+    src: url('/fonts/Morabba-Medium.woff2') format('woff2');
+    font-weight: 550;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'MorabbaLight';
+    src: url('/fonts/Morabba-Light.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+  }
+
+  /* English font  */
+  @font-face {
+    font-family: 'FrancoisOneRegular';
+    src: url('/fonts/FrancoisOne-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+  }
+
+  /* استایل‌های پایه بدنه سایت (دقیقاً طبق رنگ‌های درخواستی ) */
+  body {
+    @apply bg-gray-50 text-black transition-colors duration-500 antialiased;
+    direction: rtl;
+    overflow-x: hidden;
+  }
+
+  .dark body {
+    @apply bg-[#1a0a0e] text-white;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+
+#dynamic-print-area {
+  display: none;
+}
+
+
+/* استایل‌های مخصوص پرینت */
+@media print {
+
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+
+  #print-area {
+    display: flex !important;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100vh;
+    padding: 60px 20px;
+    box-sizing: border-box;
+    text-align: center;
+  }
+
+  /* استایل باکس برند (کج به سمت راست پایین و چپ بالا) */
+  #print-area .print-brand-box {
+    background-color: #f6339a !important;
+    /* رنگ اصلی شما */
+    padding: 12px 28px;
+    transform: skewY(3deg);
+    /* زاویه صحیح طبق برند اصلی */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* استایل متن برند (صاف و با فونت صحیح) */
+  #print-area .print-brand-text {
+    color: #ffffff !important;
+    font-family: 'MorabbaBold', sans-serif !important;
+    /* اعمال فونت سفارشی */
+    font-weight: bold;
+    font-size: 2.2rem;
+    display: inline-block;
+    transform: skewY(-3deg);
+    /* صاف نگه داشتن متن داخل باکس کج */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #print-area svg {
+    width: 50% !important;
+    height: auto !important;
+    max-width: 400px;
+  }
+
+  #print-area p {
+    color: #1a0a0e !important;
+  }
+    #dynamic-print-area {
+    display: block !important;
+  }
+
+  #dynamic-print-area,
+  #dynamic-print-area * {
+    visibility: visible !important;
+  }
+}

@@ -1,0 +1,388 @@
+name: sinshin
+
+# ══════════════════════════════════════════════════════════════
+# Shared API configuration
+# ══════════════════════════════════════════════════════════════
+
+x-api-service: &api-service
+
+  build:
+    context: .
+    dockerfile: apps/api/Dockerfile
+    target: runtime
+
+  image: sinshin/api
+
+  env_file:
+    - .env
+
+  environment:
+    APP_ENV: production
+    NODE_ENV: production
+    PORT: "3000"
+
+    SITE_URL: https://${DOMAIN:-sinshin.localhost}
+
+    DEVICE_ENFORCEMENT: ${DEVICE_ENFORCEMENT:-on}
+
+  volumes:
+    - uploads_data:/data/uploads
+
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+    redis:
+      condition: service_healthy
+
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "bun",
+        "-e",
+        "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))"
+      ]
+
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 20s
+
+  restart: unless-stopped
+
+  init: true
+
+  stop_grace_period: 30s
+
+  networks:
+    - edge
+    - internal
+
+
+services:
+
+  # ════════════════════════════════════════════════════════════
+  # Caddy / Edge
+  # ════════════════════════════════════════════════════════════
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: sinshin-caddy
+
+    restart: unless-stopped
+    init: true
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    environment:
+      DOMAIN: ${DOMAIN:-sinshin.localhost}
+
+      ACME_EMAIL: ${ACME_EMAIL:-dev@sinshin.localhost}
+
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+
+      API_UPSTREAMS: ${API_UPSTREAMS:-api:3000}
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+      # Caddy certificates / state.
+      - caddy_data:/data
+
+      # Caddy configuration.
+      - caddy_config:/config
+
+    networks:
+      - edge
+
+
+  # ════════════════════════════════════════════════════════════
+  # API — primary instance
+  # ════════════════════════════════════════════════════════════
+
+  api:
+    <<: *api-service
+    container_name: sinshin-api
+
+
+  # ════════════════════════════════════════════════════════════
+  # API — optional replicas
+  #
+  # Enable with:
+  #
+  #   API_UPSTREAMS="api:3000 api2:3000 api3:3000"
+  #
+  #   docker compose --profile scaled up -d
+  #
+  # All replicas share uploads_data on this Docker host.
+  # ════════════════════════════════════════════════════════════
+
+  api2:
+    <<: *api-service
+    container_name: sinshin-api2
+
+    profiles:
+      - scaled
+
+
+  api3:
+    <<: *api-service
+    container_name: sinshin-api3
+
+    profiles:
+      - scaled
+
+
+  # ════════════════════════════════════════════════════════════
+  # Web / SSR
+  # ════════════════════════════════════════════════════════════
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runtime
+
+    image: sinshin/web
+
+    container_name: sinshin-web
+
+    restart: unless-stopped
+    init: true
+
+    stop_grace_period: 30s
+
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Tehran
+
+      PORT: "3000"
+      HOST: 0.0.0.0
+
+      # Internal Docker network.
+      API_URL: http://api:3000
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+    networks:
+      - edge
+
+
+  # ════════════════════════════════════════════════════════════
+  # Database migration
+  #
+  # One-shot container.
+  #
+  # It runs before API starts.
+  # ════════════════════════════════════════════════════════════
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+
+    image: sinshin/api:migrate
+
+    container_name: sinshin-migrate
+
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: production
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+
+    networks:
+      - internal
+
+
+  # ════════════════════════════════════════════════════════════
+  # Database seed
+  #
+  # Explicit operation only.
+  #
+  # Run:
+  #
+  #   docker compose --profile seed run --rm seed
+  #
+  # NEVER run automatically as part of normal production startup.
+  # ════════════════════════════════════════════════════════════
+
+  seed:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+
+    image: sinshin/api:migrate
+
+    container_name: sinshin-seed
+
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: production
+
+    command:
+      - bun
+      - drizzle/seed.ts
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+    restart: "no"
+
+    profiles:
+      - seed
+
+    networks:
+      - internal
+
+
+  # ════════════════════════════════════════════════════════════
+  # PostgreSQL
+  # ════════════════════════════════════════════════════════════
+
+  postgres:
+    image: postgres:18.6-alpine
+
+    container_name: sinshin-postgres
+
+    restart: unless-stopped
+    init: true
+
+    env_file:
+      - .env
+
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+
+    volumes:
+      - pg_data:/var/lib/postgresql
+
+    networks:
+      - internal
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+        ]
+
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+
+  # ════════════════════════════════════════════════════════════
+  # Redis
+  # ════════════════════════════════════════════════════════════
+
+  redis:
+    image: redis:8-alpine
+
+    container_name: sinshin-redis
+
+    restart: unless-stopped
+    init: true
+
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - noeviction
+
+    volumes:
+      - redis_data:/data
+
+    networks:
+      - internal
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ]
+
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+
+# ══════════════════════════════════════════════════════════════
+# Persistent storage
+# ══════════════════════════════════════════════════════════════
+
+volumes:
+
+  pg_data:
+    name: sinshin_pg_data
+
+  redis_data:
+    name: sinshin_redis_data
+
+  caddy_data:
+    name: sinshin_caddy_data
+
+  caddy_config:
+    name: sinshin_caddy_config
+
+  uploads_data:
+    name: sinshin_uploads_data
+
+
+# ══════════════════════════════════════════════════════════════
+# Networks
+# ══════════════════════════════════════════════════════════════
+
+networks:
+
+  edge:
+    name: sinshin-edge
+
+  internal:
+    name: sinshin-internal
+    internal: true

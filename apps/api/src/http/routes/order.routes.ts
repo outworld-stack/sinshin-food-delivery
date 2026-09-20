@@ -1,0 +1,225 @@
+//src/http/routes/order.routes.ts
+import { Elysia, t } from 'elysia'
+
+import type { SessionService } from '#/domain/auth/session.service'
+import type { OrderService } from '#/domain/order/order.service'
+import type { ProfileService } from '#/domain/order/profile.service'
+import type { SettingsService } from '#/domain/settings/settings.service'
+import type { PaymentService } from '#/domain/payment/payment.service'
+import type { RedisService } from '#/infra/redis/redis'
+import { requireAuth } from '#/http/hooks/require-auth'
+import { Err } from '#/domain/shared/errors'
+
+const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
+const DISPLAY_PATTERN_SAFE = (v: string) => /^ord-[a-z0-9]{8}$/.test(v)
+
+export interface OrderRoutesDeps {
+  sessions: SessionService
+  orders: OrderService
+  profile: ProfileService
+  settings: SettingsService
+  payments: PaymentService
+  redis: RedisService
+}
+
+export const orderRoutes = (deps: OrderRoutesDeps) =>
+  new Elysia({ prefix: '/orders', tags: ['Orders'] })
+
+    // وضعیت رستوران — عمومی (قرارداد getRestaurantStatus)
+    .get(
+      '/restaurant-status',
+      () => deps.settings.restaurantOpen(),
+      { detail: { summary: 'Restaurant open status + next open time (public)' } },
+    )
+
+    .use(requireAuth(deps.sessions))
+
+    // پروفایل کامل — قرارداد getUserProfile
+    .get(
+      '/profile',
+      ({ user, auth }) => deps.profile.get(user.id, auth.deviceId),
+      { detail: { summary: 'Full user profile (frontend getUserProfile contract)' } },
+    )
+
+    // phase-3 — ویرایش پروفایل (name/email) — فرانت تا امروز stub بود
+    .patch(
+      '/profile',
+      ({ user, body }) =>
+        deps.profile.updateProfile(user.id, {
+          name: body.name,
+          email: body.email ?? null,
+        }),
+      {
+        body: t.Object({
+          name: t.Nullable(t.String({ minLength: 2, maxLength: 60 })),
+          email: t.Optional(t.Nullable(t.String({ maxLength: 120, format: 'email' }))),
+        }),
+        detail: { summary: 'Update profile name/email' },
+      },
+    )
+
+    // چک‌اوت
+    .post(
+      '/checkout',
+      async ({ user, body, headers }) => {
+        // ── phase-2: idempotency — retry شبکه نباید سفارش دوم بسازد ──
+        // فرانت برای هر «نیت خرید» یک UUID در هدر Idempotency-Key می‌فرستد
+        // (سمت فرانت در فاز ۳ سیم‌کشی می‌شود؛ تا آن موقع بدون هدر = رفتار قبلی)
+        const idemKey = headers['idempotency-key']
+        if (idemKey !== undefined && !/^[A-Za-z0-9-]{8,64}$/.test(idemKey)) {
+          throw Err.validation('Idempotency-Key باید ۸ تا ۶۴ کاراکتر حرفی/عددی باشد.')
+        }
+        const redisKey = idemKey ? `idem:checkout:${user.id}:${idemKey}` : null
+        if (redisKey) {
+          const cached = await deps.redis.get(redisKey)
+          if (cached) return JSON.parse(cached)
+        }
+
+        const r = await deps.orders.checkout(user.id, body)
+        const response = !r.requiresPayment || !r.paymentId
+          ? {
+            orderCompleted: true,
+            orderId: r.displayId,
+            requiresPayment: false,
+            breakdown: r.breakdown,
+          }
+          : {
+            orderCompleted: false,
+            orderId: r.displayId,
+            requiresPayment: true,
+            paymentUrl: (
+              await deps.payments.initiate(r.paymentId, body.gatewayId ?? 'MOCK', {
+                displayId: r.displayId,
+                amount: r.amountPaidOnline,
+                mobile: user.phone,
+              })
+            ).paymentUrl,
+            breakdown: r.breakdown,
+          }
+
+        if (redisKey) {
+          await deps.redis.set(redisKey, JSON.stringify(response), { ex: 86_400 })
+        }
+        return response
+      },
+      {
+        body: t.Object({
+          items: t.Array(
+            t.Object({
+              productId: t.String({ pattern: UUID_PATTERN }),
+              sizeId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
+              quantity: t.Number({ minimum: 1, maximum: 99 }),
+            }),
+            { minItems: 1, maxItems: 100 },
+          ),
+          deliveryType: t.Union([t.Literal('DELIVERY'), t.Literal('PICKUP'), t.Literal('DINE_IN')]),
+          useWallet: t.Boolean(),
+          addressId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
+          customerNote: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
+          couponCode: t.Optional(t.Nullable(t.String({ maxLength: 32 }))),
+          gatewayId: t.Optional(t.Nullable(t.String({ maxLength: 20 }))),
+        }),
+        detail: {
+          summary: 'Checkout — server-priced order + payment initiation (idempotent)',
+          description:
+            'All pricing server-side (size/discount/coupon/zone-aware delivery fee). Wallet-only orders settle instantly. Send Idempotency-Key header (UUID per purchase intent) so network retries never create a second order. Response cached 24h per key.',
+        },
+      },
+    )
+
+    // phase-2 — پیش‌نمایش چک‌اوت: قیمت زنده‌ی سرور بدون ثبت سفارش
+    .post(
+      '/checkout/preview',
+      ({ user, body }) => deps.orders.preview(user.id, body),
+      {
+        body: t.Object({
+          items: t.Array(
+            t.Object({
+              productId: t.String({ pattern: UUID_PATTERN }),
+              sizeId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
+              quantity: t.Number({ minimum: 1, maximum: 99 }),
+            }),
+            { minItems: 1, maxItems: 100 },
+          ),
+          deliveryType: t.Union([t.Literal('DELIVERY'), t.Literal('PICKUP'), t.Literal('DINE_IN')]),
+          useWallet: t.Boolean(),
+          addressId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
+          couponCode: t.Optional(t.Nullable(t.String({ maxLength: 32 }))),
+        }),
+        detail: {
+          summary: 'Checkout preview — live server pricing, no order created',
+          description:
+            'Same pricing as checkout (sizes/discount/coupon validation/zone fee/packaging/wallet) but read-only. couponCode is validated but never reserved.',
+        },
+      },
+    )
+
+    .get('/', ({ user }) => deps.orders.myOrders(user.id), {
+      detail: { summary: 'My orders (newest first, with items)' },
+    })
+
+    .get(
+      '/:displayId',
+      ({ user, params }) => deps.orders.byDisplayId(user.id, params.displayId),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        detail: { summary: 'Order detail (owner only)' },
+      },
+    )
+
+    .post(
+      '/:displayId/deliver',
+      ({ user, params }) => deps.orders.confirmDelivery(user.id, params.displayId),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        detail: { summary: 'Customer confirms delivery → DELIVERED' },
+      },
+    )
+
+    .get(
+      '/:displayId/tracking',
+      ({ user, params }) => deps.orders.tracking(user.id, params.displayId),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        detail: {
+          summary: 'Live-tracking flag for this order',
+          description:
+            'Snapshotted at checkout — orders placed before enabling never track.',
+        },
+      },
+    )
+
+    /** فاکتور چاپی — kitchen | sales — JSON ساختاریافته برای رندر/چاپ فرانت */
+    .get(
+      '/:displayId/invoice',
+      ({ user, params, query }) => {
+        if (!DISPLAY_PATTERN_SAFE(params.displayId)) throw Err.notFound('سفارش پیدا نشد.')
+        return deps.orders.byDisplayId(user.id, params.displayId).then((order) => {
+          if (query.type === 'kitchen') {
+            return {
+              type: 'kitchen' as const,
+              orderId: order.id,
+              date: order.date,
+              items: order.items.map((i) => ({ name: i.name, sizeName: i.sizeName, quantity: i.quantity })),
+            }
+          }
+          return {
+            type: 'sales' as const,
+            orderId: order.id,
+            date: order.date,
+            items: order.items,
+            breakdown: order.breakdown,
+            customerNote: order.customerNote,
+          }
+        })
+      },
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        query: t.Object({ type: t.Union([t.Literal('kitchen'), t.Literal('sales')]) }),
+        detail: {
+          summary: 'Invoice for printing — kitchen or sales',
+          description: 'Structured JSON; frontend renders and prints (owner only).',
+        },
+      },
+    )

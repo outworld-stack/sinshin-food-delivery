@@ -1,0 +1,207 @@
+name: sinshin-dev
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    container_name: sinshin-dev-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - sinshin_dev_pg_data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - dev
+
+  redis:
+    image: redis:8-alpine
+    container_name: sinshin-dev-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    volumes:
+      - sinshin_dev_redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - dev
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    image: sinshin/api:dev
+    container_name: sinshin-dev-api
+
+    env_file:
+      - .env
+
+    environment:
+      APP_ENV: development
+      NODE_ENV: development
+      PORT: "3000"
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://sinshin:sinshin_local@postgres:5432/sinshin
+      REDIS_URL: redis://redis:6379
+      SITE_URL: http://localhost:3001
+      DEVICE_ENFORCEMENT: ${DEVICE_ENFORCEMENT:-on}
+
+    volumes:
+      # Source code: HMR / live reload
+      - ./apps/api:/app/apps/api
+      - ./packages/shared:/app/packages/shared
+
+      # Node dependencies must stay inside Linux/Docker
+      - sinshin_dev_api_node_modules:/app/node_modules
+      - sinshin_dev_api_workspace_node_modules:/app/apps/api/node_modules
+
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+    restart: unless-stopped
+    init: true
+    networks:
+      - dev
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: dev
+    image: sinshin/web:dev
+    container_name: sinshin-dev-web
+
+    environment:
+      NODE_ENV: development
+      TZ: Asia/Tehran
+      PORT: "3000"
+      HOST: 0.0.0.0
+      API_URL: http://api:3000
+
+    volumes:
+      # Source code: HMR / live reload
+      - ./apps/web:/app/apps/web
+      - ./packages/shared:/app/packages/shared
+
+      # Node dependencies must stay inside Linux/Docker
+      - sinshin_dev_web_node_modules:/app/node_modules
+      - sinshin_dev_web_workspace_node_modules:/app/apps/web/node_modules
+
+    ports:
+      - "127.0.0.1:3001:3000"
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+    restart: unless-stopped
+    init: true
+    networks:
+      - dev
+
+  # Uses the already-built API dev image.
+  # No separate API migration image/build is required.
+  migrate:
+    image: sinshin/api:dev
+    container_name: sinshin-dev-migrate
+
+    env_file:
+      - .env
+
+    environment:
+      APP_ENV: development
+      NODE_ENV: development
+      DATABASE_URL: postgres://sinshin:sinshin_local@postgres:5432/sinshin
+      REDIS_URL: redis://redis:6379
+
+    command:
+      - bun
+      - src/infra/db/migrate.ts
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+    networks:
+      - dev
+
+networks:
+  dev:
+    name: sinshin-dev-network
+
+volumes:
+  sinshin_dev_pg_data:
+    name: sinshin_dev_pg_data
+
+  sinshin_dev_redis_data:
+    name: sinshin_dev_redis_data
+
+  sinshin_dev_api_node_modules:
+    name: sinshin_dev_api_node_modules
+
+  sinshin_dev_api_workspace_node_modules:
+    name: sinshin_dev_api_workspace_node_modules
+
+  sinshin_dev_web_node_modules:
+    name: sinshin_dev_web_node_modules
+
+  sinshin_dev_web_workspace_node_modules:
+    name: sinshin_dev_web_workspace_node_modules

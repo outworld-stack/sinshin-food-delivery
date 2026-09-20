@@ -1,0 +1,27 @@
+// src/routes/referral/$code.tsx
+// ⬅ phase-4: روت اختصاصی معرفی — /r/CODE → ذخیره → /login
+// ssr:false — ذخیره در localStorage فقط کلاینت؛ ریدایرکت سروری کد را نگه نمی‌داشت
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useEffect } from 'react'
+import { storeReferralCode } from '#/utils/referralCapture'
+
+export const Route = createFileRoute('/referral/$code')({
+  ssr: false,
+  component: ReferralRedirect,
+})
+
+function ReferralRedirect() {
+  const { code } = Route.useParams()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (code?.trim()) storeReferralCode(code)
+    navigate({ to: '/login', replace: true })
+  }, [code, navigate])
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#1a0a0e]">
+      <p className="text-gray-500 dark:text-gray-400 font-DanaMedium">در حال انتقال به صفحه‌ی ورود…</p>
+    </div>
+  )
+}

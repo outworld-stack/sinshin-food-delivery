@@ -1,0 +1,44 @@
+// src/components/Gallery.tsx
+import { Swiper, SwiperSlide } from 'swiper/react';
+import { EffectCards, Mousewheel, Keyboard, Pagination } from 'swiper/modules';
+import type { GalleryProps } from '#/types/shared/ui';
+
+// استایل‌های خود Swiper
+import 'swiper/css';
+import 'swiper/css/effect-cards';
+import 'swiper/css/pagination';
+
+export function Gallery({ images }: GalleryProps) {
+  if (!images || images.length === 0) return null;
+
+  return (
+    // اضافه کردن padding برای فضای تنفس افکت سه بعدی
+    <div className="mb-8 w-full flex justify-center px-8  overflow-hidden">
+      <Swiper
+        effect={'cards'}
+        grabCursor={true}
+        speed={500}
+        rewind={true}
+        // تنظیمات دقیق افکت برای حرکت نرم‌تر
+        cardsEffect={{ 
+          rotate: true, 
+          perSlideOffset: 8, // فاصله کارت‌های پشتی
+          perSlideRotate: 2, // زاویه چرخش کارت‌های پشتی
+          slideShadows: false // غیرفعال کردن سایه‌های زشت پیش‌فرض
+        }}
+        mousewheel={{ invert: true }}
+        keyboard={{ enabled: true }}
+        pagination={true}
+        modules={[EffectCards, Mousewheel, Keyboard, Pagination]}
+        // تعیین ابعاد استاندارد برای حفظ تناسب
+        className="w-full max-w-sm md:max-w-md lg:max-w-none aspect-4/5 lg:aspect-4/3 rounded-2xl"
+      >
+        {images.map((gradient, index) => (
+          <SwiperSlide key={index} className="rounded-2xl overflow-hidden shadow-xl bg-white">
+            <div className={`absolute inset-0 w-full h-full bg-linear-to-br ${gradient}`}></div>
+          </SwiperSlide>
+        ))}
+      </Swiper>
+    </div>
+  );
+}

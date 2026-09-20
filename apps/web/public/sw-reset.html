@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head><meta charset="utf-8" /><title>SW Reset | سین‌شین</title></head>
+<body style="font-family:Tahoma;text-align:center;padding:60px;direction:rtl">
+  <h2>پاک‌کردن Service </h2>
+  <p id="msg">در حال اجرا...</p>
+  <script>
+    ;(async () => {
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        for (const r of regs) await r.unregister()
+        const keys = await caches.keys()
+        for (const k of keys) await caches.delete(k)
+        document.getElementById('msg').textContent =
+          'انجام شد — '  + keys.length + ' کش پاک شد. رفرش کنید.'
+      } catch (e) {
+        document.getElementById('msg').textContent = 'خطا: ' + e.message
+      }
+    })()
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# ══════════════════════════════════════════════════════════════
+# Bun configuration — monorepo root
+# ══════════════════════════════════════════════════════════════
+
+telemetry = false
+
+[install]
+
+# Registry used by Bun for package downloads.
+#
+# IMPORTANT:
+# Keep this aligned with the deployment network.
+#
+# For environments where npmjs.org is reachable reliably:
+registry = "https://registry.npmjs.org"
+
+# If this server/build environment requires the mirror,
+# change the line above to:
+#
+# registry = "https://registry.npmmirror.com"
+#
+# Do NOT switch registries casually when debugging lockfile
+# integrity problems. The registry must serve the package
+# tarballs matching the integrity values recorded in bun.lock.

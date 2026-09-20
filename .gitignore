@@ -1,0 +1,44 @@
+# # آپلود‌های ران‌تایم — نه سورس‌کد
+# /uploads/
+# apps/api/uploads/
+
+# # env — فقط exampleها وارد git شوند
+# .env
+# apps/*/.env
+# !**/.env.example
+
+# .bun-cache/
+
+
+# ════════ وابستگی‌ها ════════
+node_modules/
+**/node_modules/
+
+# ════════ خروجی بیلد ════════
+**/.output/
+**/dist/
+**/.vinxi/
+**/.tanstack/
+**/.cache/
+
+# ════════ آپلودهای ران‌تایم — نه سورس‌کد ════════
+/uploads/
+apps/api/uploads/
+
+# ════════ env — فقط exampleها ════════
+.env
+.env.*
+apps/*/.env
+apps/*/.env.*
+!**/.env.example
+
+# ════════ PWA — خروجی تولیدی (منبع: sw.template.js) ════════
+apps/web/public/sw.js
+
+# ════════ کش محلی ════════
+.bun-cache/
+
+# ════════ سیستم / IDE ════════
+.DS_Store
+Thumbs.db
+*.log

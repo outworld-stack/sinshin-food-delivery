@@ -1,0 +1,33 @@
+{
+  "name": "@sinshin/api",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun src/infra/db/migrate.ts",
+    "db:push": "drizzle-kit push",
+    "db:seed": "bun drizzle/seed.ts",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@elysia/html": "^1.4.1",
+    "@elysiajs/cors": "^1.4.2",
+    "@elysiajs/openapi": "^1.4.16",
+    "@kitajs/ts-html-plugin": "^4.1.4",
+    "@sinshin/shared": "workspace:*",
+    "drizzle-orm": "^0.44.2",
+    "elysia": "^1.3.5",
+    "jose": "^6.0.11"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.15",
+    "drizzle-kit": "^0.31.1",
+    "typescript": "7.0.2"
+  }
+}

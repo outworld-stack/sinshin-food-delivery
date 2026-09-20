@@ -1,0 +1,80 @@
+{
+    email {$ACME_EMAIL:dev@sinshin.localhost}
+}
+
+{$DOMAIN:sinshin.localhost} {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    # HSTS فقط وقتی صراحتاً فعال شده باشد.
+    @hsts expression `{env.HSTS_ENABLED} == "true"`
+    header @hsts {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+
+    # ── Swagger / OpenAPI ──────────────────────────────────
+    @docs expression `{env.SWAGGER_ENABLED} == "true"`
+
+    handle /swagger* {
+        route {
+            reverse_proxy @docs api:3000
+            respond 404
+        }
+    }
+
+    handle /openapi* {
+        route {
+            reverse_proxy @docs api:3000
+            respond 404
+        }
+    }
+
+    # ── Service Worker ─────────────────────────────────────
+    handle /sw.js {
+        header Cache-Control "no-cache, no-store, must-revalidate"
+        reverse_proxy web:3000
+    }
+
+    # ── Web App Manifest ───────────────────────────────────
+    handle /manifest.webmanifest {
+        header Cache-Control "no-cache"
+        reverse_proxy web:3000
+    }
+
+    # ── API ────────────────────────────────────────────────
+    handle /api/* {
+        reverse_proxy {$API_UPSTREAMS:api:3000} {
+            lb_policy round_robin
+
+            health_uri /api/health
+            health_interval 15s
+            health_timeout 5s
+
+            lb_try_duration 5s
+
+            flush_interval -1
+        }
+    }
+
+    # ── Uploads ────────────────────────────────────────────
+    handle /uploads/* {
+        reverse_proxy {$API_UPSTREAMS:api:3000} {
+            lb_policy round_robin
+
+            health_uri /api/health
+            health_interval 15s
+            health_timeout 5s
+        }
+    }
+
+    # ── Web ────────────────────────────────────────────────
+    handle {
+        reverse_proxy web:3000
+    }
+}

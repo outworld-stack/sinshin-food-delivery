@@ -1,0 +1,31 @@
+{
+  "include": ["src/**/*.ts", "src/**/*.tsx", "drizzle.config.ts", "drizzle/seed.ts"],
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext"],
+
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    "jsx": "react",
+    "jsxFactory": "Html.createElement",
+    "jsxFragmentFactory": "Html.Fragment",
+    "plugins": [{ "name": "@kitajs/ts-html-plugin" }],
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "skipLibCheck": true,
+    "paths": {
+      "#/*": ["./src/*"]
+    }
+  }
+}

@@ -1,0 +1,121 @@
+//src/http/routes/live.routes.ts
+import { Elysia, t } from 'elysia'
+
+import type { SessionService } from '#/domain/auth/session.service'
+import type { Admin2Service } from '#/domain/admin2/admin2.service'
+import type { LiveService } from '#/domain/live/live.service'
+import { requireAdmin2 } from '#/http/hooks/require-admin2'
+
+const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
+const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+export interface LiveRoutesDeps {
+  sessions: SessionService
+  admin2: Admin2Service
+  live: LiveService
+}
+
+export const liveRoutes = (deps: LiveRoutesDeps) =>
+  new Elysia({ prefix: '/live', tags: ['Live Panel'] })
+    .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
+
+    /** سشن ادمین۲ — نتیجه‌ی queueCount هم اینجاست */
+    .get(
+      '/session',
+      async ({ user, admin2 }) => {
+        if (user.role !== 'admin2' || !admin2) {
+          return { isAdmin2LoggedIn: false, admin: null }
+        }
+        return {
+          isAdmin2LoggedIn: true,
+          admin: {
+            userId: user.id,
+            permissions: admin2,
+          },
+          queueCount: await deps.admin2.queueCountFor(user.id),
+        }
+      },
+      { detail: { summary: 'Level-2 admin session + queue count' } },
+    )
+
+    /** لیست زنده — صفِ scope + مالِ خودش */
+    .get(
+      '/orders',
+      ({ user }) => deps.live.liveOrders(user.id),
+      {
+        detail: {
+          summary: 'Live orders for this admin — queue (scope) + own confirmed',
+          description:
+            'Queue = PAID without confirmedBy, filtered by scope (hall=DINE_IN, takeaway=DELIVERY+PICKUP). Own = CONFIRMED/ON_THE_WAY by me. deliveryType drives panel colors (blue/purple/green).',
+        },
+      },
+    )
+
+    /** آمار داشبورد ادمین۲ */
+    .get('/stats', ({ user }) => deps.live.admin2Stats(user.id), {
+      detail: { summary: 'My stats — only orders I confirmed' },
+    })
+
+    /** گزینه‌های پیک — مودال تخصیص */
+    .get('/couriers', () => deps.live.courierOptions(), {
+      detail: { summary: 'Active couriers for assignment' },
+    })
+
+    /** دیدن نکته‌ی مشتری — قبل از تایید اجباری */
+    .post(
+      '/orders/:displayId/note',
+      ({ user, params }) => deps.live.viewNote(user.id, params.displayId),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        detail: { summary: 'View customer note (marks noteSeen)' },
+      },
+    )
+
+    /** تایید سفارش — قلب پنل */
+    .post(
+      '/orders/:displayId/confirm',
+      ({ user, params, body }) =>
+        deps.live.confirmOrder(user.id, params.displayId, {
+          courierId: body.courierId ?? null,
+          courierNote: body.courierNote ?? null,
+          securityEnabled: body.securityEnabled ?? false,
+        }),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        body: t.Object({
+          courierId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
+          courierNote: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
+          /** امنیت احراز پیک — پیش‌فرض خاموش */
+          securityEnabled: t.Optional(t.Boolean()),
+        }),
+        detail: {
+          summary: 'Confirm order — ownership + courier + print queue',
+          description:
+            'Requires noteSeen when customerNote exists. scope-checked. securityEnabled=false by default (open QR scan).',
+        },
+      },
+    )
+
+    /** تغییر/تخصیص پیک — تا قبل از رسیدن */
+    .post(
+      '/orders/:displayId/reassign',
+      ({ user, params, body }) =>
+        deps.live.reassignCourier(user.id, params.displayId, body.courierId ?? null),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        body: t.Object({
+          courierId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
+        }),
+        detail: { summary: 'Reassign courier (before arrival only)' },
+      },
+    )
+
+    /** جزئیات سفارش — نقش‌محور */
+    .get(
+      '/orders/:displayId',
+      ({ user, params }) => deps.live.orderDetail(user.id, user.role, params.displayId),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        detail: { summary: 'Order detail (role-aware)' },
+      },
+    )
