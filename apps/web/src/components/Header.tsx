@@ -6,7 +6,7 @@ import { Brand } from '#/components/Brand'
 import { ThemeToggle } from '#/components/ThemeToggle'
 import { useCartStore } from '#/stores/cartStore'
 import { useAuthStore } from '#/stores/authStore'
-import { activeMainCategoriesOptions, userProfileClientOptions } from '#/utils/queryOptions'
+import { activeMainCategoriesOptions, userProfileLightClientOptions } from '#/utils/queryOptions'
 import { Cart, User, Package, Shield, Bell } from 'reicon-react'
 import { useHydrated } from '#/hooks/useHydrated'
 import { HeaderSkeleton } from '#/components/LoadingSkeletons'
@@ -24,9 +24,11 @@ export const Header = memo(function Header() {
   // Main فعال‌ها — فکتوری مرکزی (کلید یکسان با MainLayout و /products)
   const { data: activeMains } = useQuery(activeMainCategoriesOptions)
 
-  // پروفایل — فکتوری مرکزی؛ enabled چون فقط بعد از لاگین معنا داره
+  // پروفایل سبک (کار-۶) — هدر روی «هر» صفحه‌ی سایت است؛ فقط برای تشخیص
+  // سفارش فعال نیاز دارد — قبلاً پروفایل مگا (همه‌ی سفارش‌ها + txs + دستگاه‌ها)
+  // در هر صفحه‌لود بارگذاری می‌شد
   const { data: user } = useQuery({
-    ...userProfileClientOptions,
+    ...userProfileLightClientOptions,
     enabled: isAuthenticated,
   })
 

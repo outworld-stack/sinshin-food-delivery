@@ -6,6 +6,9 @@
 export const qk = {
   // --- کاربر ---
   userProfile: ['user-profile'] as const,
+  // کار-۶: پروفایل سبک — زیرمجموعه‌ی همین پریفکس تا invalidateهای موجود
+  // (آدرس جدید، سفارش، ویرایش پروفایل، ...) به‌طور خودکار این را هم رفرش کنند
+  userProfileLight: ['user-profile', 'light'] as const,
   productReviews: (productId: string) => ['product-reviews', productId] as const,
   // پریفکس — بعد از ثبت نظر تازه، نظرات همه‌ی محصولات رفرش می‌شن
   // (بازخورد سفارش به نظرات محصول تبدیل می‌شه)

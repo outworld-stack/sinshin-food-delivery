@@ -103,18 +103,21 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
         }
       },
       {
-        // فقط همین روت — سقف IP: ۲۰ در دقیقه (سقف‌های شماره‌محور در OtpService اصلی‌اند)
+        // فقط همین روت — سقف IP: ۱۲۰ در دقیقه (perf-fix کار-۵: CGNAT — پشت یک
+        // IP عمومی اپراتور می‌تواند صد‌ها کاربر واقعی باشد؛ ۲۰ دقیقه‌ای در ساعات
+        // پیک لاگین همه را قفل می‌کرد. هزینه‌ی SMS همچنان توسط سقف‌های
+        // شماره‌محور OtpService مهار می‌شود: 60s cooldown + 5/hour + 20/day)
         beforeHandle: ipRateLimit({
           redis: deps.redis,
           scope: 'otp-request',
-          limit: 20,
+          limit: 120,
           windowSeconds: 60,
         }),
         body: t.Object({ phone: t.String() }),
         detail: {
           summary: 'Request login OTP',
           description:
-            'IP limit: 20/min. Per-phone limits (primary SMS-cost guard): 60s cooldown, 5/hour, 20/day.',
+            'IP limit: 120/min (CGNAT-friendly). Per-phone limits (primary SMS-cost guard): 60s cooldown, 5/hour, 20/day.',
         },
       },
     )

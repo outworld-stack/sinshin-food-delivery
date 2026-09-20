@@ -50,6 +50,13 @@ export const referralProfits = pgTable(
 /**
  * تراکنش‌های کیف پول — append-only ledger؛ منبع حقیقت موجودی (SUM).
  * برداشت فقط با orderId — partial unique: هر سفارش حداکثر یک WITHDRAW.
+ *
+ * perf-fix (کار-۷):
+ *  • (userId, createdAt) جایگزین (userId) — لیست تاریخچه‌ی پروفایل
+ *    (WHERE user_id ORDER BY created_at DESC) دیگر sort ندارد؛ پیشوندِ
+ *    user_id همغطیت (userId) قدیمی را پوشش می‌دهد.
+ *  • (userId, type, amount) پوشش‌دهنده — SUM موجودی (checkout/preview/
+ *    پروفایل، داغ‌ترین کوئری کیف پول) از index-only scan پاسخ داده می‌شود.
  */
 export const walletTransactions = pgTable(
   'wallet_transactions',
@@ -70,7 +77,8 @@ export const walletTransactions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('wallet_tx_user_idx').on(t.userId),
+    index('wallet_tx_user_created_idx').on(t.userId, t.createdAt),
+    index('wallet_tx_user_type_amount_idx').on(t.userId, t.type, t.amount),
     index('wallet_tx_order_idx').on(t.orderId),
     index('wallet_tx_created_idx').on(t.createdAt),
     uniqueIndex('wallet_tx_withdraw_once_key')

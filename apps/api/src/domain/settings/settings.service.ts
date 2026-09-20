@@ -16,14 +16,29 @@ export interface RestaurantLocation {
  * دو نوع بسته‌بودن:
  *  restaurant_open    → ساعتی (روزانه) — فقط ادمین اصلی؛ بسته = لاگین ادمین۲ رد
  *  temporarily_closed → موقت (گاز/برق/...) — ادمین اصلی + ادمین۲ با permission؛ ادمین۲ می‌تواند لاگین/بماند
+ *
+ * perf-fix (کار-۱): کش درون‌حافظه با TTL ۳۰ ثانیه + write-through روی set().
+ * کلیدها مجموعه‌ی ثابت و کوچکی هستند (SETTING_KEYS) — بدون سقف اندازه.
+ * restaurantStatus در هر checkout سه‌چهار بار get می‌زد (۴ کوئری)؛ حالا فقط
+ * اولین فراخوانی بعد از انقضای TTL به DB می‌رود. چند‌رپلیکایی: حداکثر ۳۰ ثانیه
+ * کهنگی — برای این نوع تنظیمات (باز/بسته، هزینه بسته‌بندی، ...) قابل قبول است.
  */
+const SETTINGS_CACHE_TTL_MS = 30_000
+
 export class SettingsService {
   constructor(private readonly deps: { db: Db }) {}
 
+  private cache = new Map<string, { value: unknown; at: number }>()
+
   async get<T>(key: string, fallback: T): Promise<T> {
+    const hit = this.cache.get(key)
+    if (hit && Date.now() - hit.at < SETTINGS_CACHE_TTL_MS) {
+      return hit.value as T
+    }
     const row = await this.deps.db.query.settings.findFirst({ where: eq(settings.key, key) })
-    if (!row) return fallback
-    return row.value as T
+    const value = row ? (row.value as T) : fallback
+    this.cache.set(key, { value, at: Date.now() })
+    return value
   }
 
   async set<T>(key: string, value: T): Promise<void> {
@@ -34,6 +49,8 @@ export class SettingsService {
         target: settings.key,
         set: { value: value as never, updatedAt: new Date() },
       })
+    // write-through — رپلیکای خودش بلافاصله مقدار تازه را می‌بیند
+    this.cache.set(key, { value, at: Date.now() })
   }
 
   /** وضعیت کامل رستوران — دو نوع بسته‌بودن */

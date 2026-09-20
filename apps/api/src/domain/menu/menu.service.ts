@@ -19,7 +19,6 @@ import {
 
 const CACHE_TTL_SECONDS = 30
 const VERSION_KEY = 'menu:ver'
-
 /** DTO محصول — قرارداد فرانت (finalPrice محاسباتی، مثل موک) */
 export interface ProductDto {
   id: string
@@ -50,9 +49,17 @@ export function finalPriceOf(p: { originalPrice: number; discountPercentage: num
  *
  * کش نسخه‌دار: کلید = menu:v{ver}:... ؛ invalidate = INCR menu:ver.
  * بدون SCAN/پترن — ساده‌ترین مکانیزم با کمترین حالت خراب.
+ *
+ * perf-fix (کار-۴): single-flight — در لحظه‌ی expire (لحظه‌ی پیک‌ترافیک)
+ * ده‌ها request موازی همزمان miss می‌زدند و همه loader را اجرا می‌کردند
+ * (thundering herd روی DB). الان اولین miss صاحب یک promise درون‌حافظه‌ای
+ * است و بقیه به همان نتیجه می‌پیوندند.
  */
 export class MenuService {
   constructor(private readonly deps: { db: Db; redis: RedisService }) { }
+
+  /** کار-۴: پرومیس‌های در حال پرواز per cache-key (بعد از resolve حذف می‌شوند) */
+  private inflight = new Map<string, Promise<unknown>>()
 
   private async version(): Promise<number> {
     const v = await this.deps.redis.get(VERSION_KEY)
@@ -64,9 +71,22 @@ export class MenuService {
     const k = `menu:v${ver}:${key}`
     const hit = await this.deps.redis.getJson<T>(k)
     if (hit !== null) return hit
-    const value = await loader()
-    await this.deps.redis.setJson(k, value, { ex: CACHE_TTL_SECONDS })
-    return value
+
+    // کار-۴: single-flight — اگر هم‌زمانی دارد همین کلید را load می‌کند، join
+    const existing = this.inflight.get(k) as Promise<T> | undefined
+    if (existing) return existing
+
+    const p = (async () => {
+      try {
+        const value = await loader()
+        await this.deps.redis.setJson(k, value, { ex: CACHE_TTL_SECONDS })
+        return value
+      } finally {
+        this.inflight.delete(k)
+      }
+    })()
+    this.inflight.set(k, p)
+    return p
   }
 
   /** هر write ادمین — یک بار */
@@ -155,11 +175,26 @@ export class MenuService {
     const k = `menu:v${ver}:prod:${id}`
     const hit = await this.deps.redis.getJson<ProductDto>(k)
     if (hit !== null) return hit
-    const value = await load()
-    if (value !== null) {
-      await this.deps.redis.setJson(k, value, { ex: CACHE_TTL_SECONDS })
-    }
-    return value
+
+    // کار-۴: همان single-flight — جزئیات محصول در صفحه‌ی محصول می‌تواند
+    // هم‌زمان توسط SSR + چند کامپوننت درخواست شود
+    const existing = this.inflight.get(k) as Promise<ProductDto | null> | undefined
+    if (existing) return existing
+
+    const p = (async (): Promise<ProductDto | null> => {
+      try {
+        const value = await load()
+        // null کش نمی‌شود (مثل قبل) — محصولِ حذف‌شده بعد از invalidate دوباره پرسیده می‌شود
+        if (value !== null) {
+          await this.deps.redis.setJson(k, value, { ex: CACHE_TTL_SECONDS })
+        }
+        return value
+      } finally {
+        this.inflight.delete(k)
+      }
+    })()
+    this.inflight.set(k, p)
+    return p
   }
 
   async allCategories() {

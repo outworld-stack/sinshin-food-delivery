@@ -3,7 +3,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { memo, useMemo } from 'react'
-import { userProfileOptions } from '#/utils/queryOptions'
+import { userProfileLightOptions } from '#/utils/queryOptions'
 import { useAddressesPage } from '#/hooks/dashboard/useAddressesPage'
 import { AddressCard } from '#/components/dashboard/addresses/AddressCard'
 import { AddressFormModal } from '#/components/dashboard/addresses/AddressFormModal'
@@ -14,7 +14,8 @@ import { Plus } from 'reicon-react'
 
 
 const AddressesPage = memo(function AddressesPage() {
-  const { data: user, isLoading } = useQuery(userProfileOptions)
+  // کار-۶: این صفحه فقط آدرس‌ها را می‌خواهد — پروفایل سبک (آدرس‌ها داخلش هستند)
+  const { data: user, isLoading } = useQuery(userProfileLightOptions)
 
   const page = useAddressesPage()
 
@@ -95,10 +96,10 @@ export const Route = createFileRoute('/dashboard/addresses/')({
   ssr: false,
   component: AddressesPage,
 
-  // ⬅ NEW: پری‌فچ — هاور روی «آدرس‌ها» در سایدبار => پروفایل (شامل addresses) در کش؛
+  // ⬅ پری‌فچ — هاور روی «آدرس‌ها» در سایدبار => پروفایل سبک (شامل addresses) در کش؛
   // ناوبری بدون حتی یک اسکلتون. گارد والد قبل از این loader اجرا شده.
   loader: async ({ context }) => {
-    await context.queryClient.query(userProfileOptions)
+    await context.queryClient.query(userProfileLightOptions)
   },
 
   pendingComponent: DashboardAddressesSkeleton,

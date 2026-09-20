@@ -57,10 +57,20 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
     .use(requireAuth(deps.sessions))
 
     // پروفایل کامل — قرارداد getUserProfile
+    // perf-fix (کار-۶): ?light=1 — حالت سبک برای هدر/لایوت/چک‌اوت:
+    // بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها
     .get(
       '/profile',
-      ({ user, auth }) => deps.profile.get(user.id, auth.deviceId),
-      { detail: { summary: 'Full user profile (frontend getUserProfile contract)' } },
+      ({ user, auth, query }) =>
+        deps.profile.get(user.id, auth.deviceId, { light: query.light === true }),
+      {
+        query: t.Object({ light: t.Optional(t.BooleanString()) }),
+        detail: {
+          summary: 'Full user profile (frontend getUserProfile contract)',
+          description:
+            'Default: full lists. ?light=true: bounded variant for always-on consumers (site header, dashboard layout, checkout) — no wallet transactions/devices/referrals, orders = last 10 + all active (PAID/CONFIRMED/ON_THE_WAY). Same DTO shape.',
+        },
+      },
     )
 
     // phase-3 — ویرایش پروفایل (name/email) — فرانت تا امروز stub بود

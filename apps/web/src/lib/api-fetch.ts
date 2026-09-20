@@ -2,7 +2,7 @@
 // هلپرهای fetch مشترک — همه‌ی server/*.ts از اینجا استفاده می‌کنند
 // cast فقط اینجا (مرز serde) — به‌علاوه‌ی cast در هر caller با contract
 
-import { apiBase } from '#/lib/api'
+import { apiBase, ssrFetchSignal } from '#/lib/api'
 import { getAccessToken, onUnauthorized, tryRefresh } from '#/lib/auth-session'
 
 export interface FetchOpts {
@@ -13,6 +13,7 @@ export interface FetchOpts {
 export async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(apiBase() + path, {
     credentials: 'include',
+    signal: ssrFetchSignal(), // کار-۳: سقف ۱۰s فقط SSR
   })
   return handleResponse<T>(res)
 }
@@ -23,6 +24,7 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     credentials: 'include',
+    signal: ssrFetchSignal(), // کار-۳
   })
   return handleResponse<T>(res)
 }
@@ -47,6 +49,7 @@ export async function authJson<T>(
     method,
     headers,
     credentials: 'include',
+    signal: ssrFetchSignal(), // کار-۳
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
 
@@ -60,6 +63,7 @@ export async function authJson<T>(
         method,
         headers,
         credentials: 'include',
+        signal: ssrFetchSignal(), // کار-۳ — سیگنال تازه برای retry
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       })
     } else {
@@ -87,4 +91,8 @@ async function handleResponse<T>(res: Response): Promise<T> {
       code: b?.error?.code,
     })
   }
+  // ⬅ body خالی — 204 یا empty:
+  const text = await res.text()
+  if (!text) return undefined as T
+  return JSON.parse(text) as T
 }

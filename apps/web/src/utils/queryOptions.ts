@@ -92,7 +92,9 @@ export const articlesOptions = (category: string, subCategory: string) =>
     staleTime: 60_000,
   })
 
-// پروفایل — در ۸ فایل استفاده می‌شه؛ staleTime اینجا متمرکز شد
+// پروفایل — staleTime اینجا متمرکز شد
+// کار-۶: full فقط برای صفحاتِ محتوا (سفارشات/کیف پول/اطلاعات/پروفایل من/
+// جزئیات سفارش)؛ لایه‌های همیشگی (هدر/لایوت/چک‌اوت/آدرس‌ها) از light استفاده می‌کنند
 export const userProfileOptions = queryOptions({
   queryKey: qk.userProfile,
   queryFn: () => getUserProfile(),
@@ -106,6 +108,24 @@ export const userProfileClientOptions = queryOptions({
     const { ensureSession } = await import('#/lib/auth-session')
     await ensureSession()
     return getUserProfile()
+  },
+});
+
+// کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).
+// همان DTO ولی بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها.
+// کلید زیر پریفکس qk.userProfile است → invalidateهای موجود این را هم می‌گیرند.
+export const userProfileLightOptions = queryOptions({
+  queryKey: qk.userProfileLight,
+  queryFn: () => getUserProfile({ light: true }),
+  staleTime: 60_000,
+});
+
+export const userProfileLightClientOptions = queryOptions({
+  ...userProfileLightOptions,
+  queryFn: async () => {
+    const { ensureSession } = await import('#/lib/auth-session')
+    await ensureSession()
+    return getUserProfile({ light: true })
   },
 });
 

@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Brand } from '#/components/Brand'
 import { ThemeToggle } from '#/components/ThemeToggle'
 import { useAuthStore } from '#/stores/authStore'
-import { userProfileClientOptions } from '#/utils/queryOptions'
+import { userProfileLightClientOptions } from '#/utils/queryOptions'
 import type { NavItem } from '#/types/shared/navigation'
 import { useHydrated } from '#/hooks/useHydrated'
 import { useRealLogout } from '#/hooks/shared/useRealLogout'
@@ -20,8 +20,10 @@ export function DashboardLayout() {
   const activeOrderId = useAuthStore((state) => state.activeOrderId)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
+  // پروفایل سبک (کار-۶) — لایوت داشبورد فقط تشخیص سفارش فعال نیاز دارد؛
+  // صفحاتی که لیست کامل می‌خواهند (سفارشات/کیف پول/...) کلید full خودشان را می‌خوانند
   const { data: user } = useQuery({
-    ...userProfileClientOptions,
+    ...userProfileLightClientOptions,
     enabled: isAuthenticated,
   })
 

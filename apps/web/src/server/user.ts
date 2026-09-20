@@ -22,8 +22,10 @@ export type { ReferralRowDto as UserReferral } from '@sinshin/shared'
 
 // ─── پروفایل ───
 
-export async function getUserProfile(): Promise<UserProfileDto> {
-  return authJson<UserProfileDto>('/orders/profile', 'GET')
+export async function getUserProfile(opts: { light?: boolean } = {}): Promise<UserProfileDto> {
+  // کار-۶: light — حالت سبک برای لایه‌های همیشگی (هدر/لایوت/چک‌اوت)
+  const qs = opts.light ? '?light=true' : ''
+  return authJson<UserProfileDto>(`/orders/profile${qs}`, 'GET')
 }
 
 export async function updateUserProfile(input: {

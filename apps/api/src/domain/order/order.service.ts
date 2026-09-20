@@ -127,6 +127,8 @@ export class OrderService {
       }
 
       // ── قیمت آیتم‌ها — سروری، snapshot ──
+      // perf-fix (کار-۲): قبلاً به‌ازای هر آیتم تا ۲ کوئری (محصول + سایزها)
+      // داخل tx → سبد ۵ آیتمه = تا ۱۰ کوئری. الان: حداکثر ۲ کوئری batch.
       const itemRows: {
         productId: ProductId
         sizeId: SizeId | null
@@ -136,24 +138,16 @@ export class OrderService {
         quantity: number
       }[] = []
       let foodTotal = 0
+      const { productMap, sizesByProduct } = await this.loadPricingBases(tx, input.items)
       for (const item of input.items) {
-        const product = (
-          await tx
-            .select()
-            .from(products)
-            .where(eq(products.id, asProductId(item.productId)))
-        )[0]
+        const product = productMap.get(asProductId(item.productId))
         if (!product || product.status !== 'ACTIVE') continue // skip نامعتبر — قرارداد فرانت
 
         let unitPrice = finalPriceOf(product)
         let sizeId: SizeId | null = null
         let sizeName: string | null = null
         if (product.sizesEnabled) {
-          const sizes = await tx
-            .select()
-            .from(productSizes)
-            .where(eq(productSizes.productId, product.id))
-            .orderBy(productSizes.sortOrder)
+          const sizes = sizesByProduct.get(product.id) ?? []
           if (sizes.length > 0) {
             // phase-2: تعویض بی‌صدای سایز ممنوع — اگر سایزِ سبد حذف/تغییر کرده،
             // مشتری باید خطا ببیند، نه اینکه بی‌سروصدا اولین سایز قیمت شود
@@ -379,22 +373,18 @@ export class OrderService {
     }
 
     // آیتم‌ها — همان منطق checkout (read-only)
+    // perf-fix (کار-۲): همان batch — قبلاً N+1 (بدون قفل هم بود، فقط کوئری‌های زائد)
     const items: { name: string; sizeName: string | null; unitPrice: number; quantity: number }[] = []
     let foodTotal = 0
+    const { productMap, sizesByProduct } = await this.loadPricingBases(db, input.items)
     for (const item of input.items) {
-      const product = (
-        await db.select().from(products).where(eq(products.id, asProductId(item.productId)))
-      )[0]
+      const product = productMap.get(asProductId(item.productId))
       if (!product || product.status !== 'ACTIVE') continue
 
       let unitPrice = finalPriceOf(product)
       let sizeName: string | null = null
       if (product.sizesEnabled) {
-        const sizes = await db
-          .select()
-          .from(productSizes)
-          .where(eq(productSizes.productId, product.id))
-          .orderBy(productSizes.sortOrder)
+        const sizes = sizesByProduct.get(product.id) ?? []
         if (sizes.length > 0) {
           if (item.sizeId) {
             const size = sizes.find((s) => s.id === item.sizeId)
@@ -691,6 +681,39 @@ export class OrderService {
     return this.mapRows(rows)
   }
 
+  /**
+   * perf-fix (کار-۶): سفارش‌های پروفایلِ سبک — ۱۰ سفارش آخر + همه‌ی سفارش‌های
+   * فعال (PAID/CONFIRMED/ON_THE_WAY) حتی اگر قدیمی‌تر از ۱۰تای آخر باشند.
+   * مصرف‌کننده: هدر/لایوت داشبورد/چک‌اوت — فقط برای تشخیص «سفارش فعال» و
+   * recentOrders؛ merge تضمین می‌کند سفارش فعالِ گیرکرده (مثلاً ۱۰ سفارش
+   * جدید بعد از آن) از دید useActiveOrder گم نشود.
+   */
+  async myOrdersLight(userId: string) {
+    const [recent, active] = await Promise.all([
+      this.deps.db
+        .select()
+        .from(orders)
+        .where(eq(orders.userId, userId))
+        .orderBy(desc(orders.createdAt))
+        .limit(10),
+      this.deps.db
+        .select()
+        .from(orders)
+        .where(
+          and(
+            eq(orders.userId, userId),
+            inArray(orders.status, ['PAID', 'CONFIRMED', 'ON_THE_WAY']),
+          ),
+        ),
+    ])
+    const seen = new Set(recent.map((r) => r.id))
+    const merged = [...recent]
+    for (const r of active) {
+      if (!seen.has(r.id)) merged.push(r)
+    }
+    return this.mapRows(merged)
+  }
+
   async byDisplayId(userId: string, displayId: string) {
     if (!DISPLAY_RE.test(displayId)) throw Err.notFound('سفارش پیدا نشد.')
     const row = (
@@ -736,6 +759,42 @@ export class OrderService {
   }
 
   // ── داخلی ──
+
+  /**
+   * perf-fix (کار-۲): پایه‌های قیمت‌گذاری — batch.
+   * قبلاً checkout/preview به‌ازای هر آیتم، محصول و سایزهایش را جدا می‌خواندند
+   * (تا ۲N کوئری). الان: ۱ کوئری محصولات (unique) + ۱ کوئری همه‌ی سایزها.
+   * ترتیب سایزها (sortOrder صعودی) مثل قبل حفظ می‌شود.
+   */
+  private async loadPricingBases(
+    db: DbOrTx,
+    items: { productId: string }[],
+  ): Promise<{
+    productMap: Map<ProductId, typeof products.$inferSelect>
+    sizesByProduct: Map<ProductId, (typeof productSizes.$inferSelect)[]>
+  }> {
+    const ids = [...new Set(items.map((i) => asProductId(i.productId)))]
+    const rows = ids.length
+      ? await db.select().from(products).where(inArray(products.id, ids))
+      : []
+    const productMap = new Map(rows.map((p) => [p.id, p]))
+
+    const sizedIds = rows.filter((p) => p.sizesEnabled).map((p) => p.id)
+    const sizeRows = sizedIds.length
+      ? await db
+          .select()
+          .from(productSizes)
+          .where(inArray(productSizes.productId, sizedIds))
+          .orderBy(productSizes.sortOrder)
+      : []
+    const sizesByProduct = new Map<ProductId, (typeof productSizes.$inferSelect)[]>()
+    for (const s of sizeRows) {
+      const list = sizesByProduct.get(s.productId) ?? []
+      list.push(s)
+      sizesByProduct.set(s.productId, list)
+    }
+    return { productMap, sizesByProduct }
+  }
 
   private async mapRows(rows: OrderRow[]) {
     if (rows.length === 0) return []

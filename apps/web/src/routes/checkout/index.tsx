@@ -2,7 +2,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import { restaurantStatusOptions, userProfileOptions } from '#/utils/queryOptions'
+import { restaurantStatusOptions, userProfileLightClientOptions } from '#/utils/queryOptions'
 import { useCartStore } from '#/stores/cartStore'
 import { useAuthStore } from '#/stores/authStore'
 import { useHydrated } from '#/hooks/useHydrated'
@@ -45,9 +45,10 @@ function CheckoutPage() {
   const items = useCartStore((s) => s.items)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
-  // پروفایل — فکتوری مرکزی (همون کلید قبلی + staleTime یکجا)
+  // پروفایل سبک (کار-۶) — چک‌اوت فقط موجودی کیف پول + آدرس‌ها را می‌خواهد؛
+  // حالت سبک هر دو را دارد (آدرس‌ها سبک‌اند و داخل پاسخ سبک می‌آیند)
   const { data: user } = useQuery({
-    ...userProfileOptions,
+    ...userProfileLightClientOptions,
     enabled: hasHydrated && isAuthenticated,
   })
 

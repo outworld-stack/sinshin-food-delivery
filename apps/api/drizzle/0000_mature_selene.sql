@@ -580,7 +580,8 @@ CREATE INDEX "payments_ref_idx" ON "payments" USING btree ("gateway_ref");--> st
 CREATE UNIQUE INDEX "referral_profits_referrer_order_key" ON "referral_profits" USING btree ("referrer_id","order_id");--> statement-breakpoint
 CREATE INDEX "referral_profits_referrer_idx" ON "referral_profits" USING btree ("referrer_id");--> statement-breakpoint
 CREATE INDEX "referral_profits_buyer_idx" ON "referral_profits" USING btree ("buyer_id");--> statement-breakpoint
-CREATE INDEX "wallet_tx_user_idx" ON "wallet_transactions" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "wallet_tx_user_created_idx" ON "wallet_transactions" USING btree ("user_id","created_at");--> statement-breakpoint
+CREATE INDEX "wallet_tx_user_type_amount_idx" ON "wallet_transactions" USING btree ("user_id","type","amount");--> statement-breakpoint
 CREATE INDEX "wallet_tx_order_idx" ON "wallet_transactions" USING btree ("order_id");--> statement-breakpoint
 CREATE INDEX "wallet_tx_created_idx" ON "wallet_transactions" USING btree ("created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "wallet_tx_withdraw_once_key" ON "wallet_transactions" USING btree ("order_id") WHERE type = 'WITHDRAW' and referral_profit_id is null;--> statement-breakpoint
