@@ -88,7 +88,12 @@ export class PaymentService {
     }
     const paymentId = verifyState(token, this.deps.config.jwtSecret)
     if (!paymentId) throw Err.forbidden('توکن پرداخت نامعتبر است.')
-    const r = await this.finalize(paymentId, success, undefined)
+    const r = await this.finalize(
+      paymentId,
+      success,
+      undefined,
+      success ? undefined : { source: 'mock', reason: 'mock-failed' },
+    )
     return { orderDisplayId: r.orderDisplayId, paymentStatus: r.paymentStatus }
   }
 
@@ -123,7 +128,13 @@ export class PaymentService {
     // claim اتمیک CONFLICT می‌دهد؛ به‌جای 409 خام، همان صفحه‌ی سفارش را نشان بده
     let orderDisplayId: string
     try {
-      const r = await this.finalize(paymentId, v.success, v.gatewayRef)
+      const r = await this.finalize(
+        paymentId,
+        v.success,
+        v.gatewayRef,
+        // امن-۸: منبع/درگاهِ شکست در metadata — قبلاً FAILED کور بود
+        v.success ? undefined : { source: 'callback', gateway: gatewayId.toUpperCase() },
+      )
       orderDisplayId = r.orderDisplayId
     } catch (e) {
       if (e instanceof AppError && e.code === 'CONFLICT') {
@@ -168,7 +179,18 @@ export class PaymentService {
             success = v.success
           }
         }
-        await this.finalize(p.id, success, p.gatewayRef)
+        await this.finalize(
+          p.id,
+          success,
+          p.gatewayRef,
+          success
+            ? undefined
+            : {
+                source: 'timeout-job',
+                gateway: gwId || null,
+                hadGatewayRef: !!p.gatewayRef,
+              },
+        )
         if (success) reverified++
         else failed++
       } catch (e) {
@@ -189,15 +211,25 @@ export class PaymentService {
   /**
    * نهایی‌سازی — claim اتمیک (status=PENDING → نتیجه) داخل tx؛
    * callback تکراری/موازی با conflict رد می‌شود. سپس settle/fail سفارش در همان tx.
+   *
+   * امن-۸: در شکست، failInfo (منبع/درگاه) داخل payments.metadata
+   * ثبت می‌شود — برای تحلیل پس از حادثه و چک R11 (spot-check دستی PSP).
    */
   private async finalize(
     paymentId: PaymentId,
     success: boolean,
     gatewayRef: string | null | undefined,
+    failInfo?: Record<string, unknown>,
   ): Promise<{ orderDisplayId: string; paymentStatus: string }> {
     const { db } = this.deps
 
     return db.transaction(async (tx) => {
+      // metadata فعلی برای merge — فقط خواندن؛ claim اتمیک همان update
+      // با status=PENDING است، پس این select مسیر رقابت را عوض نمی‌کند
+      const current = (
+        await tx.select().from(payments).where(eq(payments.id, paymentId))
+      )[0]
+
       const [payment] = await tx
         .update(payments)
         .set({
@@ -205,6 +237,17 @@ export class PaymentService {
           verifiedAt: new Date(),
           updatedAt: new Date(),
           ...(gatewayRef !== undefined ? { gatewayRef } : {}),
+          ...(success
+            ? {}
+            : {
+                metadata: {
+                  ...(current?.metadata ?? {}),
+                  fail: {
+                    ...(failInfo ?? {}),
+                    at: new Date().toISOString(),
+                  },
+                },
+              }),
         })
         .where(and(eq(payments.id, paymentId), eq(payments.status, 'PENDING')))
         .returning()

@@ -40,7 +40,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
   const clearCart = useCartStore((s) => s.clearCart)
   const setActiveOrderId = useAuthStore((s) => s.setActiveOrderId)
 
-  
+
   // ⬅ داده‌ی سفارش — «یک کوئری واحد»؛ دیتای اولیه از کشِ پرشده توسط loader
   // (همان کلید qk.orderDetails). polling فقط برای سفارش‌های ارسالیِ در جریان؛
   // refetchInterval به‌صورت callback تا با تغییر وضعیت خودش خاموش شود
@@ -94,8 +94,9 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 
   const hasReferrer = useMemo(() => !!userProfile?.referrerCode, [userProfile])
   const isDelivered = order.status === 'DELIVERED'
-  const isAwaiting = order.status !== 'DELIVERED' && order.status !== 'CANCELED'
-
+  // امن-۷: دکمه تایید تحویل فقط بعد از تایید رستوران —
+  // PAID/PENDING_PAYMENT دیگر قابل بستن نیست (قرارداد جدید بک‌اند)
+  const canConfirmDelivery = order.status === 'CONFIRMED' || order.status === 'ON_THE_WAY'
   return (
     <div className="max-w-6xl space-y-6">
       <Link
@@ -115,8 +116,8 @@ const OrderDetailPage = memo(function OrderDetailPage() {
             ...i,
             productId: i.productId ?? '' as any,
           }))} breakdown={order.breakdown ?? null} />
-          {/* آیتم ۱۶: دکمه تحویل — فقط قبل از DELIVERED */}
-          {isAwaiting && (
+          {/* آیتم ۱۶: دکمه تحویل — فقط CONFIRMED/ON_THE_WAY (امن-۷) */}
+          {canConfirmDelivery && (
             <DeliverButton
               isSubmitting={page.confirmDeliveryMutation.isPending}
               onConfirm={page.handleConfirmDelivery}
