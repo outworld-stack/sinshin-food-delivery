@@ -1,5 +1,5 @@
 {
-  "id": "afb5a39a-5f01-4e55-95f2-f9137848a90c",
+  "id": "b566c6b2-215b-4eca-a6cb-ad326bbab45d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -4446,7 +4446,23 @@
             }
           ],
           "isUnique": true,
-          "where": "type = 'WITHDRAW'",
+          "where": "type = 'WITHDRAW' and referral_profit_id is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "wallet_tx_reversal_once_key": {
+          "name": "wallet_tx_reversal_once_key",
+          "columns": [
+            {
+              "expression": "referral_profit_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "type = 'WITHDRAW' and referral_profit_id is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
