@@ -1,6 +1,22 @@
 name: sinshin
 
 # ══════════════════════════════════════════════════════════════
+# استک کامل سین‌شین — برای podman compose نوشته شده.
+#
+#  • ایمیج‌های بیرونی با رجیستری کامل (docker.io/...) آمده‌اند تا میرور
+#    تنظیم‌شده در registries.conf بدون ابهام اعمال شود — راهنمای کامل:
+#    PODMAN.md (نصب ویندوز/لینوکس + میرور + دستورات روزمره).
+#
+#  • x-podman.in_pod=false فقط برای podman-compose است (رفع گوتچای
+#    «همه در یک pod» که DNS اسم سرویس‌ها را می‌شکند؛ Caddyfile با
+#    api:3000 و web:3000 به همان DNS وابسته است). با docker-compose
+#    provider و نسخه‌های جدید podman-compose بی‌اثر/بی‌ضرر است.
+# ══════════════════════════════════════════════════════════════
+
+x-podman:
+  in_pod: false
+
+# ══════════════════════════════════════════════════════════════
 # Shared API configuration
 # ══════════════════════════════════════════════════════════════
 
@@ -67,7 +83,7 @@ services:
   # ════════════════════════════════════════════════════════════
 
   caddy:
-    image: caddy:2.10-alpine
+    image: docker.io/library/caddy:2.10-alpine
     container_name: sinshin-caddy
 
     restart: unless-stopped
@@ -115,9 +131,9 @@ services:
   #
   #   API_UPSTREAMS="api:3000 api2:3000 api3:3000"
   #
-  #   docker compose --profile scaled up -d
+  #   podman compose --profile scaled up -d
   #
-  # All replicas share uploads_data on this Docker host.
+  # All replicas share uploads_data on this host.
   # ════════════════════════════════════════════════════════════
 
   api2:
@@ -162,7 +178,7 @@ services:
       PORT: "3000"
       HOST: 0.0.0.0
 
-      # Internal Docker network.
+      # Internal container network.
       API_URL: http://api:3000
 
     depends_on:
@@ -228,7 +244,7 @@ services:
   #
   # Run:
   #
-  #   docker compose --profile seed run --rm seed
+  #   podman compose --profile seed run --rm seed
   #
   # NEVER run automatically as part of normal production startup.
   # ════════════════════════════════════════════════════════════
@@ -271,7 +287,7 @@ services:
   # ════════════════════════════════════════════════════════════
 
   postgres:
-    image: postgres:18.6-alpine
+    image: docker.io/library/postgres:18.6-alpine
 
     container_name: sinshin-postgres
 
@@ -316,7 +332,7 @@ services:
   # ════════════════════════════════════════════════════════════
 
   redis:
-    image: redis:8-alpine
+    image: docker.io/library/redis:8-alpine
 
     container_name: sinshin-redis
 

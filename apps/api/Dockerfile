@@ -1,6 +1,14 @@
-# syntax=docker/dockerfile:1
+# apps/api/Dockerfile — با podman build و docker build هر دو سازگار است.
+#
+# چرا FROM با رجیستری کامل (docker.io/...)؟
+#  • podman بدون ابهام پول می‌کند (بدون پرامپت short-name در محیط تعاملی)
+#  • میرور تنظیم‌شده در registries.conf دقیقاً روی prefix «docker.io» اعمال
+#    می‌شود — یعنی دانلود از آینه، بدون هیچ تغییری در این فایل.
+#
+# RUN --mount=type=cache توسط Buildah (podman build) پشتیبانی می‌شود؛
+# بدترین حالت فقط کندتر شدن بیلد است، نه شکست آن.
 
-FROM oven/bun:1.3.14-slim AS base
+FROM docker.io/oven/bun:1.3.14-slim AS base
 WORKDIR /app
 ENV TZ=Asia/Tehran \
     BUN_TELEMETRY_DISABLED=1

@@ -1,8 +1,27 @@
 name: sinshin-dev
 
+# ══════════════════════════════════════════════════════════════
+# محیط توسعه — برای podman compose نوشته شده (راهنما: PODMAN.md).
+#
+#  • ایمیج‌های بیرونی با رجیستری کامل (docker.io/...) آمده‌اند تا میرور
+#    registries.conf بدون ابهام اعمال شود.
+#
+#  • x-podman.in_pod=false فقط برای podman-compose است (رفع گوتچای
+#    «همه در یک pod» که DNS اسم سرویس‌ها را می‌شکند — DATABASE_URL
+#    و API_URL به postgres:5432 و api:3000 وابسته‌اند).
+#
+#  • روی ویندوز، حالت پیشنهادی dev روزمره: فقط زیرساخت با این فایل
+#    بالا بیاور و اپ‌ها را روی خود سیستم با bun اجرا کن:
+#      podman compose -f compose.dev.yml up -d postgres redis
+#    (سپس apps/api/.env.local طبق انتهای apps/api/.env.example)
+# ══════════════════════════════════════════════════════════════
+
+x-podman:
+  in_pod: false
+
 services:
   postgres:
-    image: postgres:18.6-alpine
+    image: docker.io/library/postgres:18.6-alpine
     container_name: sinshin-dev-postgres
     restart: unless-stopped
     env_file:
@@ -25,7 +44,7 @@ services:
       - dev
 
   redis:
-    image: redis:8-alpine
+    image: docker.io/library/redis:8-alpine
     container_name: sinshin-dev-redis
     restart: unless-stopped
     command:
@@ -76,7 +95,7 @@ services:
       - ./apps/api:/app/apps/api
       - ./packages/shared:/app/packages/shared
 
-      # Node dependencies must stay inside Linux/Docker
+      # Node dependencies must stay inside the container (Linux)
       - sinshin_dev_api_node_modules:/app/node_modules
       - sinshin_dev_api_workspace_node_modules:/app/apps/api/node_modules
 
@@ -127,7 +146,7 @@ services:
       - ./apps/web:/app/apps/web
       - ./packages/shared:/app/packages/shared
 
-      # Node dependencies must stay inside Linux/Docker
+      # Node dependencies must stay inside the container (Linux)
       - sinshin_dev_web_node_modules:/app/node_modules
       - sinshin_dev_web_workspace_node_modules:/app/apps/web/node_modules
 

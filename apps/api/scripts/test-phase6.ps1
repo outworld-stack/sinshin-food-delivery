@@ -56,7 +56,7 @@ function P($name, $ok, $extra) {
 function OK($r) { $null -eq $r.__status }
 
 function Pg($sql) {
-  (docker compose -f docker-compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
+  (podman compose -f compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
 }
 
 # ============ self-clean ============
@@ -88,7 +88,7 @@ Write-Host '== cleanup ==' -ForegroundColor Cyan
   "DELETE FROM couriers WHERE phone = '09120000099'"
 )
 foreach ($s in $sqls) { Pg $s | Out-Null }
-docker compose -f docker-compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
+podman compose -f compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
 Write-Host 'cleanup done' -ForegroundColor Cyan
 
 # ============ setup ============
