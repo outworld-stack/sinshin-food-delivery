@@ -1,0 +1,22 @@
+# سین‌شین فودپارک — https://www.sinshin-foodpark.ir
+# صفحات عمومی آزادند؛ بخش‌های خصوصی/تراکنشی از بودجه‌ی کرال حذف می‌شوند.
+# (noindex متای صفحاتِ خصوصی از قبل داخل خود صفحات هست — این Disallow ها
+#  فقط برای صرفه‌جویی در crawl budget اند، نه جایگزین noindex.)
+
+User-agent: *
+Allow: /
+
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /checkout
+Disallow: /cart
+Disallow: /geo-blocked
+Disallow: /referral/
+Disallow: /courier
+Disallow: /offline.html
+Disallow: /sw-reset.html
+
+# نکته: /login عمداً Disallow نیست — چون noindex متا دارد و گوگل برای دیدنِ
+# آن noindex باید بتواند صفحه را بخواند.
+
+Sitemap: https://www.sinshin-foodpark.ir/sitemap.xml

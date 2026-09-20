@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useBack } from '#/hooks/useBack'
 import { ProductSizeSelector } from '#/components/site/product-detail/ProductSizeSelector'
 import { asProductId } from '@sinshin/shared'
+import { SITE_URL, DEFAULT_OG_IMAGE, absoluteUrl, jsonLdScript } from '#/lib/site'
 
 export const Route = createFileRoute('/products/$productId')({
   component: ProductDetailPage,
@@ -38,17 +39,27 @@ export const Route = createFileRoute('/products/$productId')({
   errorComponent: RouteError,
   notFoundComponent: RouteNotFound,
 
-  head: ({ loaderData }) => ({
-    meta: loaderData
-      ? [
-        { title: `${loaderData.name} | سین شین` },
-        { name: 'description', content: loaderData.description ?? '' },
-        { property: 'og:title', content: `${loaderData.name} | سین شین` },
-        { property: 'og:description', content: loaderData.description ?? '' },
-        { property: 'og:type', content: 'product' },
-      ]
-      : [{ title: 'محصول یافت نشد | سین شین' }],
-  }),
+  head: ({ loaderData }) => {
+    // سئو-۵/۶: og:image واقعی محصول + canonical — URL مطلق لازم است
+    const ogImage = absoluteUrl(loaderData?.profileImage) ?? DEFAULT_OG_IMAGE
+    return {
+      meta: loaderData
+        ? [
+          { title: `${loaderData.name} | سین شین` },
+          { name: 'description', content: loaderData.description ?? '' },
+          { property: 'og:title', content: `${loaderData.name} | سین شین` },
+          { property: 'og:description', content: loaderData.description ?? '' },
+          { property: 'og:type', content: 'product' },
+          { property: 'og:image', content: ogImage },
+          { 'twitter:card': 'summary_large_image' },
+          { 'twitter:image': ogImage },
+        ]
+        : [{ title: 'محصول یافت نشد | سین شین' }],
+      links: loaderData
+        ? [{ rel: 'canonical', href: `${SITE_URL}/products/${loaderData.id}` }]
+        : [],
+    }
+  },
 })
 
 function ProductDetailPage() {
@@ -62,8 +73,55 @@ function ProductDetailPage() {
 
   const { data: reviews } = useQuery(productReviewsOptions(product.id))
 
+  // سئو-۴: JSON-LD — Product (با Offer) + BreadcrumbList.
+  // قیمت تومان است؛ schema.org ارز رسمی ایران «ریال» (IRR) دارد → ×۱۰.
+  // jsonLdScript: اسکیپ < برای جلوگیری از breakout تگ (XSS).
+  const jsonLd = jsonLdScript({
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Product',
+        name: product.name,
+        ...(product.description ? { description: product.description } : {}),
+        image: [
+          absoluteUrl(product.profileImage) ?? DEFAULT_OG_IMAGE,
+          ...product.galleryImages
+            .map((g) => absoluteUrl(g))
+            .filter((u): u is string => !!u)
+            .slice(0, 3),
+        ].filter((v, i, arr) => arr.indexOf(v) === i),
+        offers: {
+          '@type': 'Offer',
+          url: `${SITE_URL}/products/${product.id}`,
+          price: String(product.finalPrice * 10),
+          priceCurrency: 'IRR',
+          availability:
+            product.status === 'ACTIVE'
+              ? 'https://schema.org/InStock'
+              : 'https://schema.org/SoldOut',
+        },
+      },
+      {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'خانه', item: SITE_URL },
+          { '@type': 'ListItem', position: 2, name: 'منو', item: `${SITE_URL}/products` },
+          {
+            '@type': 'ListItem',
+            position: 3,
+            name: product.name,
+            item: `${SITE_URL}/products/${product.id}`,
+          },
+        ],
+      },
+    ],
+  })
+
   return (
     <div className="py-10 px-4 max-w-6xl mx-auto pb-32 lg:pb-10">
+      {/* سئو-۴: داده‌ی ساختاریافته‌ی محصول — گوگل JSON-LD را در body هم می‌پذیرد */}
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD با اسکیپ < — نه HTML، فقط داده */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
       <button
         type="button"
         onClick={back}

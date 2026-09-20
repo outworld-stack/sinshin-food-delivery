@@ -1,11 +1,37 @@
 // src/pwa/register-sw.tsx
 // ثبت SW + بنر آپدیت (client-only) + install-prompt اندروید + راهنمای iOS
 // همه‌چیز داخل useEffect — هیچ رندر SSR نداریم → hydration mismatch صفر
+//
+// pwa-۲: بستنِ راهنمای iOS «پایدار» است (۳۰ روز، مثل اندروید) — قبلاً فقط
+// state بود و با هر رفرش دوباره برمی‌گشت و کاربر iOS را اذیت می‌کرد.
+// pwa-۳: بنر آپدیت دکمه‌ی «بعداً» دارد — بستنش فقط برای همین session است؛
+// جلسه‌ی بعدی (reg.waiting هنوز هست) دوباره پیشنهاد می‌دهد که رفتار درستِ
+// آپدیت است.
 
 import { useEffect, useState } from 'react'
 
 const DISMISS_KEY = 'sinshin-install-dismissed'
+const IOS_DISMISS_KEY = 'sinshin-ios-dismissed'
 const DISMISS_DAYS = 30
+
+/** آیا کاربر اخیراً (ظرف مهلت) این بنر را بسته است؟ */
+function dismissedWithin(key: string, days: number): boolean {
+  try {
+    const raw = localStorage.getItem(key)
+    return !!raw && Date.now() - Number(raw) < days * 86400000
+  } catch {
+    return false
+  }
+}
+
+/** بستن پایدار — مهلت‌دار */
+function markDismissed(key: string): void {
+  try {
+    localStorage.setItem(key, String(Date.now()))
+  } catch {
+    /* noop */
+  }
+}
 
 export function PwaRegister() {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null)
@@ -59,10 +85,7 @@ export function PwaRegister() {
       e.preventDefault() // پرامپت خودکار مرورگر نمی‌آید
       setDeferredPrompt(e)
       // فقط اگر قبلاً رد نکرده
-      try {
-        const raw = localStorage.getItem(DISMISS_KEY)
-        if (raw && Date.now() - Number(raw) < DISMISS_DAYS * 86400000) return
-      } catch { /* noop */ }
+      if (dismissedWithin(DISMISS_KEY, DISMISS_DAYS)) return
       // نشان نده فوراً — بعد از تعامل کاربر (اینجا: بعد از ۳ ثانیه اگر هنوز آنلاین است)
       setTimeout(() => setShowInstall(true), 3000)
     }
@@ -74,9 +97,11 @@ export function PwaRegister() {
       try { localStorage.removeItem(DISMISS_KEY) } catch { /* noop */ }
     })
 
-    // ── iOS راهنما — فقط iOS + غیر standalone ──
+    // ── iOS راهنما — فقط iOS + غیر standalone + پایدار بسته‌نشده (pwa-۲) ──
     const isIos = /iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent)
-    if (isIos) setShowIosGuide(true)
+    if (isIos && !dismissedWithin(IOS_DISMISS_KEY, DISMISS_DAYS)) {
+      setShowIosGuide(true)
+    }
 
     return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall)
   }, [])
@@ -92,7 +117,7 @@ export function PwaRegister() {
     deferredPrompt.prompt()
     const { outcome } = await deferredPrompt.userChoice
     if (outcome === 'dismissed') {
-      try { localStorage.setItem(DISMISS_KEY, String(Date.now())) } catch { /* noop */ }
+      markDismissed(DISMISS_KEY)
     }
     setDeferredPrompt(null)
     setShowInstall(false)
@@ -103,11 +128,14 @@ export function PwaRegister() {
 
   return (
     <>
-      {/* بنر آپدیت — minimal */}
+      {/* بنر آپدیت — minimal + «بعداً» (pwa-۳) */}
       {showUpdate && (
         <div style={bannerStyle}>
           <span style={{ fontSize: 13 }}>نسخه‌ی جدید آماده است</span>
           <button onClick={applyUpdate} style={btnStyle}>به‌روزرسانی</button>
+          <button type="button" onClick={() => setShowUpdate(false)} style={laterBtnStyle}>
+            بعداً
+          </button>
         </div>
       )}
 
@@ -119,22 +147,28 @@ export function PwaRegister() {
           <button
             onClick={() => {
               setShowInstall(false)
-              try { localStorage.setItem(DISMISS_KEY, String(Date.now())) } catch { /* noop */ }
+              markDismissed(DISMISS_KEY)
             }}
-            style={{ ...btnStyle, background: 'transparent', color: '#999', border: '1px solid #ddd' }}
+            style={laterBtnStyle}
           >
             بعداً
           </button>
         </div>
       )}
 
-      {/* راهنمای iOS — فقط بار اول؛ با بستن، این session دیگر نمی‌آید */}
+      {/* راهنمای iOS — بستنش ۳۰ روز پایدار است (pwa-۲) */}
       {showIosGuide && !showUpdate && (
         <div style={bannerStyle}>
           <span style={{ fontSize: 12 }}>
             برای نصب: Share ⬆️ سپس «Add to Home Screen»
           </span>
-          <button onClick={() => setShowIosGuide(false)} style={{ ...btnStyle, background: 'transparent', color: '#999', border: '1px solid #ddd' }}>
+          <button
+            onClick={() => {
+              setShowIosGuide(false)
+              markDismissed(IOS_DISMISS_KEY)
+            }}
+            style={laterBtnStyle}
+          >
             بستن
           </button>
         </div>
@@ -168,6 +202,18 @@ const btnStyle: React.CSSProperties = {
   border: 0,
   borderRadius: 10,
   padding: '6px 16px',
+  fontSize: 13,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  whiteSpace: 'nowrap',
+}
+
+const laterBtnStyle: React.CSSProperties = {
+  background: 'transparent',
+  color: '#999',
+  border: '1px solid #ddd',
+  borderRadius: 10,
+  padding: '6px 14px',
   fontSize: 13,
   cursor: 'pointer',
   fontFamily: 'inherit',

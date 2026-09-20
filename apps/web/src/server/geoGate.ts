@@ -10,8 +10,16 @@
  * نباید برای همه قطع شود) — با کش کوتاهِ ۳۰ ثانیه‌ای (کار-۸).
  * مسدود = ریدایرکت به صفحه‌ی اختصاصی /geo-blocked.
  * IPهای خصوصی/داخلی و build/prerender (کار-۸) بدون تماس با API عبور می‌کنند.
+ *
+ * سئو-۱: کرالرهای معتبر (گوگل/بینگ/… + بات‌های پیش‌نمایش شبکه‌های اجتماعی)
+ * قبل از هر بررسی IP معاف می‌شوند — بدون این، گوگل فقط صفحه‌ی ۴۰۳ می‌بیند
+ * و هیچ صفحه‌ای ایندکس نمی‌شود. سیاست «فقط ایران» برای کاربران واقعی
+ * ذره‌ای تغییر نمی‌کند؛ منطق مشترک در @sinshin/shared (crawlers.ts) است
+ * و همان در هوک onRequest بک‌اند هم اعمال شده تا رندرِ سمت کلاینتِ
+ * کرالرها (Googlebot WRS) هم به /api برخورد نکند.
  */
 import { getRequest } from '@tanstack/react-start/server'
+import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
 import { apiBase } from '#/lib/api'
 
 const TTL_MS = 10 * 60_000
@@ -59,6 +67,14 @@ function clientIpFromRequest(): string | null {
 }
 
 export async function isBlockedByGeo(): Promise<boolean> {
+  const request = getRequest()
+
+  // سئو-۱ — معافیت کرالرها: قبل از هر چیز (حتی استخراج IP و کش)،
+  // ربات‌های معتبر عبور می‌کنند. برای بقیه، مسیر دقیقاً همان قبلی است.
+  if (isTrustedCrawlerUserAgent(request?.headers.get('user-agent'))) {
+    return false
+  }
+
   const ip = clientIpFromRequest()
   if (!ip) return false
   if (isPrivateIp(ip)) return false // کار-۸ — بدون تماس با API

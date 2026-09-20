@@ -32,6 +32,7 @@ import type { GeoService } from '#/domain/geo/geo.service'
 
 import { AppError } from '#/domain/shared/errors'
 import { clientIp } from '#/domain/shared/net'
+import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
 import { openapiPlugin } from '#/http/openapi'
 import cors from '@elysiajs/cors'
 import { healthRoutes } from '#/http/routes/health.routes'
@@ -97,6 +98,14 @@ export interface AppDeps {
 export const buildApp = (deps: AppDeps) => {
   const api = new Elysia({ prefix: '/api' })
     .onRequest(async ({ request }) => {
+      // سئو-۱ — معافیت کرالرها، آینه‌ی همان منطق دروازه‌ی SSR (geoGate.ts):
+      // کرالرهایی که صفحه را رندر می‌کنند (مثل Googlebot WRS) درخواست‌های
+      // /api را با IP خودشان (غیرایرانی) می‌فرستند؛ بدون این معافیت، محتوای
+      // رندرشده‌شان ۴۰۳ می‌شد. سیاست «فقط ایران» برای کاربران واقعی تغییر نمی‌کند.
+      // (تماس‌های SSR وب با API از IP خصوصی‌اند و از قبل عبور می‌کردند.)
+      if (isTrustedCrawlerUserAgent(request.headers.get('user-agent'))) {
+        return
+      }
       const ip = clientIp(request.headers.get('x-forwarded-for'))
       if (ip && (await deps.geo.shouldBlock(ip))) {
         // phase-fix: 404 گیج‌کننده بود → 403 + پیام روشن برای کاربر ایرانیِ VPN-دار

@@ -67,7 +67,9 @@ export function useAdmin2Panel() {
   //   * سفارش PAID در صف → هر ۲.۵ ثانیه (جهت تایید سریع)
   //   * صف بدون PAID → هر ۱۰ ثانیه (آرام)
   // قبلاً ثابت ۵s بود؛ این حالت هم پاسخ‌گوتره هم کم‌هزینه‌تر.
-  // با refetchIntervalInBackground پیش‌فرض (false)، وقتی تب مخفی می‌شه polling می‌ایسته
+  // ux-۱: refetchIntervalInBackground روشن شد — این پنل «قلب رستوران» است؛
+  // تب مخفی هم باید سفارشِ پول‌خورده را ببیند (قبلاً در تب مخفی polling
+  // می‌ایستاد و سفارش جدید دیده نمی‌شد تا بازگشت به تب)
   const { data: liveData } = useQuery({
     ...admin2LiveOrdersOptions(adminId),
     enabled: session?.isAdmin2LoggedIn === true,
@@ -75,6 +77,7 @@ export function useAdmin2Panel() {
       const orders = query.state.data?.orders ?? []
       return orders.some(o => o.status === 'PAID') ? POLL_ACTIVE_MS : POLL_IDLE_MS
     },
+    refetchIntervalInBackground: true,
   })
 
   // دینگ سفارش جدید

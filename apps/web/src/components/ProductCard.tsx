@@ -27,16 +27,23 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
   return (
     <div className="group flex flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
 
+      {/* سئو-۸: <img> واقعی به‌جای background — alt + lazy + دیده‌شدن در Google Images */}
       <Link
         to="/products/$productId"
         params={{ productId: product.id }}
-        className="relative block w-full aspect-4/3"
-        style={
-          product.profileImage
-            ? { backgroundImage: `url(${product.profileImage})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-            : { background: 'linear-gradient(135deg, #f6339a20, #2fd4d120)' }
-        }
+        className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]"
       >
+        {product.profileImage ? (
+          <img
+            src={product.profileImage}
+            alt={product.name}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="absolute inset-0 bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]"></div>
+        )}
         {showDiscount && (
           <div className="absolute top-3 left-3 bg-white/90 dark:bg-[#1a0a0e]/90 backdrop-blur-sm text-primary dark:text-dark-primary text-xs font-DanaDemiBold px-3 py-1 rounded-full shadow-md">
             {product.discountPercentage}٪ تخفیف

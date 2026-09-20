@@ -7,6 +7,11 @@ import { storeReferralCode } from '#/utils/referralCapture'
 export const Route = createFileRoute('/referral/$code')({
   ssr: false,
   component: ReferralRedirect,
+  // سئو-۹: صفحه‌ی ریدایرکت خالی — محتوای نازک؛ ایندکس نشود
+  // (هر کد معرف یک URL جدا می‌سازد؛ بدون این، هزاران URL بی‌محتوا)
+  head: () => ({
+    meta: [{ name: 'robots', content: 'noindex, nofollow' }],
+  }),
 })
 
 function ReferralRedirect() {

@@ -21,6 +21,7 @@ import { Route as GalleryRouteRouteImport } from './routes/gallery/route'
 import { Route as GeoBlockedRouteImport } from './routes/geo-blocked'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProductsRouteRouteImport } from './routes/products/route'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as ArticlesIndexRouteImport } from './routes/articles/index'
@@ -119,6 +120,11 @@ const LoginRoute = LoginRouteImport.update({
 const ProductsRouteRoute = ProductsRouteRouteImport.update({
   id: '/products',
   path: '/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AboutIndexRoute = AboutIndexRouteImport.update({
@@ -334,6 +340,7 @@ export interface FileRoutesByFullPath {
   '/products': typeof ProductsRouteRouteWithChildren
   '/geo-blocked': typeof GeoBlockedRoute
   '/login': typeof LoginRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$articleId': typeof ArticlesArticleIdRoute
   '/courier/login': typeof CourierLoginRoute
   '/products/$productId': typeof ProductsProductIdRoute
@@ -378,6 +385,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/geo-blocked': typeof GeoBlockedRoute
   '/login': typeof LoginRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$articleId': typeof ArticlesArticleIdRoute
   '/courier/login': typeof CourierLoginRoute
   '/products/$productId': typeof ProductsProductIdRoute
@@ -432,6 +440,7 @@ export interface FileRoutesById {
   '/products': typeof ProductsRouteRouteWithChildren
   '/geo-blocked': typeof GeoBlockedRoute
   '/login': typeof LoginRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$articleId': typeof ArticlesArticleIdRoute
   '/courier/login': typeof CourierLoginRoute
   '/products/$productId': typeof ProductsProductIdRoute
@@ -487,6 +496,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/geo-blocked'
     | '/login'
+    | '/sitemap.xml'
     | '/articles/$articleId'
     | '/courier/login'
     | '/products/$productId'
@@ -531,6 +541,7 @@ export interface FileRouteTypes {
     | '/'
     | '/geo-blocked'
     | '/login'
+    | '/sitemap.xml'
     | '/articles/$articleId'
     | '/courier/login'
     | '/products/$productId'
@@ -584,6 +595,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/geo-blocked'
     | '/login'
+    | '/sitemap.xml'
     | '/articles/$articleId'
     | '/courier/login'
     | '/products/$productId'
@@ -638,6 +650,7 @@ export interface RootRouteChildren {
   ProductsRouteRoute: typeof ProductsRouteRouteWithChildren
   GeoBlockedRoute: typeof GeoBlockedRoute
   LoginRoute: typeof LoginRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ReferralCodeRoute: typeof ReferralCodeRoute
 }
 
@@ -725,6 +738,13 @@ declare module '@tanstack/react-router' {
       path: '/products'
       fullPath: '/products'
       preLoaderRoute: typeof ProductsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/about/': {
@@ -1182,6 +1202,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProductsRouteRoute: ProductsRouteRouteWithChildren,
   GeoBlockedRoute: GeoBlockedRoute,
   LoginRoute: LoginRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ReferralCodeRoute: ReferralCodeRoute,
 }
 export const routeTree = rootRouteImport

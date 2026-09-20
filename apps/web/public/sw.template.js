@@ -36,15 +36,36 @@ registerRoute(
   },
 )
 
-// asset های same-origin — cache-first
+// uploads — pwa-۱: کش جداگانه و عمیق‌تر برای عکس‌های منو.
+// اسم فایل‌های uploads یکتاست (uuid) → کشِ تازه همیشه تازه می‌ماند؛
+// سقف ۱۰۰تاییِ عمومی عکس‌های منو را بی‌رحمانه تخلیه می‌کرد (LRU) و
+// در آفلاین عکس‌ها می‌پریدند.
+registerRoute(
+  ({ url }) =>
+    url.origin === self.location.origin && url.pathname.startsWith('/uploads/'),
+  new CacheFirst({
+    cacheName: `uploads-${VERSION}`,
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 300,
+        maxAgeSeconds: 30 * 86400,
+        // پرشدن quota دیسک → کش را خودکار خالی کن، نه کرش
+        purgeOnQuotaError: true,
+      }),
+    ],
+  }),
+)
+
+// asset های same-origin — cache-first (بدون uploads؛ روت بالا می‌گیرد)
 registerRoute(
   ({ request, url }) =>
     url.origin === self.location.origin &&
     !url.pathname.startsWith('/api/') &&
+    !url.pathname.startsWith('/uploads/') &&
     request.destination !== 'document',
   new CacheFirst({
     cacheName: ASSET_CACHE,
-    plugins: [new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 30 * 86400 })],
+    plugins: [new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 30 * 86400, purgeOnQuotaError: true })],
   }),
 )
 

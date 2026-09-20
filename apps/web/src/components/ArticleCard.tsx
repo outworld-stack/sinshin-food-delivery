@@ -12,16 +12,23 @@ export function ArticleCard({ article }: ArticleCardProps) {
   return (
     <div className="flex h-fit gap-x-2.5 sm:block p-2.5 md:pb-2 bg-gray-50 dark:bg-[#2a1015]/50 border border-gray-300 dark:border-[#3a151c] hover:shadow-md hover:shadow-gray-200/50 dark:hover:shadow-black/20 rounded-2xl transition-shadow duration-300">
 
-      {/* عکس مقاله */}
+      {/* عکس مقاله — سئو-۸: <img> واقعی به‌جای background (alt + lazy) */}
       <Link
         to="/articles/$articleId"
         params={{ articleId: article.id }}
-        className="relative w-28 h-28 sm:aspect-4/3 sm:w-auto sm:h-auto shrink-0 sm:mb-4 rounded-2xl rounded-bl-3xl overflow-hidden block"
+        className="relative w-28 h-28 sm:aspect-4/3 sm:w-auto sm:h-auto shrink-0 sm:mb-4 rounded-2xl rounded-bl-3xl overflow-hidden block bg-gray-200 dark:bg-[#2a1015]"
       >
-        <div
-          className="absolute inset-0 w-full h-full bg-gray-200 dark:bg-[#2a1015]"
-          style={article.profileImage ? { backgroundImage: `url(${article.profileImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
-        ></div>
+        {article.profileImage ? (
+          <img
+            src={article.profileImage}
+            alt={article.title}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="absolute inset-0 bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]"></div>
+        )}
       </Link>
 
       <div className="w-full flex flex-col sm:flex-row items-start justify-between font-DanaMedium">

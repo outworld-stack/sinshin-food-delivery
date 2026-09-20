@@ -10,6 +10,7 @@ import { ProductsMobileFilter } from '#/components/site/products/ProductsMobileF
 import { ProductsGrid } from '#/components/site/products/ProductsGrid'
 import { ProductsPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { SITE_URL } from '#/lib/site'
 
 
 const ProductsPage = memo(function ProductsPage() {
@@ -21,6 +22,10 @@ const ProductsPage = memo(function ProductsPage() {
 
   return (
     <div className="py-6 overflow-x-hidden">
+      {/* سئو-۷: h1 صفحه — قبل از هر چیز، برای کرالر و وضوح کاربر */}
+      <h1 className="font-DanaDemiBold text-2xl sm:text-3xl text-gray-900 dark:text-white mb-6">
+        منوی محصولات سین‌شین
+      </h1>
 
       {/* نوار تب موبایل: اینجا نیست — MainLayout رندرش می‌کنه */}
 
@@ -78,5 +83,8 @@ export const Route = createFileRoute('/products/')({
       { title: 'منو محصولات | سین شین' },
       { name: 'description', content: 'لیست کامل محصولات فست‌فود و رستوران سین شین با بهترین قیمت و تحویل سریع.' },
     ],
+    // سئو-۶: canonical بدون پارامتر (tab/sort) — سیگنال‌های همه‌ی variantها
+    // به یک URL تمیز جمع می‌شود و URL تکراری در ایندکس نمی‌نشیند
+    links: [{ rel: 'canonical', href: `${SITE_URL}/products` }],
   }),
 })

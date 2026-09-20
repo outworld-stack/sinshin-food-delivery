@@ -16,6 +16,14 @@ import { ChevronRight, Gift } from 'reicon-react'
 export const Route = createFileRoute('/login')({
   validateSearch: z.object({ redirect: z.string().optional() }),
   component: LoginPage,
+  // سئو-۲: صفحه‌ی ورود ارزش ایندکس ندارد و محتوایش برای گوگل نویز است.
+  // (در robots.txt عمداً Disallow نشده تا گوگل بتواند این noindex را ببیند.)
+  head: () => ({
+    meta: [
+      { title: 'ورود / ثبت‌نام | سین شین' },
+      { name: 'robots', content: 'noindex, nofollow' },
+    ],
+  }),
 })
 
 function LoginPage() {

@@ -10,6 +10,7 @@ import { CategoryScroller } from '#/components/CategoryScroller'
 import { EmptyState } from '#/components/EmptyState'
 import { ArticlesPageSkeleton, ArticleCardSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { SITE_URL } from '#/lib/site'
 import { Filter } from 'reicon-react'
 import { BottomSheet } from '#/components/shared/BottomSheet'
 
@@ -22,6 +23,11 @@ const ArticlesPage = memo(function ArticlesPage() {
 
   return (
     <div className="py-6">
+      {/* سئو-۷: h1 صفحه — مقالات ایندکس‌شونده‌اند و ساختار عنوان لازم دارند */}
+      <h1 className="font-DanaDemiBold text-2xl sm:text-3xl text-gray-900 dark:text-white mb-6">
+        مقالات سین‌شین
+      </h1>
+
       {/* تریگر فیلتر موبایل */}
       <div className="md:hidden mb-4">
         <button
@@ -133,11 +139,12 @@ export const Route = createFileRoute('/articles/')({
   component: ArticlesPage,
   pendingComponent: ArticlesPageSkeleton,
   errorComponent: RouteError,
-  // SEO — صفحه عمومی ایندکس‌شونده
+  // SEO — صفحه عمومی ایندکس‌شونده + canonical بدون پارامتر (سئو-۶)
   head: () => ({
     meta: [
       { title: 'مقالات | سین شین' },
       { name: 'description', content: 'مقالات آموزشی و معرفی محصولات فودپارک سین شین — دستورپخت، نکات و راهنمای سفارش.' },
     ],
+    links: [{ rel: 'canonical', href: `${SITE_URL}/articles` }],
   }),
 })

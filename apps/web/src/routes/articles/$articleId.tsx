@@ -7,6 +7,7 @@ import { ArticleDetailSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { useBack } from '#/hooks/useBack'
 import { ChevronRight, Feather } from 'reicon-react'
+import { SITE_URL, DEFAULT_OG_IMAGE, absoluteUrl, jsonLdScript } from '#/lib/site'
 
 export const Route = createFileRoute('/articles/$articleId')({
   component: ArticleDetailPage,
@@ -22,18 +23,30 @@ export const Route = createFileRoute('/articles/$articleId')({
   errorComponent: RouteError,
   notFoundComponent: RouteNotFound,
 
-  // سئو داینامیک — عنوان و خلاصه مقاله برای گوگل
-  head: ({ loaderData }) => ({
-    meta: loaderData
-      ? [
-        { title: `${loaderData.title} | سین شین` },
-        { name: 'description', content: loaderData.excerpt },
-        { property: 'og:title', content: `${loaderData.title} | سین شین` },
-        { property: 'og:description', content: loaderData.excerpt },
-        { property: 'og:type', content: 'article' },
-      ]
-      : [{ title: 'مقاله یافت نشد | سین شین' }],
-  }),
+  // سئو داینامیک — عنوان و خلاصه مقاله برای گوگل + canonical + og:image (سئو-۵/۶)
+  head: ({ loaderData }) => {
+    const ogImage =
+      absoluteUrl(loaderData?.profileImage) ??
+      absoluteUrl(loaderData?.galleryImages?.[0]) ??
+      DEFAULT_OG_IMAGE
+    return {
+      meta: loaderData
+        ? [
+          { title: `${loaderData.title} | سین شین` },
+          { name: 'description', content: loaderData.excerpt },
+          { property: 'og:title', content: `${loaderData.title} | سین شین` },
+          { property: 'og:description', content: loaderData.excerpt },
+          { property: 'og:type', content: 'article' },
+          { property: 'og:image', content: ogImage },
+          { 'twitter:card': 'summary_large_image' },
+          { 'twitter:image': ogImage },
+        ]
+        : [{ title: 'مقاله یافت نشد | سین شین' }],
+      links: loaderData
+        ? [{ rel: 'canonical', href: `${SITE_URL}/articles/${loaderData.id}` }]
+        : [],
+    }
+  },
 })
 
 function ArticleDetailPage() {
@@ -46,8 +59,47 @@ function ArticleDetailPage() {
     ? article.galleryImages
     : ['from-blue-400 to-purple-500', 'from-green-400 to-teal-500', 'from-orange-400 to-red-500']
 
+  // سئو-۴: JSON-LD — Article + BreadcrumbList (با اسکیپ < ضد breakout)
+  const jsonLd = jsonLdScript({
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Article',
+        headline: article.title,
+        description: article.excerpt,
+        image: [
+          absoluteUrl(article.profileImage) ??
+            absoluteUrl(article.galleryImages?.[0]) ??
+            DEFAULT_OG_IMAGE,
+        ],
+        ...(article.publishedAt ? { datePublished: article.publishedAt } : {}),
+        inLanguage: 'fa-IR',
+        author: article.author
+          ? { '@type': 'Person', name: article.author }
+          : { '@type': 'Organization', name: 'سین‌شین' },
+        mainEntityOfPage: `${SITE_URL}/articles/${article.id}`,
+      },
+      {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'خانه', item: SITE_URL },
+          { '@type': 'ListItem', position: 2, name: 'مقالات', item: `${SITE_URL}/articles` },
+          {
+            '@type': 'ListItem',
+            position: 3,
+            name: article.title,
+            item: `${SITE_URL}/articles/${article.id}`,
+          },
+        ],
+      },
+    ],
+  })
+
   return (
     <div className="py-10 px-4 max-w-3xl mx-auto">
+      {/* سئو-۴: داده‌ی ساختاریافته‌ی مقاله — با اسکیپ < امن است */}
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD با اسکیپ < — نه HTML، فقط داده */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
       <button
         type="button"
         onClick={back}
@@ -72,9 +124,20 @@ function ArticleDetailPage() {
         {article.title}
       </h1>
 
-      <div className="w-full aspect-video rounded-3xl mb-8 shadow-lg bg-gray-200 dark:bg-[#2a1015]"
-        style={article.profileImage ? { backgroundImage: `url(${article.profileImage})`, backgroundSize: 'cover' } : undefined}
-      ></div>
+      {/* سئو-۸: <img> واقعی به‌جای background (alt + دیده‌شدن در Google Images) */}
+      <div className="w-full aspect-video rounded-3xl mb-8 shadow-lg bg-gray-200 dark:bg-[#2a1015] overflow-hidden">
+        {article.profileImage ? (
+          <img
+            src={article.profileImage}
+            alt={article.title}
+            className="w-full h-full object-cover"
+            decoding="async"
+            fetchPriority="high"
+          />
+        ) : (
+          <div className="w-full h-full bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]"></div>
+        )}
+      </div>
 
       <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 leading-relaxed border-r-4 border-primary dark:border-dark-primary pr-4">
         {article.excerpt}
