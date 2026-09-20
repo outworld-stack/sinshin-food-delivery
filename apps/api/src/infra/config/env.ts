@@ -72,6 +72,8 @@ export class AppConfig {
   readonly couponScanTime: string
   readonly couponNudgeTime: string
 
+  readonly geoBypassIps: string[]
+
   constructor(source: Record<string, string | undefined> = Bun.env) {
     const str = (key: string, fallback = ''): string => {
       const v = source[key]?.trim()
@@ -159,6 +161,11 @@ export class AppConfig {
     this.couponScanTime = str('COUPON_SCAN_TIME', '02:00')
     this.couponNudgeTime = str('COUPON_NUDGE_TIME', '11:00')
 
+    this.geoBypassIps = str('GEO_BYPASS_IPS')
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+
     // ── phase-1: جایگزین چک قبلی (که فقط DEV-JWT می‌گرفت) ──
     this.assertProdInvariants()
   }
@@ -208,7 +215,7 @@ export class AppConfig {
     if (problems.length) {
       throw new Error(
         '[config] production fail-fast — این مقادیر قبل از بوت درست شوند:\n' +
-          problems.map((p) => `  • ${p}`).join('\n'),
+        problems.map((p) => `  • ${p}`).join('\n'),
       )
     }
   }

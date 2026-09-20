@@ -189,21 +189,34 @@ export class OrderService {
       if (itemRows.length === 0) throw Err.validation('هیچ آیتم معتبری در سبد نیست.')
 
       // ── کوپن — اعتبار سروری + رزرو اتمیک زیر قفل ──
+      // phase-fix: باخت رقابت (ظرفیت/گرنت) = خطای صریح، نه سقوط بی‌صدای تخفیف.
+      // فرانت فقط وقتی submit می‌کند که preview کوپن را «معتبر» دیده است؛
+      // پس در چک‌اوت، null بودن کوپن یعنی رقابت/تغییر لحظه‌ای — نه غلط تایپی.
       let discount = 0
       let couponId: CampaignId | null = null
       if (input.couponCode) {
         const coupon = await this.deps.coupons.findUsableCoupon(tx, userId, input.couponCode)
-        if (coupon) {
-          const [reserved] = await tx
-            .update(coupons)
-            .set({ usedCount: sql`${coupons.usedCount} + 1` })
-            .where(and(eq(coupons.id, coupon.id), underMaxUses(coupon.maxUses)))
-            .returning()
-          if (reserved) {
-            couponId = asCampaignId(coupon.id)
-            discount = Math.round((foodTotal * coupon.discountPercentage) / 100)
+        if (!coupon) {
+          throw Err.conflict('این کد تخفیف دیگر قابل استفاده نیست — سبد خرید را به‌روز کنید.')
+        }
+        const [reserved] = await tx
+          .update(coupons)
+          .set({ usedCount: sql`${coupons.usedCount} + 1` })
+          .where(and(eq(coupons.id, coupon.id), underMaxUses(coupon.maxUses)))
+          .returning()
+        if (!reserved) {
+          throw Err.conflict('ظرفیت این کد تخفیف همین حالا تکمیل شد — دوباره تلاش کنید.')
+        }
+        // phase-fix: کوپن خصوصی — رزرو گرنت همین‌جا (اتمیک با پول).
+        // قبلاً مصرف در settle بود و دو چک‌اوت موازی هر دو تخفیف می‌گرفتند.
+        if (!coupon.isPublic) {
+          const grantTaken = await this.deps.coupons.reserveGrant(tx, coupon.id, userId)
+          if (!grantTaken) {
+            throw Err.conflict('این کد تخفیف همین حالا استفاده شد — دوباره تلاش کنید.')
           }
         }
+        couponId = asCampaignId(coupon.id)
+        discount = Math.round((foodTotal * coupon.discountPercentage) / 100)
       }
 
       const payableFood = foodTotal - discount
@@ -506,16 +519,23 @@ export class OrderService {
     }
 
     // ── کوپن خصوصی: مصرف گرنت + ثبت redemption (عمومی هم redemption دارد) ──
+    // phase-fix: اگر کوپن وسط پرواز حذف/غیب شده، فقط رد را می‌گذریم —
+    // درج redemption با FK نمی‌شکند و پولِ گرفته‌شده گیر نمی‌کند.
     if (orderRow.couponId) {
       const coupon = (await tx.select().from(coupons).where(eq(coupons.id, orderRow.couponId)))[0]
-      if (coupon && !coupon.isPublic) {
-        // گرنتِ این کاربر را مصرف کن — اتمیک با پول
-        await this.deps.coupons.consumeGrant(tx, orderRow.couponId, orderRow.userId)
+      if (coupon) {
+        if (!coupon.isPublic) {
+          // سفارش‌های قدیمی‌تر از phase-fix این‌جا مصرف می‌شوند؛
+          // سفارش‌های جدید از قبل در چک‌اوت رزرو شده‌اند (no-op).
+          await this.deps.coupons.consumeGrant(tx, orderRow.couponId, orderRow.userId)
+        }
+        await tx
+          .insert(couponRedemptions)
+          .values({ couponId: orderRow.couponId, userId: orderRow.userId, orderId: orderRow.id })
+          .onConflictDoNothing()
+      } else {
+        console.warn(`[order] ${orderRow.displayId}: coupon ${orderRow.couponId} gone at settle — skipping redemption`)
       }
-      await tx
-        .insert(couponRedemptions)
-        .values({ couponId: orderRow.couponId, userId: orderRow.userId, orderId: orderRow.id })
-        .onConflictDoNothing()
     }
 
     // ── اعطای لحظه‌ای — شرط‌های کوپن‌های خصوصی فعال چک و گرنت ──
@@ -535,10 +555,14 @@ export class OrderService {
 
   /** پرداخت ناموفق — سفارش ثبت می‌ماند (قرارداد فرانت) + آزادسازی رزرو کوپن */
   async failPayment(tx: DbOrTx, orderRow: OrderRow): Promise<void> {
-    await tx
+    // phase-fix: مثل settlePayment گارد گذاشتیم — اگر این سفارش قبلاً
+    // نهایی شده، برگشت وجه/کوپن دوباره اجرا نمی‌شود (ضدِ بازگشت دوبل).
+    const [updated] = await tx
       .update(orders)
       .set({ status: 'CANCELED', paymentStatus: 'FAILED', updatedAt: new Date() })
       .where(and(eq(orders.id, orderRow.id), eq(orders.status, 'PENDING_PAYMENT')))
+      .returning()
+    if (!updated) return
 
     // phase-2: پس‌گرفتن رزرو کیف پول — ledger append-only → ردیف جبرانی
     if (orderRow.breakdown.walletDeduction > 0) {
@@ -556,6 +580,8 @@ export class OrderService {
         .update(coupons)
         .set({ usedCount: sql`greatest(${coupons.usedCount} - 1, 0)` })
         .where(eq(coupons.id, orderRow.couponId))
+      // phase-fix: گرنت رزروشده در چک‌اوت آزاد می‌شود
+      await this.deps.coupons.releaseGrant(tx, orderRow.couponId, orderRow.userId)
     }
   }
 
@@ -607,6 +633,9 @@ export class OrderService {
       }
 
       // ۲) فسخ سود معرف — ردیف profit می‌ماند (FK سالم)، ردیف معکوس می‌نشیند
+      // phase-fix: orderId عمداً null است — ایندکس یونیک رزرو (WITHDRAW+
+      // orderId) نباید فسخِ سود را قالب کند؛ idempotency با ایندکس یونیک
+      // جدید روی referralProfitId تضمین می‌شود.
       const profits = await tx
         .select()
         .from(referralProfits)
@@ -619,7 +648,7 @@ export class OrderService {
             type: 'WITHDRAW',
             amount: p.amount,
             description: `فسخ سود معرفی سفارش ${row.displayId}`,
-            orderId: row.id,
+            orderId: null,
             referralProfitId: p.id,
           })
           .onConflictDoNothing()

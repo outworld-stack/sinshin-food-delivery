@@ -111,6 +111,41 @@ export class CouponService {
     return grant ? coupon : null
   }
 
+  /**
+ * phase-fix — رزرو گرنت کوپن خصوصی، در همان tx چک‌اوت.
+ * اتمیک: UPDATE ... WHERE consumedAt IS NULL — فقط یکی از دو چک‌اوت
+ * موازی برنده می‌شود؛ بازنده خطا می‌گیرد (نه اینکه هر دو تخفیف ببرند).
+ * آزادسازی در failPayment / refund انجام می‌شود.
+ */
+  async reserveGrant(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<boolean> {
+    const rows = await tx
+      .update(couponGrants)
+      .set({ consumedAt: new Date() })
+      .where(
+        and(
+          eq(couponGrants.couponId, couponId),
+          eq(couponGrants.userId, userId),
+          isNull(couponGrants.consumedAt),
+        ),
+      )
+      .returning({ id: couponGrants.id })
+    return rows.length > 0
+  }
+
+  /** آزادسازی گرنت — در failPayment / refund (برگرداندن به قابل‌استفاده) */
+  async releaseGrant(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<void> {
+    await tx
+      .update(couponGrants)
+      .set({ consumedAt: null })
+      .where(
+        and(
+          eq(couponGrants.couponId, couponId),
+          eq(couponGrants.userId, userId),
+        ),
+      )
+  }
+
+
   /** مصرف گرنت — در settle؛ اتمیک با پول */
   async consumeGrant(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<void> {
     await tx
@@ -271,15 +306,21 @@ export class CouponService {
     return { success: true }
   }
 
+  /**
+   * phase-fix — حذفِ سخت ممنوع: سفارش‌های در پرواز (PENDING_PAYMENT) به
+   * couponId اشاره می‌کنند و درج redemption در settle با FK می‌شکند و
+   * سفارشِ «پول‌گرفته‌شده» برای همیشه گیر می‌کند. حذف = غیرفعال‌سازی.
+   */
   async remove(id: string): Promise<{ success: boolean; message?: string }> {
     if (!UUID_RE.test(id)) return { success: false, message: 'شناسه معتبر نیست' }
     const couponId = asCampaignId(id)
-    const removed = await this.deps.db
-      .delete(coupons)
+    const updated = await this.deps.db
+      .update(coupons)
+      .set({ isActive: false })
       .where(eq(coupons.id, couponId))
       .returning({ id: coupons.id })
-    if (removed.length === 0) return { success: false, message: 'کوپن پیدا نشد' }
-    return { success: true }
+    if (updated.length === 0) return { success: false, message: 'کوپن پیدا نشد' }
+    return { success: true, message: 'کوپن غیرفعال شد' }
   }
 
   // ══ داخلی ══

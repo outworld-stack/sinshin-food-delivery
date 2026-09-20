@@ -311,6 +311,17 @@ export async function setLiveTrackingEnabled(input: {
   await authJson<unknown>('/admin/settings/live-tracking', 'POST', input.data)
 }
 
+// phase-fix — محدودیت دسترسی «فقط ایران» (پیش‌فرض روشن)
+export async function getIranOnlyAccess(): Promise<boolean> {
+  return authJson<boolean>('/admin/settings/iran-only', 'GET')
+}
+
+export async function setIranOnlyAccess(input: {
+  data: { enabled: boolean }
+}): Promise<void> {
+  await authJson<unknown>('/admin/settings/iran-only', 'POST', input.data)
+}
+
 export async function getRestaurantOpen(): Promise<{ isOpen: boolean; nextOpenTime: string }> {
   return authJson<{ isOpen: boolean; nextOpenTime: string }>('/admin/settings/restaurant', 'GET')
 }

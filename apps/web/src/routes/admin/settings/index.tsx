@@ -4,11 +4,12 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { memo, useCallback, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { setLiveTrackingEnabled, setRestaurantOpen } from '#/server/admin'
+import { setIranOnlyAccess, setLiveTrackingEnabled, setRestaurantOpen } from '#/server/admin'
 import { useAuthStore, ensureAuthHydrated } from '#/stores/authStore'
 import {
   settingsTrackingOptions, settingsRestaurantOptions,
   aboutContentOptions, adminGalleryImagesOptions, deliveryZonesOptions,
+  settingsIranOnlyOptions,
 } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { Toggle } from '#/components/shared/Toggle'
@@ -20,7 +21,7 @@ import { useSiteContentSettings } from '#/hooks/admin/useSiteContentSettings'
 import { AboutContentForm } from '#/components/admin/settings/AboutContentForm'
 import { GalleryManager } from '#/components/admin/settings/GalleryManager'
 import { DeliveryZonesManager } from '#/components/admin/settings/DeliveryZonesManager'
-import { Pin, Store, Discover2 } from 'reicon-react'
+import { Pin, Store, Discover2, Shield } from 'reicon-react'
 import type { UpdateGalleryImageInput } from '#/types/site/gallery'
 import { TermsEditor } from '#/components/admin/settings/TermsEditor'
 
@@ -45,6 +46,7 @@ const SettingsContent = memo(function SettingsContent() {
   // پرچم‌های تنظیمات از فکتوری — staleTime داخل فکتوری متمرکزه
   const { data: tracking } = useQuery({ ...settingsTrackingOptions, enabled: isMainAdmin })
   const { data: restaurant } = useQuery({ ...settingsRestaurantOptions, enabled: isMainAdmin })
+  const { data: iranOnly } = useQuery({ ...settingsIranOnlyOptions, enabled: isMainAdmin })
 
   const trackingMutation = useMutation({
     mutationFn: (enabled: boolean) => setLiveTrackingEnabled({ data: { enabled } }),
@@ -65,6 +67,19 @@ const SettingsContent = memo(function SettingsContent() {
       showToast('وضعیت رستوران ذخیره شد')
     },
   })
+
+  // phase-fix — سوییچ «فقط ایران»
+  const iranOnlyMutation = useMutation({
+    mutationFn: (enabled: boolean) => setIranOnlyAccess({ data: { enabled } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.settingsIranOnly })
+      showToast('تنظیم دسترسی ذخیره شد — حداکثر تا ۱۵ ثانیه دیگر اعمال می‌شود')
+    },
+  })
+
+  const handleIranOnlyToggle = useCallback(() => {
+    if (iranOnly !== undefined) iranOnlyMutation.mutate(!iranOnly)
+  }, [iranOnly, iranOnlyMutation])
 
   const handleTrackingToggle = useCallback(() => {
     if (tracking) trackingMutation.mutate(!tracking)
@@ -162,6 +177,34 @@ const SettingsContent = memo(function SettingsContent() {
             )}
           </div>
 
+          {/* phase-fix: محدودیت دسترسی فقط ایران */}
+          <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className={`w-11 h-11 rounded-xl flex items-center justify-center ${iranOnly === false
+                  ? 'bg-amber-100 dark:bg-amber-500/10 text-amber-500'
+                  : 'bg-green-100 dark:bg-green-500/10 text-green-500'
+                  }`}>
+                  <Shield size={22} />
+                </span>
+                <div>
+                  <p className="font-DanaDemiBold text-gray-800 dark:text-white">دسترسی فقط از ایران</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed max-w-xs">
+                    وقتی روشن است، بازدید از IP های خارج از ایران با صفحه‌ای که پیدا نشد (404) مواجه می‌شود.
+                  </p>
+                </div>
+              </div>
+              <Toggle isOn={iranOnly ?? true} onToggle={handleIranOnlyToggle} />
+            </div>
+            <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2">
+              <Discover2 size={16} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
+                اگر خودتان از خارج از ایران یا با VPN وارد می‌شوید، قبل از فعال‌سازی، IP خود را در متغیر
+                محیطی عبور قرار دهید وگرنه از پنل خارج می‌شوید. پیش‌فرض این گزینه روشن است.
+              </p>
+            </div>
+          </div>
+
           {/* مدیریت محتوای سایت */}
           <div className="space-y-6">
             <div>
@@ -223,6 +266,7 @@ export const Route = createFileRoute('/admin/settings/')({
       context.queryClient.query(settingsRestaurantOptions),
       context.queryClient.query(aboutContentOptions),
       context.queryClient.query(adminGalleryImagesOptions),
+      context.queryClient.query(settingsIranOnlyOptions),
     ])
   },
 

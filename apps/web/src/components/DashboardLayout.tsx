@@ -1,6 +1,6 @@
 // src/components/DashboardLayout.tsx
 import { Outlet, Link, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Brand } from '#/components/Brand'
 import { ThemeToggle } from '#/components/ThemeToggle'
@@ -8,6 +8,7 @@ import { useAuthStore } from '#/stores/authStore'
 import { userProfileClientOptions } from '#/utils/queryOptions'
 import type { NavItem } from '#/types/shared/navigation'
 import { useHydrated } from '#/hooks/useHydrated'
+import { useRealLogout } from '#/hooks/shared/useRealLogout'
 import { DashboardLayoutSkeleton } from '#/components/LoadingSkeletons'
 import { User, Cart, Wallet, Pin, Discover2, Logout4, Menu, Package, X } from 'reicon-react'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
@@ -15,20 +16,26 @@ import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
 export function DashboardLayout() {
   const hydrated = useHydrated()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const logout = useAuthStore((state) => state.logout)
   const navigate = useNavigate()
   const activeOrderId = useAuthStore((state) => state.activeOrderId)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
-const { data: user } = useQuery({
-  ...userProfileClientOptions,
-  enabled: isAuthenticated,
-})
+  const { data: user } = useQuery({
+    ...userProfileClientOptions,
+    enabled: isAuthenticated,
+  })
 
-  const handleLogout = () => {
-    logout()
-    navigate({ to: '/' })
-  }
+  // phase-fix: لاگ‌اوت واقعی — سشن سرور revoke می‌شود، توکن و کش پاک (مرگ لاگ‌اوت دکوری)
+  const handleLogout = useRealLogout('/')
+
+  // phase-fix: سشن وسط باز کردن منقضی شد (۴۰۱) → استور پاک می‌شود ولی
+  // کاربر روی صفحه‌ی خطا گیر نمی‌کند — به لاگین برگرد
+  useEffect(() => {
+    if (hydrated && !isAuthenticated) {
+      navigate({ to: '/login' })
+    }
+  }, [hydrated, isAuthenticated, navigate])
+
 
   // ردیابی خودکار سفارش فعال
   useActiveOrder(user?.allOrders)

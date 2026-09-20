@@ -18,7 +18,7 @@ export class ZarinpalAdapter implements PaymentGateway {
   readonly id = 'ZARINPAL'
   readonly mode = 'direct' as const
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(private readonly config: AppConfig) { }
 
   private get merchantId(): string {
     const id = this.config.gateway.zarinpalMerchantId
@@ -46,7 +46,8 @@ export class ZarinpalAdapter implements PaymentGateway {
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
-    const authority = input.query.authority ?? input.gatewayRef ?? ''
+    // phase-fix: مرجع ذخیره‌شده در DB مقدم است؛ query فقط fallback.
+    const authority = input.gatewayRef ?? input.query.authority ?? ''
     const res = await Bun.fetch(VERIFY_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -57,11 +58,21 @@ export class ZarinpalAdapter implements PaymentGateway {
       }),
       signal: AbortSignal.timeout(15_000),
     })
-    const json = (await res.json()) as { data?: { code?: number } }
+    const json = (await res.json().catch(() => null)) as { data?: { code?: number } } | null
+    const code = json?.data?.code
     // 100 = موفق ، 101 = قبلاً verify شده (idempotent)
-    return {
-      success: json.data?.code === 100 || json.data?.code === 101,
-      gatewayRef: authority,
+    if (code === 100 || code === 101) {
+      return { success: true, gatewayRef: authority }
     }
+    // phase-fix: فقط کدهای «قطعاً پرداخت‌نشده» fail می‌کنند؛
+    // بقیه (خطای بانک/سرویس/نامشخص) = indeterminate — پول ممکن است گرفته
+    // شده باشد؛ قطعی‌سازی به‌عنوان FAILED یعنی بازگشت وجه اشتباه.
+    //   -9  ورودی نامعتبر (پولی گرفته نشده)
+    //   -10 پذیرنده/IP نامعتبر
+    //   -11 authority پیدا نشد (پرداختی در کار نیست)
+    if (code === -9 || code === -10 || code === -11) {
+      return { success: false, gatewayRef: authority }
+    }
+    return { success: false, gatewayRef: authority, indeterminate: true }
   }
 }

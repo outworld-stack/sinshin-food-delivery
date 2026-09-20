@@ -32,6 +32,7 @@ export interface GatewayVerifyInput {
 export interface GatewayVerifyResult {
   success: boolean
   gatewayRef: string | null
+  indeterminate?: boolean
 }
 
 export interface PaymentGateway {

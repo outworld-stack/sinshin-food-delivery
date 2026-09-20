@@ -73,7 +73,11 @@ export async function authJson<T>(
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const b = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
-    throw new Error(b?.error?.message ?? `خطای ${res.status}`)
+    // phase-fix: status روی خطا — predicate ریترای TanStack Query این را می‌خواند؛
+    // قبلاً 4xx هم دو بار retry می‌شد (سه برابر بار روی API در خطای اعتبارسنجی)
+    throw Object.assign(new Error(b?.error?.message ?? `خطای ${res.status}`), {
+      status: res.status,
+    })
   }
   // ⬅ body خالی — 204 یا empty:
   const text = await res.text()

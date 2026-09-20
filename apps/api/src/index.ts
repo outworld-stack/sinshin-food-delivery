@@ -41,6 +41,7 @@ import { ReconcileJob } from '#/workers/jobs/reconcile.job'
 import { ArticleService } from '#/domain/article/article.service'
 import { GalleryService } from '#/domain/gallery/gallery.service'
 import { PaymentTimeoutJob } from '#/workers/jobs/payment-timeout.job'
+import { GeoService } from '#/domain/geo/geo.service'
 import { buildApp } from '#/app'
 
 const config = new AppConfig()
@@ -92,6 +93,7 @@ const reports = new ReportService({ db, config, sms, links, reconcile })
 const auth = new AuthService({ db, config, otp, sessions, devices, admin2 })
 const articles = new ArticleService({ db })
 const gallery = new GalleryService({ db })
+const geo = new GeoService({ db, config, settings })
 
 // ── cron — registered once ──
 const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis))
@@ -103,6 +105,14 @@ if (!g.__sinshin_cron_registered) {
   scheduler.register(new WeeklyReportJob({ config, db, sms, reports }))
   scheduler.register(new ReconcileJob({ config, db, reconcile }))
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
+  // phase-fix: تازه‌سازی روزانه‌ی بازه‌های IP ایران (RIPE)
+  scheduler.registerInterval({
+    name: 'geo-refresh',
+    everySeconds: 24 * 60 * 60,
+    run: async () => {
+      await geo.refresh()
+    },
+  })
 }
 
 // ── app ──
@@ -135,8 +145,12 @@ const app = buildApp({
   admin,
   articles,
   gallery,
+  geo,
 })
 app.listen({ port: config.port, hostname: config.host })
+
+// phase-fix: لود بازه‌های IP ایران — fire-and-forget (fail-open تا آماده شود)
+geo.warmup()
 
 // ── probes ──
 const [dbUp, redisUp] = await Promise.all([database.connect(), redis.connect()])
@@ -158,6 +172,13 @@ console.log(
 // ── graceful shutdown — registered once ──
 if (!g.__sinshin_signals) {
   g.__sinshin_signals = true
+  // لاگ می‌ماند، پروسه زنده می‌ماند (restart خودش فقط برای خطاهای مهلک)
+  process.on('unhandledRejection', (reason) => {
+    console.error('[api] unhandledRejection (kept alive):', reason)
+  })
+  process.on('uncaughtException', (err) => {
+    console.error('[api] uncaughtException (kept alive):', err)
+  })
   const shutdown = async (signal: string) => {
     console.log(`[api] ${signal} received — shutting down`)
     scheduler.stop()

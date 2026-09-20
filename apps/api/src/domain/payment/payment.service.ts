@@ -111,6 +111,14 @@ export class PaymentService {
     const gw = this.gateway(gatewayId)
     const v = await gw.verify({ gatewayRef: payment.gatewayRef, amount: payment.amount, query })
 
+    // phase-fix: نتیجه‌ی قطعی نیست (خطای گذرای درگاه) — سفارش را fail نکن؛
+    // job تایم‌اوت دوباره verify می‌کند و مشتری به صفحه سفارشش برمی‌گردد.
+    if (v.indeterminate) {
+      throw Err.serviceUnavailable(
+        'نتیجه‌ی پرداخت فعلاً از درگاه قابل دریافت نیست — چند دقیقه بعد صفحه‌ی سفارش را دوباره باز کنید.',
+      )
+    }
+
     // callback تکراری (رفرش صفحه‌ی برگشت / دوبارفرستادن درگاه) →
     // claim اتمیک CONFLICT می‌دهد؛ به‌جای 409 خام، همان صفحه‌ی سفارش را نشان بده
     let orderDisplayId: string
@@ -156,6 +164,7 @@ export class PaymentService {
           const gw = this.gateways.get(gwId) // مستقیم — بدون گارد حالت
           if (gw && gw.mode !== 'mock') {
             const v = await gw.verify({ gatewayRef: p.gatewayRef, amount: p.amount, query: {} })
+            if (v.indeterminate) continue
             success = v.success
           }
         }

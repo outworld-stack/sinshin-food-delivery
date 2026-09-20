@@ -61,8 +61,8 @@ function DashboardHome() {
 
     const displayName = user.name || user.phone;
 
-    // لینک معرف — از دامنه‌ی فعلی ساخته می‌شه (فاز بک: متغیر محیطی)
-    const referralLink = `${window.location.origin}/r/${user.referralCode}`
+    // لینک معرف — روت واقعی /referral است؛ /r/CODE هیچ روتی ندارد و ۴۰۴ می‌داد
+    const referralLink = `${window.location.origin}/referral/${user.referralCode}`
 
     return (
         <div className="space-y-8">

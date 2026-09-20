@@ -28,6 +28,8 @@ export const SETTING_KEYS = {
   restaurantLocation: 'restaurant_location', // { lat, lng }
   /** هزینه بسته‌بندی PICKUP — پایه توسط ادمین اصلی؛ ادمین۲ با permission ویرایش می‌کند */
   packagingFee: 'packaging_fee', // number (تومان)
+
+  iranOnlyAccess: 'iran_only_access', // boolean
 } as const
 
 export const contentAbout = pgTable('content_about', {

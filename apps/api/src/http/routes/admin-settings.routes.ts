@@ -4,6 +4,7 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
+import { SETTING_KEYS } from '#/infra/db/schema'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
 
@@ -120,6 +121,29 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           summary: 'Enable/disable courier live tracking — main admin only',
           description:
             'Orders created BEFORE enabling never track (per-order snapshot at checkout).',
+        },
+      },
+    )
+    // phase-fix — محدودیت دسترسی «فقط ایران» — پیش‌فرض روشن
+    .get(
+      '/iran-only',
+      async () => ({
+        enabled: await deps.settings.get<boolean>(SETTING_KEYS.iranOnlyAccess, true),
+      }),
+      { detail: { summary: 'Iran-only access flag (default: on) — main admin only' } },
+    )
+    .post(
+      '/iran-only',
+      async ({ body }) => {
+        await deps.settings.set(SETTING_KEYS.iranOnlyAccess, body.enabled)
+        return { success: true }
+      },
+      {
+        body: t.Object({ enabled: t.Boolean() }),
+        detail: {
+          summary: 'Toggle Iran-only access — main admin only',
+          description:
+            'When ON, non-Iranian IPs get 404 (site + API). Effective within ~15s (cached). Admins abroad/VPN: set GEO_BYPASS_IPS in env.',
         },
       },
     )

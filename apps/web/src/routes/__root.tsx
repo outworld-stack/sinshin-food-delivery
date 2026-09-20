@@ -1,5 +1,5 @@
 // src/routes/__root.tsx
-import { HeadContent, Scripts, createRootRouteWithContext } from '@tanstack/react-router'
+import { HeadContent, Scripts, createRootRouteWithContext, notFound } from '@tanstack/react-router'
 import { Toast } from '#/components/Toast'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import appCss from '#/styles.css?url'
@@ -15,6 +15,14 @@ interface MyRouterContext {
 }
 
 export const Route = createRootRouteWithContext<MyRouterContext>()({
+  beforeLoad: async () => {
+    if (import.meta.env.SSR) {
+      const { isBlockedByGeo } = await import('#/server/geoGate')
+      if (await isBlockedByGeo()) {
+        throw notFound()
+      }
+    }
+  },
   head: () => ({
     meta: [
       { charSet: 'utf-8' },

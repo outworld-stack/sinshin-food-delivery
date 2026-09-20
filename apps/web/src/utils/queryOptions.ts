@@ -34,6 +34,7 @@ import {
   // ⬅ NEW (بچ ۵): جزئیات نقش‌محور + گزینه‌های پنل زنده
   getSubAdminDetails, getOrderDetailsByRole, getAdminCourierDetailsForRole,
   getCouriersForAssignment,
+  getIranOnlyAccess,
 } from '#/server/admin'
 import { getTerms } from '#/server/terms'
 import { getAdminCoupons } from '#/server/coupons'
@@ -287,6 +288,13 @@ export const settingsTrackingOptions = queryOptions({
 export const settingsRestaurantOptions = queryOptions({
   queryKey: qk.settingsRestaurant,
   queryFn: () => getRestaurantOpen(),
+  staleTime: 0,
+})
+
+// phase-fix — پرچم «فقط ایران» — staleTime صفر: تغییر ادمین باید فوری دیده شه
+export const settingsIranOnlyOptions = queryOptions({
+  queryKey: qk.settingsIranOnly,
+  queryFn: () => getIranOnlyAccess(),
   staleTime: 0,
 })
 

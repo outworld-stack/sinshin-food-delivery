@@ -23,8 +23,29 @@ export interface OrderRoutesDeps {
   redis: RedisService
 }
 
-export const orderRoutes = (deps: OrderRoutesDeps) =>
-  new Elysia({ prefix: '/orders', tags: ['Orders'] })
+export const orderRoutes = (deps: OrderRoutesDeps) => {
+  /**
+   * phase-fix — سقف هر «کاربر» (نه IP — CGNAT ایرانی: ده‌ها کاربر پشت یک IP).
+   * fail-open: قطعی Redis = عبور؛ این سقف ضد سوءاستفاده است نه ضد پیک.
+   */
+  const perUserLimit = async (
+    userId: string,
+    scope: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<void> => {
+    const key = `rl:${scope}:user:${userId}`
+    const count = await deps.redis.incr(key)
+    if (!Number.isFinite(count) || count < 1) return // ردیس پایین — عبور
+    if (count === 1 || count <= limit) {
+      await deps.redis.expire(key, windowSeconds)
+    }
+    if (count > limit) {
+      throw Err.rateLimited('درخواست‌های شما زیاد است؛ کمی بعد دوباره تلاش کنید.', windowSeconds)
+    }
+  }
+
+  return new Elysia({ prefix: '/orders', tags: ['Orders'] })
 
     // وضعیت رستوران — عمومی (قرارداد getRestaurantStatus)
     .get(
@@ -63,6 +84,9 @@ export const orderRoutes = (deps: OrderRoutesDeps) =>
     .post(
       '/checkout',
       async ({ user, body, headers }) => {
+        // phase-fix: سقف هر کاربر — ۱۰ چک‌اوت در دقیقه (ضد اسپم سفارش/کوپن)
+        await perUserLimit(user.id, 'checkout', 10, 60)
+
         // ── phase-2: idempotency — retry شبکه نباید سفارش دوم بسازد ──
         // فرانت برای هر «نیت خرید» یک UUID در هدر Idempotency-Key می‌فرستد
         // (سمت فرانت در فاز ۳ سیم‌کشی می‌شود؛ تا آن موقع بدون هدر = رفتار قبلی)
@@ -74,29 +98,44 @@ export const orderRoutes = (deps: OrderRoutesDeps) =>
         if (redisKey) {
           const cached = await deps.redis.get(redisKey)
           if (cached) return JSON.parse(cached)
+          // phase-fix: claim اتمیک — دو درخواست موازی با همان کلید فقط یکی
+          // سفارش می‌سازد؛ قبلاً get-then-set بود و هر دو از کنار می‌گذشتند.
+          // null = ردیس پایین → بدون idempotency ادامه (fail-open؛ چک‌اوت نباید بمیرد)
+          const claimed = await deps.redis.setNx(redisKey, 'PENDING', { ex: 15 })
+          if (claimed === false) {
+            throw Err.conflict('درخواست قبلی هنوز در حال پردازش است — چند لحظه صبر کنید.')
+          }
         }
 
-        const r = await deps.orders.checkout(user.id, body)
-        const response = !r.requiresPayment || !r.paymentId
-          ? {
-            orderCompleted: true,
-            orderId: r.displayId,
-            requiresPayment: false,
-            breakdown: r.breakdown,
-          }
-          : {
-            orderCompleted: false,
-            orderId: r.displayId,
-            requiresPayment: true,
-            paymentUrl: (
-              await deps.payments.initiate(r.paymentId, body.gatewayId ?? 'MOCK', {
-                displayId: r.displayId,
-                amount: r.amountPaidOnline,
-                mobile: user.phone,
-              })
-            ).paymentUrl,
-            breakdown: r.breakdown,
-          }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let response: Record<string, any>
+        try {
+          const r = await deps.orders.checkout(user.id, body)
+          response = !r.requiresPayment || !r.paymentId
+            ? {
+              orderCompleted: true,
+              orderId: r.displayId,
+              requiresPayment: false,
+              breakdown: r.breakdown,
+            }
+            : {
+              orderCompleted: false,
+              orderId: r.displayId,
+              requiresPayment: true,
+              paymentUrl: (
+                await deps.payments.initiate(r.paymentId, body.gatewayId ?? 'MOCK', {
+                  displayId: r.displayId,
+                  amount: r.amountPaidOnline,
+                  mobile: user.phone,
+                })
+              ).paymentUrl,
+              breakdown: r.breakdown,
+            }
+        } catch (e) {
+          // شکست چک‌اوت — نشانه آزاد شود تا retry ممکن باشد
+          if (redisKey) await deps.redis.del(redisKey)
+          throw e
+        }
 
         if (redisKey) {
           await deps.redis.set(redisKey, JSON.stringify(response), { ex: 86_400 })
@@ -109,7 +148,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) =>
             t.Object({
               productId: t.String({ pattern: UUID_PATTERN }),
               sizeId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
-              quantity: t.Number({ minimum: 1, maximum: 99 }),
+              quantity: t.Integer({ minimum: 1, maximum: 99 }),
             }),
             { minItems: 1, maxItems: 100 },
           ),
@@ -131,14 +170,18 @@ export const orderRoutes = (deps: OrderRoutesDeps) =>
     // phase-2 — پیش‌نمایش چک‌اوت: قیمت زنده‌ی سرور بدون ثبت سفارش
     .post(
       '/checkout/preview',
-      ({ user, body }) => deps.orders.preview(user.id, body),
+      async ({ user, body }) => {
+        // phase-fix: سقف هر کاربر — ۴۵ در دقیقه (ضد brute-force کد تخفیف)
+        await perUserLimit(user.id, 'checkout-preview', 45, 60)
+        return deps.orders.preview(user.id, body)
+      },
       {
         body: t.Object({
           items: t.Array(
             t.Object({
               productId: t.String({ pattern: UUID_PATTERN }),
               sizeId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
-              quantity: t.Number({ minimum: 1, maximum: 99 }),
+              quantity: t.Integer({ minimum: 1, maximum: 99 }),
             }),
             { minItems: 1, maxItems: 100 },
           ),
@@ -223,3 +266,4 @@ export const orderRoutes = (deps: OrderRoutesDeps) =>
         },
       },
     )
+}

@@ -82,9 +82,15 @@ export function useCheckoutPage(deps: {
   const setActiveOrderId = useAuthStore((s) => s.setActiveOrderId)
   const showToast = useToastStore((s) => s.showToast)
 
+
+  // phase-fix: fallback برای مرورگرهای قدیمی (iOS < 15.4 / WebView ناامن) —
+  // نبود randomUUID یعنی TypeError در لحظه‌ی ثبت سفارش = چک‌اوت مرده
+  const newIdempotencyKey = (): string =>
+    crypto.randomUUID?.() ?? `idm-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+
   // phase-3: idempotency — یک کلید به‌ازای هر نیت خرید؛ retry شبکه همان کلید
   // را می‌فرستد → سفارش دوم ساخته نمی‌شود. فقط بعد از «شکست قطعی» تازه می‌شود.
-  const idempotencyKey = useRef<string>(crypto.randomUUID())
+  const idempotencyKey = useRef<string>(newIdempotencyKey())
 
   // ⬅ preview — قیمت‌گذاری ۱۰۰٪ سروری: سایز/تخفیف/کوپن/ناحیه/بسته‌بندی/کیف پول
   const {
@@ -112,7 +118,7 @@ export function useCheckoutPage(deps: {
     if (!code || !c || announcedCoupon.current === code) return
     announcedCoupon.current = code
     if (c.valid) {
-      showToast(`کد تخفیف اعمال شد (${c.discount.toLocaleString('fa-IR')} تومان)`)
+      showToast(`کد تخفیف اعمال شد (${ c.discount.toLocaleString('fa-IR') } تومان)`)
     } else {
       showToast(c.message ?? 'کد تخفیف نامعتبر است', 'error')
     }
@@ -209,11 +215,11 @@ export function useCheckoutPage(deps: {
               navigate({ to: '/dashboard/orders/$orderId', params: { orderId: payResult.orderDisplayId } })
             } else {
               // شکست قطعی → کلید تازه؛ سبد «پاک نشده» — کاربر دوباره می‌زند
-              idempotencyKey.current = crypto.randomUUID()
+              idempotencyKey.current = newIdempotencyKey()
               showToast('پرداخت ناموفق — سفارش لغو شد؛ سبد شما حفظ شده است', 'error')
             }
           } catch (err) {
-            idempotencyKey.current = crypto.randomUUID()
+            idempotencyKey.current = newIdempotencyKey()
             showToast(err instanceof Error ? err.message : 'خطا در پرداخت', 'error')
           }
           return

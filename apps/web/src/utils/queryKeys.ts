@@ -88,6 +88,9 @@ export const qk = {
   settingsTracking: ['settings-tracking'] as const,
   settingsRestaurant: ['settings-restaurant'] as const,
 
+  // phase-fix — پرچم «فقط ایران»
+  settingsIranOnly: ['settings-iran-only'] as const,
+
   // کتگوری‌ها — فرم محصول/کوپن + فیلتر لیست‌ها همه از یک کش
   categories: ['categories'] as const,
 

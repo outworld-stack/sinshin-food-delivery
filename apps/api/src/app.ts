@@ -26,8 +26,12 @@ import type { ReportLinks } from '#/domain/report/report-links'
 import type { CouponService } from '#/domain/coupon/coupon.service'
 import type { ReconcileService } from '#/domain/reconcile/reconcile.service'
 import type { TermsService } from '#/domain/terms/terms.service'
+import type { ArticleService } from './domain/article/article.service'
+import type { GalleryService } from './domain/gallery/gallery.service'
+import type { GeoService } from '#/domain/geo/geo.service'
 
 import { AppError } from '#/domain/shared/errors'
+import { clientIp } from '#/domain/shared/net'
 import { openapiPlugin } from '#/http/openapi'
 import cors from '@elysiajs/cors'
 import { healthRoutes } from '#/http/routes/health.routes'
@@ -53,10 +57,9 @@ import { reconcileRoutes } from '#/http/routes/reconcile.routes'
 import { termsRoutes } from '#/http/routes/terms.routes'
 import { adminOrderRoutes } from '#/http/routes/admin-order.routes'
 import { articlesRoutes } from './http/routes/articles.routes'
-import type { ArticleService } from './domain/article/article.service'
 import { galleryRoutes } from './http/routes/gallery.routes'
 import { aboutRoutes } from './http/routes/about.routes'
-import type { GalleryService } from './domain/gallery/gallery.service'
+import { geoRoutes } from '#/http/routes/geo.routes'
 
 
 export interface AppDeps {
@@ -88,10 +91,20 @@ export interface AppDeps {
   termsService: TermsService
   articles: ArticleService
   gallery: GalleryService
+  geo: GeoService
 }
 
 export const buildApp = (deps: AppDeps) => {
   const api = new Elysia({ prefix: '/api' })
+    .onRequest(async ({ request }) => {
+      const ip = clientIp(request.headers.get('x-forwarded-for'))
+      if (ip && (await deps.geo.shouldBlock(ip))) {
+        return new Response(
+          JSON.stringify({ error: { code: 'NOT_FOUND', message: 'موردی پیدا نشد.' } }),
+          { status: 404, headers: { 'content-type': 'application/json' } },
+        )
+      }
+    })
     .use(
       healthRoutes({
         db: deps.db,
@@ -147,6 +160,7 @@ export const buildApp = (deps: AppDeps) => {
     )
     .use(paymentRoutes({ payments: deps.payments }))
     .use(reconcileRoutes({ sessions: deps.sessions, reconcile: deps.reconcile }))
+    .use(geoRoutes({ geo: deps.geo, sessions: deps.sessions, redis: deps.redis }))
 
   return new Elysia()
     .use(openapiPlugin(deps.config))

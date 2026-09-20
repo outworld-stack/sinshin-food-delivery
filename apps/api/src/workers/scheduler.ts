@@ -65,7 +65,7 @@ export class CronScheduler {
   private readonly intervalJobs: IntervalJob[] = []
   private intervalTimers: Array<ReturnType<typeof setInterval>> = []
 
-  constructor(private readonly redis: RedisService) {}
+  constructor(private readonly redis: RedisService) { }
 
   register(job: DailyJob): void {
     this.jobs.push(job)
@@ -182,10 +182,10 @@ export class CronScheduler {
     void this.execute(job)
   }
 
-  /** SET ... NX — فقط اگر کسی قبل از ما نزد بود */
+  /** SET ... NX — فقط اگر کسی قبل از ما نزد بود (null = ردیس پایین → قفل گرفته نشده) */
   private async tryLock(lockKey: string): Promise<boolean> {
     try {
-      return await this.redis.setNx(lockKey, '1', { ex: LOCK_TTL_SECONDS })
+      return (await this.redis.setNx(lockKey, '1', { ex: LOCK_TTL_SECONDS })) === true
     } catch {
       // ردیس پایین → fail-closed؛ تیک بعدی دوباره می‌آید
       return false

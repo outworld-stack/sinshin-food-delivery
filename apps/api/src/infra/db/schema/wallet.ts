@@ -75,6 +75,9 @@ export const walletTransactions = pgTable(
     index('wallet_tx_created_idx').on(t.createdAt),
     uniqueIndex('wallet_tx_withdraw_once_key')
       .on(t.orderId)
-      .where(sql`type = 'WITHDRAW'`),
+      .where(sql`type = 'WITHDRAW' and referral_profit_id is null`),
+    uniqueIndex('wallet_tx_reversal_once_key')
+      .on(t.referralProfitId)
+      .where(sql`type = 'WITHDRAW' and referral_profit_id is not null`),
   ],
 )

@@ -59,19 +59,26 @@ export class RedisService {
     return this.t<string | null>(op, null)
   }
 
-  /** SET ... NX — برای قفل‌ها */
-  async setNx(key: string, value: string, opts: { ex: number }): Promise<boolean> {
+  /**
+   * SET ... NX — برای قفل‌ها.
+   * true = گرفته شد | false = کسی دیگر دارد | null = ردیس در دسترس نیست
+   * (تفکیک null از false تا caller ها بتوانند fail-open انتخاب کنند)
+   */
+  async setNx(key: string, value: string, opts: { ex: number }): Promise<boolean | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      const res = await this.client.send('SET', [
-        key,
-        value,
-        'EX',
-        String(opts.ex),
-        'NX',
+      const res = await Promise.race([
+        this.client.send('SET', [key, value, 'EX', String(opts.ex), 'NX']),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), OP_TIMEOUT_MS)
+        }),
       ])
+      if (res === undefined) return null // timeout — ردیس معلق
       return res === 'OK'
     } catch {
-      return false
+      return null // خطا — ردیس پایین
+    } finally {
+      if (timer) clearTimeout(timer)
     }
   }
 
@@ -95,27 +102,22 @@ export class RedisService {
   }
 
   async exists(key: string): Promise<boolean> {
-    try {
-      return Number(await this.client.send('EXISTS', [key])) === 1
-    } catch {
-      return false
-    }
+    const raw = await this.t<string | number | null>(this.client.send('EXISTS', [key]), null)
+    return Number(raw) === 1
   }
 
   async incr(key: string): Promise<number> {
-    try {
-      return Number(await this.client.send('INCR', [key]))
-    } catch {
-      return 0
-    }
+    const raw = await this.t<string | number | null>(this.client.send('INCR', [key]), null)
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : 0
   }
 
   async expire(key: string, seconds: number): Promise<boolean> {
-    try {
-      return Number(await this.client.send('EXPIRE', [key, String(seconds)])) === 1
-    } catch {
-      return false
-    }
+    const raw = await this.t<string | number | null>(
+      this.client.send('EXPIRE', [key, String(seconds)]),
+      null,
+    )
+    return Number(raw) === 1
   }
 
   // ── pub/sub ──
