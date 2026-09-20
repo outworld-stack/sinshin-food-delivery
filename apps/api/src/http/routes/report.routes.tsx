@@ -96,7 +96,8 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
         detail: {
           summary: 'Create a scoped live-report link (admin / admin2)',
           description:
-            'Token embeds page+user+filters in the signature — links cannot be shared across admins.',
+            'Token embeds page+user+filters in the signature — links cannot be shared across admins. ' +
+            'امن-۱: token expires 24h after creation; expired or old-format (no-expiry) tokens are rejected.',
         },
       },
     )

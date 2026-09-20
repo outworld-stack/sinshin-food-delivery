@@ -28,15 +28,8 @@ export class OtpService {
     const { ttlSeconds, cooldownSeconds, maxPerHourPerPhone, maxPerDayPerPhone } =
       this.deps.config.otp
 
-    // ۱) فاصله‌ی بین دو درخواست
-    if (await redis.exists(K.cooldown(phone))) {
-      throw Err.rateLimited(
-        `کد قبلی هنوز معتبر است؛ ${cooldownSeconds} ثانیه دیگر تلاش کنید.`,
-        cooldownSeconds,
-      )
-    }
-
-    // ۲) سقف ساعتی و روزانه هر شماره
+    // ۱) سقف ساعتی و روزانه هر شماره — read-only، ردِ سریع
+    // (قبل از گیت می‌آیند تا ردِ سقف، گیتِ کول‌داون را نگرفته باشد)
     const hourCount = Number((await redis.get(K.hour(phone))) ?? 0)
     if (hourCount >= maxPerHourPerPhone) {
       throw Err.rateLimited('سقف درخواست کد در این ساعت پر شده است.', 3600)
@@ -46,15 +39,28 @@ export class OtpService {
       throw Err.rateLimited('سقف درخواست کد در امروز پر شده است.', 86400)
     }
 
+    // ۲) فاصله‌ی بین دو درخواست — گیت اتمیک (امن-۲)
+    // قبلاً exists-بعد-set بود: دو درخواست هم‌زمان هر دو از exists رد می‌شدند
+    // → دو پیامک + بازنویسی کد. SET NX فقط به یکی اجازه می‌دهد.
+    // null (ردیس در دسترس نیست) = fail-open مثل بقیه‌ی محدودیت‌ها.
+    const gate = await redis.setNx(K.cooldown(phone), '1', { ex: cooldownSeconds })
+    if (gate === false) {
+      throw Err.rateLimited(
+        `کد قبلی هنوز معتبر است؛ ${cooldownSeconds} ثانیه دیگر تلاش کنید.`,
+        cooldownSeconds,
+      )
+    }
+
     // ۳) کد + هش (خود کد هرگز ذخیره نمی‌شود)
     const code = randomOtpCode(4)
     const codeHash = sha256(`${code}:${phone}`)
 
-    // نسل A از multi/exec استفاده می‌کرد که RedisClient بانی ندارد؛
-    // اینجا دنباله‌ای می‌نویسیم — دو درخواست هم‌زمان یعنی بازنویسی کد، بی‌خطر.
     const ok = await redis.set(K.code(phone), codeHash, { ex: ttlSeconds })
-    if (ok !== 'OK') throw Err.internal('ذخیره‌ی کد ناموفق بود؛ کمی بعد تلاش کنید.')
-    await redis.set(K.cooldown(phone), '1', { ex: cooldownSeconds })
+    if (ok !== 'OK') {
+      // ردیس ناپایدار — گیت را پس بگیر تا کاربر ۶۰ ثانیه قفل نشود
+      await redis.del(K.cooldown(phone))
+      throw Err.internal('ذخیره‌ی کد ناموفق بود؛ کمی بعد تلاش کنید.')
+    }
     await redis.incr(K.hour(phone))
     await redis.expire(K.hour(phone), 3600)
     await redis.incr(K.day(phone))

@@ -245,39 +245,38 @@ export class OrderService {
       const trackingEnabled = await this.deps.settings.liveTrackingEnabled()
 
       // ── سفارش ──
+      // امن-۶: برخورد displayId با onConflictDoNothing حل می‌شود —
+      // قبلاً رد شدن unique داخل tx، کل tx را abort می‌کرد (25P02) و
+      // تلاش‌های بعدی حلقه همگی fail بودند (retry مرده). الان:
+      // ردیف خالی = همین تلاش برخورد خورد؛ تلاش بعدی با id تازه.
+      // خطای واقعی (قطعی DB و…) دیگر بلعیده نمی‌شود و همان‌جا می‌ترکد.
       let orderRow: OrderRow | undefined
       for (let attempt = 0; attempt < 5 && !orderRow; attempt++) {
-        try {
-          ;[orderRow] = await tx
-            .insert(orders)
-            .values({
-              displayId: newDisplayId(),
-              userId,
-              status: 'PENDING_PAYMENT',
-              deliveryType: input.deliveryType,
-              addressId: addressRow?.id ?? null,
-              addressSnapshot: addressRow?.address ?? null,
-              customerNote: input.customerNote?.slice(0, 300) ?? null,
-              noteSeen: !(input.customerNote && input.customerNote.trim().length > 0),
-              couponId,
-              paymentStatus: 'PENDING',
-              paymentMethod,
-              totalAmount,
-              breakdown,
-              trackingEnabled,
-              customerLocation: addressRow
-                ? { lat: addressRow.lat, lng: addressRow.lng }
-                : null,
-            })
-            .returning()
-        } catch (e) {
-          if (attempt === 4) {
-            console.error('[order] displayId collision loop exhausted:', e)
-            throw Err.internal('ساخت سفارش ناموفق بود؛ دوباره تلاش کنید.')
-          }
-        }
+        ;[orderRow] = await tx
+          .insert(orders)
+          .values({
+            displayId: newDisplayId(),
+            userId,
+            status: 'PENDING_PAYMENT',
+            deliveryType: input.deliveryType,
+            addressId: addressRow?.id ?? null,
+            addressSnapshot: addressRow?.address ?? null,
+            customerNote: input.customerNote?.slice(0, 300) ?? null,
+            noteSeen: !(input.customerNote && input.customerNote.trim().length > 0),
+            couponId,
+            paymentStatus: 'PENDING',
+            paymentMethod,
+            totalAmount,
+            breakdown,
+            trackingEnabled,
+            customerLocation: addressRow
+              ? { lat: addressRow.lat, lng: addressRow.lng }
+              : null,
+          })
+          .onConflictDoNothing({ target: orders.displayId })
+          .returning()
       }
-      if (!orderRow) throw Err.internal('ساخت سفارش ناموفق بود.')
+      if (!orderRow) throw Err.internal('ساخت سفارش ناموفق بود؛ دوباره تلاش کنید.')
 
       await tx.insert(orderItems).values(
         itemRows.map((it) => ({
@@ -739,13 +738,18 @@ export class OrderService {
       await this.deps.db.select().from(orders).where(eq(orders.displayId, displayId))
     )[0]
     if (!row || row.userId !== userId) throw Err.notFound('سفارش پیدا نشد.')
-    if (row.status !== 'PAID' && row.status !== 'CONFIRMED' && row.status !== 'ON_THE_WAY') {
-      throw Err.conflict('این سفارش قابل تایید تحویل نیست.')
+    // امن-۷: فقط بعد از تایید رستوران — PAID یعنی سفارش هنوز وارد جریان
+    // آشپزخانه/پیک نشده؛ بستنش توسط مشتری زودهنگام بود و جریان را می‌شکست
+    if (row.status !== 'CONFIRMED' && row.status !== 'ON_THE_WAY') {
+      throw Err.conflict('این سفارش هنوز تایید نشده و قابل تایید تحویل نیست.')
     }
-    await this.deps.db
+    // گارد دومی روی خود UPDATE — چک-و-آپدیت اتمیک نیست
+    const [updated] = await this.deps.db
       .update(orders)
       .set({ status: 'DELIVERED', deliveredAt: new Date(), updatedAt: new Date() })
-      .where(eq(orders.id, row.id))
+      .where(and(eq(orders.id, row.id), inArray(orders.status, ['CONFIRMED', 'ON_THE_WAY'])))
+      .returning()
+    if (!updated) throw Err.conflict('این سفارش قابل تایید تحویل نیست.')
   }
 
   /** پرچم ردیابی — snapshot ثبت سفارش، نه وضعیت فعلی تنظیمات */

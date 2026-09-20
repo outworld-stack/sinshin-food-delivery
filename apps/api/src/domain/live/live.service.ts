@@ -114,6 +114,11 @@ export class LiveService {
     /** دیدن نکته‌ی مشتری — قبل از اجازه‌ی تایید (قرارداد فرانت) */
     async viewNote(adminUserId: string, displayId: string): Promise<{ note: string | null }> {
         const row = await this.mustGet(displayId)
+
+        // امن-۳: مالک یا سفارشِ صف داخل scope — همان چشمی‌ که liveOrders می‌بیند.
+        // قبلاً هر ادمین۲ نکته‌ی هر سفارشی را باز کرده و noteSeen ست می‌کرد.
+        await this.assertViewable(adminUserId, row)
+
         const note = row.customerNote
         await this.deps.db
             .update(orders)
@@ -200,6 +205,11 @@ export class LiveService {
         newCourierId: string | null,
     ): Promise<{ success: boolean; message?: string }> {
         const row = await this.mustGet(displayId)
+        // امن-۳: فقط سفارش خودِ ادمین — قبلاً هر ادمین۲ می‌توانست پیکِ
+        // سفارش CONFIRMED شده‌ی ادمین دیگر را عوض کند
+        if (row.confirmedBy !== adminUserId) {
+            return { success: false, message: 'این سفارش به شما تعلق ندارد' }
+        }
         if (row.status !== 'CONFIRMED') {
             return { success: false, message: 'وضعیت سفارش اجازه تغییر پیک نمی‌دهد' }
         }
@@ -243,17 +253,36 @@ export class LiveService {
         const row = await this.mustGet(displayId)
         const buyer = (await this.deps.db.select().from(users).where(eq(users.id, row.userId)))[0]!
 
-        if (viewerRole === 'admin2' && row.confirmedBy !== viewerUserId && row.status === 'CONFIRMED') {
-            throw Err.forbidden('این سفارش به شما تعلق ندارد')
-        }
-        if (viewerRole === 'admin2' && row.status !== 'PAID' && row.confirmedBy !== viewerUserId) {
-            throw Err.forbidden('این سفارش به شما تعلق ندارد')
+        // امن-۳: ادمین۲ فقط مالک خودش یا صفِ PAID داخل scope را می‌بیند.
+        // قبلاً سفارش‌های PAID بدون چک scope برای همه‌ی ادمین‌های۲ باز بود.
+        if (viewerRole === 'admin2') {
+            await this.assertViewable(viewerUserId, row)
         }
 
         return (await this.toViews([{ o: row, buyer }]))[0]!
     }
 
     // ── داخلی ──
+
+    /**
+     * امن-۳ — اجازه‌ی دیدن/باز کردن یک سفارش برای ادمین۲:
+     *  مالک (confirmedBy = خودش، هر وضعیتی) یا سفارشِ صفِ PAID داخل scope.
+     * همان قاعده‌ی liveOrders؛ ادمین اصلی (role=admin) از مسیر بالاتر رد می‌شود.
+     */
+    private async assertViewable(adminUserId: string, row: OrderRow): Promise<void> {
+        if (row.confirmedBy === adminUserId) return
+        if (row.status === 'PAID') {
+            const scope = await this.deps.admin2.scopeOf(adminUserId)
+            const inScope =
+                !!scope &&
+                ((scope.hall && row.deliveryType === 'DINE_IN') ||
+                    (scope.takeaway &&
+                        (row.deliveryType === 'DELIVERY' || row.deliveryType === 'PICKUP')))
+            if (inScope) return
+            throw Err.forbidden('این سفارش خارج از حوزه‌ی شماست')
+        }
+        throw Err.forbidden('این سفارش به شما تعلق ندارد')
+    }
 
     private async mustGet(displayId: string): Promise<OrderRow> {
         if (!DISPLAY_RE.test(displayId)) throw Err.notFound('سفارش پیدا نشد.')

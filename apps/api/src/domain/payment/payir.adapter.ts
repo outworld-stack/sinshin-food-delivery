@@ -44,7 +44,10 @@ export class PayirAdapter implements PaymentGateway {
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
-    const token = input.query.token ?? input.gatewayRef ?? ''
+    // امن-۴: مرجع ذخیره‌شده در DB مقدم است؛ query فقط fallback —
+    // هم‌تراز با زرین‌پال (stage two). قبلاً token کوئری مقدم بود و
+    // state جعلی می‌توانست verify را روی token دلخواه اجرا کند.
+    const token = input.gatewayRef ?? input.query.token ?? ''
     const res = await Bun.fetch(VERIFY_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

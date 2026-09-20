@@ -26,11 +26,12 @@ export interface ReconcileReport {
 }
 
 /**
- * مغایرت‌گیری مالی — ۱۰ چک، شغل ۰۳:۰۰ تهران.
+ * مغایرت‌گیری مالی — ۱۱ چک، شغل ۰۳:۰۰ تهران.
  *
  * Flags per-check: RECONCILE_AUTO_R1..R10 (on/off) — پیش‌فرض همه off.
  * حالت off = report-only (R1 findings را می‌سازد ولی settle نمی‌زند؛
  * wouldFix می‌شمارد برای تصمیم).
+ * (R11 همیشه report-only است — auto-fix ندارد.)
  *
  * قرارداد برداشتِ سفارشی: wallet_tx با type='WITHDRAW' و orderId != null.
  * (برداشت واقعی کاربر — که فعلاً نداریم — orderId ندارد.)
@@ -59,6 +60,7 @@ export class ReconcileService {
         checks.push(await this.r8NegativeBalance())
         checks.push(await this.r9AmountMismatch())
         checks.push(await this.r10StuckPending())
+        checks.push(await this.r11FailedGatewayPayments())
 
         let totalOpen = 0
         for (const c of checks) totalOpen += c.findings.length
@@ -380,42 +382,95 @@ export class ReconcileService {
         }
     }
 
+    // ═══════════ R11 (امن-۸): FAILED درگاه واقعی — بررسی دستی PSP ═══════════
+
+    /**
+     * پرداخت‌های FAILED درگاهِ واقعی در ۲۴ ساعت اخیر → finding هشداری
+     * برای spot-check دستی در پنل PSP. مسیر دفاعی از قبل کار می‌کند
+     * (job تایم‌اوت قبل از fail دوباره verify می‌کند)؛ این چک لایه‌ی
+     * تشخیصیِ بعد از آن است — همیشه report-only، auto-fix ندارد.
+     */
+    private async r11FailedGatewayPayments(): Promise<CheckResult> {
+        const rows = (await this.deps.db.execute(sql`
+          select p.id, p.gateway, p.gateway_ref, p.amount, p.updated_at, o.display_id
+          from payments p
+          join orders o on o.id = p.order_id
+          where p.status = 'FAILED'
+            and p.mode <> 'mock'
+            and p.updated_at > now() - interval '24 hours'
+          order by p.updated_at desc
+          limit 100
+        `)) as unknown as Array<{
+            id: string
+            gateway: string
+            gateway_ref: string | null
+            amount: number
+            updated_at: Date
+            display_id: string
+        }>
+
+        return {
+            checkId: 'R11',
+            severity: 'warning',
+            findings: rows.map((r) => ({
+                entityType: 'payment' as const,
+                entityId: r.id,
+                detail: {
+                    orderDisplayId: r.display_id,
+                    gateway: r.gateway,
+                    gatewayRef: r.gateway_ref,
+                    amount: r.amount,
+                    failedAt: r.updated_at,
+                    note: 'manual PSP spot-check recommended (failed real-gateway payment)',
+                },
+            })),
+            wouldFix: 0,
+        }
+    }
+
     // ═══════════ ثبت findings — idempotent روزانه ═══════════
 
     /**
      * upsert: finding باز → lastSeenAt + occurrences++ ؛
      * finding resolved که دوباره دیده شد → reopen (status→open, resolvedAt→null).
      * unique (check_id, entity_id) — بدون status در کلید.
+     *
+     * امن-۵: همه‌ی statements داخل یک tx — چون now() در PostgreSQL
+     * «زمان شروع تراکنش» است و در طول tx ثابت می‌ماند، upsert و reopen
+     * دقیقاً یک now() می‌بینند و شرط last_seen_at = now() واقعاً مچ می‌شود.
+     * (قبلاً new Date() ساعتیِ اپ بود و reopen عملاً هرگز fire نمی‌شد.)
      */
     async persistFindings(report: ReconcileReport): Promise<void> {
-        for (const check of report.checks) {
-            for (const f of check.findings) {
-                await this.deps.db
-                    .insert(reconcileFindings)
-                    .values({
-                        checkId: check.checkId,
-                        severity: check.severity,
-                        entityType: f.entityType,
-                        entityId: f.entityId,
-                        detail: f.detail,
-                    })
-                    .onConflictDoUpdate({
-                        target: [reconcileFindings.checkId, reconcileFindings.entityId],
-                        set: {
-                            lastSeenAt: new Date(),
-                            occurrences: sql`${reconcileFindings.occurrences} + 1`,
-                        },
-                    })
+        await this.deps.db.transaction(async (tx) => {
+            for (const check of report.checks) {
+                for (const f of check.findings) {
+                    await tx
+                        .insert(reconcileFindings)
+                        .values({
+                            checkId: check.checkId,
+                            severity: check.severity,
+                            entityType: f.entityType,
+                            entityId: f.entityId,
+                            detail: f.detail,
+                        })
+                        .onConflictDoUpdate({
+                            target: [reconcileFindings.checkId, reconcileFindings.entityId],
+                            set: {
+                                lastSeenAt: sql`now()`,
+                                occurrences: sql`${reconcileFindings.occurrences} + 1`,
+                            },
+                        })
+                }
             }
-        }
 
-        // reopen در گام جدا — روشن‌تر از sql شرطی در upsert:
-        await this.deps.db.execute(sql`
-      update reconcile_findings
-      set status = 'open', resolved_at = null
-      where status in ('acknowledged', 'resolved_external')
-        and last_seen_at = now()
-    `)
+            // reopen — همان tx، همان now()
+            await tx.execute(sql`
+              update reconcile_findings
+              set status = 'open', resolved_at = null
+              where status in ('acknowledged', 'resolved_external')
+                and last_seen_at = now()
+            `)
+        })
     }
 
     // ═══════════ خواندن — پنل ادمین ═══════════
