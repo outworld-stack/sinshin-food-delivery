@@ -72,15 +72,19 @@ export async function authJson<T>(
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const b = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
+    const b = (await res.json().catch(() => null)) as {
+      error?: { message?: string; code?: string }
+    } | null
+    // phase-fix: کاربری که وسط نشست VPN روشن کرده — رفرش سخت؛
+    // دروازه‌ی SSR دوباره اجرا می‌شود و صفحه‌ی «دسترسی محدود» می‌آید
+    if (b?.error?.code === 'GEO_BLOCKED' && typeof window !== 'undefined') {
+      window.location.reload()
+    }
     // phase-fix: status روی خطا — predicate ریترای TanStack Query این را می‌خواند؛
     // قبلاً 4xx هم دو بار retry می‌شد (سه برابر بار روی API در خطای اعتبارسنجی)
     throw Object.assign(new Error(b?.error?.message ?? `خطای ${res.status}`), {
       status: res.status,
+      code: b?.error?.code,
     })
   }
-  // ⬅ body خالی — 204 یا empty:
-  const text = await res.text()
-  if (!text) return undefined as T
-  return JSON.parse(text) as T
 }

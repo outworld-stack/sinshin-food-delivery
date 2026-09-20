@@ -99,9 +99,15 @@ export const buildApp = (deps: AppDeps) => {
     .onRequest(async ({ request }) => {
       const ip = clientIp(request.headers.get('x-forwarded-for'))
       if (ip && (await deps.geo.shouldBlock(ip))) {
+        // phase-fix: 404 گیج‌کننده بود → 403 + پیام روشن برای کاربر ایرانیِ VPN-دار
         return new Response(
-          JSON.stringify({ error: { code: 'NOT_FOUND', message: 'موردی پیدا نشد.' } }),
-          { status: 404, headers: { 'content-type': 'application/json' } },
+          JSON.stringify({
+            error: {
+              code: 'GEO_BLOCKED',
+              message: 'لطفاً اگر از ایران هستید، لطفاً VPN خودتان را خاموش کنید و صفحه را رفرش کنید.',
+            },
+          }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
         )
       }
     })

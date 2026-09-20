@@ -1,5 +1,5 @@
 // src/routes/__root.tsx
-import { HeadContent, Scripts, createRootRouteWithContext, notFound } from '@tanstack/react-router'
+import { HeadContent, Scripts, createRootRouteWithContext, redirect } from '@tanstack/react-router'
 import { Toast } from '#/components/Toast'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import appCss from '#/styles.css?url'
@@ -15,11 +15,13 @@ interface MyRouterContext {
 }
 
 export const Route = createRootRouteWithContext<MyRouterContext>()({
-  beforeLoad: async () => {
-    if (import.meta.env.SSR) {
+  beforeLoad: async ({ location }) => {
+    // phase-fix: IP خارج از ایران → صفحه‌ی اختصاصی ۴۰۳ (نه 404)؛
+    // خودِ صفحه‌ی پیام از بررسی معاف است تا ریدایرکت بی‌نهایت نشود
+    if (import.meta.env.SSR && !location.pathname.startsWith('/geo-blocked')) {
       const { isBlockedByGeo } = await import('#/server/geoGate')
       if (await isBlockedByGeo()) {
-        throw notFound()
+        throw redirect({ to: '/geo-blocked', replace: true })
       }
     }
   },

@@ -18,6 +18,7 @@ import { Route as CheckoutRouteRouteImport } from './routes/checkout/route'
 import { Route as CourierRouteRouteImport } from './routes/courier/route'
 import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
 import { Route as GalleryRouteRouteImport } from './routes/gallery/route'
+import { Route as GeoBlockedRouteImport } from './routes/geo-blocked'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProductsRouteRouteImport } from './routes/products/route'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
@@ -103,6 +104,11 @@ const DashboardRouteRoute = DashboardRouteRouteImport.update({
 const GalleryRouteRoute = GalleryRouteRouteImport.update({
   id: '/gallery',
   path: '/gallery',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GeoBlockedRoute = GeoBlockedRouteImport.update({
+  id: '/geo-blocked',
+  path: '/geo-blocked',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -326,6 +332,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRouteRouteWithChildren
   '/gallery': typeof GalleryRouteRouteWithChildren
   '/products': typeof ProductsRouteRouteWithChildren
+  '/geo-blocked': typeof GeoBlockedRoute
   '/login': typeof LoginRoute
   '/articles/$articleId': typeof ArticlesArticleIdRoute
   '/courier/login': typeof CourierLoginRoute
@@ -369,6 +376,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/geo-blocked': typeof GeoBlockedRoute
   '/login': typeof LoginRoute
   '/articles/$articleId': typeof ArticlesArticleIdRoute
   '/courier/login': typeof CourierLoginRoute
@@ -422,6 +430,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRouteRouteWithChildren
   '/gallery': typeof GalleryRouteRouteWithChildren
   '/products': typeof ProductsRouteRouteWithChildren
+  '/geo-blocked': typeof GeoBlockedRoute
   '/login': typeof LoginRoute
   '/articles/$articleId': typeof ArticlesArticleIdRoute
   '/courier/login': typeof CourierLoginRoute
@@ -476,6 +485,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/gallery'
     | '/products'
+    | '/geo-blocked'
     | '/login'
     | '/articles/$articleId'
     | '/courier/login'
@@ -519,6 +529,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/geo-blocked'
     | '/login'
     | '/articles/$articleId'
     | '/courier/login'
@@ -571,6 +582,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/gallery'
     | '/products'
+    | '/geo-blocked'
     | '/login'
     | '/articles/$articleId'
     | '/courier/login'
@@ -624,6 +636,7 @@ export interface RootRouteChildren {
   DashboardRouteRoute: typeof DashboardRouteRouteWithChildren
   GalleryRouteRoute: typeof GalleryRouteRouteWithChildren
   ProductsRouteRoute: typeof ProductsRouteRouteWithChildren
+  GeoBlockedRoute: typeof GeoBlockedRoute
   LoginRoute: typeof LoginRoute
   ReferralCodeRoute: typeof ReferralCodeRoute
 }
@@ -691,6 +704,13 @@ declare module '@tanstack/react-router' {
       path: '/gallery'
       fullPath: '/gallery'
       preLoaderRoute: typeof GalleryRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geo-blocked': {
+      id: '/geo-blocked'
+      path: '/geo-blocked'
+      fullPath: '/geo-blocked'
+      preLoaderRoute: typeof GeoBlockedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -1160,6 +1180,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRouteRoute: DashboardRouteRouteWithChildren,
   GalleryRouteRoute: GalleryRouteRouteWithChildren,
   ProductsRouteRoute: ProductsRouteRouteWithChildren,
+  GeoBlockedRoute: GeoBlockedRoute,
   LoginRoute: LoginRoute,
   ReferralCodeRoute: ReferralCodeRoute,
 }
