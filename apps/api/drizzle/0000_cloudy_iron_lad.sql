@@ -316,6 +316,7 @@ CREATE TABLE "products" (
 	"discount_percentage" integer DEFAULT 0 NOT NULL,
 	"prep_time" integer DEFAULT 15 NOT NULL,
 	"sizes_enabled" boolean DEFAULT false NOT NULL,
+	"packaging_cost" integer DEFAULT 0 NOT NULL,
 	"ingredients" jsonb DEFAULT '[]'::jsonb,
 	"profile_image" text,
 	"gallery_images" jsonb DEFAULT '[]'::jsonb,

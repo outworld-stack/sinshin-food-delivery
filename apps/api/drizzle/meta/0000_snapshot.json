@@ -1,5 +1,5 @@
 {
-  "id": "439b7648-c8fb-4fbc-81ca-8417dd5c20b5",
+  "id": "29cfa05d-6950-4487-8891-f00c26a7d0e6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -3260,6 +3260,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "packaging_cost": {
+          "name": "packaging_cost",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "ingredients": {
           "name": "ingredients",
