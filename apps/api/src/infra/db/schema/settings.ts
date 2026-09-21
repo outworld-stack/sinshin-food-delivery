@@ -26,8 +26,8 @@ export const SETTING_KEYS = {
   liveTrackingEnabled: 'live_tracking_enabled', // boolean
   /** مختصات مبدأ ارسال */
   restaurantLocation: 'restaurant_location', // { lat, lng }
-  /** هزینه بسته‌بندی PICKUP — پایه توسط ادمین اصلی؛ ادمین۲ با permission ویرایش می‌کند */
-  packagingFee: 'packaging_fee', // number (تومان)
+  // round-11: کلید packagingFee حذف شد — stage-10 هزینهٔ بسته‌بندی
+  // per-product (ستون products.packaging_cost) شد و این کلید مرده بود.
 
   iranOnlyAccess: 'iran_only_access', // boolean
 } as const

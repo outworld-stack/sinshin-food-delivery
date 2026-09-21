@@ -267,6 +267,11 @@ export class CouponService {
     if (input.discountPercentage < 1 || input.discountPercentage > 99) {
       throw Err.validation('درصد تخفیف باید بین ۱ تا ۹۹ باشد')
     }
+    // round-11 (اسکن L-5): تاریخ خراب قبلاً Invalid Date می‌ساخت که وسط درج
+    // با خطای DB (۵۰۰) می‌ترکید — اعتبارسنجی صریح با پیام روشن.
+    if (input.expiryDate && Number.isNaN(new Date(input.expiryDate).getTime())) {
+      throw Err.validation('تاریخ انقضا معتبر نیست')
+    }
     const clash = await this.deps.db.query.coupons.findFirst({ where: eq(coupons.code, code) })
     if (clash) throw Err.conflict('این کد قبلاً ثبت شده است')
 
@@ -316,6 +321,10 @@ export class CouponService {
     }
     if (input.discountPercentage < 1 || input.discountPercentage > 99) {
       throw Err.validation('درصد تخفیف باید بین ۱ تا ۹۹ باشد')
+    }
+    // round-11 (اسکن L-5): هم‌الگوی create — انقضای خراب ۵۰۰ نمی‌دهد، ۴۲۲ می‌دهد
+    if (input.expiryDate && Number.isNaN(new Date(input.expiryDate).getTime())) {
+      throw Err.validation('تاریخ انقضا معتبر نیست')
     }
     const clash = await db.query.coupons.findFirst({ where: eq(coupons.code, code) })
     if (clash && clash.id !== id) {

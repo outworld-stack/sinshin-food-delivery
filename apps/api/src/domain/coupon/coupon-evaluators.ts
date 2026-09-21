@@ -44,6 +44,14 @@ const num = (v: unknown, fallback: number): number =>
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
 
+// round-11 (اسکن H-1): مقدار غیر-UUID در شرط productId/categoryId کل
+// کوئری ارزیابی را با خطای «invalid input syntax for type uuid» می‌شکند —
+// و چون grantIfEligible داخل tx همین settlePayment اجرا می‌شود، سفارشِ
+// پول‌گرفته‌شده برای همیشه PENDING می‌ماند. گارد: مقدار خراب → شرط
+// «همیشه ناراضی» (sql`false`)، نه انفجار.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const uuidOrFalse = (v: string | null): string | null => (v && UUID_RE.test(v) ? v : null)
+
 /** سفارش‌های موفق کاربر — عبارت مشترک */
 function successfulOrdersExpr(): SQL {
   return sql`(
@@ -80,7 +88,7 @@ export function evaluateCondition(
     }
 
     case 'MIN_PRODUCT_ORDERS': {
-      const productId = str(params.productId)
+      const productId = uuidOrFalse(str(params.productId))
       const count = num(params.count, 1)
       if (!productId) {
         // شرط غیرقابل‌ارزیابی → همیشه ناراضی (امن: کوپن اعطا نمی‌شود)
@@ -99,7 +107,7 @@ export function evaluateCondition(
     }
 
     case 'MIN_CATEGORY_ORDERS': {
-      const categoryId = str(params.categoryId)
+      const categoryId = uuidOrFalse(str(params.categoryId))
       const count = num(params.count, 1)
       if (!categoryId) {
         return { satisfied: sql`false`, current: sql`0` }

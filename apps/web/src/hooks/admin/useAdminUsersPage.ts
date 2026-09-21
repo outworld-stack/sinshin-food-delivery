@@ -167,7 +167,9 @@ export function useAdminUsersPage() {
           ...old,
           users: old.users.map(u =>
             u.id === userId
-              ? { ...u, status: u.status === 'ACTIVE' ? 'BLOCKED' : 'ACTIVE' }
+              // round-11 (اسکن L-1): واژگان پلتفرم SUSPENDED است (فیلتر/سرور) —
+              // BLOCKED فقط لحظه‌ای ناسازگار بود.
+              ? { ...u, status: u.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' }
               : u,
           ),
         }

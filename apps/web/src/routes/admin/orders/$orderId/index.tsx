@@ -11,7 +11,6 @@ import { useAuthStore, ensureAuthHydrated } from '#/stores/authStore'
 import { adminOrderDetailsOptions } from '#/utils/queryOptions'
 import { StatusBadge } from '#/components/shared/StatusBadge'
 import { AdminOrderDetailSkeleton } from '#/components/LoadingSkeletons'
-import { PdfDownloadButton } from '#/components/shared/PdfDownloadButton'
 import { OrderBreakdownCard } from '#/components/shared/OrderBreakdownCard'
 import { useToastStore } from '#/stores/toastStore'
 import { usePermissions } from '#/hooks/admin/usePermissions'
@@ -73,7 +72,6 @@ const OrderDetailPage = memo(function OrderDetailPage() {
               {formatPrice(order.amount)} تومان
             </p>
           </div>
-          <PdfDownloadButton documentId={order.id} documentType="order-invoice" targetSelector="#order-detail-print" />
         </div>
       </div>
 

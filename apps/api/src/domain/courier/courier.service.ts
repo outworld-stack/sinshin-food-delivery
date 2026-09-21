@@ -1,5 +1,5 @@
 //src/domain/courier/courier.service.ts
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from 'drizzle-orm'
 import { buildRangeCharts } from '#/domain/shared/charts'
 import type { Db } from '#/infra/db/client'
 import { courierDeliveries, courierTrips, couriers, orders, type OrderRow } from '#/infra/db/schema'
@@ -199,6 +199,120 @@ export class CourierService {
 
   async listCouriers(): Promise<Array<typeof couriers.$inferSelect>> {
     return this.deps.db.select().from(couriers).orderBy(desc(couriers.createdAt))
+  }
+
+  /**
+   * round-11 (اسکن H-3): لیست پیک‌ها با فیلتر و شکل واقعی صفحهٔ پنل —
+   * صفحهٔ /admin/couriers انتظار { couriers: [{id,name,phone,trips:[{...,deliveries:[]}]}], total }
+   * دارد ولی روت قبلی آرایهٔ خام ردیف‌ها برمی‌گرداند و فیلترها را نادیده می‌گرفت
+   * → لیست همیشه خالی بود («پیکِِی در این بازه یافت نشد») و آمار همیشه صفر.
+   * بازهٔ زمانی روی deliveredAt اعمال می‌شود؛ پیک/سفرِ بدون تحویل در بازه حذف می‌شود.
+   */
+  async listCouriersPage(filters: {
+    page: number
+    limit: number
+    search?: string
+    dateFrom?: string
+    dateTo?: string
+  }): Promise<{
+    couriers: Array<{
+      id: string
+      name: string
+      phone: string
+      createdAt: Date
+      trips: Array<
+        typeof courierTrips.$inferSelect & {
+          deliveries: Array<typeof courierDeliveries.$inferSelect>
+        }
+      >
+    }>
+    total: number
+  }> {
+    const { db } = this.deps
+
+    // فیلتر متن روی نام/موبایل (مثل «محمد یا 0912...»)
+    const text = filters.search?.trim()
+    const courierWhere = text
+      ? or(ilike(couriers.name, `%${text}%`), ilike(couriers.phone, `%${text}%`))
+      : undefined
+
+    // تعداد پیک‌های یک رستوران کم است؛ «در این بازه» فقط بعد از دیدن تحویل‌ها
+    // مشخص می‌شود، پس صفحه‌بندی صادقانه در JS است نه SQL.
+    const courierRows = await db
+      .select()
+      .from(couriers)
+      .where(courierWhere)
+      .orderBy(desc(couriers.createdAt))
+
+    const courierIds = courierRows.map((c) => c.id)
+    const trips = courierIds.length
+      ? await db
+        .select()
+        .from(courierTrips)
+        .where(inArray(courierTrips.courierId, courierIds))
+        .orderBy(desc(courierTrips.startedAt))
+      : []
+
+    // بازهٔ تحویل — تاریخ‌های خراب بی‌اثرند (نه ۵۰۰)
+    const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : undefined
+    const toDate = filters.dateTo ? new Date(filters.dateTo) : undefined
+    const from = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined
+    const to = toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined
+
+    const tripIds = trips.map((t) => t.id)
+    const dConds: SQL[] = []
+    if (tripIds.length > 0) dConds.push(inArray(courierDeliveries.tripId, tripIds))
+    if (from) dConds.push(gte(courierDeliveries.deliveredAt, from))
+    if (to) dConds.push(lte(courierDeliveries.deliveredAt, to))
+    const deliveries =
+      tripIds.length > 0
+        ? await db
+          .select()
+          .from(courierDeliveries)
+          .where(dConds.length > 0 ? and(...dConds) : undefined)
+        : []
+
+    const hasRange = from !== undefined || to !== undefined
+
+    const byTrip = new Map<string, Array<typeof courierDeliveries.$inferSelect>>()
+    for (const d of deliveries) {
+      const list = byTrip.get(d.tripId as string) ?? []
+      list.push(d)
+      byTrip.set(d.tripId as string, list)
+    }
+    const byCourier = new Map<string, Array<typeof courierTrips.$inferSelect>>()
+    for (const t of trips) {
+      const list = byCourier.get(t.courierId as string) ?? []
+      list.push(t)
+      byCourier.set(t.courierId as string, list)
+    }
+
+    // در حالت بازه: فقط پیک‌هایی که تحویلِ داخل بازه دارند
+    const visible = hasRange
+      ? courierRows.filter((c) =>
+        (byCourier.get(c.id as string) ?? []).some(
+          (t) => (byTrip.get(t.id as string) ?? []).length > 0,
+        ),
+      )
+      : courierRows
+
+    const total = visible.length
+    const start = (filters.page - 1) * filters.limit
+    const pageRows = visible.slice(start, start + filters.limit)
+
+    return {
+      couriers: pageRows.map((c) => ({
+        id: c.id as string,
+        name: c.name,
+        phone: c.phone,
+        createdAt: c.createdAt,
+        trips: (byCourier.get(c.id as string) ?? [])
+          .map((t) => ({ ...t, deliveries: byTrip.get(t.id as string) ?? [] }))
+          // در حالت بازه: سفرهای بی‌تحویلِ داخل بازه نمایش داده نمی‌شوند
+          .filter((t) => (hasRange ? t.deliveries.length > 0 : true)),
+      })),
+      total,
+    }
   }
 
   async addCourier(input: { name: string; phone: string }): Promise<{ success: boolean; message?: string }> {

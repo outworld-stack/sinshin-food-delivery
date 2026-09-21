@@ -410,7 +410,9 @@ export class AdminService {
             where: eq(users.id, uid),
             columns: { bannedAt: true, role: true },
         })
-        if (!user) return
+        // round-11 (اسکن L-3): کاربر ناموجود قبلاً بی‌صدا 200 برمی‌گرداند و
+        // روت audit فانتوم (USER_TOGGLE روی هیچ) ثبت می‌کرد — notFound صریح.
+        if (!user) throw Err.notFound('کاربر پیدا نشد.')
         // phase-3.5: ادمین۲ (حتی با usersWrite) فقط کاربر عادی را مسدود می‌کند
         if (actorRole === 'admin2' && user.role !== 'user') {
             throw Err.forbidden('تغییر وضعیت ادمین‌ها فقط توسط ادمین اصلی')

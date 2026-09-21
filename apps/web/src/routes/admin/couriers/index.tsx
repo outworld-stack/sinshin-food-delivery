@@ -9,7 +9,6 @@ import { CourierCard } from '#/components/admin/couriers/CourierCard'
 import { CouriersFilterBox } from '#/components/admin/couriers/CouriersFilterBox'
 import { AddCourierModal } from '#/components/admin/couriers/AddCourierModal'
 import { Pagination } from '#/components/Pagination'
-import { PdfDownloadButton } from '#/components/shared/PdfDownloadButton'
 import { Can } from '#/components/shared/PermissionGate'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { RouteError } from '#/components/shared/RouteFallbacks'
@@ -45,7 +44,6 @@ const CouriersPage = memo(function CouriersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <PdfDownloadButton documentId="couriers-list" documentType="couriers-report" targetSelector="#couriers-list-area" label="خروجی PDF" />
           <Can allowed={permissions.couriersWrite}>
             <button
               type="button"

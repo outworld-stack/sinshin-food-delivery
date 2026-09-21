@@ -2,6 +2,7 @@
 // تمام تایپ‌ها از @sinshin/shared — بدون تعریف local
 
 import { authJson } from '#/lib/api-fetch'
+import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
 import type {
   AdminStatsDto,
   AdminUsersData,
@@ -171,6 +172,17 @@ export async function getOrderDetailsByRole(input: {
 
 // ═════════════ پیک‌ها ═════════════
 
+/** شمسی ISO (۱۴۰۳-۰۵-۱۲) → میلادی ISO — از/تا روز (هم‌الگوی مرکز گزارشات) */
+function jalaliBoundary(iso: string | undefined, endOfDay: boolean): string | undefined {
+  if (!iso) return undefined
+  const j = jalaliFromISO(iso)
+  if (!j) return undefined
+  const d = jalaliToGregorian(j)
+  if (endOfDay) d.setHours(23, 59, 59, 999)
+  else d.setHours(0, 0, 0, 0) // round-11 (H-2): شروع روز — نیمهٔ اول روز اول حذف نشود
+  return d.toISOString()
+}
+
 export async function getAdminCouriers(filters: {
   page: number
   limit: number
@@ -182,8 +194,11 @@ export async function getAdminCouriers(filters: {
   params.set('page', String(filters.page))
   params.set('limit', String(filters.limit))
   if (filters.search) params.set('search', filters.search)
-  if (filters.dateFrom) params.set('dateFrom', filters.dateFrom)
-  if (filters.dateTo) params.set('dateTo', filters.dateTo)
+  // round-11 (H-3): تاریخ‌ها از URL شمسی می‌آیند — تبدیل به مرز میلادی
+  const from = jalaliBoundary(filters.dateFrom, false)
+  const to = jalaliBoundary(filters.dateTo, true)
+  if (from) params.set('dateFrom', from)
+  if (to) params.set('dateTo', to)
   return authJson<{ couriers: CourierRecord[]; total: number }>(`/admin/couriers?${params}`, 'GET')
 }
 

@@ -8,10 +8,13 @@ export type CouponRow = CouponWithConditionsDto['coupon']
 
 export type CouponStatus = 'ACTIVE' | 'EXPIRED' | 'DISABLED'
 
-/** وضعیت واقعی — از isActive + endsAt مشتق می‌شود (سرور فیلد status ندارد) */
+/** وضعیت واقعی — از isActive + endsAt مشتق می‌شود (سرور فیلد status ندارد).
+ *  round-11 (اسکن M-1): انقضا مقدم بر غیرفعالی چک می‌شود — کوپنِ غیرفعال+منقضی
+ *  قبلاً «غیرفعال» نشان داده می‌شد و دکمهٔ فعال‌سازی می‌آمد که سرور 409 می‌داد؛
+ *  حالا «منقضی» است و راهنمای «ابتدا انقضا را ویرایش کنید» واقعاً رندر می‌شود. */
 export function couponStatus(c: CouponRow): CouponStatus {
-  if (!c.isActive) return 'DISABLED'
   if (c.endsAt !== null && new Date(c.endsAt).getTime() <= Date.now()) return 'EXPIRED'
+  if (!c.isActive) return 'DISABLED'
   return 'ACTIVE'
 }
 

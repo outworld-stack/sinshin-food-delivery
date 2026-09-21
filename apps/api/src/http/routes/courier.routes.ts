@@ -120,9 +120,30 @@ export const courierRoutes = (deps: CourierRoutesDeps) => {
   // گروه فقط permission خودش را می‌گیرد.
   const adminCourierRead = new Elysia({ prefix: '/admin/couriers', tags: ['Admin / Couriers'] })
     .use(requireAdmin2Permission({ sessions: deps.sessions, admin2: deps.admin2 }, 'couriersRead'))
-    .get('/', () => deps.couriers.listCouriers(), {
-      detail: { summary: 'List couriers (couriersRead)' },
-    })
+    .get(
+      '/',
+      // round-11 (اسکن H-3): روت قبلی آرایهٔ خام برمی‌گرداند و فیلترها را
+      // نادیده می‌گرفت — صفحهٔ پنل { couriers: [...با trips], total } با
+      // صفحه‌بندی/جستجو/بازهٔ تحویل می‌خواهد.
+      ({ query }) =>
+        deps.couriers.listCouriersPage({
+          page: query.page ?? 1,
+          limit: query.limit ?? 10,
+          search: query.search,
+          dateFrom: query.dateFrom,
+          dateTo: query.dateTo,
+        }),
+      {
+        query: t.Object({
+          page: t.Optional(t.Numeric({ minimum: 1, maximum: 100000 })),
+          limit: t.Optional(t.Numeric({ minimum: 1, maximum: 100 })),
+          search: t.Optional(t.String({ maxLength: 60 })),
+          dateFrom: t.Optional(t.String({ maxLength: 40 })),
+          dateTo: t.Optional(t.String({ maxLength: 40 })),
+        }),
+        detail: { summary: 'List couriers with trips/deliveries + filters (couriersRead)' },
+      },
+    )
     .get(
       '/:id',
       ({ params, user }) =>

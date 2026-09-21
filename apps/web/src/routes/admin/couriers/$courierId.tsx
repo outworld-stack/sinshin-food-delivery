@@ -9,7 +9,6 @@ import { useQuery } from '@tanstack/react-query'
 import { adminCourierDetailsOptions } from '#/utils/queryOptions'
 import { useAuthStore, ensureAuthHydrated } from '#/stores/authStore'
 import { ChartPanel } from '#/components/shared/ChartPanel'
-import { PdfDownloadButton } from '#/components/shared/PdfDownloadButton'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { CourierDetailSkeleton } from '#/components/LoadingSkeletons'
 import { formatPrice, formatDate, formatTime, faNum } from '#/utils/format'
@@ -79,7 +78,6 @@ const CourierDetailPage = memo(function CourierDetailPage() {
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">مجموع مبالغ</p>
             <p className="font-DanaDemiBold text-primary dark:text-dark-primary">{formatPrice(viewData.totalAmount)} ت</p>
           </div>
-          <PdfDownloadButton documentId={viewData.courier.id} documentType="courier-report" targetSelector="#courier-detail-print" />
         </div>
       </div>
 

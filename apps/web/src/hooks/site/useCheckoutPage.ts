@@ -171,7 +171,14 @@ export function useCheckoutPage(deps: {
     }
   }, [])
   const handleCouponCodeChange = useCallback((raw: string) => {
-    const sanitized = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 20)
+    // round-11 (اسکن H-1): راند ۹ کد فارسی را در کل پلتفرم مجاز کرد
+    // (سرور: [A-Z0-9\u0600-\u06FF_-]{3,16}) ولی این sanitizer حروف فارسی و
+    // خط تیره را می‌زداشت → کوپن فارسی عملاً در چک‌اوت قابل تایپ نبود.
+    // هم‌الگوی سرور + سقف ۱۶ (نه ۲۰).
+    const sanitized = raw
+      .replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '')
+      .toUpperCase()
+      .slice(0, 16)
     dispatch({ type: 'SET_COUPON_DRAFT', payload: sanitized })
   }, [])
   // phase-3: اعمال = commit کد → preview با کد رفرش می‌شود → نتیجه از سرور

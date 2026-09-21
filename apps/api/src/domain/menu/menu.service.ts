@@ -488,7 +488,10 @@ export class MenuService {
         originalPrice: input.originalPrice,
         discountPercentage: input.discountPercentage,
         prepTime: input.prepTime,
-        packagingCost: input.packagingCost ?? 0,
+        // round-11 (اسکن M-3): undefined یعنی «فیلد نیامده» (کلاینت قدیمی/اسکریپت)
+        // → مقدار موجود حفظ می‌شود، نه صفرِ بی‌صدا (درآمد بسته‌بندی از دست نمی‌رود).
+        // drizzle مقدار undefined را از SET حذف می‌کند.
+        ...(input.packagingCost !== undefined ? { packagingCost: input.packagingCost } : {}),
         profileImage: input.profileImage ?? null,
         galleryImages: input.galleryImages ?? [],
         sizesEnabled: input.sizesEnabled ?? false,

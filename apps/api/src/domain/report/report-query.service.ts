@@ -64,13 +64,16 @@ const faDate = (d: Date) =>
     new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short' }).format(d)
 const faDelivery = (t: string) =>
     t === 'DELIVERY' ? 'ارسال با پیک' : t === 'PICKUP' ? 'بیرون‌بر' : 'سرو در سالن'
-const faStatus = (s: string) =>
-    s === 'PAID' ? 'در انتظار تایید'
-        : s === 'CONFIRMED' ? 'تایید شده'
-            : s === 'ON_THE_WAY' ? 'در مسیر'
-                : s === 'DELIVERED' ? 'تحویل شده'
-                    : s === 'CANCELED' ? 'پرداخت ناموفق'
-                        : 'در انتظار پرداخت'
+// round-11 (اسکن M-4): سفارش refunded قبلاً «پرداخت ناموفق» نشان داده می‌شد
+// (refund → status=CANCELED) — ابتدا paymentStatus چک می‌شود، بعد status.
+const faStatus = (s: string, paymentStatus?: string) =>
+    paymentStatus === 'REFUNDED' ? 'بازگشت وجه'
+        : s === 'PAID' ? 'در انتظار تایید'
+            : s === 'CONFIRMED' ? 'تایید شده'
+                : s === 'ON_THE_WAY' ? 'در مسیر'
+                    : s === 'DELIVERED' ? 'تحویل شده'
+                        : s === 'CANCELED' ? 'پرداخت ناموفق'
+                            : 'در انتظار پرداخت'
 const faAction = (a: string) =>
     ({
         LOGIN: 'ورود',
@@ -114,7 +117,9 @@ export class ReportQueryService {
             case 'users':
                 return this.usersReport(from, to, generatedAt, subtitle)
             case 'user':
-                return this.userReport(input, generatedAt)
+                // round-11 (اسکن M-2-web): گزارش کاربر خاص هم بازهٔ زمانی می‌گیرد —
+                // سفارشات/تراکنش‌ها با فیلتر؛ موجودی کیف پول همیشه کل است (پول واقعی).
+                return this.userReport(input, generatedAt, from, to, subtitle)
             case 'audit':
                 return this.auditReport(from, to, input, generatedAt, subtitle)
             default:
@@ -162,7 +167,7 @@ export class ReportQueryService {
                     rows: rows.map(({ o, u }) => [
                         o.displayId,
                         faDelivery(o.deliveryType),
-                        faStatus(o.status),
+                        faStatus(o.status, o.paymentStatus),
                         faNum(o.breakdown.totalAmount),
                         faNum(o.breakdown.amountPaidOnline),
                         faNum(o.breakdown.walletDeduction),
@@ -247,15 +252,21 @@ export class ReportQueryService {
         const conditions: SQL[] = []
         if (from) conditions.push(gte(courierDeliveries.deliveredAt, from))
         if (to) conditions.push(lte(courierDeliveries.deliveredAt, to))
-        if (input.courierId && UUID_RE.test(input.courierId)) {
+        if (input.courierId) {
+            // round-11 (اسکن L-8): مقدار غیر-UUID قبلاً بی‌صدا ignore می‌شد و
+            // گزارشِ «همهٔ پیک‌ها» برمی‌گشت — خطای صریح، بهتر از سکوت گمراه‌کننده.
+            if (!UUID_RE.test(input.courierId)) {
+                throw Err.validation('شناسهٔ پیک معتبر نیست.')
+            }
             conditions.push(eq(courierTrips.courierId, input.courierId as never))
         }
 
         const rows = await this.deps.db
-            .select({ d: courierDeliveries, c: couriers })
+            .select({ d: courierDeliveries, c: couriers, displayId: orders.displayId })
             .from(courierDeliveries)
             .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
             .innerJoin(couriers, eq(couriers.id, courierTrips.courierId))
+            .leftJoin(orders, eq(orders.id, courierDeliveries.orderId))
             .where(conditions.length > 0 ? and(...conditions) : undefined)
             .orderBy(desc(courierDeliveries.deliveredAt))
             .limit(2000)
@@ -272,9 +283,10 @@ export class ReportQueryService {
                 {
                     title: 'تحویل‌ها',
                     head: ['پیک', 'سفارش', 'آدرس', 'مبلغ (تومان)', 'زمان تحویل'],
-                    rows: rows.map(({ d, c }) => [
+                    rows: rows.map(({ d, c, displayId }) => [
                         `${c.name} (${c.phone})`,
-                        d.orderId,
+                        // round-11: شناسهٔ خوانا (ord-xxxxxxxx) به‌جای UUID خام
+                        displayId ?? '—',
                         d.addressSnapshot ?? '—',
                         faNum(d.amount),
                         faDate(d.deliveredAt),
@@ -418,6 +430,9 @@ export class ReportQueryService {
     private async userReport(
         input: ReportQueryInput,
         generatedAt: string,
+        from: Date | undefined,
+        to: Date | undefined,
+        subtitle: string,
     ): Promise<ReportResultDto> {
         const phone = (input.phone ?? '').trim()
         if (!PHONE_RE.test(phone)) {
@@ -436,38 +451,51 @@ export class ReportQueryService {
             .where(eq(users.referredBy, target.id))
             .then((r) => r[0]?.count ?? 0)
 
-        const [orderRows, walletRows] = await Promise.all([
+        // round-11 (اسکن M-2-web + M-1): سفارشات/تراکنش‌ها با فیلتر بازه؛
+        // موجودی کیف پول با SUM روی کل ledger (قبلاً از ۲۰۰ ردیف آخر جمع می‌شد
+        // و برای کاربر پرحجم غلط بود).
+        const orderConds: SQL[] = [eq(orders.userId, target.id)]
+        if (from) orderConds.push(gte(orders.createdAt, from))
+        if (to) orderConds.push(lte(orders.createdAt, to))
+        const walletConds: SQL[] = [eq(walletTransactions.userId, target.id)]
+        if (from) walletConds.push(gte(walletTransactions.createdAt, from))
+        if (to) walletConds.push(lte(walletTransactions.createdAt, to))
+
+        const [orderRows, walletRows, walletTotalRow] = await Promise.all([
             this.deps.db
                 .select()
                 .from(orders)
-                .where(eq(orders.userId, target.id))
+                .where(and(...orderConds))
                 .orderBy(desc(orders.createdAt))
                 .limit(500),
             this.deps.db
                 .select()
                 .from(walletTransactions)
-                .where(eq(walletTransactions.userId, target.id))
+                .where(and(...walletConds))
                 .orderBy(desc(walletTransactions.createdAt))
                 .limit(200),
+            this.deps.db
+                .select({
+                    balance: sql<number>`coalesce(sum(case when ${walletTransactions.type} = 'DEPOSIT' then ${walletTransactions.amount} else -${walletTransactions.amount} end), 0)::int`,
+                })
+                .from(walletTransactions)
+                .where(eq(walletTransactions.userId, target.id))
+                .then((r) => r[0]?.balance ?? 0),
         ])
 
         const paid = orderRows.filter((o) => o.status !== 'CANCELED')
         const totalSpent = paid
             .filter((o) => o.paymentStatus === 'SUCCESS')
             .reduce((s, o) => s + o.totalAmount, 0)
-        const walletBalance = walletRows.reduce(
-            (s, w) => s + (w.type === 'DEPOSIT' ? w.amount : -w.amount),
-            0,
-        )
 
         return {
             title: `گزارش کاربر ${target.name ?? target.phone}`,
-            subtitle: `موبایل: ${target.phone} — ${target.bannedAt ? 'مسدود' : 'فعال'}`,
+            subtitle: `موبایل: ${target.phone} — ${target.bannedAt ? 'مسدود' : 'فعال'} — ${subtitle}`,
             generatedAt,
             stats: [
-                { label: 'تعداد سفارش', value: faNum(orderRows.length) },
+                { label: 'تعداد سفارش (بازه)', value: faNum(orderRows.length) },
                 { label: 'مجموع خرید (تومان)', value: faNum(totalSpent) },
-                { label: 'موجودی کیف پول (تومان)', value: faNum(walletBalance) },
+                { label: 'موجودی کیف پول (تومان)', value: faNum(walletTotalRow) },
                 { label: 'تعداد ارجاع', value: faNum(referralCount) },
             ],
             tables: [
@@ -477,7 +505,7 @@ export class ReportQueryService {
                     rows: orderRows.map((o) => [
                         o.displayId,
                         faDelivery(o.deliveryType),
-                        faStatus(o.status),
+                        faStatus(o.status, o.paymentStatus),
                         faNum(o.breakdown.totalAmount),
                         faNum(o.breakdown.amountPaidOnline),
                         faNum(o.breakdown.walletDeduction),
@@ -508,6 +536,10 @@ export class ReportQueryService {
         generatedAt: string,
         subtitle: string,
     ): Promise<ReportResultDto> {
+        // round-11 (اسکن L-8): مقدار غیر-UUID صریحاً رد می‌شود (نه ignore بی‌صدا)
+        if (input.adminUserId && !UUID_RE.test(input.adminUserId)) {
+            throw Err.validation('شناسهٔ ادمین معتبر نیست.')
+        }
         const { rows, total } = await this.deps.audit.report({
             from,
             to,

@@ -320,7 +320,20 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
                   <div className="flex items-center gap-2">
                     <select
                       value={rule.type}
-                      onChange={(e) => updateRuleByKey(rule.key, 'type', e.target.value)}
+                      onChange={(e) => {
+                        // round-11 (اسکن M-4): تعویض نوع شرط مقدار قدیمی را نگه
+                        // نمی‌دارد — قبلاً «۵» به‌عنوان productId شرط MIN_PRODUCT_ORDERS
+                        // ذخیره می‌شد (شرط مرده) چون value خالی به‌نظر نمی‌رسید.
+                        // یک set واحد (دو updateRuleByKey پشت‌سرهم closure کهنه می‌دید).
+                        const newType = e.target.value as keyof typeof ruleConfig
+                        set({
+                          rules: form.rules.map((r) =>
+                            r.key === rule.key && r.type !== newType
+                              ? { ...r, type: newType, value: '' }
+                              : r,
+                          ),
+                        })
+                      }}
                       className="flex-1 px-2 py-2 rounded-md bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-xs outline-none cursor-pointer"
                     >
                       {Object.entries(ruleConfig).map(([key, val]) => (
