@@ -7,6 +7,7 @@ import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2, requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import type { AdminService } from '#/domain/admin/admin.service'
+import type { AuditService } from '#/domain/audit/audit.service'
 import { Err } from '#/domain/shared/errors'
 import { asUserId } from '#/domain/shared/brand'
 
@@ -17,6 +18,8 @@ export interface AdminRoutesDeps {
   devices: DeviceService
   admin: AdminService
   admin2: Admin2Service
+  /** stage-10: لاگ ممیزی — عملیات حساس ادمین */
+  audit: AuditService
 }
 
 export const adminRoutes = (deps: AdminRoutesDeps) => {
@@ -111,10 +114,28 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
     .use(requireAdmin2Permission(guards, 'usersWrite'))
     .post(
       '/users/:id/toggle',
-      ({ params, user }) => deps.admin.toggleUserStatus(params.id, user.role),
+      async ({ params, user }) => {
+        // stage-10: ادمین اصلی خودش را غیرفعال نکند — گارد سروری
+        // (آیکون فرانت هم disable می‌شود؛ این لایه‌ی دوم است)
+        if (user.role === 'admin' && user.id === params.id) {
+          throw Err.forbidden('ادمین اصلی نمی‌تواند حساب خودش را غیرفعال کند.')
+        }
+        await deps.admin.toggleUserStatus(params.id, user.role)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'USER_TOGGLE',
+          entity: 'user',
+          entityId: params.id,
+          userId: params.id,
+        })
+        return { success: true }
+      },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        detail: { summary: 'Toggle user active/suspended (usersWrite)' },
+        detail: {
+          summary: 'Toggle user active/suspended (usersWrite)',
+          description: 'Main admin self-toggle rejected (403). Main-admin accounts cannot be suspended at all.',
+        },
       },
     )
     .patch(

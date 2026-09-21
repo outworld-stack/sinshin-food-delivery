@@ -75,7 +75,7 @@ await db.transaction(async (tx) => {
       { key: 'next_open_time', value: '۱۱:۰۰ صبح' },
       { key: 'temporarily_closed', value: false },
       { key: 'live_tracking_enabled', value: false },
-      { key: 'packaging_fee', value: 5000 },
+      // stage-10: packaging_fee حذف شد — بسته‌بندی per-product در ستون packaging_cost
       { key: 'restaurant_location', value: { lat: 35.6892, lng: 51.389 } },
     ])
     .onConflictDoNothing()

@@ -22,6 +22,8 @@ import type { LiveService } from '#/domain/live/live.service'
 import type { CourierService } from '#/domain/courier/courier.service'
 import type { ReviewService } from '#/domain/review/review.service'
 import type { ReportService } from '#/domain/report/report.service'
+import type { ReportQueryService } from '#/domain/report/report-query.service'
+import type { AuditService } from '#/domain/audit/audit.service'
 import type { ReportLinks } from '#/domain/report/report-links'
 import type { CouponService } from '#/domain/coupon/coupon.service'
 import type { ReconcileService } from '#/domain/reconcile/reconcile.service'
@@ -53,6 +55,7 @@ import { courierRoutes } from '#/http/routes/courier.routes'
 import { reviewRoutes } from '#/http/routes/review.routes'
 import { reportRoutes } from '#/http/routes/report.routes'
 import { reportPanelRoutes } from '#/http/routes/report-panel.routes'
+import { adminReportRoutes } from '#/http/routes/admin-report.routes'
 import { couponRoutes } from '#/http/routes/coupon.routes'
 import { reconcileRoutes } from '#/http/routes/reconcile.routes'
 import { termsRoutes } from '#/http/routes/terms.routes'
@@ -86,6 +89,8 @@ export interface AppDeps {
   couriers: CourierService
   reviews: ReviewService
   reports: ReportService
+  reportQueries: ReportQueryService
+  audit: AuditService
   links: ReportLinks
   coupons: CouponService
   reconcile: ReconcileService
@@ -128,7 +133,15 @@ export const buildApp = (deps: AppDeps) => {
         startedAt: Date.now(),
       }),
     )
-    .use(adminRoutes({ sessions: deps.sessions, devices: deps.devices, admin: deps.admin, admin2: deps.admin2 }))
+    .use(
+      adminRoutes({
+        sessions: deps.sessions,
+        devices: deps.devices,
+        admin: deps.admin,
+        admin2: deps.admin2,
+        audit: deps.audit,
+      }),
+    )
     .use(realtimeRoutes({ hub: deps.sseHub, sessions: deps.sessions, db: deps.db.db }))
     .use(
       authRoutes({
@@ -143,13 +156,21 @@ export const buildApp = (deps: AppDeps) => {
     .use(articlesRoutes({ sessions: deps.sessions, articles: deps.articles }))
     .use(menuRoutes({ menu: deps.menu, cart: deps.cart }))
     .use(addressRoutes({ sessions: deps.sessions, addresses: deps.addresses }))
-    .use(adminMenuRoutes({ sessions: deps.sessions, menu: deps.menu, admin2: deps.admin2 }))
+    .use(
+      adminMenuRoutes({
+        sessions: deps.sessions,
+        menu: deps.menu,
+        admin2: deps.admin2,
+        audit: deps.audit,
+      }),
+    )
     .use(
       adminSettingsRoutes({
         sessions: deps.sessions,
         zones: deps.zones,
         settings: deps.settings,
         admin2: deps.admin2,
+        audit: deps.audit,
       }),
     )
     .use(adminOrderRoutes({ sessions: deps.sessions, orders: deps.orders }))
@@ -157,12 +178,19 @@ export const buildApp = (deps: AppDeps) => {
     .use(liveRoutes({ sessions: deps.sessions, admin2: deps.admin2, live: deps.live }))
     .use(courierRoutes({ sessions: deps.sessions, admin2: deps.admin2, couriers: deps.couriers, redis: deps.redis }))
     .use(reviewRoutes({ sessions: deps.sessions, admin2: deps.admin2, reviews: deps.reviews }))
-    .use(couponRoutes({ sessions: deps.sessions, coupons: deps.coupons }))
+    .use(
+      couponRoutes({
+        sessions: deps.sessions,
+        coupons: deps.coupons,
+        audit: deps.audit,
+      }),
+    )
     .use(termsRoutes({ sessions: deps.sessions, termsService: deps.termsService }))
     .use(galleryRoutes({ sessions: deps.sessions, gallery: deps.gallery }))
     .use(aboutRoutes({ db: deps.db.db, sessions: deps.sessions }))
     .use(reportRoutes({ sessions: deps.sessions, reports: deps.reports, links: deps.links }))
     .use(reportPanelRoutes({ db: deps.db.db, links: deps.links }))
+    .use(adminReportRoutes({ sessions: deps.sessions, reports: deps.reportQueries }))
     .use(
       orderRoutes({
         sessions: deps.sessions,

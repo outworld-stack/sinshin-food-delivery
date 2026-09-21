@@ -22,6 +22,7 @@ export function ProductForm({ initialData, onSubmit, isSubmitting }: ProductForm
     originalPrice: 0,
     discountPercentage: 0,
     prepTime: 15,
+    packagingCost: 0,
     categoryId: '',
     profileImage: '',
     galleryImages: [],
@@ -41,6 +42,7 @@ export function ProductForm({ initialData, onSubmit, isSubmitting }: ProductForm
         originalPrice: initialData.originalPrice || 0,
         discountPercentage: initialData.discountPercentage || 0,
         prepTime: initialData.prepTime || 15,
+        packagingCost: initialData.packagingCost || 0,
         categoryId: initialData.categoryId || '',
         profileImage: initialData.profileImage || '',
         galleryImages: initialData.galleryImages || [],
@@ -210,7 +212,7 @@ export function ProductForm({ initialData, onSubmit, isSubmitting }: ProductForm
         </div>
 
         {/* قیمت‌ها — با روشن بودن سایز، قفل */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <div>
             <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
               قیمت پایه (تومان) {isSizesOn && <span className="text-xs text-gray-400">(قفل — سایز مبناست)</span>}
@@ -228,6 +230,12 @@ export function ProductForm({ initialData, onSubmit, isSubmitting }: ProductForm
           <div>
             <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">زمان آماده‌سازی</label>
             <input type="number" name="prepTime" value={formData.prepTime} onChange={handleChange} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none" />
+          </div>
+          <div>
+            <label htmlFor="packagingCost" className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">هزینه بسته‌بندی (تومان)</label>
+            <input id="packagingCost" type="number" name="packagingCost" value={formData.packagingCost} onChange={handleChange} min="0" step="500"
+              className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none" />
+            <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">به‌ازای هر واحد — در ارسال با پیک و بیرون‌بر اعمال می‌شود؛ سرو در محل بسته‌بندی ندارد.</p>
           </div>
         </div>
 

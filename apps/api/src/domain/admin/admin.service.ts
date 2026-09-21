@@ -138,6 +138,8 @@ export class AdminService {
             walletBalance: number
             totalSpent: number
             registeredAt: Date
+            /** stage-10: 'admin' → آیکون مسدودسازی در فرانت disable */
+            role: string
         }>
         total: number
     }> {
@@ -192,6 +194,8 @@ export class AdminService {
                 phone: users.phone,
                 bannedAt: users.bannedAt,
                 createdAt: users.createdAt,
+                // stage-10: آیکون مسدودسازی ادمین اصلی در فرانت disable می‌شود
+                role: users.role,
             })
             .from(users)
             .where(where)
@@ -244,6 +248,7 @@ export class AdminService {
                     walletBalance: balanceMap.get(r.id) ?? 0,
                     totalSpent: spentMap.get(r.id) ?? 0,
                     registeredAt: r.createdAt,
+                    role: r.role,
                 }
             }),
             total,
@@ -409,6 +414,11 @@ export class AdminService {
         // phase-3.5: ادمین۲ (حتی با usersWrite) فقط کاربر عادی را مسدود می‌کند
         if (actorRole === 'admin2' && user.role !== 'user') {
             throw Err.forbidden('تغییر وضعیت ادمین‌ها فقط توسط ادمین اصلی')
+        }
+        // stage-10: حساب ادمین اصلی اصلاً قابل تغییر وضعیت نیست —
+        // حتی توسط خودش (روت لایه‌ی اول را می‌گیرد؛ این لایه‌ی دوم است)
+        if (user.role === 'admin') {
+            throw Err.forbidden('حساب ادمین اصلی قابل مسدودسازی نیست.')
         }
         await db
             .update(users)

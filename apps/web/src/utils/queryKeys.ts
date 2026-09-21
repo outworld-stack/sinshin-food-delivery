@@ -154,4 +154,13 @@ export const qk = {
     search: string; status: string; categoryId: string;
   }) => ['admin-products', f.page, f.limit, f.search, f.status, f.categoryId] as const,
   adminProductsAll: ['admin-products'] as const,
+
+  // stage-10: باکس گزارشات داشبورد — کلیدِ همه‌ی فیلترها؛ همان فیلترها =
+  // همان کلید = کش (سیستم کشی گزارشات). staleTime در queryOptions.
+  adminReport: (f: {
+    type: string; from: string | null; to: string | null;
+    status: string; deliveryType: string;
+    adminUserId: string | null; courierId: string | null; phone: string | null;
+  }) => ['admin-report', f.type, f.from, f.to, f.status, f.deliveryType,
+    f.adminUserId, f.courierId, f.phone] as const,
 } as const

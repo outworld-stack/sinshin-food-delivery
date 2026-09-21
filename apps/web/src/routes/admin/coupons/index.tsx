@@ -7,7 +7,7 @@
 //  ۳) کل کارت کلیک‌پذیر است و به صفحه‌ی کوپن می‌رود.
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { deleteCoupon } from '#/server/coupons'
+import { deleteCoupon, setCouponActive } from '#/server/coupons'
 import { AdminCouponsPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { ConfirmModal } from '#/components/ConfirmModal'
@@ -22,17 +22,19 @@ import {
   couponAudienceLabel,
   formatCouponUsage,
 } from '#/utils/couponDisplay'
-import { Plus, Pen, Trash2 } from 'reicon-react'
+import { Plus, Pen, Ban, Check } from 'reicon-react'
 import type { CouponWithConditionsDto } from '@sinshin/shared'
 import { memo, useState, useCallback } from 'react'
 
 // --- کارت کوپن — سه چیدمان (موبایل/تبلت/دسکتاپ) ---
+// stage-10: آیکون وضعیت toggle شد — Ban برای غیرفعال‌سازی (با تایید)،
+// Check برای فعال‌سازی مجدد. کوپن منقضی فقط از صفحه‌ی خودش (ویرایش انقضا).
 const CouponCard = memo(function CouponCard({
-  coupon: row, onEdit, onDelete, onOpen,
+  coupon: row, onEdit, onToggle, onOpen,
 }: {
   coupon: CouponWithConditionsDto
   onEdit: (id: string) => void
-  onDelete: (id: string) => void
+  onToggle: (row: CouponWithConditionsDto) => void
   onOpen: (id: string) => void
 }) {
   const c = row.coupon
@@ -56,10 +58,11 @@ const CouponCard = memo(function CouponCard({
     e.stopPropagation()
     onEdit(c.id as string)
   }, [onEdit, c.id])
-  const handleDelete = useCallback((e: React.MouseEvent) => {
+  // stage-10: toggle — مسیر را صفحه تعیین می‌کند (فعال → تایید حذف؛ غیرفعال → فعال‌سازی)
+  const handleToggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    onDelete(c.id as string)
-  }, [onDelete, c.id])
+    onToggle(row)
+  }, [onToggle, row])
   const handleOpen = useCallback(() => onOpen(c.id as string), [onOpen, c.id])
   // کیبورد — Enter/Space روی کارت هم باز می‌کند (دکمه‌ی ویرایش همیشه هست)
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -107,9 +110,15 @@ const CouponCard = memo(function CouponCard({
             <button type="button" onClick={handleEdit} aria-label="ویرایش" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer">
               <Pen size={16} />
             </button>
-            <button type="button" onClick={handleDelete} aria-label="غیرفعال‌سازی" className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
-              <Trash2 size={16} />
-            </button>
+            {c.isActive ? (
+              <button type="button" onClick={handleToggle} aria-label="غیرفعال‌سازی" className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
+                <Ban size={16} />
+              </button>
+            ) : status === 'DISABLED' ? (
+              <button type="button" onClick={handleToggle} aria-label="فعال‌سازی" className="p-1.5 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer">
+                <Check size={16} />
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -145,9 +154,15 @@ const CouponCard = memo(function CouponCard({
             <button type="button" onClick={handleEdit} aria-label="ویرایش" className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer">
               <Pen size={18} />
             </button>
-            <button type="button" onClick={handleDelete} aria-label="غیرفعال‌سازی" className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
-              <Trash2 size={18} />
-            </button>
+            {c.isActive ? (
+              <button type="button" onClick={handleToggle} aria-label="غیرفعال‌سازی" className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
+                <Ban size={18} />
+              </button>
+            ) : status === 'DISABLED' ? (
+              <button type="button" onClick={handleToggle} aria-label="فعال‌سازی" className="p-2 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer">
+                <Check size={18} />
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -167,9 +182,15 @@ const CouponCard = memo(function CouponCard({
           <button type="button" onClick={handleEdit} aria-label="ویرایش" className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer">
             <Pen size={18} />
           </button>
-          <button type="button" onClick={handleDelete} aria-label="غیرفعال‌سازی" className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
-            <Trash2 size={18} />
-          </button>
+          {c.isActive ? (
+            <button type="button" onClick={handleToggle} aria-label="غیرفعال‌سازی" className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
+              <Ban size={18} />
+            </button>
+          ) : status === 'DISABLED' ? (
+            <button type="button" onClick={handleToggle} aria-label="فعال‌سازی" className="p-2 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer">
+              <Check size={18} />
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -210,6 +231,18 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
     },
   })
 
+  // stage-10: فعال‌سازی مجدد — مستقیم (بدون مودال)؛ خطا (مثل انقضای گذشته) toast می‌شود
+  const activateMut = useMutation({
+    mutationFn: (id: string) => setCouponActive(id, true),
+    onSuccess: (res) => {
+      showToast(res.message || 'کوپن فعال شد')
+    },
+    onError: (err) => showToast(err.message || 'فعال‌سازی ناموفق بود', 'error'),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: qk.adminCoupons })
+    },
+  })
+
   const handleOpenNew = useCallback(() => {
     navigate({ to: '/admin/coupons/new' })
   }, [navigate])
@@ -219,10 +252,14 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
   const handleOpen = useCallback((id: string) => {
     navigate({ to: '/admin/coupons/$couponId', params: { couponId: id } })
   }, [navigate])
-  const handleRequestDelete = useCallback((id: string) => {
-    setCouponToDelete(id)
-    setIsDeleteModalOpen(true)
-  }, [])
+  const handleRequestToggle = useCallback((row: CouponWithConditionsDto) => {
+    if (row.coupon.isActive) {
+      setCouponToDelete(row.coupon.id as string)
+      setIsDeleteModalOpen(true)
+    } else {
+      activateMut.mutate(row.coupon.id as string)
+    }
+  }, [activateMut])
   const handleCloseDelete = useCallback(() => {
     setCouponToDelete(null)
     setIsDeleteModalOpen(false)
@@ -271,7 +308,7 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
               key={row.coupon.id}
               coupon={row}
               onEdit={handleEdit}
-              onDelete={handleRequestDelete}
+              onToggle={handleRequestToggle}
               onOpen={handleOpen}
             />
           ))}

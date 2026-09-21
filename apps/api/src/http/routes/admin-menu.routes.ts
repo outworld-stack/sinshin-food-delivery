@@ -4,6 +4,7 @@ import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { MenuService } from '#/domain/menu/menu.service'
+import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -14,6 +15,8 @@ export interface AdminMenuRoutesDeps {
   sessions: SessionService
   menu: MenuService
   admin2: Admin2Service // ← phase-1: برای سیم‌کیری permission
+  /** stage-10: لاگ ممیزی — فقط عملیات ادمین اصلی (admin2 در activities خودش) */
+  audit: AuditService
 }
 
 export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
@@ -157,7 +160,20 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .use(requireAdmin2Permission(admin2, 'productsWrite'))
     .post(
       '/products',
-      ({ body }) => deps.menu.createProduct(body),
+      async ({ body, user }) => {
+        const res = await deps.menu.createProduct(body)
+        // stage-10: ممیزی فقط برای ادمین اصلی — ادمین۲ activities خودش را دارد
+        if (user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: 'PRODUCT_CREATE',
+            entity: 'product',
+            entityId: res.id ?? null,
+            metadata: { name: body.name, packagingCost: body.packagingCost ?? 0 },
+          })
+        }
+        return res
+      },
       {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 120 }),
@@ -165,6 +181,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
+          packagingCost: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
           categoryId: t.String({ pattern: UUID_PATTERN }),
           profileImage: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
           galleryImages: t.Optional(t.Array(t.String({ maxLength: 500 }), { maxItems: 12 })),
@@ -177,7 +194,19 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     )
     .patch(
       '/products/:id',
-      ({ params, body }) => deps.menu.updateProduct({ id: params.id, ...body }),
+      async ({ params, body, user }) => {
+        await deps.menu.updateProduct({ id: params.id, ...body })
+        if (user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: 'PRODUCT_UPDATE',
+            entity: 'product',
+            entityId: params.id,
+            metadata: { name: body.name, packagingCost: body.packagingCost ?? 0 },
+          })
+        }
+        return { success: true }
+      },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
         body: t.Object({
@@ -186,6 +215,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
+          packagingCost: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
           profileImage: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
           galleryImages: t.Optional(t.Array(t.String({ maxLength: 500 }), { maxItems: 12 })),
           sizesEnabled: t.Optional(t.Boolean()),
@@ -195,7 +225,20 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         detail: { summary: 'Update product — categoryId immutable (frontend contract)' },
       },
     )
-    .post('/products/:id/toggle', ({ params }) => deps.menu.toggleProductStatus(params.id), {
+    .post(
+      '/products/:id/toggle',
+      async ({ params, user }) => {
+        await deps.menu.toggleProductStatus(params.id)
+        if (user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: 'PRODUCT_TOGGLE',
+            entity: 'product',
+            entityId: params.id,
+          })
+        }
+        return { success: true }
+      }, {
       params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
       detail: { summary: 'Toggle product ACTIVE / INACTIVE' },
     })

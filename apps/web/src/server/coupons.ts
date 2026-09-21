@@ -63,4 +63,14 @@ export async function deleteCoupon(id: string): Promise<{ success: boolean }> {
   return authJson<{ success: boolean }>(`/admin/coupons/${id}`, 'DELETE')
 }
 
+/** stage-10: فعال/غیرفعال — رفع باگ «برگشتی نداشتن غیرفعال‌سازی» */
+export async function setCouponActive(
+  id: string,
+  active: boolean,
+): Promise<{ success: boolean; message: string }> {
+  return authJson<{ success: boolean; message: string }>(`/admin/coupons/${id}/status`, 'PATCH', {
+    active,
+  })
+}
+
 export type { CouponRule }

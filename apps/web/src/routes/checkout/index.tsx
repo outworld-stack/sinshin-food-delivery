@@ -94,6 +94,7 @@ function CheckoutPage() {
           <DeliveryTypeSelector
             deliveryType={page.state.deliveryType}
             deliveryFee={page.calc.deliveryFee}
+            packagingFee={page.calc.packagingFee}
             onChange={page.handleDeliveryTypeChange}
           />
 
@@ -139,6 +140,7 @@ function CheckoutPage() {
           discount={page.calc.discount}
           walletDeduction={page.calc.walletDeduction}
           deliveryFee={page.calc.deliveryFee}
+          packagingFee={page.calc.packagingFee}
           total={page.calc.total}
           amountPaidOnline={page.calc.amountPaidOnline}
           deliveryType={page.state.deliveryType}

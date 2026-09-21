@@ -380,6 +380,8 @@ export interface AdminUserRow {
   walletBalance: number
   totalSpent: number
   registeredAt: Date
+  /** stage-10: 'admin' → آیکون مسدودسازی disable (حساب ادمین اصلی) */
+  role?: string
 }
 export interface AdminUsersData {
   users: AdminUserRow[]

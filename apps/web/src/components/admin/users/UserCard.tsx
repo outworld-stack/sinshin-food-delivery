@@ -3,7 +3,7 @@ import { memo, useCallback } from 'react'
 import { Link } from '@tanstack/react-router'
 import { formatPrice, formatDate } from '#/utils/format'
 import { Can } from '#/components/shared/PermissionGate'
-import { Eye, Ban, Check } from 'reicon-react'
+import { Eye, Ban, Check, Shield } from 'reicon-react'
 
 interface UserCardProps {
   user: {
@@ -16,6 +16,8 @@ interface UserCardProps {
     walletBalance: number
     totalSpent: number
     registeredAt: Date
+    /** stage-10: 'admin' → آیکون مسدودسازی disable (حساب ادمین اصلی محافظت‌شده) */
+    role?: string
   }
   canToggle: boolean
   onToggle: (id: string, status: string) => void
@@ -24,6 +26,9 @@ interface UserCardProps {
 // کارت کاربر — موبایل وسط‌چین + دسکتاپ تک‌ردیف + Can دور اکشن‌ها
 export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: UserCardProps) {
   const handleToggle = useCallback(() => onToggle(user.id, user.status), [onToggle, user.id, user.status])
+
+  // stage-10: حساب ادمین اصلی قابل مسدودسازی نیست — آیکون disable + توضیح
+  const isProtectedAdmin = user.role === 'admin'
 
   const displayName = user.firstName ? `${user.firstName} ${user.lastName || ''}` : 'ناشناس'
   const mobileName = user.firstName ? `${user.firstName}` : 'ناشناس'
@@ -66,8 +71,18 @@ export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: Us
             <Eye size={18} />
           </Link>
           <Can allowed={canToggle}>
-            <button onClick={handleToggle} className={`p-2 rounded-lg transition cursor-pointer ${user.status === 'ACTIVE' ? 'text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10' : 'text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10'}`} title={user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}>
-              {user.status === 'ACTIVE' ? <Ban size={18} /> : <Check size={18} />}
+            <button
+              onClick={handleToggle}
+              disabled={isProtectedAdmin}
+              title={isProtectedAdmin ? 'حساب ادمین اصلی قابل مسدودسازی نیست' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
+              aria-label={isProtectedAdmin ? 'ادمین اصلی — محافظت‌شده' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
+              className={`p-2 rounded-lg transition ${isProtectedAdmin
+                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                : user.status === 'ACTIVE'
+                  ? 'text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer'
+                  : 'text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer'}`}
+            >
+              {isProtectedAdmin ? <Shield size={18} /> : user.status === 'ACTIVE' ? <Ban size={18} /> : <Check size={18} />}
             </button>
           </Can>
         </div>
@@ -88,8 +103,18 @@ export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: Us
             <Eye size={18} />
           </Link>
           <Can allowed={canToggle}>
-            <button onClick={handleToggle} className={`p-2 rounded-lg transition cursor-pointer ${user.status === 'ACTIVE' ? 'text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10' : 'text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10'}`} title={user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}>
-              {user.status === 'ACTIVE' ? <Ban size={18} /> : <Check size={18} />}
+            <button
+              onClick={handleToggle}
+              disabled={isProtectedAdmin}
+              title={isProtectedAdmin ? 'حساب ادمین اصلی قابل مسدودسازی نیست' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
+              aria-label={isProtectedAdmin ? 'ادمین اصلی — محافظت‌شده' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
+              className={`p-2 rounded-lg transition ${isProtectedAdmin
+                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                : user.status === 'ACTIVE'
+                  ? 'text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer'
+                  : 'text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer'}`}
+            >
+              {isProtectedAdmin ? <Shield size={18} /> : user.status === 'ACTIVE' ? <Ban size={18} /> : <Check size={18} />}
             </button>
           </Can>
         </div>

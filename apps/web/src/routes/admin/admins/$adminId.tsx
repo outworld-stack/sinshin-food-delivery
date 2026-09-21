@@ -10,7 +10,6 @@ import { useQuery } from '@tanstack/react-query'
 import { subAdminDetailsOptions } from '#/utils/queryOptions'
 import { SessionRow } from '#/components/admin/admins/SessionRow'
 import { PermissionsEditor } from '#/components/admin/admins/PermissionsEditor'
-import { PdfDownloadButton } from '#/components/shared/PdfDownloadButton'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { ShieldCheck, Phone } from 'reicon-react'
 import { faNum } from '#/utils/format'
@@ -86,7 +85,6 @@ const SubAdminDetailPage = memo(function SubAdminDetailPage() {
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">سفارشات تاییدشده</p>
             <p className="font-DanaDemiBold text-gray-800 dark:text-white">{faNum(admin.ordersConfirmed)}</p>
           </div>
-          <PdfDownloadButton documentId={admin.userId} documentType="admin-report" targetSelector="#admin-detail-print" />
         </div>
       </div>
 

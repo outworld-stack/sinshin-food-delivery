@@ -8,6 +8,7 @@ import { formatPrice, formatDate } from '#/utils/format'
 import { AdminDashboardSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { ChartPanel } from '#/components/shared/ChartPanel'
+import { ReportsBox } from '#/components/admin/reports/ReportsBox'
 import { buildChartData } from '#/utils/chartData'
 import { adminStatsOptions } from '#/utils/queryOptions'
 import { Users, CheckCircle, Wallet, ShoppingBag } from 'reicon-react'
@@ -125,6 +126,9 @@ function AdminDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* stage-10: مرکز گزارشات — PDFسازی از همه‌ی صفحات این‌جا متمرکز شد */}
+      <ReportsBox />
     </div>
   )
 }

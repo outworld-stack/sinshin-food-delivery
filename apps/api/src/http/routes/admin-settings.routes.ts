@@ -4,6 +4,7 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
+import type { AuditService } from '#/domain/audit/audit.service'
 import { SETTING_KEYS } from '#/infra/db/schema'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
@@ -13,11 +14,14 @@ export interface AdminSettingsRoutesDeps {
   zones: DeliveryZoneService
   settings: SettingsService
   admin2: Admin2Service
+  /** stage-10: لاگ ممیزی — تغییرات پولی/سراسری ادمین اصلی */
+  audit: AuditService
 }
 
 export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
   // ══ خواندن + عملیاتِ permission-دار — ادمین اصلی + ادمین۲ فعال ══
-  // (temporary-close و packaging-fee: permission شان داخل service چک می‌شود)
+  // (temporary-close: permission داخل service چک می‌شود)
+  // stage-10: packaging-fee حذف شد — بسته‌بندی per-product در فرم محصول است.
   const shared = new Elysia({ prefix: '/admin/settings', tags: ['Admin / Settings'] })
     .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
 
@@ -32,9 +36,6 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       () => deps.settings.restaurantStatus(),
       { detail: { summary: 'Full status — schedule + temporary' } },
     )
-    .get('/packaging-fee', () => deps.settings.packagingFee(), {
-      detail: { summary: 'Current packaging fee (PICKUP)' },
-    })
     .post(
       '/temporary-close',
       async ({ user, body }) => {
@@ -53,20 +54,6 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
         },
       },
     )
-    .post(
-      '/packaging-fee',
-      async ({ user, body }) => {
-        await deps.admin2.setPackagingFee(user.id, user.role, body.fee)
-        return { success: true }
-      },
-      {
-        body: t.Object({ fee: t.Number({ minimum: 0, maximum: 1000000 }) }),
-        detail: {
-          summary: 'Set packaging fee',
-          description: 'Admin always. Level-2 with canEditPackagingFee (activity logged).',
-        },
-      },
-    )
 
   // ══ phase-1: تنظیمات سراسری/پولی — فقط ادمین اصلی ══
   // قبلاً هر admin2 می‌توانست: ساعات کاری را ببند/باز کند، ناحیه‌های
@@ -77,7 +64,16 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
 
     .post(
       '/delivery-zones',
-      ({ body }) => deps.zones.add(body.radiusKm, body.fee),
+      async ({ body, user }) => {
+        await deps.zones.add(body.radiusKm, body.fee)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'ZONE_ADD',
+          entity: 'delivery-zone',
+          metadata: { radiusKm: body.radiusKm, fee: body.fee },
+        })
+        return { success: true }
+      },
       {
         body: t.Object({
           radiusKm: t.Number({ minimum: 0.5, maximum: 500 }),
@@ -88,7 +84,16 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     )
     .post(
       '/delivery-zones/remove',
-      ({ body }) => deps.zones.remove(body.radiusKm),
+      async ({ body, user }) => {
+        await deps.zones.remove(body.radiusKm)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'ZONE_REMOVE',
+          entity: 'delivery-zone',
+          metadata: { radiusKm: body.radiusKm },
+        })
+        return { success: true }
+      },
       {
         body: t.Object({ radiusKm: t.Number({ minimum: 0.5, maximum: 500 }) }),
         detail: { summary: 'Remove zone (last one is kept) — main admin only' },
@@ -96,9 +101,15 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     )
     .post(
       '/restaurant',
-      async ({ body }) => {
+      async ({ body, user }) => {
         await deps.settings.set('restaurant_open', body.isOpen)
         if (body.nextOpenTime) await deps.settings.set('next_open_time', body.nextOpenTime)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'RESTAURANT_SCHEDULE',
+          entity: 'settings',
+          metadata: { isOpen: body.isOpen, nextOpenTime: body.nextOpenTime ?? null },
+        })
         return { success: true }
       },
       {
@@ -116,8 +127,14 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     )
     .post(
       '/live-tracking',
-      async ({ body }) => {
+      async ({ body, user }) => {
         await deps.settings.set('live_tracking_enabled', body.enabled)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'LIVE_TRACKING_TOGGLE',
+          entity: 'settings',
+          metadata: { enabled: body.enabled },
+        })
         return { success: true }
       },
       {
@@ -139,8 +156,14 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     )
     .post(
       '/iran-only',
-      async ({ body }) => {
+      async ({ body, user }) => {
         await deps.settings.set(SETTING_KEYS.iranOnlyAccess, body.enabled)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'IRAN_ONLY_TOGGLE',
+          entity: 'settings',
+          metadata: { enabled: body.enabled },
+        })
         return { success: true }
       },
       {

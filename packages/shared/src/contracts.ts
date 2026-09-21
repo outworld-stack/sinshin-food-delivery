@@ -84,6 +84,8 @@ export interface Product {
   originalPrice: number
   finalPrice: number
   discountPercentage: number
+  /** stage-10: هزینه بسته‌بندی هر واحد — فقط DELIVERY/PICKUP */
+  packagingCost: number
   categoryId: CategoryId
   categoryName?: string
   profileImage: string | null

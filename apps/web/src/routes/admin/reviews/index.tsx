@@ -5,7 +5,6 @@ import { memo } from 'react'
 import { useReviewsPage, adminReviewsSearchSchema, type ReviewFilter } from '#/hooks/admin/useReviewsPage'
 import { adminReviewsOptions } from '#/utils/queryOptions'
 import { RouteError } from '#/components/shared/RouteFallbacks'
-import { PdfDownloadButton } from '#/components/shared/PdfDownloadButton'
 import { formatDate } from '#/utils/format'
 import { Check, X, User, MessageSquare, Package } from 'reicon-react'
 import { AdminReviewsPageSkeleton } from '#/components/LoadingSkeletons'
@@ -95,7 +94,6 @@ const ReviewsPage = memo(function ReviewsPage() {
             تایید یا رد نظرات — نظرات تاییدشده در صفحه محصول نمایش داده می‌شوند
           </p>
         </div>
-        <PdfDownloadButton documentId="reviews" documentType="reviews-list" targetSelector="#reviews-list" label="خروجی PDF" />
       </div>
 
       <div className="flex bg-gray-100 dark:bg-[#1a0a0e] rounded-xl p-1 w-fit">

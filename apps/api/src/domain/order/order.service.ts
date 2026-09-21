@@ -136,8 +136,12 @@ export class OrderService {
         name: string
         unitPrice: number
         quantity: number
+        packagingCost: number
       }[] = []
       let foodTotal = 0
+      // stage-10: بسته‌بندی per-product — جمع (هزینه بسته‌بندی محصول × تعداد)
+      // فقط برای DELIVERY و PICKUP؛ DINE_IN (سرو در محل) بسته‌بندی ندارد.
+      let packagingTotal = 0
       const { productMap, sizesByProduct } = await this.loadPricingBases(tx, input.items)
       for (const item of input.items) {
         const product = productMap.get(asProductId(item.productId))
@@ -171,6 +175,7 @@ export class OrderService {
           }
         }
         foodTotal += unitPrice * item.quantity
+        packagingTotal += product.packagingCost * item.quantity
         itemRows.push({
           productId: product.id,
           sizeId,
@@ -178,6 +183,7 @@ export class OrderService {
           name: product.name,
           unitPrice,
           quantity: item.quantity,
+          packagingCost: product.packagingCost,
         })
       }
       if (itemRows.length === 0) throw Err.validation('هیچ آیتم معتبری در سبد نیست.')
@@ -217,15 +223,16 @@ export class OrderService {
       const balance = await this.walletBalance(tx, userId)
       const walletDeduction = input.useWallet ? Math.min(balance, payableFood) : 0
 
-      // ── هزینه ارسال/بسته‌بندی — ناحیه‌ای برای DELIVERY، ثابت برای PICKUP ──
+      // ── هزینه ارسال/بسته‌بندی — ناحیه‌ای برای DELIVERY؛ بسته‌بندی per-product ──
+      // stage-10: بسته‌بندی دیگر تنظیم سراسری نیست — جمع هزینه بسته‌بندی
+      // خودِ محصولات است (ستون packaging_cost) و فقط در سرو در محل صفر می‌شود.
       const deliveryFee =
         input.deliveryType === 'DELIVERY'
           ? await this.deps.zones.feeFor(
             addressRow ? { lat: addressRow.lat, lng: addressRow.lng } : null,
           )
           : 0
-      const packagingFee =
-        input.deliveryType === 'PICKUP' ? await this.deps.settings.packagingFee() : 0
+      const packagingFee = input.deliveryType === 'DINE_IN' ? 0 : packagingTotal
 
       const totalAmount = payableFood + deliveryFee + packagingFee
       const amountPaidOnline = payableFood - walletDeduction + deliveryFee + packagingFee
@@ -375,6 +382,8 @@ export class OrderService {
     // perf-fix (کار-۲): همان batch — قبلاً N+1 (بدون قفل هم بود، فقط کوئری‌های زائد)
     const items: { name: string; sizeName: string | null; unitPrice: number; quantity: number }[] = []
     let foodTotal = 0
+    // stage-10: بسته‌بندی per-product — همان جمعِ checkout
+    let packagingTotal = 0
     const { productMap, sizesByProduct } = await this.loadPricingBases(db, input.items)
     for (const item of input.items) {
       const product = productMap.get(asProductId(item.productId))
@@ -401,6 +410,7 @@ export class OrderService {
         }
       }
       foodTotal += unitPrice * item.quantity
+      packagingTotal += product.packagingCost * item.quantity
       items.push({ name: product.name, sizeName, unitPrice, quantity: item.quantity })
     }
     if (items.length === 0) throw Err.validation('هیچ آیتم معتبری در سبد نیست.')
@@ -435,7 +445,8 @@ export class OrderService {
           addressRow ? { lat: addressRow.lat, lng: addressRow.lng } : null,
         )
         : 0
-    const packagingFee = input.deliveryType === 'PICKUP' ? await this.deps.settings.packagingFee() : 0
+    // stage-10: بسته‌بندی per-product — فقط سرو در محل صفر
+    const packagingFee = input.deliveryType === 'DINE_IN' ? 0 : packagingTotal
 
     const totalAmount = payableFood + deliveryFee + packagingFee
     const amountPaidOnline = payableFood - walletDeduction + deliveryFee + packagingFee

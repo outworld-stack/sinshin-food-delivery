@@ -27,6 +27,8 @@ export interface ProductDto {
   originalPrice: number
   finalPrice: number
   discountPercentage: number
+  /** stage-10: هزینه بسته‌بندی هر واحد — فقط DELIVERY/PICKUP */
+  packagingCost: number
   categoryId: string
   categoryName?: string
   profileImage: string | null
@@ -430,6 +432,7 @@ export class MenuService {
     discountPercentage: number
     prepTime: number
     categoryId: string
+    packagingCost?: number
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
@@ -444,6 +447,7 @@ export class MenuService {
         originalPrice: input.originalPrice,
         discountPercentage: input.discountPercentage,
         prepTime: input.prepTime,
+        packagingCost: input.packagingCost ?? 0,
         categoryId: asCategoryId(input.categoryId),
         profileImage: input.profileImage ?? null,
         galleryImages: input.galleryImages ?? [],
@@ -468,6 +472,7 @@ export class MenuService {
     originalPrice: number
     discountPercentage: number
     prepTime: number
+    packagingCost?: number
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
@@ -483,6 +488,7 @@ export class MenuService {
         originalPrice: input.originalPrice,
         discountPercentage: input.discountPercentage,
         prepTime: input.prepTime,
+        packagingCost: input.packagingCost ?? 0,
         profileImage: input.profileImage ?? null,
         galleryImages: input.galleryImages ?? [],
         sizesEnabled: input.sizesEnabled ?? false,
@@ -582,6 +588,7 @@ export class MenuService {
       originalPrice: r.originalPrice,
       finalPrice: finalPriceOf(r),
       discountPercentage: r.discountPercentage,
+      packagingCost: r.packagingCost,
       categoryId: r.categoryId,
       categoryName: catMap.get(r.categoryId),
       profileImage: r.profileImage,

@@ -209,6 +209,7 @@ export async function createAdminProduct(input: {
     originalPrice: number
     discountPercentage: number
     prepTime: number
+    packagingCost?: number
     categoryId: string
     profileImage?: string
     galleryImages?: string[]
@@ -223,6 +224,7 @@ export async function createAdminProduct(input: {
     originalPrice: input.data.originalPrice,
     discountPercentage: input.data.discountPercentage,
     prepTime: input.data.prepTime,
+    packagingCost: input.data.packagingCost ?? 0,
     categoryId: input.data.categoryId,
     profileImage: input.data.profileImage || null, // '' → null
     galleryImages: input.data.galleryImages ?? [],
@@ -240,6 +242,7 @@ export async function updateAdminProduct(input: {
     originalPrice: number
     discountPercentage: number
     prepTime: number
+    packagingCost?: number
     profileImage?: string
     galleryImages?: string[]
     sizesEnabled?: boolean
@@ -253,6 +256,7 @@ export async function updateAdminProduct(input: {
     originalPrice: input.data.originalPrice,
     discountPercentage: input.data.discountPercentage,
     prepTime: input.data.prepTime,
+    packagingCost: input.data.packagingCost ?? 0,
     profileImage: input.data.profileImage || null,
     galleryImages: input.data.galleryImages ?? [],
     sizesEnabled: input.data.sizesEnabled ?? false,

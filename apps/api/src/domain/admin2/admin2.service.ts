@@ -306,17 +306,7 @@ export class Admin2Service {
             .where(eq(admin2Profiles.userId, uid))
     }
 
-    /** هزینه بسته‌بندی — ادمین اصلی یا ادمین۲ با permission */
-    async setPackagingFee(actorUserId: string, actorRole: string, fee: number): Promise<void> {
-        const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
-        if (actorRole === 'admin2' && !(p?.canEditPackagingFee)) {
-            throw Err.forbidden('اجازه‌ی تغییر هزینه بسته‌بندی را ندارید.')
-        }
-        await this.deps.settings.set('packaging_fee', fee)
-        if (actorRole === 'admin2') {
-            await this.log(actorUserId, 'PACKAGING_FEE_CHANGE', null, { fee })
-        }
-    }
+    // stage-10: setPackagingFee حذف شد — بسته‌بندی per-product در فرم محصول است.
 
     /** اعلام بسته/باز موقت — ادمین اصلی یا ادمین۲ با permission */
     async setTemporaryClose(

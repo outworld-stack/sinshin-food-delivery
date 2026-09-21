@@ -74,6 +74,13 @@ export const products = pgTable(
     discountPercentage: integer('discount_percentage').notNull().default(0),
     prepTime: integer('prep_time').notNull().default(15),
     sizesEnabled: boolean('sizes_enabled').notNull().default(false),
+    /**
+     * stage-10: هزینه بسته‌بندی هر محصول (تومان) — به‌ازای هر واحد.
+     * فقط در تحویل پیک (DELIVERY) و بیرون‌بر (PICKUP) جمع می‌شود؛
+     * سرو در محل (DINE_IN) بسته‌بندی ندارد. مثل هزینه ارسال،
+     * مشمول سود معرفی هم نیست (در settle از پایه کسر می‌شود).
+     */
+    packagingCost: integer('packaging_cost').notNull().default(0),
     ingredients: jsonb('ingredients').$type<string[]>().default([]),
     /** آپلود واقعی فاز ۳ — فعلاً مسیر/گرادیانت */
     profileImage: text('profile_image'),

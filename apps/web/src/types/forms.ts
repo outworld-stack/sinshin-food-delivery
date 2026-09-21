@@ -31,6 +31,8 @@ export interface ProductFormData {
   originalPrice: number;
   discountPercentage: number;
   prepTime: number;
+  // stage-10: هزینه بسته‌بندی هر واحد — پیک و بیرون‌بر؛ سرو در محل ندارد
+  packagingCost: number;
   categoryId: string;
   profileImage: string;
   galleryImages: string[];

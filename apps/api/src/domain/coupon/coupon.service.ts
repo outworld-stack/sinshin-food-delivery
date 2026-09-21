@@ -365,6 +365,32 @@ export class CouponService {
     return { success: true, message: 'کوپن غیرفعال شد' }
   }
 
+  /**
+   * stage-10: فعال‌سازی مجدد — رفع باگ «غیرفعال کردم دیگر برنمی‌گردد».
+   * remove فقط isActive=false می‌گذاشت و هیچ مسیری برای برگشت نبود.
+   * اگر تاریخ انقضا گذشته باشد خطا می‌دهیم — ادمین اول باید انقضا را ویرایش کند
+   * (وگرنه کوپن «فعال» ولی عملاً غیرقابل‌استفاده می‌شد — گمراه‌کننده).
+   */
+  async setActive(id: string, active: boolean): Promise<{ success: boolean; message: string }> {
+    if (!UUID_RE.test(id)) throw Err.validation('شناسه معتبر نیست')
+    const couponId = asCampaignId(id)
+    const row = (await this.deps.db.select().from(coupons).where(eq(coupons.id, couponId)))[0]
+    if (!row) throw Err.notFound('کوپن پیدا نشد')
+
+    if (active && row.endsAt !== null && row.endsAt.getTime() <= Date.now()) {
+      throw Err.conflict('تاریخ انقضای این کوپن گذشته است — ابتدا انقضا را ویرایش کنید')
+    }
+    if (row.isActive === active) {
+      return { success: true, message: active ? 'کوپن از قبل فعال است' : 'کوپن از قبل غیرفعال است' }
+    }
+
+    await this.deps.db
+      .update(coupons)
+      .set({ isActive: active })
+      .where(eq(coupons.id, couponId))
+    return { success: true, message: active ? 'کوپن فعال شد' : 'کوپن غیرفعال شد' }
+  }
+
   // ══ داخلی ══
 
   private async conditionsOf(couponId: CampaignId) {

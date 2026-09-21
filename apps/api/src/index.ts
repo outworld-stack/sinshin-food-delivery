@@ -28,6 +28,8 @@ import { LiveService } from '#/domain/live/live.service'
 import { CourierService } from '#/domain/courier/courier.service'
 import { ReviewService } from '#/domain/review/review.service'
 import { ReportService } from '#/domain/report/report.service'
+import { ReportQueryService } from '#/domain/report/report-query.service'
+import { AuditService } from '#/domain/audit/audit.service'
 import { ReportLinks } from '#/domain/report/report-links'
 import { CouponService } from '#/domain/coupon/coupon.service'
 import { ReconcileService } from '#/domain/reconcile/reconcile.service'
@@ -90,6 +92,9 @@ const reviews = new ReviewService({ db })
 const links = new ReportLinks(config)
 const reconcile = new ReconcileService({ db, config, orders })
 const reports = new ReportService({ db, config, sms, links, reconcile })
+// stage-10: باکس گزارشات داشبورد + لاگ ممیزی ادمین اصلی
+const audit = new AuditService({ db })
+const reportQueries = new ReportQueryService({ db, audit })
 const auth = new AuthService({ db, config, otp, sessions, devices, admin2 })
 const articles = new ArticleService({ db })
 const gallery = new GalleryService({ db })
@@ -138,6 +143,8 @@ const app = buildApp({
   couriers,
   reviews,
   reports,
+  reportQueries,
+  audit,
   links,
   reconcile,
   coupons,

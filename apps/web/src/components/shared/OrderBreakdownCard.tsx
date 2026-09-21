@@ -37,6 +37,13 @@ export const OrderBreakdownCard = memo(function OrderBreakdownCard({ breakdown, 
           <span>هزینه ارسال</span>
           <span>{breakdown.deliveryFee > 0 ? `${formatPrice(breakdown.deliveryFee)} تومان` : 'رایگان'}</span>
         </div>
+        {/* stage-10: بسته‌بندی per-product — پیک و بیرون‌بر؛ سرو در محل صفر است */}
+        {breakdown.packagingFee > 0 && (
+          <div className="flex justify-between font-DanaRegular text-gray-600 dark:text-gray-300 text-sm">
+            <span>هزینه بسته‌بندی</span>
+            <span>{formatPrice(breakdown.packagingFee)} تومان</span>
+          </div>
+        )}
         <div className="flex justify-between font-DanaDemiBold text-gray-800 dark:text-white pt-2 border-t border-gray-100 dark:border-white/5">
           <span>مبلغ کل</span>
           <span>{formatPrice(breakdown.totalAmount)} تومان</span>

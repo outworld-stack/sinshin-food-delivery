@@ -3,6 +3,7 @@ import { Elysia, t } from 'elysia'
 
 import type { SessionService } from '#/domain/auth/session.service'
 import type { CouponService } from '#/domain/coupon/coupon.service'
+import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -60,6 +61,8 @@ const couponBody = t.Object({
 export interface CouponRoutesDeps {
   sessions: SessionService
   coupons: CouponService
+  /** stage-10: لاگ ممیزی — عملیات کوپن ادمین اصلی */
+  audit: AuditService
 }
 
 export const couponRoutes = (deps: CouponRoutesDeps) =>
@@ -82,8 +85,8 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
 
     .post(
       '/',
-      ({ body }) =>
-        deps.coupons.create({
+      async ({ body, user }) => {
+        const res = await deps.coupons.create({
           code: body.code,
           title: body.title ?? null,
           discountPercentage: body.discountPercentage,
@@ -94,15 +97,24 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
             type: r.type,
             params: ruleToParams(r.type, r.value, r.quantity),
           })),
-        }),
+        })
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'COUPON_CREATE',
+          entity: 'coupon',
+          entityId: res.id ?? null,
+          metadata: { code: body.code, discount: body.discountPercentage },
+        })
+        return res
+      },
       { body: couponBody, detail: { summary: 'Create coupon (contract: value/quantity)' } },
     )
 
     // ── phase-5: PATCH — فرانت updateCoupon می‌فرستید ولی روت نبود! ──
     .patch(
       '/:id',
-      ({ params, body }) =>
-        deps.coupons.update(params.id, {
+      async ({ params, body, user }) => {
+        const res = await deps.coupons.update(params.id, {
           code: body.code,
           title: body.title ?? null,
           discountPercentage: body.discountPercentage,
@@ -113,7 +125,16 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
             type: r.type,
             params: ruleToParams(r.type, r.value, r.quantity),
           })),
-        }),
+        })
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'COUPON_UPDATE',
+          entity: 'coupon',
+          entityId: params.id,
+          metadata: { code: body.code, discount: body.discountPercentage },
+        })
+        return res
+      },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
         body: couponBody,
@@ -123,9 +144,42 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
 
     .delete(
       '/:id',
-      ({ params }) => deps.coupons.remove(params.id),
+      async ({ params, user }) => {
+        const res = await deps.coupons.remove(params.id)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'COUPON_DEACTIVATE',
+          entity: 'coupon',
+          entityId: params.id,
+        })
+        return res
+      },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
         detail: { summary: 'Delete coupon' },
+      },
+    )
+
+    // ── stage-10: فعال/غیرفعال — رفع باگ «برگشتی نداشتن غیرفعال‌سازی» ──
+    .patch(
+      '/:id/status',
+      async ({ params, body, user }) => {
+        const res = await deps.coupons.setActive(params.id, body.active)
+        await deps.audit.log({
+          actorId: user.id,
+          action: body.active ? 'COUPON_ACTIVATE' : 'COUPON_DEACTIVATE',
+          entity: 'coupon',
+          entityId: params.id,
+        })
+        return res
+      },
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        body: t.Object({ active: t.Boolean() }),
+        detail: {
+          summary: 'Activate / deactivate coupon',
+          description:
+            'Deactivate = soft (same as delete). Activate rejected while endsAt is in the past — edit expiry first.',
+        },
       },
     )

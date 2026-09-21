@@ -97,9 +97,4 @@ export class SettingsService {
       lng: 51.389,
     })
   }
-
-  /** هزینه بسته‌بندی PICKUP */
-  async packagingFee(): Promise<number> {
-    return this.get<number>(SETTING_KEYS.packagingFee, 5000)
-  }
 }

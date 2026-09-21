@@ -2,9 +2,10 @@
 // phase-9: صفحه‌ی اختصاصی هر کوپن — قبلاً مودال بود که با تاریخ invalid
 // کرش می‌کرد (RangeError: Invalid time value). حالا: کارت وضعیت + ویرایش
 // + حذف، همه از قرارداد واقعی سرور (coupon/conditions/recipientsCount).
+// stage-10: دکمه‌ی وضعت toggle شد — فعال‌سازی مجدد بعد از غیرفعال‌سازی.
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { deleteCoupon, updateCoupon } from '#/server/coupons'
+import { deleteCoupon, updateCoupon, setCouponActive } from '#/server/coupons'
 import { adminCouponDetailsOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { CouponForm, type CouponFormPayload } from '#/components/admin/coupons/CouponForm'
@@ -22,7 +23,7 @@ import {
   couponAudienceLabel,
   formatCouponUsage,
 } from '#/utils/couponDisplay'
-import { ChevronRight, Trash2 } from 'reicon-react'
+import { ChevronRight, Trash2, ArrowRotate } from 'reicon-react'
 import { useState } from 'react'
 
 export const Route = createFileRoute('/admin/coupons/$couponId')({
@@ -69,6 +70,17 @@ function CouponDetailPage() {
     },
   })
 
+  // stage-10: فعال‌سازی مجدد — در جای خود می‌ماند (بدون ناوبری)
+  const activateMut = useMutation({
+    mutationFn: () => setCouponActive(couponId, true),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: qk.adminCoupons })
+      queryClient.invalidateQueries({ queryKey: qk.adminCouponDetails(couponId) })
+      showToast(res.message || 'کوپن فعال شد')
+    },
+    onError: (err) => showToast(err.message || 'فعال‌سازی ناموفق بود', 'error'),
+  })
+
   if (!isMainAdmin) {
     return <PermissionGate hasAccess={false} pageName="جزئیات کوپن" />
   }
@@ -103,15 +115,39 @@ function CouponDetailPage() {
               مشاهده و ویرایش جزئیات کوپن
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleOpenDelete}
-            disabled={deleteMut.isPending || !c.isActive}
-            className="px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-500/10 text-red-500 text-sm font-DanaMedium hover:bg-red-100 dark:hover:bg-red-500/20 transition cursor-pointer flex items-center gap-2 justify-center disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-          >
-            <Trash2 size={16} />
-            {c.isActive ? 'غیرفعال‌سازی کوپن' : 'غیرفعال شده'}
-          </button>
+          {/* stage-10: toggle وضعیت — فعال: دکمه‌ی قرمز غیرفعال‌سازی؛
+              غیرفعال: دکمه‌ی سبز فعال‌سازی؛ منقضی: غیرقابل فعال‌سازی تا ویرایش انقضا */}
+          {c.isActive ? (
+            <button
+              type="button"
+              onClick={handleOpenDelete}
+              disabled={deleteMut.isPending}
+              className="px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-500/10 text-red-500 text-sm font-DanaMedium hover:bg-red-100 dark:hover:bg-red-500/20 transition cursor-pointer flex items-center gap-2 justify-center disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              <Trash2 size={16} />
+              {deleteMut.isPending ? 'در حال انجام...' : 'غیرفعال‌سازی کوپن'}
+            </button>
+          ) : status === 'EXPIRED' ? (
+            <button
+              type="button"
+              disabled
+              title="تاریخ انقضا گذشته — ابتدا انقضا را ویرایش کنید"
+              className="px-4 py-2.5 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-400 text-sm font-DanaMedium cursor-not-allowed flex items-center gap-2 justify-center shrink-0"
+            >
+              <ArrowRotate size={16} />
+              منقضی — ابتدا انقضا را ویرایش کنید
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => activateMut.mutate()}
+              disabled={activateMut.isPending}
+              className="px-4 py-2.5 rounded-xl bg-green-50 dark:bg-green-500/10 text-green-600 dark:text-green-400 text-sm font-DanaMedium hover:bg-green-100 dark:hover:bg-green-500/20 transition cursor-pointer flex items-center gap-2 justify-center disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              <ArrowRotate size={16} />
+              {activateMut.isPending ? 'در حال انجام...' : 'فعال‌سازی کوپن'}
+            </button>
+          )}
         </div>
       </div>
 
