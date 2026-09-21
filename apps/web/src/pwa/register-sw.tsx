@@ -51,6 +51,21 @@ export function PwaRegister() {
 
     // ── ثبت SW ──
     if (!('serviceWorker' in navigator)) return
+
+    // dev: sw.js فقط با build:pwa تولید می‌شود (bundled توسط workbox)؛ در dev
+    // وجود ندارد یا کهنه است → ثبت نکن و SW های مانده روی origin را پاک کن.
+    // (خطای «SyntaxError: import outside a module» در dev همین‌جا ریشه می‌گیرد:
+    // فایل sw با import کلاسیک register می‌شود.)
+    if (import.meta.env.DEV) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((regs) => {
+          for (const r of regs) void r.unregister()
+        })
+        .catch(() => {/* noop */})
+      return
+    }
+
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {

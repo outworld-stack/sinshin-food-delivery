@@ -109,6 +109,11 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
         detail: { summary: 'Set restaurant schedule — main admin only' },
       },
     )
+    .get(
+      '/live-tracking',
+      async () => ({ enabled: await deps.settings.liveTrackingEnabled() }),
+      { detail: { summary: 'Live-tracking flag (default: off) — main admin only' } },
+    )
     .post(
       '/live-tracking',
       async ({ body }) => {

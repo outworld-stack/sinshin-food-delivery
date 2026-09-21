@@ -302,7 +302,9 @@ export async function reassignCourier(input: {
 // ═════════════ تنظیمات ═════════════
 
 export async function getLiveTrackingEnabled(): Promise<boolean> {
-  return authJson<boolean>('/admin/settings/live-tracking', 'GET')
+  // پاسخ API شیء { enabled } است؛ مرز serde همین‌جاست — بقیه‌ی اپ boolean می‌بیند
+  const d = await authJson<{ enabled: boolean }>('/admin/settings/live-tracking', 'GET')
+  return d.enabled
 }
 
 export async function setLiveTrackingEnabled(input: {
@@ -313,7 +315,9 @@ export async function setLiveTrackingEnabled(input: {
 
 // phase-fix — محدودیت دسترسی «فقط ایران» (پیش‌فرض روشن)
 export async function getIranOnlyAccess(): Promise<boolean> {
-  return authJson<boolean>('/admin/settings/iran-only', 'GET')
+  // پاسخ API شیء { enabled } است؛ قبلاً مستقیم cast می‌شد → سوییچ همیشه روشن دیده می‌شد
+  const d = await authJson<{ enabled: boolean }>('/admin/settings/iran-only', 'GET')
+  return d.enabled
 }
 
 export async function setIranOnlyAccess(input: {
