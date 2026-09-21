@@ -1,5 +1,5 @@
 //src/domain/coupon/coupon.service.ts
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import {
@@ -8,6 +8,7 @@ import {
   coupons,
 } from '#/infra/db/schema'
 import { asCampaignId, type CampaignId } from '#/domain/shared/brand'
+import { Err } from '#/domain/shared/errors'
 import { buildUserCondition, type ConditionType } from './coupon-evaluators'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -15,6 +16,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export interface CouponWithConditions {
   coupon: typeof coupons.$inferSelect
   conditions: Array<{ id: string; type: ConditionType; params: Record<string, unknown> }>
+  /** phase-9: شمارش گیرندگان (coupon_grants) — برای لیست/جزئیات ادمین */
+  recipientsCount: number
 }
 
 export class CouponService {
@@ -201,13 +204,47 @@ export class CouponService {
 
   // ══ CRUD ادمین ══
 
+  /** phase-9: شمارش گیرندگان چند کوپن با یک کوئری گروهی */
+  private async recipientsCounts(couponIds: CampaignId[]): Promise<Map<string, number>> {
+    if (couponIds.length === 0) return new Map()
+    const rows = await this.deps.db
+      .select({ couponId: couponGrants.couponId, count: sql<number>`count(*)::int` })
+      .from(couponGrants)
+      .where(inArray(couponGrants.couponId, couponIds))
+      .groupBy(couponGrants.couponId)
+    return new Map(rows.map((r) => [r.couponId as string, r.count]))
+  }
+
   async list(): Promise<CouponWithConditions[]> {
     const rows = await this.deps.db.select().from(coupons).orderBy(desc(coupons.createdAt))
+    const counts = await this.recipientsCounts(rows.map((r) => r.id))
     const out: CouponWithConditions[] = []
     for (const c of rows) {
-      out.push({ coupon: c, conditions: await this.conditionsOf(c.id) })
+      out.push({
+        coupon: c,
+        conditions: await this.conditionsOf(c.id),
+        recipientsCount: counts.get(c.id as string) ?? 0,
+      })
     }
     return out
+  }
+
+  /** phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی ادمین (deep-link بدون وابستگی به کش لیست) */
+  async get(id: string): Promise<CouponWithConditions> {
+    if (!UUID_RE.test(id)) throw Err.validation('شناسه‌ی کوپن معتبر نیست')
+    const row = (
+      await this.deps.db.select().from(coupons).where(eq(coupons.id, asCampaignId(id)))
+    )[0]
+    if (!row) throw Err.notFound('کوپن پیدا نشد')
+    const [granted] = await this.deps.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(couponGrants)
+      .where(eq(couponGrants.couponId, row.id))
+    return {
+      coupon: row,
+      conditions: await this.conditionsOf(row.id),
+      recipientsCount: granted?.count ?? 0,
+    }
   }
 
   async create(input: {
@@ -218,16 +255,20 @@ export class CouponService {
     isPublic: boolean
     expiryDate: string | null
     rules: Array<{ type: string; params: Record<string, unknown> }>
-  }): Promise<{ success: boolean; message?: string; id?: string }> {
-    const code = input.code.trim().toUpperCase().slice(0, 32)
-    if (!/^[A-Z0-9_-]{3,32}$/.test(code)) {
-      return { success: false, message: 'کد تخفیف فقط حروف بزرگ، رقم و خط تیره (۳-۳۲)' }
+  }): Promise<{ success: boolean; id?: string }> {
+    // phase-9: حروف فارسی هم مجاز شد (پلتفرم کاملاً فارسی است؛ چک‌اوت toUpperCase
+    // روی فارسی بی‌اثر و بی‌ضرر است) + خطاها به‌جای success:false با 200،
+    // Err.validation می‌شوند تا فرانت پیام واقعی را ببیند (باگ «اضافه شد
+    // ولی اضافه نشد» برای کد فارسی دقیقاً از همین‌جا می‌آمد).
+    const code = input.code.trim().toUpperCase().slice(0, 16)
+    if (!/^[A-Z0-9\u0600-\u06FF_-]{3,16}$/.test(code)) {
+      throw Err.validation('کد تخفیف باید ۳ تا ۱۶ نویسه باشد: حروف لاتین یا فارسی، رقم و خط تیره')
     }
     if (input.discountPercentage < 1 || input.discountPercentage > 99) {
-      return { success: false, message: 'درصد تخفیف باید بین ۱ تا ۹۹ باشد' }
+      throw Err.validation('درصد تخفیف باید بین ۱ تا ۹۹ باشد')
     }
     const clash = await this.deps.db.query.coupons.findFirst({ where: eq(coupons.code, code) })
-    if (clash) return { success: false, message: 'این کد قبلاً ثبت شده است' }
+    if (clash) throw Err.conflict('این کد قبلاً ثبت شده است')
 
     const [created] = await this.deps.db
       .insert(coupons)
@@ -241,7 +282,7 @@ export class CouponService {
         ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : {}),
       })
       .returning()
-    if (!created) return { success: false, message: 'ذخیره‌سازی ناموفق بود' }
+    if (!created) throw Err.validation('ذخیره‌سازی ناموفق بود')
 
     for (const rule of input.rules) {
       await this.deps.db.insert(couponConditions).values({
@@ -266,18 +307,19 @@ export class CouponService {
       expiryDate: string | null
       rules: Array<{ type: string; params: Record<string, unknown> }>
     },
-  ): Promise<{ success: boolean; message?: string }> {
+  ): Promise<{ success: boolean }> {
     const { db } = this.deps
+    // phase-9: هم‌الگوی create — کد فارسی مجاز + خطاها Err (۴۲۲/۴۰۹) نه success:false با 200
     const code = input.code.trim().toUpperCase().slice(0, 16)
-    if (!/^[A-Z0-9_-]{3,16}$/.test(code)) {
-      return { success: false, message: 'کد تخفیف فقط حروف بزرگ، رقم و خط تیره (۳-۱۶)' }
+    if (!/^[A-Z0-9\u0600-\u06FF_-]{3,16}$/.test(code)) {
+      throw Err.validation('کد تخفیف باید ۳ تا ۱۶ نویسه باشد: حروف لاتین یا فارسی، رقم و خط تیره')
     }
     if (input.discountPercentage < 1 || input.discountPercentage > 99) {
-      return { success: false, message: 'درصد تخفیف باید بین ۱ تا ۹۹ باشد' }
+      throw Err.validation('درصد تخفیف باید بین ۱ تا ۹۹ باشد')
     }
     const clash = await db.query.coupons.findFirst({ where: eq(coupons.code, code) })
     if (clash && clash.id !== id) {
-      return { success: false, message: 'این کد قبلاً ثبت شده است' }
+      throw Err.conflict('این کد قبلاً ثبت شده است')
     }
 
     const cid = asCampaignId(id)
@@ -293,7 +335,7 @@ export class CouponService {
       })
       .where(eq(coupons.id, cid))
       .returning()
-    if (!updated) return { success: false, message: 'کوپن پیدا نشد' }
+    if (!updated) throw Err.notFound('کوپن پیدا نشد')
 
     await db.delete(couponConditions).where(eq(couponConditions.couponId, cid))
     for (const rule of input.rules) {
@@ -312,14 +354,14 @@ export class CouponService {
    * سفارشِ «پول‌گرفته‌شده» برای همیشه گیر می‌کند. حذف = غیرفعال‌سازی.
    */
   async remove(id: string): Promise<{ success: boolean; message?: string }> {
-    if (!UUID_RE.test(id)) return { success: false, message: 'شناسه معتبر نیست' }
+    if (!UUID_RE.test(id)) throw Err.validation('شناسه معتبر نیست')
     const couponId = asCampaignId(id)
     const updated = await this.deps.db
       .update(coupons)
       .set({ isActive: false })
       .where(eq(coupons.id, couponId))
       .returning({ id: coupons.id })
-    if (updated.length === 0) return { success: false, message: 'کوپن پیدا نشد' }
+    if (updated.length === 0) throw Err.notFound('کوپن پیدا نشد')
     return { success: true, message: 'کوپن غیرفعال شد' }
   }
 

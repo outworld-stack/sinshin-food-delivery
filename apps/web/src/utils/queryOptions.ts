@@ -37,7 +37,7 @@ import {
   getIranOnlyAccess,
 } from '#/server/admin'
 import { getTerms } from '#/server/terms'
-import { getAdminCoupons } from '#/server/coupons'
+import { getAdminCoupons, getAdminCoupon } from '#/server/coupons'
 import { getDeliveryZones } from '#/server/deliveryZones'
 import type { DeliveryType } from '#/types/site/checkout'
 import type { OrderRow } from '#/types/admin/orders'
@@ -259,6 +259,14 @@ export const adminCouponsOptions = queryOptions({
   queryFn: () => getAdminCoupons(),
   staleTime: 30_000,
 })
+
+// phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی؛ staleTime مثل لیست
+export const adminCouponDetailsOptions = (id: string) =>
+  queryOptions({
+    queryKey: qk.adminCouponDetails(id),
+    queryFn: () => getAdminCoupon(id),
+    staleTime: 30_000,
+  })
 
 // ⬅ NEW: ادمین‌های سطح ۲ — لیست مدیریت
 export const subAdminsOptions = queryOptions({

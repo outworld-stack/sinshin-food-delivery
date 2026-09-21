@@ -40,6 +40,8 @@ import { Route as AdminAdminsAdminIdRouteImport } from './routes/admin/admins/$a
 import { Route as AdminArticlesIndexRouteImport } from './routes/admin/articles/index'
 import { Route as AdminArticlesNewRouteImport } from './routes/admin/articles/new'
 import { Route as AdminCouponsIndexRouteImport } from './routes/admin/coupons/index'
+import { Route as AdminCouponsCouponIdRouteImport } from './routes/admin/coupons/$couponId'
+import { Route as AdminCouponsNewRouteImport } from './routes/admin/coupons/new'
 import { Route as AdminCouriersIndexRouteImport } from './routes/admin/couriers/index'
 import { Route as AdminCouriersCourierIdRouteImport } from './routes/admin/couriers/$courierId'
 import { Route as AdminOrdersIndexRouteImport } from './routes/admin/orders/index'
@@ -217,6 +219,16 @@ const AdminCouponsIndexRoute = AdminCouponsIndexRouteImport.update({
   path: '/coupons/',
   getParentRoute: () => AdminRouteRoute,
 } as any)
+const AdminCouponsCouponIdRoute = AdminCouponsCouponIdRouteImport.update({
+  id: '/coupons/$couponId',
+  path: '/coupons/$couponId',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminCouponsNewRoute = AdminCouponsNewRouteImport.update({
+  id: '/coupons/new',
+  path: '/coupons/new',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
 const AdminCouriersIndexRoute = AdminCouriersIndexRouteImport.update({
   id: '/couriers/',
   path: '/couriers/',
@@ -356,6 +368,8 @@ export interface FileRoutesByFullPath {
   '/products/': typeof ProductsIndexRoute
   '/admin/admins/$adminId': typeof AdminAdminsAdminIdRoute
   '/admin/articles/new': typeof AdminArticlesNewRoute
+  '/admin/coupons/$couponId': typeof AdminCouponsCouponIdRoute
+  '/admin/coupons/new': typeof AdminCouponsNewRoute
   '/admin/couriers/$courierId': typeof AdminCouriersCourierIdRoute
   '/admin/products/new': typeof AdminProductsNewRoute
   '/courier/scan/$orderId': typeof CourierScanOrderIdRoute
@@ -401,6 +415,8 @@ export interface FileRoutesByTo {
   '/products': typeof ProductsIndexRoute
   '/admin/admins/$adminId': typeof AdminAdminsAdminIdRoute
   '/admin/articles/new': typeof AdminArticlesNewRoute
+  '/admin/coupons/$couponId': typeof AdminCouponsCouponIdRoute
+  '/admin/coupons/new': typeof AdminCouponsNewRoute
   '/admin/couriers/$courierId': typeof AdminCouriersCourierIdRoute
   '/admin/products/new': typeof AdminProductsNewRoute
   '/courier/scan/$orderId': typeof CourierScanOrderIdRoute
@@ -456,6 +472,8 @@ export interface FileRoutesById {
   '/products/': typeof ProductsIndexRoute
   '/admin/admins/$adminId': typeof AdminAdminsAdminIdRoute
   '/admin/articles/new': typeof AdminArticlesNewRoute
+  '/admin/coupons/$couponId': typeof AdminCouponsCouponIdRoute
+  '/admin/coupons/new': typeof AdminCouponsNewRoute
   '/admin/couriers/$courierId': typeof AdminCouriersCourierIdRoute
   '/admin/products/new': typeof AdminProductsNewRoute
   '/courier/scan/$orderId': typeof CourierScanOrderIdRoute
@@ -512,6 +530,8 @@ export interface FileRouteTypes {
     | '/products/'
     | '/admin/admins/$adminId'
     | '/admin/articles/new'
+    | '/admin/coupons/$couponId'
+    | '/admin/coupons/new'
     | '/admin/couriers/$courierId'
     | '/admin/products/new'
     | '/courier/scan/$orderId'
@@ -557,6 +577,8 @@ export interface FileRouteTypes {
     | '/products'
     | '/admin/admins/$adminId'
     | '/admin/articles/new'
+    | '/admin/coupons/$couponId'
+    | '/admin/coupons/new'
     | '/admin/couriers/$courierId'
     | '/admin/products/new'
     | '/courier/scan/$orderId'
@@ -611,6 +633,8 @@ export interface FileRouteTypes {
     | '/products/'
     | '/admin/admins/$adminId'
     | '/admin/articles/new'
+    | '/admin/coupons/$couponId'
+    | '/admin/coupons/new'
     | '/admin/couriers/$courierId'
     | '/admin/products/new'
     | '/courier/scan/$orderId'
@@ -873,6 +897,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCouponsIndexRouteImport
       parentRoute: typeof AdminRouteRoute
     }
+    '/admin/coupons/$couponId': {
+      id: '/admin/coupons/$couponId'
+      path: '/coupons/$couponId'
+      fullPath: '/admin/coupons/$couponId'
+      preLoaderRoute: typeof AdminCouponsCouponIdRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/coupons/new': {
+      id: '/admin/coupons/new'
+      path: '/coupons/new'
+      fullPath: '/admin/coupons/new'
+      preLoaderRoute: typeof AdminCouponsNewRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
     '/admin/couriers/': {
       id: '/admin/couriers/'
       path: '/couriers'
@@ -1039,6 +1077,8 @@ interface AdminRouteRouteChildren {
   AdminIndexRoute: typeof AdminIndexRoute
   AdminAdminsAdminIdRoute: typeof AdminAdminsAdminIdRoute
   AdminArticlesNewRoute: typeof AdminArticlesNewRoute
+  AdminCouponsCouponIdRoute: typeof AdminCouponsCouponIdRoute
+  AdminCouponsNewRoute: typeof AdminCouponsNewRoute
   AdminCouriersCourierIdRoute: typeof AdminCouriersCourierIdRoute
   AdminProductsNewRoute: typeof AdminProductsNewRoute
   AdminAdminsIndexRoute: typeof AdminAdminsIndexRoute
@@ -1063,6 +1103,8 @@ const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminIndexRoute: AdminIndexRoute,
   AdminAdminsAdminIdRoute: AdminAdminsAdminIdRoute,
   AdminArticlesNewRoute: AdminArticlesNewRoute,
+  AdminCouponsCouponIdRoute: AdminCouponsCouponIdRoute,
+  AdminCouponsNewRoute: AdminCouponsNewRoute,
   AdminCouriersCourierIdRoute: AdminCouriersCourierIdRoute,
   AdminProductsNewRoute: AdminProductsNewRoute,
   AdminAdminsIndexRoute: AdminAdminsIndexRoute,

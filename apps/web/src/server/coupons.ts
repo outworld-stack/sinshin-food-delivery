@@ -1,9 +1,17 @@
 // src/server/coupons.ts — تماماً API
+// phase-9: شکل داده هم‌الگوی قرارداد واقعی سرور (CouponWithConditionsDto) —
+// قبلاً تایپ تختِ ساختگی (expiryDate/status/recipientsCount تخت) باعث
+// «Invalid Date»، «undefined نفر» و وضعیت همیشگی «منقضی» می‌شد.
 import { authJson } from '#/lib/api-fetch'
 import type { CouponWithConditionsDto, CouponRule } from '@sinshin/shared'
 
 export async function getAdminCoupons(): Promise<CouponWithConditionsDto[]> {
   return authJson<CouponWithConditionsDto[]>('/admin/coupons', 'GET')
+}
+
+/** phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی */
+export async function getAdminCoupon(id: string): Promise<CouponWithConditionsDto> {
+  return authJson<CouponWithConditionsDto>(`/admin/coupons/${id}`, 'GET')
 }
 
 export async function createCoupon(input: {
@@ -14,8 +22,8 @@ export async function createCoupon(input: {
   isPublic: boolean
   expiryDate: string | null
   rules: CouponRule[]
-}): Promise<{ success: boolean; message?: string }> {
-  return authJson<{ success: boolean; message?: string }>(
+}): Promise<{ success: boolean; id?: string }> {
+  return authJson<{ success: boolean; id?: string }>(
     '/admin/coupons',
     'POST',
     {

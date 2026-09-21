@@ -481,6 +481,11 @@ export interface CouponWithConditionsDto {
     endsAt: string | null
   }
   conditions: Array<{ id: ConditionId; type: CouponConditionType; params: Record<string, unknown> }>
+  /**
+   * phase-9: تعداد گیرندگان فعلی — برای عمومی «-» است ولی برای خصوصی
+   * شمارش coupon_grants است (خروجی موتور کمپین / اعطای لحظه‌ای).
+   */
+  recipientsCount: number
 }
 
 // ═══════════ Admin: Users (ادغام — نسخه‌ی rich با firstName/lastName) ═══════════

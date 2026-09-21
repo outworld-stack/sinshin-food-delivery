@@ -67,8 +67,18 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
     .use(requireAdmin(deps.sessions))
 
     .get('/', () => deps.coupons.list(), {
-      detail: { summary: 'List coupons with conditions' },
+      detail: { summary: 'List coupons with conditions + recipients count' },
     })
+
+    // ── phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی ادمین ──
+    .get(
+      '/:id',
+      ({ params }) => deps.coupons.get(params.id),
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        detail: { summary: 'Coupon detail with conditions + recipients count' },
+      },
+    )
 
     .post(
       '/',

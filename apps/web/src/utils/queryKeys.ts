@@ -70,6 +70,8 @@ export const qk = {
   subAdmins: ['sub-admins'] as const,
   adminReviews: ['admin-reviews'] as const,
   adminCoupons: ['admin-coupons'] as const,
+  // phase-9: جزئیات کوپن — صفحه‌ی اختصاصی
+  adminCouponDetails: (id: string) => ['admin-coupon-details', id] as const,
   deliveryZones: ['delivery-zones'] as const,
 
   // ⬅ NEW: پیک‌های قابل تخصیص — مودال تایید سفارش زنده
