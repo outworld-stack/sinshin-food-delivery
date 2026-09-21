@@ -473,6 +473,22 @@ export class DeviceService {
     return updated
   }
 
+  /**
+   * round-12 — چک REFERRAL_BLOCK برای دستگاهِ مشخص (bind معرف پس از ثبت‌نام).
+   * همان قاعدهٔ signup: اگر خوشهٔ این دستگاه به تعداد زیادی شمارهٔ متفاول
+   * وصل شده، معرفیِ شمارهٔ تازه فقط از همین خوشه پاداش نمی‌گیرد (ضد فارم).
+   */
+  async referralBlockedForDevice(deviceId: string, phone: string): Promise<number> {
+    const clusterIds = await this.clusterDeviceIds(asDeviceId(deviceId))
+    const rows = await this.deps.db
+      .selectDistinct({ phone: deviceIdentities.phone })
+      .from(deviceIdentities)
+      .where(
+        and(inArray(deviceIdentities.deviceId, clusterIds), ne(deviceIdentities.phone, phone)),
+      )
+    return rows.length
+  }
+
   // ── داخلی ──
 
   private async clusterDeviceIds(root: DeviceId): Promise<DeviceId[]> {

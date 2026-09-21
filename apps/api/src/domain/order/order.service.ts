@@ -7,6 +7,7 @@ import {
   couponRedemptions,
   couponGrants,
   coupons,
+  couriers,
   orderItems,
   orders,
   payments,
@@ -24,6 +25,7 @@ import {
   asProductId,
   asSizeId,
   type CampaignId,
+  type CourierId,
   type OrderId,
   type PaymentId,
   type ProductId,
@@ -739,7 +741,51 @@ export class OrderService {
       .from(referralProfits)
       .where(eq(referralProfits.orderId, row.id))
       .then((r) => r[0]?.amount ?? 0)
-    return this.mapOne(row, items, profit)
+    const courier = await this.courierOf(row.courierId)
+    return this.mapOne(row, items, profit, courier)
+  }
+
+  /**
+   * round-12 — دیتای فاکتور برای چاپ توسط پنل (ادمین اصلی/سطح ۲).
+   * بدون چک مالکیت (مسیر مشتری byDisplayId گاردش را دارد)؛ شامل مشخصات
+   * مشتری/نوع تحویل/آدرس/پیک برای فاکتور اشپزخانه + فروش (با QR پیک).
+   */
+  async invoiceForStaff(displayId: string) {
+    if (!DISPLAY_RE.test(displayId)) throw Err.notFound('سفارش پیدا نشد.')
+    const row = (
+      await this.deps.db.select().from(orders).where(eq(orders.displayId, displayId))
+    )[0]
+    if (!row) throw Err.notFound('سفارش پیدا نشد.')
+
+    const [items, user, courier] = await Promise.all([
+      this.deps.db.select().from(orderItems).where(eq(orderItems.orderId, row.id)),
+      row.userId
+        ? this.deps.db.select().from(users).where(eq(users.id, row.userId))
+        : Promise.resolve([]),
+      this.courierOf(row.courierId),
+    ])
+
+    return {
+      orderId: row.displayId,
+      date: row.createdAt,
+      status: row.status,
+      userName: user[0]?.name ?? null,
+      userPhone: user[0]?.phone ?? null,
+      deliveryType: row.deliveryType,
+      address: row.addressSnapshot,
+      customerNote: row.customerNote,
+      courierId: row.courierId,
+      courierName: courier?.name ?? null,
+      courierPhone: courier?.phone ?? null,
+      courierSecurityEnabled: row.courierSecurityEnabled,
+      items: items.map((i) => ({
+        name: i.name,
+        sizeName: i.sizeName,
+        quantity: i.quantity,
+        price: i.unitPrice,
+      })),
+      breakdown: row.breakdown,
+    }
   }
 
   /** تایید تحویل توسط مشتری — قرارداد فرانت */
@@ -832,20 +878,57 @@ export class OrderService {
       .where(inArray(referralProfits.orderId, ids))
     const profitByOrder = new Map(profits.map((p) => [p.orderId, p.amount]))
 
+    // round-12 — نام/تلفن پیک واقعی (قبلاً همیشه null بود؛ کامنت «فاز ۵» دیگر
+    // درست نبود — سرویس live فقط نمای ادمین را پر می‌کند، نه مسیر کاربر)
+    const courierIds = [
+      ...new Set(rows.map((r) => r.courierId).filter((c): c is CourierId => !!c)),
+    ]
+    const courierRows = courierIds.length
+      ? await this.deps.db
+          .select({ id: couriers.id, name: couriers.name, phone: couriers.phone })
+          .from(couriers)
+          .where(inArray(couriers.id, courierIds))
+      : []
+    const courierById = new Map(courierRows.map((c) => [c.id, c]))
+
     return rows.map((r) =>
-      this.mapOne(r, itemsByOrder.get(r.id) ?? [], profitByOrder.get(r.id) ?? 0),
+      this.mapOne(
+        r,
+        itemsByOrder.get(r.id) ?? [],
+        profitByOrder.get(r.id) ?? 0,
+        r.courierId ? courierById.get(r.courierId) : undefined,
+      ),
     )
   }
 
-  private mapOne(row: OrderRow, items: OrderItemRow[], referralProfit: number) {
+  /** ردیف پیک — null-courierId → undefined (بدون کوئری) */
+  private async courierOf(
+    courierId: CourierId | null,
+  ): Promise<{ name: string; phone: string } | undefined> {
+    if (!courierId) return undefined
+    const row = (
+      await this.deps.db
+        .select({ name: couriers.name, phone: couriers.phone })
+        .from(couriers)
+        .where(eq(couriers.id, courierId))
+    )[0]
+    return row
+  }
+
+  private mapOne(
+    row: OrderRow,
+    items: OrderItemRow[],
+    referralProfit: number,
+    courier?: { name: string; phone: string },
+  ) {
     return {
       id: row.displayId,
       date: row.createdAt,
       totalAmount: row.breakdown.totalAmount,
       itemCount: items.reduce((s, i) => s + i.quantity, 0),
       address: row.addressSnapshot,
-      courierName: null, // فاز ۵ — سرویس live پر می‌کند
-      courierPhone: null,
+      courierName: courier?.name ?? null,
+      courierPhone: courier?.phone ?? null,
       status: row.status,
       deliveryType: row.deliveryType,
       items: items.map((i) => ({

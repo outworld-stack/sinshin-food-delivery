@@ -1,21 +1,42 @@
 // src/components/admin/reports/ReportsBox.tsx
-// stage-10 — مرکز گزارشات داشبورد ادمین اصلی.
-// PDFسازی از تمام صفحات حذف شد و همه‌چیز این‌جا آمد:
-//  • هفت نوع گزارش: سفارشات / کار ادمین‌های سطح ۲ / پیک‌ها / ریز کوپن‌ها /
-//    کاربران / کاربر خاص / لاگ ممیزی (audit-log)
-//  • بازه‌ی زمانی دلخواه (تقویم شمسی) + فیلترهای نوع‌محور
-//  • سیستم کشی: React Query با کلیدِ کامل فیلترها + staleTime ۵ دقیقه —
-//    همان فیلترها = همان کلید = بدون درخواست مجدد
-//  • خروجی: همان موتور چاپ قبلی (Save as PDF از پنجره‌ی چاپ)
+// round-12 — مرکز گزارشات داشبورد ادمین اصلی — بازطراحی کامل.
+//
+// چه چیزی عوض شد:
+//  • باکس دوم «نتیجه» حذف شد (دوباره‌کاری — همان اطلاعات در صفحات
+//    سفارشات/کاربران/کوپن‌ها با فیلتر قابل مشاهده است). این‌جا فقط:
+//    فیلتر پیشرفته + دکمهٔ تولید + نوار خلاصه + چاپ.
+//  • چاپ قبلی (کلون DOM داخل #dynamic-print-area + @media print اپ) در
+//    هر دو نسخهٔ قبلی صفحهٔ سفید می‌داد: CSS چاپ اپ، ارتفاع/overflow لایه‌ها
+//    و جدول داخل max-h-96 همه روی خروجی اثر می‌گذاشتند. حالا چاپ = سند
+//    HTML مستقل در iframe مخفی (lib/printDocument) — مصون از استایل اپ،
+//    با @page و فونت خودش و thead تکرارشونده در صفحه‌بندی.
+//  • مرز «از» = ابتدای روز (قبلاً ظهر روز اول بود و نیمهٔ اول روزِ اول
+//    از همهٔ گزارش‌ها حذف می‌شد).
+//  • دراپ‌داون ادمین فقط برای گزارش «کار ادمین‌های سطح ۲» — audit خودش
+//    لاگ ادمین اصلی است و فیلتر ادمین بی‌معنا بود.
+//  • پریست‌های سریع بازه + شمار ردیف‌ها + انتخاب خودکار landscape برای
+//    جدول‌های پهن (سفارشات ۱۱ ستونه در A4 عمودی بریده می‌شد).
+//
+//  • سیستم کشی: React Query با کلیدِ کامل فیلترها + staleTime ۵ دقیقه.
 
 import { useQuery } from '@tanstack/react-query'
 import { memo, useCallback, useMemo, useReducer, useState } from 'react'
 import { FileText, Printer, Search, X } from 'reicon-react'
 import { Skeleton } from '#/components/LoadingSkeletons'
 import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
+import { printHtmlDocument } from '#/lib/printDocument'
 import { type AdminReportType, queryAdminReport } from '#/server/reports'
 import { useToastStore } from '#/stores/toastStore'
-import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
+import { formatDate } from '#/utils/format'
+import {
+	formatJalali,
+	gregorianToJalali,
+	type JalaliDate,
+	jalaliFromISO,
+	jalaliToGregorian,
+	jalaliToISO,
+	todayJalali,
+} from '#/utils/persianDate'
 import { qk } from '#/utils/queryKeys'
 import {
 	couriersAssignmentOptions,
@@ -50,6 +71,66 @@ const DELIVERY_TYPES = [
 	{ key: 'DINE_IN', label: 'سرو در سالن' },
 ]
 
+// ── پریست‌های بازه — بر پایهٔ تقویم شمسی ──
+type PresetKey = 'today' | 'last7' | 'last30' | 'thisMonth' | 'prevMonth'
+
+const PRESETS: { key: PresetKey; label: string }[] = [
+	{ key: 'today', label: 'امروز' },
+	{ key: 'last7', label: '۷ روز اخیر' },
+	{ key: 'last30', label: '۳۰ روز اخیر' },
+	{ key: 'thisMonth', label: 'این ماه' },
+	{ key: 'prevMonth', label: 'ماه گذشته' },
+]
+
+/** N روز قبل (شمسی) — از میان گریگورین برای دقت مرز ماه‌ها */
+function jalaliDaysAgo(base: JalaliDate, days: number): JalaliDate {
+	const g = jalaliToGregorian(base)
+	g.setDate(g.getDate() - days)
+	return gregorianToJalali(g)
+}
+
+function prevJalaliMonth(base: JalaliDate): JalaliDate {
+	return base.month > 1
+		? { year: base.year, month: base.month - 1, day: 1 }
+		: { year: base.year - 1, month: 12, day: 1 }
+}
+
+function presetRange(key: PresetKey): { from: string; to: string } {
+	const today = todayJalali()
+	switch (key) {
+		case 'today':
+			return { from: jalaliToISO(today), to: jalaliToISO(today) }
+		case 'last7':
+			return {
+				from: jalaliToISO(jalaliDaysAgo(today, 6)),
+				to: jalaliToISO(today),
+			}
+		case 'last30':
+			return {
+				from: jalaliToISO(jalaliDaysAgo(today, 29)),
+				to: jalaliToISO(today),
+			}
+		case 'thisMonth':
+			return {
+				from: jalaliToISO({ year: today.year, month: today.month, day: 1 }),
+				to: jalaliToISO(today),
+			}
+		case 'prevMonth': {
+			const start = prevJalaliMonth({
+				year: today.year,
+				month: today.month,
+				day: 1,
+			})
+			// روز آخر ماه قبل = یک روز قبل از روز اول همین ماه
+			const end = jalaliDaysAgo(
+				{ year: today.year, month: today.month, day: 1 },
+				1,
+			)
+			return { from: jalaliToISO(start), to: jalaliToISO(end) }
+		}
+	}
+}
+
 // ── state ──
 interface ReportsState {
 	type: AdminReportType
@@ -71,6 +152,7 @@ type ReportsAction =
 	| { type: 'SET_ADMIN'; payload: string }
 	| { type: 'SET_COURIER'; payload: string }
 	| { type: 'SET_PHONE'; payload: string }
+	| { type: 'SET_RANGE'; payload: { from: string; to: string } }
 	| { type: 'CLEAR_DATES' }
 
 const initialState: ReportsState = {
@@ -108,6 +190,12 @@ function reportsReducer(
 				...state,
 				phoneDraft: action.payload.replace(/[^0-9]/g, '').slice(0, 11),
 			}
+		case 'SET_RANGE':
+			return {
+				...state,
+				fromJalali: action.payload.from,
+				toJalali: action.payload.to,
+			}
 		case 'CLEAR_DATES':
 			return { ...state, fromJalali: null, toJalali: null }
 		default:
@@ -115,7 +203,7 @@ function reportsReducer(
 	}
 }
 
-/** شمسی ISO → میلادی ISO؛ to با پایان روز (تا رکوردهای همان روز بیفتند داخل بازه) */
+/** شمسی ISO → میلادی ISO — از: ابتدای روز / تا: پایان روز (رفع باگ ظهر) */
 function jalaliToGregorianISO(
 	iso: string | null,
 	endOfDay: boolean,
@@ -125,7 +213,13 @@ function jalaliToGregorianISO(
 	if (!j) return null
 	const d = jalaliToGregorian(j)
 	if (endOfDay) d.setHours(23, 59, 59, 999)
+	else d.setHours(0, 0, 0, 0) // round-12: قبلاً ظهر بود — نیمهٔ اول روز اول حذف می‌شد
 	return d.toISOString()
+}
+
+const faJalali = (iso: string | null): string => {
+	const j = iso ? jalaliFromISO(iso) : null
+	return j ? formatJalali(j) : 'ابتدای داده‌ها'
 }
 
 export const ReportsBox = memo(function ReportsBox() {
@@ -135,8 +229,9 @@ export const ReportsBox = memo(function ReportsBox() {
 	const [committed, setCommitted] = useState<ReportsState | null>(null)
 	const showToast = useToastStore((s) => s.showToast)
 
-	// دراپ‌داون‌ها — ادمین‌های سطح ۲ و پیک‌ها (فقط وقتی نوع مربوطه انتخاب شده)
-	const needsAdmins = state.type === 'admin2' || state.type === 'audit'
+	// دراپ‌داون‌ها — ادمین‌های سطح ۲ فقط برای گزارشِ کارشان؛ audit لاگِ
+	// ادمین اصلی است و فیلتر ادمین رویش بی‌معنا بود (round-12 حذف شد)
+	const needsAdmins = state.type === 'admin2'
 	const needsCouriers = state.type === 'couriers'
 	const { data: subAdmins } = useQuery({
 		...subAdminsOptions,
@@ -196,23 +291,47 @@ export const ReportsBox = memo(function ReportsBox() {
 		setCommitted({ ...state })
 	}, [state, showToast])
 
+	// ── چاپ — سند مستقل؛ landscape خودکار برای جدول‌های پهن ──
 	const handlePrint = useCallback(() => {
-		const source = document.querySelector('#reports-result')
-		if (!source) return
-		// همان موتور چاپ قبلی — کلون محتوا + پنجره‌ی چاپ (Save as PDF)
-		const area = document.createElement('div')
-		area.id = 'dynamic-print-area'
-		area.innerHTML = source.innerHTML
-		document.body.appendChild(area)
-		window.print()
-		const cleanup = () => area.remove()
-		window.addEventListener('afterprint', cleanup, { once: true })
-		setTimeout(cleanup, 10000) // fallback
+		if (!report) return
+		const widest = Math.max(0, ...report.tables.map((t) => t.head.length))
+		printHtmlDocument({
+			fileName: `sinshin-report-${committed?.type ?? 'report'}`,
+			brand: 'سین‌شین فودپارک',
+			landscape: widest >= 8,
+			sections: [
+				{
+					heading: report.title,
+					metaLines: [
+						report.subtitle,
+						committed?.fromJalali || committed?.toJalali
+							? `بازه: از ${faJalali(committed?.fromJalali ?? null)} تا ${faJalali(committed?.toJalali ?? null)}`
+							: 'بازه: همهٔ زمان‌ها',
+						`زمان تولید: ${formatDate(new Date())}`,
+					],
+					stats: report.stats,
+					tables: report.tables,
+				},
+			],
+			footerNote: 'گزارش رسمی سین‌شین',
+		})
 		showToast('از گزینه «Save as PDF» در پنجره چاپ استفاده کنید')
-	}, [showToast])
+	}, [report, committed, showToast])
 
 	const activeType = REPORT_TYPES.find((t) => t.key === state.type)
 	const hasDates = state.fromJalali || state.toJalali
+
+	// پریست فعال؟ (برای هایلایت)
+	const activePreset = useMemo(() => {
+		if (!state.fromJalali || !state.toJalali) return null
+		for (const p of PRESETS) {
+			const r = presetRange(p.key)
+			if (r.from === state.fromJalali && r.to === state.toJalali) return p.key
+		}
+		return null
+	}, [state.fromJalali, state.toJalali])
+
+	const totalRows = report?.tables.reduce((s, t) => s + t.rows.length, 0) ?? 0
 
 	return (
 		<div className="bg-white dark:bg-[#2a1015] p-4 sm:p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
@@ -226,20 +345,11 @@ export const ReportsBox = memo(function ReportsBox() {
 							مرکز گزارشات
 						</h2>
 						<p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-DanaMedium">
-							دریافت PDF همه‌ی گزارش‌ها با بازه‌ی زمانی دلخواه
+							فیلتر را انتخاب و گزارش را چاپ/PDF کنید — داده‌های کامل در صفحات
+							مدیریت همان بخش‌ها قابل مشاهده است
 						</p>
 					</div>
 				</div>
-				{committed && report && (
-					<button
-						type="button"
-						onClick={handlePrint}
-						className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-700 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer flex items-center gap-2 text-sm shrink-0 self-start sm:self-auto"
-					>
-						<Printer size={16} />
-						چاپ / ذخیره PDF
-					</button>
-				)}
 			</div>
 
 			{/* ── نوع گزارش — چیپ‌های wrap ── */}
@@ -269,6 +379,32 @@ export const ReportsBox = memo(function ReportsBox() {
 						{activeType.hint}
 					</p>
 				)}
+			</div>
+
+			{/* ── بازهٔ سریع — پریست‌ها ── */}
+			<div className="mb-4">
+				<p className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-3">
+					بازهٔ سریع
+				</p>
+				<div className="flex flex-wrap gap-2">
+					{PRESETS.map((p) => (
+						<button
+							key={p.key}
+							type="button"
+							onClick={() =>
+								dispatch({ type: 'SET_RANGE', payload: presetRange(p.key) })
+							}
+							className={`px-3.5 py-1.5 rounded-xl text-xs font-DanaMedium transition cursor-pointer ${
+								activePreset === p.key
+									? 'bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary border border-primary/30 dark:border-dark-primary/30'
+									: 'bg-gray-50 dark:bg-[#1a0a0e] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#3a151c] hover:bg-gray-100 dark:hover:bg-[#3a151c]'
+							}`}
+							aria-pressed={activePreset === p.key}
+						>
+							{p.label}
+						</button>
+					))}
+				</div>
 			</div>
 
 			{/* ── فیلترها — گرید پاسخ‌گو ── */}
@@ -352,7 +488,7 @@ export const ReportsBox = memo(function ReportsBox() {
 					</>
 				)}
 
-				{/* نوع‌محور: ادمین سطح ۲ / لاگ ممیزی */}
+				{/* نوع‌محور: ادمین سطح ۲ */}
 				{needsAdmins && (
 					<div className="md:col-span-2">
 						<label
@@ -455,12 +591,11 @@ export const ReportsBox = memo(function ReportsBox() {
 				)}
 			</div>
 
-			{/* ── نتیجه ── */}
+			{/* ── خلاصهٔ نتیجه — بدون جدول‌ها؛ فقط آمار + چاپ ── */}
 			{isLoading && (
 				<div className="mt-6 space-y-4">
 					<Skeleton className="h-8 w-1/2" />
 					<Skeleton className="h-24 w-full" />
-					<Skeleton className="h-48 w-full" />
 				</div>
 			)}
 
@@ -473,22 +608,30 @@ export const ReportsBox = memo(function ReportsBox() {
 			)}
 
 			{report && !isLoading && (
-				<div
-					id="reports-result"
-					className="mt-8 pt-6 border-t border-gray-100 dark:border-white/5"
-				>
-					<div className="mb-5 text-center">
-						<h3 className="font-MorabbaBold text-2xl text-gray-800 dark:text-white">
-							{report.title}
-						</h3>
-						<p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5 font-DanaMedium">
-							{report.subtitle}
-						</p>
+				<div className="mt-6 pt-6 border-t border-gray-100 dark:border-white/5">
+					<div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
+						<div className="text-center lg:text-right">
+							<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white">
+								{report.title}
+							</h3>
+							<p className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-DanaMedium">
+								{report.subtitle} · {totalRows.toLocaleString('fa-IR')} ردیف در{' '}
+								{report.tables.length.toLocaleString('fa-IR')} جدول
+							</p>
+						</div>
+						<button
+							type="button"
+							onClick={handlePrint}
+							disabled={totalRows === 0 && report.stats.length === 0}
+							className="px-6 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 self-stretch lg:self-auto"
+						>
+							<Printer size={16} />
+							چاپ / ذخیره PDF
+						</button>
 					</div>
 
-					{/* آمار */}
 					{report.stats.length > 0 && (
-						<div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+						<div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
 							{report.stats.map((s, i) => {
 								// biome-ignore lint/suspicious/noArrayIndexKey: آمار سرور-ساخته — رشته‌ی خام بدون شناسه؛ ایندکس همان شناسه است
 								return (
@@ -508,62 +651,11 @@ export const ReportsBox = memo(function ReportsBox() {
 						</div>
 					)}
 
-					{/* جدول‌ها */}
-					{report.tables.map((table, ti) => (
-						<div key={ti} className="mb-6">
-							<p className="text-sm font-DanaDemiBold text-gray-700 dark:text-gray-200 mb-3">
-								{table.title}
-							</p>
-							{table.rows.length === 0 ? (
-								<div className="text-center py-8 text-gray-400 dark:text-gray-500 text-sm font-DanaMedium bg-gray-50 dark:bg-[#1a0a0e] rounded-xl">
-									موردی در این بازه یافت نشد.
-								</div>
-							) : (
-								<div className="border border-gray-200 dark:border-[#3a151c] rounded-xl overflow-hidden">
-									<div className="max-h-96 overflow-y-auto overflow-x-auto">
-										<table className="w-full text-xs">
-											<thead className="sticky top-0 bg-gray-100 dark:bg-[#3a151c]">
-												<tr>
-													{table.head.map((h, hi) => (
-														<th
-															key={hi}
-															className="px-3 py-2.5 text-right font-DanaDemiBold text-gray-600 dark:text-gray-300 whitespace-nowrap"
-														>
-															{h}
-														</th>
-													))}
-												</tr>
-											</thead>
-											<tbody>
-												{table.rows.map((row, ri) => (
-													<tr
-														key={ri}
-														className="border-t border-gray-100 dark:border-white/5 hover:bg-gray-50 dark:hover:bg-white/[0.02]"
-													>
-														{row.map((cell, ci) => {
-															// biome-ignore lint/suspicious/noArrayIndexKey: سلول سرور-ساخته
-															return (
-																<td
-																	key={ci}
-																	className="px-3 py-2.5 text-gray-600 dark:text-gray-300 whitespace-nowrap font-DanaMedium"
-																>
-																	{cell}
-																</td>
-															)
-														})}
-													</tr>
-												))}
-											</tbody>
-										</table>
-									</div>
-								</div>
-							)}
+					{totalRows === 0 && report.stats.length === 0 && (
+						<div className="text-center py-6 text-gray-400 dark:text-gray-500 text-sm font-DanaMedium bg-gray-50 dark:bg-[#1a0a0e] rounded-xl">
+							موردی در این بازه یافت نشد — بازه یا فیلترها را تغییر دهید.
 						</div>
-					))}
-
-					<p className="text-center text-[11px] text-gray-400 dark:text-gray-500 font-DanaMedium">
-						سین‌شین فودپارک — تولید گزارش
-					</p>
+					)}
 				</div>
 			)}
 		</div>

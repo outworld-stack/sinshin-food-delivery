@@ -175,7 +175,7 @@ export const buildApp = (deps: AppDeps) => {
     )
     .use(adminOrderRoutes({ sessions: deps.sessions, orders: deps.orders, audit: deps.audit }))
     .use(admin2Routes({ sessions: deps.sessions, admin2: deps.admin2, settings: deps.settings }))
-    .use(liveRoutes({ sessions: deps.sessions, admin2: deps.admin2, live: deps.live }))
+    .use(liveRoutes({ sessions: deps.sessions, admin2: deps.admin2, live: deps.live, orders: deps.orders }))
     .use(courierRoutes({ sessions: deps.sessions, admin2: deps.admin2, couriers: deps.couriers, redis: deps.redis }))
     .use(reviewRoutes({ sessions: deps.sessions, admin2: deps.admin2, reviews: deps.reviews }))
     .use(

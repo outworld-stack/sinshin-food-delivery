@@ -13,13 +13,80 @@ import {
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import type { DeviceService } from '#/domain/device/device.service'
 import type { OrderService } from './order.service'
 
 /** پروفایل کامل — قرارداد getUserProfile فرانت */
 export class ProfileService {
   constructor(
-    private readonly deps: { db: Db; config: AppConfig; orders: OrderService },
+    private readonly deps: {
+      db: Db
+      config: AppConfig
+      orders: OrderService
+      devices: DeviceService
+    },
   ) { }
+
+  /**
+   * round-12 — bind معرف پس از ثبت‌نام (اسکن QR در داشبورد کاربر).
+   * گاردها: یک‌بار بودن، کد خودتان نه، وجود معرف، REFERRAL_BLOCK خوشهٔ دستگاه —
+   * همان قواعد signup (auth.service) این‌جا برای کاربرِ ازقبل‌موجود تکرار می‌شود.
+   */
+  async applyReferral(
+    userId: string,
+    deviceId: string,
+    rawCode: string,
+  ): Promise<{ referrerCode: string }> {
+    const { db, config } = this.deps
+    const code = rawCode.trim().toUpperCase().slice(0, 32)
+    if (!code) throw Err.validation('کد معرف را وارد کنید.')
+
+    const user = (await db.select().from(users).where(eq(users.id, userId)))[0]
+    if (!user) throw Err.unauthorized()
+    if (user.referredBy) throw Err.conflict('قبلاً معرف برای حساب شما ثبت شده است.')
+
+    const referrer = (await db.select().from(users).where(eq(users.referralCode, code)))[0]
+    if (!referrer) throw Err.notFound('کد معرف معتبر نیست.')
+    if (referrer.id === user.id) {
+      throw Err.validation('کد معرف خودتان قابل استفاده نیست.')
+    }
+
+    // REFERRAL_BLOCK — همان آستانهٔ signup؛ خوشهٔ دستگاهِ فعلی کاربر
+    const clusterPhones = await this.deps.devices.referralBlockedForDevice(
+      deviceId,
+      user.phone,
+    )
+    if (clusterPhones >= config.device.referralBlockAfter) {
+      await this.deps.devices.logEvent(
+        deviceId,
+        user.phone,
+        'REFERRAL_BLOCKED',
+        null,
+        null,
+        { refCode: code, clusterPhones, via: 'profile-apply' },
+      )
+      throw Err.forbidden(
+        'به دلایل امنیتی، ثبت معرف از این دستگاه امکان‌پذیر نیست.',
+      )
+    }
+
+    const [updated] = await db
+      .update(users)
+      .set({ referredBy: referrer.id })
+      .where(and(eq(users.id, user.id), sql`${users.referredBy} is null`))
+      .returning()
+    if (!updated) throw Err.conflict('قبلاً معرف برای حساب شما ثبت شده است.')
+
+    await this.deps.devices.logEvent(
+      deviceId,
+      user.phone,
+      'REFERRAL_APPLIED',
+      null,
+      null,
+      { refCode: code, referrerId: referrer.id },
+    )
+    return { referrerCode: referrer.referralCode ?? code }
+  }
 
   /** phase-3 — ویرایش name/email (مرجع: فرانت قبلاً stub no-op بود) */
   async updateProfile(

@@ -90,6 +90,24 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       },
     )
 
+    // round-12 — bind معرف پس از ثبت‌نام (اسکن QR / ورود دستی کد در داشبورد).
+    // سقف هر کاربر: ۱۰ تلاش در ساعت — ضد brute-force کد معرف
+    .post(
+      '/profile/apply-referral',
+      async ({ user, auth, body }) => {
+        await perUserLimit(user.id, 'apply-referral', 10, 3600)
+        return deps.profile.applyReferral(user.id, auth.deviceId, body.code)
+      },
+      {
+        body: t.Object({ code: t.String({ minLength: 3, maxLength: 32 }) }),
+        detail: {
+          summary: 'Bind a referrer code after signup (dashboard scanner)',
+          description:
+            'One-shot: fails with 409 if a referrer is already bound. Guards: own-code rejected, referrer must exist, device-cluster REFERRAL_BLOCK (same rule as signup). Rate-limited per user.',
+        },
+      },
+    )
+
     // چک‌اوت
     .post(
       '/checkout',

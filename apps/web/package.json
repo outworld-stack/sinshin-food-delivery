@@ -17,8 +17,8 @@
     "check": "biome check"
   },
   "dependencies": {
-    "@sinshin/shared": "workspace:*",
     "@elysiajs/eden": "^1.4.9",
+    "@sinshin/shared": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-form": "^1.33.5",
@@ -29,6 +29,7 @@
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
     "browser-image-compression": "^2.0.2",
+    "jsqr": "^1.4.0",
     "nitro": "3.0.260610-beta",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.0",

@@ -102,12 +102,9 @@
 }
 
 
-#dynamic-print-area {
-  display: none;
-}
-
-
-/* استایل‌های مخصوص پرینت */
+/* استایل‌های مخصوص پرینت — فقط ساختار #print-area (کارت QR معرف داشبورد
+   کاربر). round-12: قواعد #dynamic-print-area حذف شدند — چاپ گزارشات/فاکتورها
+   به سند مستقل iframe مهاجرت کرد (lib/printDocument) و دیگر به CSS اپ وابسته نیست. */
 @media print {
 
 
@@ -177,61 +174,5 @@
 
   #print-area p {
     color: #1a0a0e !important;
-  }
-    #dynamic-print-area {
-    display: block !important;
-    /* round-11 (اسکن H-4): موتور چاپ داینامیک — چندصفحه‌ای و بدون کلیپ.
-    ناحیه absolute نمی‌شد (گزارش بلند فقط صفحهٔ اول چاپ می‌شد)؛ به‌جایش
-    handlePrint کلاس printing-dynamic روی html/body می‌گذارد و اینجا همهٔ
-    فرزندان body جز ناحیهٔ چاپ مخفی می‌شوند + ریست height/overflow. */
-    position: static !important;
-    width: 100%;
-    padding: 24px 16px;
-    box-sizing: border-box;
-    background: #fff !important;
-    text-align: right;
-  }
-
-  .printing-dynamic {
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  body.printing-dynamic > *:not(#dynamic-print-area) {
-    display: none !important;
-  }
-
-  #dynamic-print-area,
-  #dynamic-print-area * {
-    visibility: visible !important;
-    /* جدول‌های گزارش داخل max-h-96 overflow-y-auto رندر می‌شوند —
-       در چاپ باید کامل باز شوند وگرنه به ~۳۸۴px کلیپ می‌شوند. */
-    max-height: none !important;
-    overflow: visible !important;
-  }
-
-  /* کاغذ سفید: متن تیره صریح (کلاس‌های dark: از کلون حذف شده‌اند،
-     این ریست برای رنگ‌های ارثی/اینلاین باقی‌مانده است) */
-  #dynamic-print-area * {
-    color: #1f2937 !important;
-    background: transparent !important;
-    border-color: #e5e7eb !important;
-  }
-
-  #dynamic-print-area table {
-    width: 100% !important;
-    border-collapse: collapse !important;
-  }
-
-  #dynamic-print-area th,
-  #dynamic-print-area td {
-    border: 1px solid #e5e7eb !important;
-    padding: 6px 8px !important;
-  }
-
-  #dynamic-print-area thead {
-    background: #f3f4f6 !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
   }
 }

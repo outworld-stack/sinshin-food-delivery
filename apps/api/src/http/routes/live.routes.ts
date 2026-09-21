@@ -4,6 +4,7 @@ import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { LiveService } from '#/domain/live/live.service'
+import type { OrderService } from '#/domain/order/order.service'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
 
 const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
@@ -13,6 +14,7 @@ export interface LiveRoutesDeps {
   sessions: SessionService
   admin2: Admin2Service
   live: LiveService
+  orders: OrderService
 }
 
 export const liveRoutes = (deps: LiveRoutesDeps) =>
@@ -117,5 +119,23 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
       {
         params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
         detail: { summary: 'Order detail (role-aware)' },
+      },
+    )
+
+    /**
+     * round-12 — دیتای فاکتور چاپی (اشپزخانه + فروش) برای پنل.
+     * ادمین اصلی و ادمین‌های سطح ۲ (تاییدکنندهٔ سفارش) — سند عملیاتی
+     * مشتری/آشپزخانه/پیک است؛ ریز سود داخلی ندارد.
+     */
+    .get(
+      '/orders/:displayId/invoice',
+      ({ params }) => deps.orders.invoiceForStaff(params.displayId),
+      {
+        params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
+        detail: {
+          summary: 'Invoice print data — kitchen + sales (staff)',
+          description:
+            'Full print payload: items with prices, breakdown, customer info, delivery type/address and courier fields for the sales QR. No ownership check — staff route.',
+        },
       },
     )
