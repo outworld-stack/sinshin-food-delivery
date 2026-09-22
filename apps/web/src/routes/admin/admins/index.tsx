@@ -129,7 +129,8 @@ const AdminsPage = memo(function AdminsPage() {
                   <div className="text-center">
                     <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">آخرین فعالیت</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium">
-                      {formatDate(admin.lastActivity)}
+                      {/* stage-15 — ادمینِ لاگین‌نکرده null است، نه تاریخ غلط */}
+                      {admin.lastActivity ? formatDate(admin.lastActivity) : '—'}
                     </p>
                   </div>
                 </div>

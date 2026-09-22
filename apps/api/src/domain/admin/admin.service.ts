@@ -14,7 +14,7 @@ import {
     walletTransactions,
 } from '#/infra/db/schema'
 import { asUserId, asCourierId, asAddressId, type UserId } from '#/domain/shared/brand'
-import { buildRangeCharts, type RangeCharts } from '#/domain/shared/charts'
+import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain/shared/charts'
 import { Err } from '#/domain/shared/errors'
 import { normalizePhone } from '#/domain/shared/phone'
 
@@ -33,7 +33,7 @@ export class AdminService {
         activeUsers: number
         totalRevenue: number
         totalOrders: number
-        chartData: { date: string; sales: number; rawRegs: number; refRegs: number; views: number }[]
+        chartData: RangeCharts
         recentOrders: { id: string; user: string; amount: number; status: string; date: Date }[]
         latestUsers: { id: UserId; phone: string; name: string; device: string; registeredAt: Date }[]
     }> {
@@ -76,31 +76,21 @@ export class AdminService {
                     .limit(5),
             ])
 
-        // ChartData — ۳۰ روز اخیر
-        const yearAgo = new Date(Date.now() - 365 * 86400000)
-        const chartRows = await db
-            .select({
-                date: sql<string>`to_char(${orders.createdAt}, 'YYYY-MM-DD')`,
-                sales: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
-            })
+        // stage-15 — چارت با معنای «بازهٔ جاری» (۶ ستونِ ۴ساعتهٔ امروز /
+        // هفتهٔ شنبه‌محور / ماه و سال شمسی) از اقلام خام ساخته می‌شود؛
+        // پیش‌تجمیع روزانه دیگر کافی نیست چون باکت ساعتی لازم است.
+        // کران پایین = currentPeriodStart (ابتدای سال شمسی یا هفتهٔ جاری).
+        const chartItems = await db
+            .select({ date: orders.createdAt, value: orders.totalAmount })
             .from(orders)
-            .where(and(gte(orders.createdAt, yearAgo), ne(orders.status, 'CANCELED')))
-            .groupBy(sql`to_char(${orders.createdAt}, 'YYYY-MM-DD')`)
-
-        const chartData = chartRows.map((r) => ({
-            date: r.date,
-            sales: r.sales,
-            rawRegs: 0,
-            refRegs: 0,
-            views: 0,
-        }))
+            .where(and(gte(orders.createdAt, currentPeriodStart()), ne(orders.status, 'CANCELED')))
 
         return {
             totalUsers,
             activeUsers,
             totalRevenue: totalRevenueAgg,
             totalOrders: totalOrdersAgg.count,
-            chartData,
+            chartData: buildRangeCharts(chartItems),
             recentOrders: recentOrders.map((r) => ({
                 id: r.id,
                 user: r.user,

@@ -3,13 +3,11 @@
 // (هاور روی «داشبورد» در سایدبار => آمار در کش؛ ناوبری بدون اسکلتون)
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { useMemo } from 'react'
 import { formatPrice, formatDate } from '#/utils/format'
 import { AdminDashboardSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { ChartPanel } from '#/components/shared/ChartPanel'
 import { ReportsBox } from '#/components/admin/reports/ReportsBox'
-import { buildChartData } from '#/utils/chartData'
 import { adminStatsOptions } from '#/utils/queryOptions'
 import { Users, CheckCircle, Wallet, ShoppingBag } from 'reicon-react'
 
@@ -37,9 +35,6 @@ function AdminDashboard() {
   // آمار داشبورد — فکتوری مرکزی (کلید + staleTime ۳۰s)؛
   // ⬅ NEW: همان کلیدی که loader روت با query پر کرده
   const { data: stats, isLoading } = useQuery(adminStatsOptions)
-
-  // داده‌ی نمودار — ۳۰ روز فروش سرور؛ همه‌ی بازه‌ها از همین یک منبع
-  const chartData = useMemo(() => buildChartData(stats?.chartData ?? []), [stats])
 
   if (isLoading || !stats) {
     return <AdminDashboardSkeleton />
@@ -71,8 +66,9 @@ function AdminDashboard() {
         ))}
       </div>
 
-      {/* نمودار — پنل مشترک (به‌جای سه تکه: کارت فیلتر + نمودار + مودال موبایل) */}
-      <ChartPanel title="نمودار تحلیل سیستم" chartData={chartData} defaultGranularity="daily" />
+      {/* نمودار — پنل مشترک؛ stage-15: چارت‌ها سمت API ساخته می‌شوند
+          (روزانه = ۶ ستونِ ۴ساعتهٔ امروز، هفتگی = شنبه تا جمعه، ...) */}
+      <ChartPanel title="نمودار تحلیل سیستم" chartData={stats.chartData} defaultGranularity="daily" />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* سفارشات اخیر */}

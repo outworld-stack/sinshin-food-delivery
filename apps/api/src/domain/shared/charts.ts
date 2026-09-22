@@ -1,107 +1,132 @@
 // src/domain/shared/charts.ts
 /**
- * phase-3 — سازنده‌ی ChartData از داده‌ی «واقعی» (مرگ وزن‌های ساختگی).
- *   daily   = آخرین ۳۰ روز، پیوسته (روزِ بدون داده = صفرِ واقعی)
- *   weekly  = تجمیع شنبه‌محور (هفته‌ی ایرانی) — فقط هفته‌های دارای داده
- *   monthly = تجمیع ماه شمسی («۱۴۰۳ آبان»)
- *   yearly  = تجمیع سال شمسی («۱۴۰۳»)
- * تقویم شمسی از Intl('fa-IR') — پیش‌فرض persian؛ ایران DST ندارد پس محاسبه‌ی روز ثابت است.
+ * stage-15 — سازندهٔ ChartData با معنای «بازهٔ جاری» (خواستهٔ صریح مغازه):
+ *   daily   = امروز در ۶ ستونِ ۴ساعته (۰۰-۰۴ / ۰۴-۰۸ / … / ۲۰-۲۴)
+ *   weekly  = هفتهٔ جاری ایرانی — شنبه تا جمعه (۷ ستون، نام روزها)
+ *   monthly = روزهای ماه شمسیِ جاری (۲۹/۳۰/۳۱ ستون — بر اساس تقویم)
+ *   yearly  = ۱۲ ماه سال شمسیِ جاری (فروردین … اسفند)
+ *
+ * همهٔ سری‌ها «از راست به چپ» ارائه می‌شوند: آرایه‌ها زمان‌محورِ
+ * صعودی مرتب می‌شوند و رندر RTL (dir="rtl" اپ) ستون اول را سمت راست
+ * می‌گذارد — یعنی قدیمی‌ترین بازه راست، جدیدترین چپ.
+ *
+ * ورودی همهٔ فراخوان‌ها یکی است: اقلام خام {date, value} (مثل سفارش‌ها یا
+ * تحویل‌های پیک) — تاریخچهٔ خارج از بازهٔ جاری بی‌صدا نادیده گرفته می‌شود.
+ *
+ * تقویم شمسی از @sinshin/shared (هستهٔ Intl مشترک با وب)؛ ایران DST ندارد
+ * پس مرز روزها در TZ سرور (استقرار: Asia/Tehran) پایدار است.
  */
 
-export interface ChartPoint {
-  label: string
-  value: number
-}
+import type { ChartPoint, RangeCharts } from '@sinshin/shared'
+import {
+        daysInJalaliMonth,
+        gregorianToJalali,
+        JALALI_MONTHS,
+        jalaliToGregorian,
+} from '@sinshin/shared'
 
-export interface RangeCharts {
-  daily: ChartPoint[]
-  weekly: ChartPoint[]
-  monthly: ChartPoint[]
-  yearly: ChartPoint[]
+// فراخوان‌ها تایپ قرارداد را از همین ماژول می‌گیرند (نقطهٔ واحد)
+export type { ChartPoint, RangeCharts } from '@sinshin/shared'
+
+export interface ChartItem {
+        date: Date
+        value: number
 }
 
 const DAY_MS = 86_400_000
 
-const F_DAY = new Intl.DateTimeFormat('fa-IR', { day: 'numeric' })
-const F_DAY_MONTH = new Intl.DateTimeFormat('fa-IR', { day: 'numeric', month: 'long' })
-const F_MONTH = new Intl.DateTimeFormat('fa-IR', { year: 'numeric', month: 'long' })
-const F_YEAR = new Intl.DateTimeFormat('fa-IR', { year: 'numeric' })
-
-const localDateKey = (d: Date): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-
-/** شنبه‌محور — هفته‌ی ایرانی (getDay: یکشنبه=۰ … شنبه=۶) */
+/** شنبه‌محور — هفتهٔ ایرانی (getDay: یکشنبه=۰ … شنبه=۶)؛ همیشه نیمه‌شب */
 const weekStart = (d: Date): Date => {
-  const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  const daysSinceSaturday = (copy.getDay() + 1) % 7
-  return new Date(copy.getTime() - daysSinceSaturday * DAY_MS)
+        const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+        const daysSinceSaturday = (midnight.getDay() + 1) % 7
+        return new Date(midnight.getTime() - daysSinceSaturday * DAY_MS)
 }
 
-export function buildRangeCharts(
-  items: ReadonlyArray<{ date: Date; value: number }>,
-  opts: { dailyDays?: number } = {},
-): RangeCharts {
-  const dailyDays = Math.max(1, opts.dailyDays ?? 30)
-  const sorted = [...items].sort((a, b) => a.date.getTime() - b.date.getTime())
+const localDateKey = (d: Date): string =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-  // ── daily — پیوسته‌ی N روز آخر (صفرِ روزِ خالی = واقعی) ──
-  const byDay = new Map<string, number>()
-  for (const it of sorted) {
-    const k = localDateKey(it.date)
-    byDay.set(k, (byDay.get(k) ?? 0) + it.value)
-  }
-  const daily: ChartPoint[] = []
-  const anchor = new Date()
-  anchor.setHours(12, 0, 0, 0)
-  for (let i = dailyDays - 1; i >= 0; i--) {
-    const d = new Date(anchor.getTime() - i * DAY_MS)
-    daily.push({ label: F_DAY.format(d), value: byDay.get(localDateKey(d)) ?? 0 })
-  }
+const addDays = (d: Date, n: number): Date =>
+        new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 
-  // ── weekly — شنبه‌محور؛ فقط هفته‌های دارای داده ──
-  const weeklyMap = new Map<string, { label: string; value: number; ts: number }>()
-  for (const it of sorted) {
-    const ws = weekStart(it.date)
-    const k = localDateKey(ws)
-    const cell = weeklyMap.get(k) ?? { label: F_DAY_MONTH.format(ws), value: 0, ts: ws.getTime() }
-    cell.value += it.value
-    weeklyMap.set(k, cell)
-  }
-  const weekly = [...weeklyMap.values()]
-    .sort((a, b) => a.ts - b.ts)
-    .map(({ label, value }) => ({ label, value }))
+// برچسب بازه‌های ۴ساعته — رقم فارسی، هم‌قالب خواستهٔ مغازه
+const FOUR_HOUR_LABELS = [
+        '۰۰:۰۰ تا ۰۴:۰۰',
+        '۰۴:۰۰ تا ۰۸:۰۰',
+        '۰۸:۰۰ تا ۱۲:۰۰',
+        '۱۲:۰۰ تا ۱۶:۰۰',
+        '۱۶:۰۰ تا ۲۰:۰۰',
+        '۲۰:۰۰ تا ۲۴:۰۰',
+] as const
 
-  // ── monthly — ماه شمسی؛ label یکتا per ماه («۱۴۰۳ آبان») ──
-  const monthlyMap = new Map<string, { label: string; value: number; ts: number }>()
-  for (const it of sorted) {
-    const label = F_MONTH.format(it.date)
-    const cell = monthlyMap.get(label) ?? {
-      label,
-      value: 0,
-      ts: new Date(it.date.getFullYear(), it.date.getMonth(), 1).getTime(),
-    }
-    cell.value += it.value
-    monthlyMap.set(label, cell)
-  }
-  const monthly = [...monthlyMap.values()]
-    .sort((a, b) => a.ts - b.ts)
-    .map(({ label, value }) => ({ label, value }))
+const F_DAY = new Intl.DateTimeFormat('fa-IR', { day: 'numeric' })
+const F_WEEKDAY = new Intl.DateTimeFormat('fa-IR', { weekday: 'long' })
 
-  // ── yearly — سال شمسی ──
-  const yearlyMap = new Map<string, { label: string; value: number; ts: number }>()
-  for (const it of sorted) {
-    const label = F_YEAR.format(it.date)
-    const cell = yearlyMap.get(label) ?? {
-      label,
-      value: 0,
-      ts: new Date(it.date.getFullYear(), 0, 1).getTime(),
-    }
-    cell.value += it.value
-    yearlyMap.set(label, cell)
-  }
-  const yearly = [...yearlyMap.values()]
-    .sort((a, b) => a.ts - b.ts)
-    .map(({ label, value }) => ({ label, value }))
+/**
+ * ابتدای بازهٔ پوشش — قدیمی‌ترین تاریخی که buildRangeCharts می‌خواند:
+ * ابتدای سال شمسیِ جاری، مگر هفته‌ای که سال را قطع می‌کند (روزهای اول
+ * فروردین) که ابتدای هفتهٔ شنبه‌محور قدیمی‌تر است. کوئری‌های فراخوان
+ * با این کران، دادهٔ کافی برای هر چهار نما می‌گیرند.
+ */
+export function currentPeriodStart(): Date {
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12)
+        const tj = gregorianToJalali(today)
+        const yearStart = jalaliToGregorian({ year: tj.year, month: 1, day: 1 })
+        yearStart.setHours(0, 0, 0, 0) // مرز نیمه‌شب — سفارش‌های صبح روز اول داخل بمانند
+        const ws = weekStart(today)
+        return yearStart.getTime() < ws.getTime() ? yearStart : ws
+}
 
-  return { daily, weekly, monthly, yearly }
+export function buildRangeCharts(items: ReadonlyArray<ChartItem>): RangeCharts {
+        // ظهرِ امروز — لنگر مرزها؛ مصون از جابه‌جایی ساعت در محاسبات روزانه
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12)
+        const todayKey = localDateKey(today)
+
+        // یک پاس: جمع روزانه + باکت‌های ۴ساعتهٔ امروز
+        const byDay = new Map<string, number>()
+        const buckets = [0, 0, 0, 0, 0, 0]
+        for (const it of items) {
+                const k = localDateKey(it.date)
+                byDay.set(k, (byDay.get(k) ?? 0) + it.value)
+                if (k === todayKey) {
+                        const b = Math.floor(it.date.getHours() / 4)
+                        buckets[b] = (buckets[b] ?? 0) + it.value
+                }
+        }
+
+        // ── daily — امروز در ۶ ستونِ ۴ساعته ──
+        const daily: ChartPoint[] = FOUR_HOUR_LABELS.map((label, i) => ({
+                label,
+                value: buckets[i] ?? 0,
+        }))
+
+        // ── weekly — هفتهٔ جاری شنبه تا جمعه (۷ ستون) ──
+        const ws = weekStart(today)
+        const weekly: ChartPoint[] = Array.from({ length: 7 }, (_, i) => {
+                const d = addDays(ws, i)
+                return { label: F_WEEKDAY.format(d), value: byDay.get(localDateKey(d)) ?? 0 }
+        })
+
+        // ── monthly — روزهای ماه شمسیِ جاری (۲۹/۳۰/۳۱) ──
+        const tj = gregorianToJalali(today)
+        const monthLen = daysInJalaliMonth(tj.year, tj.month)
+        const monthStart = jalaliToGregorian({ year: tj.year, month: tj.month, day: 1 })
+        const monthly: ChartPoint[] = Array.from({ length: monthLen }, (_, i) => {
+                const d = addDays(monthStart, i)
+                return { label: F_DAY.format(d), value: byDay.get(localDateKey(d)) ?? 0 }
+        })
+
+        // ── yearly — ۱۲ ماه سال شمسیِ جاری ──
+        const yearly: ChartPoint[] = JALALI_MONTHS.map((label, idx) => {
+                const month = idx + 1
+                const start = jalaliToGregorian({ year: tj.year, month, day: 1 })
+                let value = 0
+                for (let day = 0; day < daysInJalaliMonth(tj.year, month); day++) {
+                        value += byDay.get(localDateKey(addDays(start, day))) ?? 0
+                }
+                return { label, value }
+        })
+
+        return { daily, weekly, monthly, yearly }
 }

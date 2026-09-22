@@ -12,9 +12,10 @@ import {
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
-import { asUserId, type UserId } from '#/domain/shared/brand'
+import { asUserId } from '#/domain/shared/brand'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
+import type { AdminSessionDto, SubAdminRecordDto } from '@sinshin/shared'
 
 /** ساختار scope — از دو ستون boolean */
 export interface Admin2Scope {
@@ -34,16 +35,6 @@ export interface Admin2Permissions extends Admin2Scope {
     orderDetailsRead: boolean
     canToggleTemporaryClose: boolean
     canEditPackagingFee: boolean
-}
-
-export interface Admin2Public {
-    userId: UserId
-    phone: string
-    firstName: string | null
-    lastName: string | null
-    isActive: boolean
-    ordersConfirmed: number
-    permissions: Admin2Permissions
 }
 
 /**
@@ -164,17 +155,37 @@ export class Admin2Service {
         }
     }
 
-    /** لیست ادمین‌های ۲ — پنل ادمین اصلی */
-    async list(): Promise<Admin2Public[]> {
+    /** لیست ادمین‌های ۲ — پنل ادمین اصلی
+     *
+     * stage-15: قرارداد کامل (SubAdminRecordDto) رعایت می‌شود — قبلاً
+     * sessions/lastActivity غایب بودند و صفحهٔ لیست «invalid date» و
+     * صفحهٔ جزئیات «admin.sessions is not iterable» می‌گرفت.
+     * sessions در لیست [] است (UI لیست فقط lastActivity می‌خواهد)؛
+     * lastActivity با یک کوئری تجمیعی روی همهٔ سشن‌ها محاسبه می‌شود.
+     */
+    async list(): Promise<SubAdminRecordDto[]> {
         const rows = await this.deps.db
             .select({ u: users, p: admin2Profiles })
             .from(admin2Profiles)
             .innerJoin(users, eq(users.id, admin2Profiles.userId))
             .orderBy(desc(admin2Profiles.createdAt))
-        return rows.map(({ u, p }) => this.toPublic(u, p))
+
+        const lastActs = await this.deps.db
+            .select({
+                adminUserId: admin2Sessions.adminUserId,
+                last: sql<Date | null>`max(coalesce(${admin2Sessions.lastActivityAt}, ${admin2Sessions.loginAt}))`,
+            })
+            .from(admin2Sessions)
+            .groupBy(admin2Sessions.adminUserId)
+        const lastByAdmin = new Map(lastActs.map((r) => [r.adminUserId, r.last]))
+
+        return rows.map(({ u, p }) =>
+            this.toRecord(u, p, [], lastByAdmin.get(asUserId(u.id)) ?? null),
+        )
     }
 
-    async detail(adminUserId: string) {
+    /** جزئیات — سشن‌ها (گزارش حضور) + lastActivity واقعی */
+    async detail(adminUserId: string): Promise<SubAdminRecordDto> {
         const uid = asUserId(adminUserId)
         const row = await this.deps.db
             .select({ u: users, p: admin2Profiles })
@@ -183,7 +194,13 @@ export class Admin2Service {
             .where(eq(admin2Profiles.userId, uid))
             .then((r) => r[0])
         if (!row) throw Err.notFound('ادمین سطح ۲ پیدا نشد.')
-        return this.toPublic(row.u, row.p)
+
+        const sessions = await this.sessions(adminUserId)
+        const lastActivity = sessions.reduce<Date | null>((acc, s) => {
+            const t = s.lastActivityAt ?? s.loginAt
+            return !acc || t > acc ? t : acc
+        }, null)
+        return this.toRecord(row.u, row.p, sessions, lastActivity)
     }
 
     // ── فعالیت‌ها — گزارش کامل با فیلتر ──
@@ -223,10 +240,17 @@ export class Admin2Service {
     }
 
     /** سشن‌های یک ادمین — بخش «گزارش حضور» گسترش‌یافته */
-    async sessions(adminUserId: string) {
+    async sessions(adminUserId: string): Promise<
+        Array<{ loginAt: Date; logoutAt: Date | null; wasActive: boolean; lastActivityAt: Date | null }>
+    > {
         const uid = asUserId(adminUserId)
         return this.deps.db
-            .select()
+            .select({
+                loginAt: admin2Sessions.loginAt,
+                logoutAt: admin2Sessions.logoutAt,
+                wasActive: admin2Sessions.wasActive,
+                lastActivityAt: admin2Sessions.lastActivityAt,
+            })
             .from(admin2Sessions)
             .where(eq(admin2Sessions.adminUserId, uid))
             .orderBy(desc(admin2Sessions.loginAt))
@@ -357,7 +381,13 @@ export class Admin2Service {
         return sql`false` // بدون scope — هیچ
     }
 
-    private toPublic(u: UserRow, p: typeof admin2Profiles.$inferSelect): Admin2Public {
+    /** رکورد کامل قرارداد — sessions فقط در detail پر می‌شود */
+    private toRecord(
+        u: UserRow,
+        p: typeof admin2Profiles.$inferSelect,
+        sessions: AdminSessionDto[],
+        lastActivity: Date | null,
+    ): SubAdminRecordDto {
         return {
             userId: asUserId(u.id),
             phone: u.phone,
@@ -380,6 +410,8 @@ export class Admin2Service {
                 canToggleTemporaryClose: p.canToggleTemporaryClose,
                 canEditPackagingFee: p.canEditPackagingFee,
             },
+            sessions,
+            lastActivity,
         }
     }
 

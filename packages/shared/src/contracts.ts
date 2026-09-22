@@ -510,6 +510,9 @@ export interface AdminUsersData {
 }
 
 // phase-0: تایپ‌های کمکی چارت — ساختار عوض نشده
+// stage-15: معنای بازه‌ها عوض شد (سازندهٔ API):
+//   daily  = امروز در ۶ ستونِ ۴ساعته | weekly = هفتهٔ جاری شنبه→جمعه
+//   monthly = روزهای ماه شمسیِ جاری | yearly = ۱۲ ماه سال شمسیِ جاری
 export interface ChartPoint {
   label: string
   value: number
@@ -565,8 +568,9 @@ export interface SubAdminPermissionsDto {
   orderDetailsRead: boolean
   canToggleTemporaryClose?: boolean
   canEditPackagingFee?: boolean
-  scopeHall?: boolean
-  scopeTakeaway?: boolean
+  /** stage-15 — نام واقعی روی سیم (قبلاً scopeHall/scopeTakeaway بود که API هرگز نمی‌فرستاد) */
+  hall?: boolean
+  takeaway?: boolean
 }
 
 export interface SubAdminRecordDto {
@@ -577,8 +581,10 @@ export interface SubAdminRecordDto {
   isActive: boolean
   ordersConfirmed: number
   permissions: SubAdminPermissionsDto
+  /** فقط در detail پر می‌شود — لیست برای سبکی [] برمی‌گرداند */
   sessions: AdminSessionDto[]
-  lastActivity: Date
+  /** stage-15: ادمینی که هنوز لاگین نکرده → null (کلاینت «—» نشان دهد) */
+  lastActivity: Date | null
 }
 
 export interface CourierOptionDto {
@@ -683,7 +689,8 @@ export interface AdminStatsDto {
   activeUsers: number
   totalRevenue: number
   totalOrders: number
-  chartData: { date: string; sales: number; rawRegs: number; refRegs: number; views: number }[]
+  /** stage-15: چارت‌ها سمت API با buildRangeCharts ساخته می‌شوند */
+  chartData: RangeCharts
   recentOrders: { id: string; user: string; amount: number; status: string; date: Date }[]
   latestUsers: { id: UserId; phone: string; name: string; device: string; registeredAt: Date }[]
 }

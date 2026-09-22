@@ -71,9 +71,10 @@ export function AdminChart({ chartType, data }: AdminChartProps) {
     )
   }
 
-  // Line Chart
+  // Line Chart — RTL (stage-15): زمان از راست به چپ جریان دارد (هم‌راستا با
+  // نمودار میله‌ای که در dir="rtl" رندر می‌شود) — ستون اول = راست‌ترین نقطه.
   const points = data.map((d, i) => {
-    const x = data.length > 1 ? (i / (data.length - 1)) * 100 : 50;
+    const x = data.length > 1 ? 100 - (i / (data.length - 1)) * 100 : 50;
     const y = 100 - (d.value / maxVal) * 85 - 5;
     return { x, y, value: d.value, label: d.label };
   });
