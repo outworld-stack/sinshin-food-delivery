@@ -58,6 +58,9 @@ export interface StaffInvoice {
 	courierName: string | null
 	courierPhone: string | null
 	courierSecurityEnabled: boolean
+	/** round-14 — یادداشت ادمین تاییدکننده + پرچم چاپ آن در فاکتور فروش (بیرون‌بر) */
+	internalNote: string | null
+	internalNotePrint: boolean
 	items: StaffInvoiceItem[]
 	breakdown: OrderBreakdown
 }
@@ -373,6 +376,8 @@ export async function confirmLiveOrder(input: {
 	orderId: string
 	courierId?: string | null
 	courierNote?: string | null
+	/** round-14 — یادداشت روی فاکتور بیرون‌بر چاپ شود؟ */
+	notePrintOnInvoice?: boolean
 	securityEnabled?: boolean
 }): Promise<{ success: boolean; message?: string }> {
 	return authJson<{ success: boolean; message?: string }>(
@@ -381,6 +386,7 @@ export async function confirmLiveOrder(input: {
 		{
 			courierId: input.courierId ?? null,
 			courierNote: input.courierNote ?? null,
+			notePrintOnInvoice: input.notePrintOnInvoice ?? false,
 			securityEnabled: input.securityEnabled ?? false,
 		},
 	)
@@ -458,7 +464,10 @@ export interface RestaurantFullStatus {
 }
 
 export async function getRestaurantStatusFull(): Promise<RestaurantFullStatus> {
-	return authJson<RestaurantFullStatus>('/admin/settings/restaurant/status', 'GET')
+	return authJson<RestaurantFullStatus>(
+		'/admin/settings/restaurant/status',
+		'GET',
+	)
 }
 
 export async function setTemporaryClose(input: {

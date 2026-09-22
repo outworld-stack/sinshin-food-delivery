@@ -8,6 +8,11 @@
 // round-13 — هر فاکتور سندِ چاپ «جداگانه» است: بعد از تایید سفارش،
 // فاکتور اشپزخانه و فاکتور فروش پشت‌سرهم (هر کدام یک پنجرهٔ چاپ) ارسال
 // می‌شوند تا هر کدام روی پرینتر خودش (آشپزخانه / میز بیرون‌بر) چاپ شود.
+//
+// round-14 — فرمت «رسیدی 80mm»: پرینترهای مغازه ستونی‌اند و از موبایل چاپ
+// می‌گیرند — چاپ A4 دسکتاپی روی آن‌ها بریده/ریز می‌شد. حالا هر دو فاکتور
+// با paper:'receipt' ساخته می‌شوند: عرض 80mm، طول رول (auto)، آمار به‌صورت
+// ردیف عمودی، QR وسط‌چین. جدول فروش هم باریک‌تر شد (سایز داخل نام محصول).
 
 import {
         type PrintDocumentSpec,
@@ -39,9 +44,14 @@ export function courierScanUrl(order: {
         return `${window.location.origin}/courier/scan/${order.orderId}${suffix}`
 }
 
+/** نام محصول + سایز در یک سلول — جدول باریک رسیدی */
+function itemLabel(name: string, sizeName: string | null): string {
+        return sizeName ? `${name} (${sizeName})` : name
+}
+
 function kitchenSection(inv: StaffInvoice) {
         return {
-                heading: `فاکتور اشپزخانه — سفارش ${inv.orderId}`,
+                heading: `اشپزخانه — ${inv.orderId}`,
                 metaLines: [
                         `تاریخ: ${formatDate(inv.date)}`,
                         `نوع تحویل: ${DELIVERY_LABEL[inv.deliveryType]}`,
@@ -63,10 +73,8 @@ function kitchenSection(inv: StaffInvoice) {
 
 async function salesSection(inv: StaffInvoice) {
         const rows = inv.items.map((i) => [
-                i.name,
-                i.sizeName ?? '—',
+                itemLabel(i.name, i.sizeName),
                 i.quantity.toLocaleString('fa-IR'),
-                formatPrice(i.price),
                 formatPrice(i.price * i.quantity),
         ])
         const b = inv.breakdown
@@ -104,30 +112,41 @@ async function salesSection(inv: StaffInvoice) {
         const qr =
                 inv.deliveryType === 'DELIVERY'
                         ? {
-                                        svg: await qrSvgMarkup(courierScanUrl(inv), 220),
-                                        orderId: inv.orderId,
-                                        caption: inv.courierSecurityEnabled
-                                                ? 'این QR فقط برای پیک تخصیص‌یافتهٔ این سفارش قابل اسکن است.'
-                                                : 'پیک: برای شروع ارسال، این QR را با گوشی خود اسکن کنید.',
-                                }
+                                svg: await qrSvgMarkup(courierScanUrl(inv), 220),
+                                orderId: inv.orderId,
+                                caption: inv.courierSecurityEnabled
+                                        ? 'این QR فقط برای پیک تخصیص‌یافتهٔ این سفارش قابل اسکن است.'
+                                        : 'پیک: برای شروع ارسال، این QR را با گوشی خود اسکن کنید.',
+                        }
                         : undefined
 
+        // round-14 — یادداشت ادمین (تاییدکننده): فقط اگر سوییچ «چاپ در فاکتور
+        // بیرون‌بر» موقع تایید روشن شده باشد، روی این نسخه چاپ می‌شود.
+        const adminNote =
+                inv.internalNote && inv.internalNotePrint
+                        ? `یادداشت فروشگاه: ${inv.internalNote}`
+                        : undefined
+        const noteParts = [
+                inv.customerNote ? `نکته مشتری: ${inv.customerNote}` : null,
+                adminNote,
+        ].filter((x): x is string => !!x)
+
         return {
-                heading: `فاکتور فروش — سفارش ${inv.orderId}`,
+                heading: `فاکتور فروش — ${inv.orderId}`,
                 metaLines: meta,
                 stats,
                 tables: [
                         {
-                                head: ['محصول', 'سایز', 'تعداد', 'قیمت واحد (تومان)', 'جمع (تومان)'],
+                                head: ['محصول', 'تعداد', 'جمع (تومان)'],
                                 rows,
                         },
                 ],
-                note: inv.customerNote ? `نکته مشتری: ${inv.customerNote}` : undefined,
+                note: noteParts.length > 0 ? noteParts.join(' | ') : undefined,
                 qr,
         }
 }
 
-/** round-13 — یک spec مستقل به‌ازای هر نوع فاکتور (فایل/دیالوگ چاپ جدا) */
+/** یک spec مستقل به‌ازای هر نوع فاکتور — فرمت رسیدی 80mm (round-14) */
 async function buildSpecs(
         inv: StaffInvoice,
         kinds: InvoiceKind[],
@@ -137,6 +156,7 @@ async function buildSpecs(
                 specs.push({
                         fileName: `sinshin-kitchen-${inv.orderId}`,
                         brand: 'سین‌شین فودپارک',
+                        paper: 'receipt',
                         sections: [kitchenSection(inv)],
                         footerNote: 'فاکتور اشپزخانه — بدون قیمت',
                 })
@@ -145,6 +165,7 @@ async function buildSpecs(
                 specs.push({
                         fileName: `sinshin-sales-${inv.orderId}`,
                         brand: 'سین‌شین فودپارک',
+                        paper: 'receipt',
                         sections: [await salesSection(inv)],
                         footerNote: 'از خرید شما سپاسگزاریم',
                 })

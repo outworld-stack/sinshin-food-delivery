@@ -20,11 +20,18 @@
 //  • سیستم کشی: React Query با کلیدِ کامل فیلترها + staleTime ۵ دقیقه.
 
 import { useQuery } from '@tanstack/react-query'
-import { memo, useCallback, useMemo, useReducer, useState } from 'react'
+import {
+	memo,
+	useCallback,
+	useEffect,
+	useMemo,
+	useReducer,
+	useState,
+} from 'react'
 import { FileText, Printer, Search, X } from 'reicon-react'
 import { Skeleton } from '#/components/LoadingSkeletons'
 import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
-import { printHtmlDocument } from '#/lib/printDocument'
+import { type PrintPaper, printHtmlDocument } from '#/lib/printDocument'
 import { type AdminReportType, queryAdminReport } from '#/server/reports'
 import { useToastStore } from '#/stores/toastStore'
 import { formatDate } from '#/utils/format'
@@ -222,12 +229,38 @@ const faJalali = (iso: string | null): string => {
 	return j ? formatJalali(j) : 'ابتدای داده‌ها'
 }
 
+// round-14 — قالب چاپ گزارش: ستونی/رسیدی (موبایل) یا دسکتاپ/A4 — انتخاب
+// کاربر در localStorage می‌ماند تا هر بار دوباره تنظیم نشود.
+const PRINT_MODE_KEY = 'sinshin-report-print-mode'
+function loadPrintMode(): PrintPaper {
+	try {
+		const v = localStorage.getItem(PRINT_MODE_KEY)
+		return v === 'receipt' ? 'receipt' : 'a4'
+	} catch {
+		return 'a4'
+	}
+}
+
 export const ReportsBox = memo(function ReportsBox() {
 	const [state, dispatch] = useReducer(reportsReducer, initialState)
 	// فیلترهای «کامیت‌شده» — کوئری فقط با دکمه‌ی تولید شروع می‌شود؛
 	// تغییر فیلترها نتیجه‌ی روی صفحه را وسط کار عوض نمی‌کند.
 	const [committed, setCommitted] = useState<ReportsState | null>(null)
 	const showToast = useToastStore((s) => s.showToast)
+
+	// round-14 — قالب چاپ (ستونی/موبایل ↔ دسکتاپ) — پس از mount از localStorage
+	const [printMode, setPrintMode] = useState<PrintPaper>('a4')
+	useEffect(() => {
+		setPrintMode(loadPrintMode())
+	}, [])
+	const changePrintMode = useCallback((mode: PrintPaper) => {
+		setPrintMode(mode)
+		try {
+			localStorage.setItem(PRINT_MODE_KEY, mode)
+		} catch {
+			/* noop */
+		}
+	}, [])
 
 	// دراپ‌داون‌ها — ادمین‌های سطح ۲ فقط برای گزارشِ کارشان؛ audit لاگِ
 	// ادمین اصلی است و فیلتر ادمین رویش بی‌معنا بود (round-12 حذف شد)
@@ -291,14 +324,15 @@ export const ReportsBox = memo(function ReportsBox() {
 		setCommitted({ ...state })
 	}, [state, showToast])
 
-	// ── چاپ — سند مستقل؛ landscape خودکار برای جدول‌های پهن ──
+	// ── چاپ — سند مستقل؛ landscape خودکار برای جدول‌های پهن (فقط A4) ──
 	const handlePrint = useCallback(() => {
 		if (!report) return
 		const widest = Math.max(0, ...report.tables.map((t) => t.head.length))
 		printHtmlDocument({
 			fileName: `sinshin-report-${committed?.type ?? 'report'}`,
 			brand: 'سین‌شین فودپارک',
-			landscape: widest >= 8,
+			paper: printMode,
+			landscape: printMode === 'a4' && widest >= 8,
 			sections: [
 				{
 					heading: report.title,
@@ -315,8 +349,12 @@ export const ReportsBox = memo(function ReportsBox() {
 			],
 			footerNote: 'گزارش رسمی سین‌شین',
 		})
-		showToast('از گزینه «Save as PDF» در پنجره چاپ استفاده کنید')
-	}, [report, committed, showToast])
+		showToast(
+			printMode === 'receipt'
+				? 'قالب ستونی (رسیدی) — در پنجره چاپ، پرینتر رسیدی خود را انتخاب کنید'
+				: 'از گزینه «Save as PDF» در پنجره چاپ استفاده کنید',
+		)
+	}, [report, committed, printMode, showToast])
 
 	const activeType = REPORT_TYPES.find((t) => t.key === state.type)
 	const hasDates = state.fromJalali || state.toJalali
@@ -619,35 +657,63 @@ export const ReportsBox = memo(function ReportsBox() {
 								{report.tables.length.toLocaleString('fa-IR')} جدول
 							</p>
 						</div>
-						<button
-							type="button"
-							onClick={handlePrint}
-							disabled={totalRows === 0 && report.stats.length === 0}
-							className="px-6 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 self-stretch lg:self-auto"
-						>
-							<Printer size={16} />
-							چاپ / ذخیره PDF
-						</button>
+						<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+							{/* round-14 — انتخاب قالب چاپ: ستونی (رسیدی/موبایل) یا دسکتاپ (A4) */}
+							<div className="flex items-center gap-1 p-1 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
+								<button
+									type="button"
+									onClick={() => changePrintMode('receipt')}
+									aria-pressed={printMode === 'receipt'}
+									title="چاپ ستونی در سایز موبایل — مناسب پرینترهای رسیدی مغازه"
+									className={`px-3 py-2 rounded-lg text-xs font-DanaDemiBold transition cursor-pointer whitespace-nowrap ${
+										printMode === 'receipt'
+											? 'bg-primary dark:bg-dark-primary text-white shadow-sm'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+									}`}
+								>
+									ستونی / موبایل
+								</button>
+								<button
+									type="button"
+									onClick={() => changePrintMode('a4')}
+									aria-pressed={printMode === 'a4'}
+									title="چاپ در سایز دسکتاپ — A4 (افقی برای جدول‌های پهن)"
+									className={`px-3 py-2 rounded-lg text-xs font-DanaDemiBold transition cursor-pointer whitespace-nowrap ${
+										printMode === 'a4'
+											? 'bg-primary dark:bg-dark-primary text-white shadow-sm'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+									}`}
+								>
+									دسکتاپ / A4
+								</button>
+							</div>
+							<button
+								type="button"
+								onClick={handlePrint}
+								disabled={totalRows === 0 && report.stats.length === 0}
+								className="px-6 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+							>
+								<Printer size={16} />
+								چاپ / ذخیره PDF
+							</button>
+						</div>
 					</div>
 
 					{report.stats.length > 0 && (
 						<div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-							{report.stats.map((s, i) => {
-								// biome-ignore lint/suspicious/noArrayIndexKey: آمار سرور-ساخته — رشته‌ی خام بدون شناسه؛ ایندکس همان شناسه است
-								return (
-									<div
-										key={i}
-										className="bg-gray-50 dark:bg-[#1a0a0e] p-3.5 rounded-xl text-center"
-									>
-										<p className="text-[11px] text-gray-400 font-DanaMedium mb-1">
-											{s.label}
-										</p>
-										<p className="font-DanaDemiBold text-primary dark:text-dark-primary text-sm">
-											{s.value}
-										</p>
-									</div>
-								)
-							})}
+							{report.stats.map((s) => (
+								<div
+									key={s.label}
+									className="bg-gray-50 dark:bg-[#1a0a0e] p-3.5 rounded-xl text-center"
+								>
+									<p className="text-[11px] text-gray-400 font-DanaMedium mb-1">
+										{s.label}
+									</p>
+									<p className="font-DanaDemiBold text-primary dark:text-dark-primary text-sm">
+										{s.value}
+									</p>
+								</div>
+							))}
 						</div>
 					)}
 

@@ -5,7 +5,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { QRCodeSVG } from 'qrcode.react'
-import { ReferralApplyBox } from '#/components/dashboard/ReferralApplyBox'
 import { Skeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import type { UserOrder } from '#/server/user'
@@ -361,47 +360,8 @@ function DashboardHome() {
 				</div>
 			</div>
 
-			{/* باکس معرف من */}
-			<div className="bg-white dark:bg-[#2a1015] p-6 md:p-8 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-				<h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-4">
-					معرف من
-				</h2>
-				{user.referrerCode ? (
-					<div className="flex items-center gap-3 p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5">
-						<div className="w-10 h-10 rounded-lg bg-primary/10 dark:bg-dark-primary/10 flex items-center justify-center text-primary dark:text-dark-primary">
-							<svg
-								width="20"
-								height="20"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								strokeWidth="2"
-							>
-								<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-								<circle cx="9" cy="7" r="4" />
-								<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-								<path d="M16 3.13a4 4 0 0 1 0 7.75" />
-							</svg>
-						</div>
-						<div>
-							<p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">
-								من با کد معرف زیر ثبت‌نام کردم:
-							</p>
-							<p className="font-DanaDemiBold text-lg text-gray-800 dark:text-white tracking-wider">
-								{user.referrerCode}
-							</p>
-						</div>
-					</div>
-				) : (
-					<div className="space-y-4">
-						<p className="text-center text-gray-400 dark:text-gray-500 font-DanaMedium">
-							شما زیر مجموعه ی کسی نیستید.
-						</p>
-						{/* round-12 — ثبت معرف با اسکن QR / ورود دستی (قبلاً فقط متن خالی بود) */}
-						<ReferralApplyBox />
-					</div>
-				)}
-			</div>
+			{/* round-14 — باکس «معرف من» حذف شد: امکان معرفی معرف فقط لحظه‌ی ثبت‌نام وجود دارد؛
+                            باکس زیرمجموعه‌ها سر جایش است */}
 
 			{/* باکس زیرمجموعه‌های من */}
 			<div className="bg-white dark:bg-[#2a1015] p-6 md:p-8 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">

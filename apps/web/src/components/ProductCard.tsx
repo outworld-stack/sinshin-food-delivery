@@ -82,7 +82,8 @@ export const ProductCard = memo(function ProductCard({
 				</div>
 			)}
 
-			<div className="p-4 flex flex-col flex-1">
+			{/* round-14 — موبایل: پدینگ جمع‌تر، قیمت/«تومان» و آیکون سبد کوچک‌تر تا کارت در عرض کم نشکند */}
+			<div className="p-3 sm:p-4 flex flex-col flex-1">
 				{interactive ? (
 					<Link to="/products/$productId" params={{ productId: product.id }}>
 						<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-1 hover:text-primary dark:hover:text-dark-primary transition-colors">
@@ -121,15 +122,15 @@ export const ProductCard = memo(function ProductCard({
 				<div className="mt-auto flex items-center justify-between gap-2 pt-3 border-t border-gray-100 dark:border-white/5">
 					<div className="flex flex-col">
 						{showDiscount && (
-							<span className="text-xs text-gray-400 line-through font-DanaRegular">
+							<span className="text-[11px] sm:text-xs text-gray-400 line-through font-DanaRegular">
 								{formatPrice(product.originalPrice)}
 							</span>
 						)}
 						<div className="flex items-center gap-1">
-							<span className="font-DanaDemiBold text-lg text-gray-900 dark:text-white">
+							<span className="font-DanaDemiBold text-[15px] sm:text-lg text-gray-900 dark:text-white">
 								{formatPrice(displayPrice)}
 							</span>
-							<span className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium mr-1">
+							<span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 font-DanaMedium mr-0.5 sm:mr-1">
 								تومان
 							</span>
 						</div>
@@ -137,10 +138,10 @@ export const ProductCard = memo(function ProductCard({
 
 					<button
 						onClick={handleAddToCart}
-						className="cursor-pointer flex items-center justify-center p-3 rounded-xl bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition-colors duration-300 shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30"
+						className="cursor-pointer flex items-center justify-center p-2 sm:p-3 rounded-xl bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition-colors duration-300 shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30 shrink-0"
 						aria-label="افزودن به سبد خرید"
 					>
-						<Cart size={24} />
+						<Cart size={24} className="h-[18px] w-[18px] sm:h-6 sm:w-6" />
 					</button>
 				</div>
 			</div>
