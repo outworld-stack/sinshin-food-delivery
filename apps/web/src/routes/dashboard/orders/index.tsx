@@ -6,7 +6,7 @@
 //   ✗ رفرش = برگشت به صفحه ۱ و سورت پیش‌فرض
 //   ✗ «گران‌ترین‌ها، صفحه ۲» قابل اشتراک‌گذاری نبود
 import { createFileRoute, Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useMemo } from 'react'
 import { z } from 'zod'
 import { userProfileOptions } from '#/utils/queryOptions'
@@ -15,8 +15,11 @@ import { formatPrice, formatDate } from '#/utils/format'
 import { Pagination } from '#/components/Pagination'
 import { DashboardOrdersSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
-import { ShoppingBag, Wallet } from 'reicon-react'
+import { ShoppingBag, Wallet, Check } from 'reicon-react'
 import { StatusBadge } from '#/components/shared/StatusBadge'
+import { confirmOrderDelivery } from '#/server/user'
+import { qk } from '#/utils/queryKeys'
+import { useToastStore } from '#/stores/toastStore'
 
 // --- اسکیمای search: سورت تاریخچه + شماره صفحه ---
 export const dashboardOrdersSearchSchema = z.object({
@@ -31,9 +34,25 @@ const ITEMS_PER_PAGE = 5;
 const OrdersPage = memo(function OrdersPage() {
   const search = useSearch({ from: '/dashboard/orders/' })
   const navigate = useNavigate({ from: '/dashboard/orders/' })
+  const queryClient = useQueryClient()
+  const showToast = useToastStore((s) => s.showToast)
 
   // پروفایل — staleTime از فکتوری (۶۰s)؛ loader همین کلید را روی هاور پر کرده
   const { data: user, isLoading } = useQuery(userProfileOptions)
+
+  // round-13 — «تحویل گرفتم» روی هر ردیف: سفارش سبز (DELIVERED) می‌شود؛
+  // با تحویل همه، نشانگر چشمک‌زن سبز هدر هم خودش خاموش می‌شود
+  // (invalidation پریفکس ['user-profile'] → حالت light هدر هم رفرش می‌شود).
+  const deliverMutation = useMutation({
+    mutationFn: (orderId: string) => confirmOrderDelivery({ data: { orderId } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.userProfile })
+      showToast('تحویل سفارش ثبت شد')
+    },
+    onError: (err) => {
+      showToast(err instanceof Error ? err.message : 'ثبت تحویل ناموفق بود', 'error')
+    },
+  })
 
   const sortedOrders = useMemo(() => {
     if (!user) return [];
@@ -117,35 +136,57 @@ const OrdersPage = memo(function OrdersPage() {
 
             {currentOrders.length > 0 ? (
               <div className="space-y-4">
-                {currentOrders.map((order) => (
-                  <Link
-                    key={order.id}
-                    to="/dashboard/orders/$orderId"
-                    params={{ orderId: order.id }}
-                    className="flex flex-col md:flex-row md:items-center justify-between p-5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-white/5 hover:shadow-md transition cursor-pointer gap-4"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-primary/10 dark:bg-dark-primary/10 flex items-center justify-center text-primary dark:text-dark-primary shrink-0">
-                        <ShoppingBag size={24} />
-                      </div>
-                      <div>
-                        <p className="font-DanaDemiBold text-gray-800 dark:text-white">سفارش شماره {order.id}</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{formatDate(order.date)} • {order.itemCount} کالا</p>
-                      </div>
-                    </div>
+                {currentOrders.map((order) => {
+                  // امن-۷: فقط CONFIRMED/ON_THE_WAY قابل تایید تحویل است
+                  const canDeliver =
+                    order.status === 'CONFIRMED' || order.status === 'ON_THE_WAY'
+                  return (
+                    <div
+                      key={order.id}
+                      className="flex flex-col md:flex-row md:items-center justify-between p-5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-white/5 hover:shadow-md transition gap-4"
+                    >
+                      <Link
+                        to="/dashboard/orders/$orderId"
+                        params={{ orderId: order.id }}
+                        className="flex items-center gap-4 cursor-pointer min-w-0"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-primary/10 dark:bg-dark-primary/10 flex items-center justify-center text-primary dark:text-dark-primary shrink-0">
+                          <ShoppingBag size={24} />
+                        </div>
+                        <div>
+                          <p className="font-DanaDemiBold text-gray-800 dark:text-white">سفارش شماره {order.id}</p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{formatDate(order.date)} • {order.itemCount} کالا</p>
+                        </div>
+                      </Link>
 
-                    <div className="flex items-center justify-between md:justify-end gap-6">
-                      <div className="text-right">
-                        <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">وضعیت</p>
-                        <StatusBadge status={order.paymentStatus === 'FAILED' ? 'PAYMENT_FAILED' : order.status} />
+                      <div className="flex items-center justify-between md:justify-end gap-6">
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">وضعیت</p>
+                          <StatusBadge status={order.paymentStatus === 'FAILED' ? 'PAYMENT_FAILED' : order.status} />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">مبلغ</p>
+                          <p className="font-DanaDemiBold text-gray-900 dark:text-white">{formatPrice(order.totalAmount)} ت</p>
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">مبلغ</p>
-                        <p className="font-DanaDemiBold text-gray-900 dark:text-white">{formatPrice(order.totalAmount)} ت</p>
-                      </div>
+
+                      {/* round-13 — دکمه تحویل گرفتم، خارج از لینک (بدون تداخل کلیک) */}
+                      {canDeliver && (
+                        <button
+                          type="button"
+                          onClick={() => deliverMutation.mutate(order.id)}
+                          disabled={deliverMutation.isPending && deliverMutation.variables === order.id}
+                          className="shrink-0 px-5 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white text-sm font-DanaDemiBold cursor-pointer transition disabled:opacity-50 flex items-center justify-center gap-2 w-full md:w-auto"
+                        >
+                          <Check size={18} />
+                          {deliverMutation.isPending && deliverMutation.variables === order.id
+                            ? 'در حال ثبت...'
+                            : 'تحویل گرفتم'}
+                        </button>
+                      )}
                     </div>
-                  </Link>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <div className="text-center py-16 bg-gray-50 dark:bg-[#1a0a0e] rounded-xl border border-dashed border-gray-300 dark:border-white/5">

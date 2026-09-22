@@ -92,6 +92,8 @@ export const qk = {
   // پرچم‌های صفحه‌ی تنظیمات — بعد از ذخیره invalidate می‌شن
   settingsTracking: ['settings-tracking'] as const,
   settingsRestaurant: ['settings-restaurant'] as const,
+  // round-13 — وضعیت کامل (بسته موقت + علت) برای کارت بسته/باز موقت
+  settingsRestaurantStatus: ['settings-restaurant-status'] as const,
 
   // phase-fix — پرچم «فقط ایران»
   settingsIranOnly: ['settings-iran-only'] as const,

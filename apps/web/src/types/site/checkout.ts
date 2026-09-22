@@ -7,6 +7,8 @@ export type CouponStatus = 'NONE' | 'HAVE'
 export interface RestaurantStatus {
   isOpen: boolean
   nextOpenTime: string
+  /** round-13 — علت بسته‌شدن موقت (فقط وقتی موقتاً بسته باشد) */
+  closeReason?: string | null
 }
 
 // فاکتور (خروجی سرور) — صفحه‌ی چاپ فاکتور

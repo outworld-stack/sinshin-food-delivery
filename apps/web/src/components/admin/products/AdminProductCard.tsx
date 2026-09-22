@@ -1,4 +1,6 @@
 // src/components/admin/products/AdminProductCard.tsx
+// round-13 — ستون عکس حذف شد (درخواست صریح): زیر «محصول» نام محصول،
+// زیر «دسته‌بندی» دسته‌بندی. عکس فقط در فرم/جزئیات دیده می‌شود.
 import { memo, useCallback } from 'react'
 import { Link } from '@tanstack/react-router'
 import { formatPrice } from '#/utils/format'
@@ -9,7 +11,6 @@ interface AdminProductCardProps {
   product: {
     id: string
     name: string
-    profileImage?: string | null
     prepTime: number
     finalPrice: number
     status: string
@@ -31,14 +32,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 
       {/* موبایل */}
       <div className="lg:hidden flex items-center gap-4">
-        {product.profileImage ? (
-          <img src={product.profileImage} alt={product.name} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-[#1a0a0e] text-gray-400 dark:text-gray-500 text-[10px] font-DanaMedium">
-            بدون عکس
-          </div>
-        )}
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">{product.name}</p>
           <p className="text-xs text-gray-400 mt-1">{categoryName} | {product.prepTime} دقیقه</p>
           <span className="text-sm font-DanaDemiBold text-primary dark:text-dark-primary mt-1 block">{formatPrice(product.finalPrice)} ت</span>
@@ -57,18 +51,9 @@ export const AdminProductCard = memo(function AdminProductCard({
 
       {/* دسکتاپ */}
       <div className="hidden lg:grid lg:grid-cols-5 gap-4 items-center text-right">
-        <div className="flex items-center gap-3">
-          {product.profileImage ? (
-            <img src={product.profileImage} alt={product.name} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-[#1a0a0e] text-gray-400 dark:text-gray-500 text-[10px] font-DanaMedium">
-              بدون عکس
-            </div>
-          )}
-          <div className="flex flex-col">
-            <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">{product.name}</p>
-            <p className="text-xs text-gray-400">{product.prepTime} دقیقه</p>
-          </div>
+        <div className="flex flex-col">
+          <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">{product.name}</p>
+          <p className="text-xs text-gray-400">{product.prepTime} دقیقه</p>
         </div>
         <div className="font-DanaMedium text-gray-600 dark:text-gray-300 text-sm">{categoryName || '-'}</div>
         <div className="font-DanaDemiBold text-gray-900 dark:text-white text-sm">{formatPrice(product.finalPrice)} ت</div>

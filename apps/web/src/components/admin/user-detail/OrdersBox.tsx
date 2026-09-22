@@ -52,8 +52,11 @@ export const OrdersBox = memo(function OrdersBox({ orders, addresses }: OrdersBo
         || (applied.filterAddr === 'null' ? o.addressId === null : o.addressId === applied.filterAddr)
       )
     )
-    if (applied.sortDate === 'newest') res = [...res].sort((a, b) => b.date.getTime() - a.date.getTime())
-    if (applied.sortDate === 'oldest') res = [...res].sort((a, b) => a.date.getTime() - b.date.getTime())
+    // round-13 — رفع کرش «b.date.getTime is not a function»:
+    // DTO این فیلدها را Date اعلام کرده ولی روی سیم JSON رشته است؛
+    // new Date() هر دو را می‌پوشاند (الگوی dashboard/orders).
+    if (applied.sortDate === 'newest') res = [...res].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    if (applied.sortDate === 'oldest') res = [...res].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     if (applied.sortAmount === 'highest') res = [...res].sort((a, b) => b.amount - a.amount)
     if (applied.sortAmount === 'lowest') res = [...res].sort((a, b) => a.amount - b.amount)
     return res

@@ -11,105 +11,105 @@
 // iOS Safari (iframe-print ندارد) → fallback پنجرهٔ جدید با همان سند.
 
 export interface PrintTableSpec {
-	title?: string
-	head: string[]
-	rows: string[][]
+        title?: string
+        head: string[]
+        rows: string[][]
 }
 
 export interface PrintQrSpec {
-	/** مارک‌آپ خام SVG (خروجی QRCodeSVG از qrSvgMarkup) */
-	svg: string
-	caption?: string
-	/** شناسه‌ای که زیر QR با فونت درشت چاپ می‌شود */
-	orderId?: string
+        /** مارک‌آپ خام SVG (خروجی QRCodeSVG از qrSvgMarkup) */
+        svg: string
+        caption?: string
+        /** شناسه‌ای که زیر QR با فونت درشت چاپ می‌شود */
+        orderId?: string
 }
 
 export interface PrintSectionSpec {
-	heading: string
-	metaLines?: string[]
-	stats?: { label: string; value: string }[]
-	tables: PrintTableSpec[]
-	note?: string
-	qr?: PrintQrSpec
-	/** جدول‌های درشت — فاکتور آشپزخانه برای خوانایی از دور */
-	bigTables?: boolean
-	/** صفحه‌بندی بعد از این سکشن (وقتی چند فاکتور پشت‌سرهم چاپ می‌شوند) */
-	pageBreakAfter?: boolean
+        heading: string
+        metaLines?: string[]
+        stats?: { label: string; value: string }[]
+        tables: PrintTableSpec[]
+        note?: string
+        qr?: PrintQrSpec
+        /** جدول‌های درشت — فاکتور آشپزخانه برای خوانایی از دور */
+        bigTables?: boolean
+        /** صفحه‌بندی بعد از این سکشن (وقتی چند فاکتور پشت‌سرهم چاپ می‌شوند) */
+        pageBreakAfter?: boolean
 }
 
 export interface PrintDocumentSpec {
-	/** نام پیشنهادی فایل PDF (عنوان سند لحظهٔ چاپ) */
-	fileName: string
-	brand: string
-	sections: PrintSectionSpec[]
-	landscape?: boolean
-	footerNote?: string
+        /** نام پیشنهادی فایل PDF (عنوان سند لحظهٔ چاپ) */
+        fileName: string
+        brand: string
+        sections: PrintSectionSpec[]
+        landscape?: boolean
+        footerNote?: string
 }
 
 // ── ابزارها ──
 
 const esc = (s: string): string =>
-	s
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
+        s
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
 
 const isIOS = (): boolean =>
-	/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-	(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
 function tableHtml(t: PrintTableSpec, big: boolean): string {
-	const cls = big ? 'tbl big' : 'tbl'
-	const head = t.head.map((h) => `<th>${esc(h)}</th>`).join('')
-	const body = t.rows.length
-		? t.rows
-				.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
-				.join('')
-		: `<tr><td colspan="${t.head.length}" class="empty">موردی یافت نشد</td></tr>`
-	const title = t.title ? `<p class="tbl-title">${esc(t.title)}</p>` : ''
-	return `${title}<table class="${cls}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+        const cls = big ? 'tbl big' : 'tbl'
+        const head = t.head.map((h) => `<th>${esc(h)}</th>`).join('')
+        const body = t.rows.length
+                ? t.rows
+                                .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
+                                .join('')
+                : `<tr><td colspan="${t.head.length}" class="empty">موردی یافت نشد</td></tr>`
+        const title = t.title ? `<p class="tbl-title">${esc(t.title)}</p>` : ''
+        return `${title}<table class="${cls}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
 }
 
 function sectionHtml(s: PrintSectionSpec): string {
-	const meta =
-		s.metaLines && s.metaLines.length > 0
-			? `<div class="meta">${s.metaLines.map((m) => `<div>${esc(m)}</div>`).join('')}</div>`
-			: ''
-	const stats =
-		s.stats && s.stats.length > 0
-			? `<div class="stats">${s.stats
-					.map(
-						(x) =>
-							`<div class="stat"><div class="l">${esc(x.label)}</div><div class="v">${esc(x.value)}</div></div>`,
-					)
-					.join('')}</div>`
-			: ''
-	const tables = s.tables
-		.map((t) => tableHtml(t, s.bigTables === true))
-		.join('')
-	const note = s.note ? `<div class="note">${esc(s.note)}</div>` : ''
-	const qr = s.qr
-		? `<div class="qr-box">${s.qr.svg}<div>${
-				s.qr.orderId
-					? `<div class="oid" dir="ltr">${esc(s.qr.orderId)}</div>`
-					: ''
-			}${s.qr.caption ? `<div class="cap">${esc(s.qr.caption)}</div>` : ''}</div></div>`
-		: ''
-	const brk = s.pageBreakAfter ? ' page-break' : ''
-	return `<section class="sheet${brk}"><h1 class="heading">${esc(s.heading)}</h1>${meta}${stats}${tables}${note}${qr}</section>`
+        const meta =
+                s.metaLines && s.metaLines.length > 0
+                        ? `<div class="meta">${s.metaLines.map((m) => `<div>${esc(m)}</div>`).join('')}</div>`
+                        : ''
+        const stats =
+                s.stats && s.stats.length > 0
+                        ? `<div class="stats">${s.stats
+                                        .map(
+                                                (x) =>
+                                                        `<div class="stat"><div class="l">${esc(x.label)}</div><div class="v">${esc(x.value)}</div></div>`,
+                                        )
+                                        .join('')}</div>`
+                        : ''
+        const tables = s.tables
+                .map((t) => tableHtml(t, s.bigTables === true))
+                .join('')
+        const note = s.note ? `<div class="note">${esc(s.note)}</div>` : ''
+        const qr = s.qr
+                ? `<div class="qr-box">${s.qr.svg}<div>${
+                                s.qr.orderId
+                                        ? `<div class="oid" dir="ltr">${esc(s.qr.orderId)}</div>`
+                                        : ''
+                        }${s.qr.caption ? `<div class="cap">${esc(s.qr.caption)}</div>` : ''}</div></div>`
+                : ''
+        const brk = s.pageBreakAfter ? ' page-break' : ''
+        return `<section class="sheet${brk}"><h1 class="heading">${esc(s.heading)}</h1>${meta}${stats}${tables}${note}${qr}</section>`
 }
 
 function documentHtml(spec: PrintDocumentSpec): string {
-	const origin = window.location.origin
-	const font = (family: string, file: string) =>
-		`@font-face{font-family:'${family}';src:url('${origin}/fonts/${file}') format('woff2');font-display:block;}`
-	const orientation = spec.landscape ? 'landscape' : 'portrait'
-	const sections = spec.sections.map(sectionHtml).join('')
-	const footer = spec.footerNote
-		? `<div class="footer">${esc(spec.footerNote)} — ${new Date().toLocaleDateString('fa-IR')}</div>`
-		: ''
-	return `<!doctype html>
+        const origin = window.location.origin
+        const font = (family: string, file: string) =>
+                `@font-face{font-family:'${family}';src:url('${origin}/fonts/${file}') format('woff2');font-display:block;}`
+        const orientation = spec.landscape ? 'landscape' : 'portrait'
+        const sections = spec.sections.map(sectionHtml).join('')
+        const footer = spec.footerNote
+                ? `<div class="footer">${esc(spec.footerNote)} — ${new Date().toLocaleDateString('fa-IR')}</div>`
+                : ''
+        return `<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8" />
@@ -162,56 +162,93 @@ ${footer}
  * مرورگر نام درست پیشنهاد دهد و بعد از بسته‌شدن دیالوگ برمی‌گردد.
  */
 export function printHtmlDocument(spec: PrintDocumentSpec): void {
-	const html = documentHtml(spec)
-	const prevTitle = document.title
-	document.title = spec.fileName
+        void printHtmlDocumentAndWait(spec)
+}
 
-	const restore = () => {
-		document.title = prevTitle
-	}
+/**
+ * round-13 — چاپ سند + انتظار برای بسته‌شدن دیالوگ.
+ * Promise وقتی resolve می‌شود که afterprint روی پنجره‌ی چاپ‌شده (iframe)
+ * یا پنجره‌ی والد-fire شود — یا بعد از سقف زمانی (مرورگرهایی که afterprint
+ * نمی‌دهند). پایه‌ی صف چاپ چندسندی است.
+ */
+function printHtmlDocumentAndWait(spec: PrintDocumentSpec): Promise<void> {
+        const html = documentHtml(spec)
+        const prevTitle = document.title
+        document.title = spec.fileName
 
-	// iOS Safari — چاپ iframe را پشتیبانی نمی‌کند؛ سند در پنجرهٔ جدید
-	if (isIOS()) {
-		const win = window.open('', '_blank')
-		if (!win) {
-			restore()
-			return
-		}
-		win.document.open()
-		win.document.write(html)
-		win.document.close()
-		win.focus()
-		win.print()
-		return
-	}
+        const restore = () => {
+                document.title = prevTitle
+        }
 
-	// دسکتاپ — iframe مخفی؛ visibility:hidden چون display:none در برخی
-	// مرورگرها رندر (و در نتیجه صفحه‌بندی چاپ) را غیرقابل‌اعتماد می‌کند
-	const iframe = document.createElement('iframe')
-	iframe.setAttribute('aria-hidden', 'true')
-	iframe.style.cssText =
-		'position:fixed;inset:0;width:100%;height:100%;border:0;visibility:hidden;z-index:-9999;'
-	iframe.srcdoc = html
+        // iOS Safari — چاپ iframe را پشتیبانی نمی‌کند؛ سند در پنجرهٔ جدید
+        // (زنجیره‌ی afterprint اینجا قابل اعتماد نیست؛ فراخواننده مقصد بعدی را
+        // با تأخیر کوتاه می‌فرستد)
+        if (isIOS()) {
+                return new Promise<void>((resolve) => {
+                        const win = window.open('', '_blank')
+                        if (!win) {
+                                restore()
+                                resolve()
+                                return
+                        }
+                        win.document.open()
+                        win.document.write(html)
+                        win.document.close()
+                        win.focus()
+                        win.print()
+                        setTimeout(resolve, 1_500)
+                })
+        }
 
-	let cleaned = false
-	const cleanup = () => {
-		if (cleaned) return
-		cleaned = true
-		iframe.remove()
-		restore()
-	}
+        return new Promise<void>((resolve) => {
+                // دسکتاپ — iframe مخفی؛ visibility:hidden چون display:none در برخی
+                // مرورگرها رندر (و در نتیجه صفحه‌بندی چاپ) را غیرقابل‌اعتماد می‌کند
+                const iframe = document.createElement('iframe')
+                iframe.setAttribute('aria-hidden', 'true')
+                iframe.style.cssText =
+                        'position:fixed;inset:0;width:100%;height:100%;border:0;visibility:hidden;z-index:-9999;'
+                iframe.srcdoc = html
 
-	iframe.onload = () => {
-		try {
-			iframe.contentWindow?.focus()
-			iframe.contentWindow?.print()
-		} finally {
-			// print() در اکثر مرورگرها مدال است؛ بعد از بازگشت پاک‌سازی می‌کنیم.
-			// afterprint برای مرورگرهای غیرمدال (+ fallback زمانی)
-			window.addEventListener('afterprint', cleanup, { once: true })
-			setTimeout(cleanup, 60_000)
-		}
-	}
+                let settled = false
+                const done = () => {
+                        if (settled) return
+                        settled = true
+                        iframe.remove()
+                        restore()
+                        resolve()
+                }
 
-	document.body.appendChild(iframe)
+                iframe.onload = () => {
+                        try {
+                                iframe.contentWindow?.focus()
+                                iframe.contentWindow?.print()
+                        } finally {
+                                // afterprint روی هر دو پنجره (iframe + والد) گوش می‌دهیم —
+                                // کدام زودتر fire شد همان ملاک است؛ سقف ۹۰ ثانیه هم برای
+                                // مرورگرهایی که اصلاً afterprint ندارند.
+                                window.addEventListener('afterprint', done, { once: true })
+                                iframe.contentWindow?.addEventListener('afterprint', done, { once: true })
+                                setTimeout(done, 90_000)
+                        }
+                }
+
+                document.body.appendChild(iframe)
+        })
+}
+
+/**
+ * round-13 — صف چاپ چندسندی: هر سند پنجره‌ی چاپ «جداگانه» می‌گیرد تا
+ * ادمین بتواند هر فاکتور را روی پرینتر خودش بفرستد (مثلاً فاکتور اشپزخانه
+ * روی پرینتر آشپزخانه و فاکتور فروش روی پرینتر میز بیرون‌بر).
+ * سند بعدی بعد از بسته‌شدن دیالوگِ قبلی + یک مکث کوتاه ارسال می‌شود.
+ */
+export async function printHtmlDocumentQueue(specs: PrintDocumentSpec[]): Promise<void> {
+        for (let i = 0; i < specs.length; i++) {
+                await printHtmlDocumentAndWait(specs[i]!)
+                if (i < specs.length - 1) {
+                        // مکث کوتاه بین دیالوگ‌ها — برخی مرورگرها برای بازسازی
+                        // activation به چند صد میلی‌ثانیه نیاز دارند
+                        await new Promise((r) => setTimeout(r, 400))
+                }
+        }
 }

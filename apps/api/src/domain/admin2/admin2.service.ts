@@ -110,8 +110,15 @@ export class Admin2Service {
 
     // ── صف ──
 
-    /** «صف» = PAID بدون confirmedBy — داخل scope ادمین */
-    async queueCountFor(adminUserId: string): Promise<number> {
+    /** «صف» = PAID بدون confirmedBy — داخل scope ادمین؛ ادمین اصلی: کل صف */
+    async queueCountFor(adminUserId: string, viewerRole?: string): Promise<number> {
+        if (viewerRole === 'admin') {
+            return this.deps.db
+                .select({ count: sql<number>`count(*)::int` })
+                .from(orders)
+                .where(and(eq(orders.status, 'PAID'), isNull(orders.confirmedBy)))
+                .then((r) => r[0]?.count ?? 0)
+        }
         const scope = await this.scopeOf(adminUserId)
         if (!scope) return 0
         return this.deps.db
@@ -308,7 +315,11 @@ export class Admin2Service {
 
     // stage-10: setPackagingFee حذف شد — بسته‌بندی per-product در فرم محصول است.
 
-    /** اعلام بسته/باز موقت — ادمین اصلی یا ادمین۲ با permission */
+    /**
+     * اعلام بسته/باز موقت — ادمین اصلی یا ادمین۲ با permission.
+     * round-13: علت برای «هر دو» جهت اجباری است (بسته و باز)؛ با باز شدن،
+     * علت ذخیره‌شده پاک می‌شود تا متن کهنه به مشتری نشت نکند.
+     */
     async setTemporaryClose(
         actorUserId: string,
         actorRole: string,
@@ -320,7 +331,10 @@ export class Admin2Service {
             throw Err.forbidden('اجازه‌ی اعلام وضعیت موقت را ندارید.')
         }
         await this.deps.settings.set('temporarily_closed', closed)
-        if (closed && reason) await this.deps.settings.set('temporary_close_reason', reason)
+        await this.deps.settings.set(
+            'temporary_close_reason',
+            closed ? (reason ?? '').slice(0, 120) : '',
+        )
         if (actorRole === 'admin2') {
             await this.log(
                 actorUserId,

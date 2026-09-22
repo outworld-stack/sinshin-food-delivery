@@ -26,8 +26,12 @@ export const Route = createFileRoute('/admin')({
     }
     await ensureSession()
 
+    // round-13 — ادمین اصلی به «پنل سفارشات زنده» هم دسترسی دارد (تایید/
+    // تخصیص/تغییر پیک مثل ادمین۲)؛ بقیه‌ی صفحات ادمین۲ (داشبورد شخصی) مالِ او نیست.
     if (role === 'admin' && location.pathname.startsWith('/admin/admin2')) {
-      throw redirect({ to: '/admin' })
+      if (!location.pathname.startsWith('/admin/admin2/live-orders')) {
+        throw redirect({ to: '/admin' })
+      }
     }
     if (role === 'admin2' && !ADMIN2_ALLOWED_PREFIXES.some(p => location.pathname.startsWith(p))) {
       throw redirect({ to: '/admin/admin2/live-orders' })

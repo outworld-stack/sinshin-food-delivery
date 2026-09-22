@@ -50,8 +50,16 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
     // وضعیت رستوران — عمومی (قرارداد getRestaurantStatus)
     .get(
       '/restaurant-status',
-      () => deps.settings.restaurantOpen(),
-      { detail: { summary: 'Restaurant open status + next open time (public)' } },
+      // round-13 — وضعیت کامل (شامل علت بسته‌شدن موقت) برای نمایش در چک‌اوت؛
+      // isOpen اینجا فقط «ساعتی» است؛ temporarilyClosed جدا می‌آید.
+      () => deps.settings.restaurantStatus(),
+      {
+        detail: {
+          summary: 'Restaurant status + temporary-close reason (public)',
+          description:
+            'isOpen = scheduled open only. Combine with temporarilyClosed for the customer-facing state. temporaryCloseReason is shown in the checkout order-summary box.',
+        },
+      },
     )
 
     .use(requireAuth(deps.sessions))

@@ -26,15 +26,28 @@ import { getGalleryImages, getAdminGalleryImages } from '#/server/gallery'
 import { getAboutContent } from '#/server/about'
 import { getCheckoutPreview, getRestaurantStatus } from '#/server/checkout'
 import {
-  getAdminStats, getAdmin2Options, getCourierOptions, getSubAdminSession,
-  getLiveTrackingEnabled, getRestaurantOpen,
+  getAdminStats,
+  getAdmin2Options,
+  getCourierOptions,
+  getSubAdminSession,
+  getLiveTrackingEnabled,
+  getRestaurantOpen,
   // ⬅ NEW: لیست‌های ادمین حالا فکتوری دارند (پیش‌نیاز loader + query)
-  getAdminUsers, getAdminOrders, getSubAdminOrders, getAdminCouriers,
-  getAdminUserDetails, getAdmin2Stats, getLiveOrders, getSubAdmins,
+  getAdminUsers,
+  getAdminOrders,
+  getSubAdminOrders,
+  getAdminCouriers,
+  getAdminUserDetails,
+  getAdmin2Stats,
+  getLiveOrders,
+  getSubAdmins,
   // ⬅ NEW (بچ ۵): جزئیات نقش‌محور + گزینه‌های پنل زنده
-  getSubAdminDetails, getOrderDetailsByRole, getAdminCourierDetailsForRole,
+  getSubAdminDetails,
+  getOrderDetailsByRole,
+  getAdminCourierDetailsForRole,
   getCouriersForAssignment,
   getIranOnlyAccess,
+  getRestaurantStatusFull,
 } from '#/server/admin'
 import { getTerms } from '#/server/terms'
 import { getAdminCoupons, getAdminCoupon } from '#/server/coupons'
@@ -317,6 +330,13 @@ export const settingsRestaurantOptions = queryOptions({
   queryKey: qk.settingsRestaurant,
   queryFn: () => getRestaurantOpen(),
   staleTime: 0,
+})
+
+// round-13 — وضعیت کامل رستوران (شامل بسته موقت + علت) — کارت تنظیمات
+export const settingsRestaurantStatusOptions = queryOptions({
+  queryKey: qk.settingsRestaurantStatus,
+  queryFn: () => getRestaurantStatusFull(),
+  staleTime: 15_000,
 })
 
 // phase-fix — پرچم «فقط ایران» — staleTime صفر: تغییر ادمین باید فوری دیده شه

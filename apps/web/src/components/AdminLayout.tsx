@@ -33,6 +33,8 @@ const COURIERS_ITEM: NavItem = {
 function buildAdminItems(): NavItem[] {
   return [
     { to: '/admin', label: 'داشبورد', icon: <ChartBarTrendUp size={20} />, exact: true },
+    // round-13 — ادمین اصلی هم پنل زنده را می‌بیند: تایید سفارش، تخصیص/تغییر پیک
+    LIVE_PANEL_ITEM,
     ORDERS_ITEM,
     { to: '/admin/users', label: 'کاربران', icon: <Users size={20} /> },
     { to: '/admin/products', label: 'محصولات', icon: <Bag size={20} /> },

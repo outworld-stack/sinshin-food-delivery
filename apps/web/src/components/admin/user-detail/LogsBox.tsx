@@ -34,8 +34,9 @@ export const LogsBox = memo(function LogsBox({ logs }: LogsBoxProps) {
 
   const filtered = useMemo(() => {
     let res = logs.filter(l => applied.type === 'all' || l.type === applied.type)
-    if (applied.sortBy === 'newest') res = [...res].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-    if (applied.sortBy === 'oldest') res = [...res].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+    // round-13 — رفع کرش getTime: روی سیم JSON تاریخ‌ها رشته‌اند (مثل OrdersBox)
+    if (applied.sortBy === 'newest') res = [...res].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    if (applied.sortBy === 'oldest') res = [...res].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
     return res
   }, [logs, applied])
 

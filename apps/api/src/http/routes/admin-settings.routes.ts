@@ -25,9 +25,15 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
   const shared = new Elysia({ prefix: '/admin/settings', tags: ['Admin / Settings'] })
     .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
 
-    .get('/delivery-zones', async () => ({ zones: await deps.zones.list() }), {
-      detail: { summary: 'Delivery zones sorted by radius' },
-    })
+    .get(
+      '/delivery-zones',
+      async () => ({
+        zones: await deps.zones.list(),
+        // round-13 — مبدأ واقعی محاسبه‌ی فاصله (env > تنظیمات > پیش‌فرض) برای نمایش در پنل
+        origin: await deps.settings.restaurantLocation(),
+      }),
+      { detail: { summary: 'Delivery zones (radius-sorted) + restaurant origin coords' } },
+    )
     .get('/restaurant', () => deps.settings.restaurantOpen(), {
       detail: { summary: 'Open status + next open time' },
     })
@@ -39,18 +45,26 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     .post(
       '/temporary-close',
       async ({ user, body }) => {
-        await deps.admin2.setTemporaryClose(user.id, user.role, body.closed, body.reason ?? null)
+        await deps.admin2.setTemporaryClose(user.id, user.role, body.closed, body.reason)
+        // round-13 — ممیزی برای هر دو نقش (قبلاً ادمین اصلی هیچ ردی نداشت)
+        await deps.audit.log({
+          actorId: user.id,
+          action: body.closed ? 'TEMP_CLOSE' : 'TEMP_OPEN',
+          entity: 'settings',
+          metadata: { closed: body.closed, reason: body.reason },
+        })
         return { success: true }
       },
       {
         body: t.Object({
           closed: t.Boolean(),
-          reason: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
+          /** round-13 — علت برای بستن «و» باز کردن اجباری است (به مشتری در چک‌اوت نمایش داده می‌شود) */
+          reason: t.String({ minLength: 3, maxLength: 120 }),
         }),
         detail: {
-          summary: 'Temporary close/open (gas/power outages...)',
+          summary: 'Temporary close/open — reason REQUIRED (shown to customers)',
           description:
-            'Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Users: same rules as schedule-close (orders queue), but level-2 login stays allowed.',
+            'Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Reason (3-120 chars) is required for BOTH closing and opening; customers see it in the checkout order-summary box. Same rules as schedule-close (orders queue), but level-2 login stays allowed.',
         },
       },
     )
@@ -97,6 +111,35 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       {
         body: t.Object({ radiusKm: t.Number({ minimum: 0.5, maximum: 500 }) }),
         detail: { summary: 'Remove zone (last one is kept) — main admin only' },
+      },
+    )
+    // round-13 — ویرایش ناحیه (شعاع + هزینه) — فقط ادمین اصلی
+    .post(
+      '/delivery-zones/update',
+      async ({ body, user }) => {
+        const res = await deps.zones.update(body.radiusKm, body.newRadiusKm, body.fee)
+        if (!res.success) return res
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'ZONE_UPDATE',
+          entity: 'delivery-zone',
+          metadata: {
+            radiusKm: body.radiusKm,
+            newRadiusKm: body.newRadiusKm,
+            fee: body.fee,
+          },
+        })
+        return res
+      },
+      {
+        body: t.Object({
+          radiusKm: t.Number({ minimum: 0.5, maximum: 500 }),
+          newRadiusKm: t.Number({ minimum: 0.5, maximum: 500 }),
+          fee: t.Number({ minimum: 0 }),
+        }),
+        detail: {
+          summary: 'Update zone radius/fee (duplicate radius rejected) — main admin only',
+        },
       },
     )
     .post(

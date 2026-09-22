@@ -50,20 +50,32 @@ export class LiveService {
         private readonly deps: { db: Db; config: AppConfig; admin2: Admin2Service; hub: SseHub },
     ) { }
 
-    /** لیست زنده برای یک ادمین۲ — PAID های داخل scope + CONFIRMED/ON_THE_WAY های خودش */
-    async liveOrders(adminUserId: string): Promise<{ orders: LiveOrderView[]; total: number }> {
-        const scope = await this.deps.admin2.scopeOf(adminUserId)
+    /**
+     * round-13 — لیست زنده، نقش‌آگاه:
+     *  • ادمین۲: صفِ scope خودش + CONFIRMED/ON_THE_WAY های خودش
+     *  • ادمین اصلی: کل صف (هر دو scope) + همهٔ سفارشات CONFIRMED/ON_THE_WAY
+     *    (نظارت کامل — می‌تواند پیک سفارشِ تاییدشده‌ی ادمین۲ را هم عوض کند)
+     */
+    async liveOrders(
+        adminUserId: string,
+        viewerRole: string,
+    ): Promise<{ orders: LiveOrderView[]; total: number }> {
+        const isMainAdmin = viewerRole === 'admin'
+        const scope = isMainAdmin
+            ? { hall: true, takeaway: true }
+            : await this.deps.admin2.scopeOf(adminUserId)
         if (!scope || (!scope.hall && !scope.takeaway)) {
             return { orders: [], total: 0 }
         }
 
-        // PAID (صفِ scope) ∪ CONFIRMED/ON_THE_WAY (مالِ خودش)
+        // PAID (صفِ scope) ∪ CONFIRMED/ON_THE_WAY — ادمین اصلی: مالِ همه، ادمین۲: مالِ خودش
         const scopeSql =
             scope.hall && scope.takeaway
                 ? sql`true`
                 : scope.hall
                     ? eq(orders.deliveryType, 'DINE_IN')
                     : sql`${orders.deliveryType} in ('DELIVERY', 'PICKUP')`
+        const ownershipSql = isMainAdmin ? sql`true` : eq(orders.confirmedBy, adminUserId)
 
         const rows = await this.deps.db
             .select({ o: orders, buyer: users })
@@ -71,7 +83,7 @@ export class LiveService {
             .innerJoin(users, eq(users.id, orders.userId))
             .where(
                 sql`(${orders.status} = 'PAID' and ${orders.confirmedBy} is null and ${scopeSql})
-            or (${orders.confirmedBy} = ${adminUserId} and ${orders.status} in ('CONFIRMED', 'ON_THE_WAY'))`,
+            or (${ownershipSql} and ${orders.status} in ('CONFIRMED', 'ON_THE_WAY'))`,
             )
             .orderBy(desc(orders.createdAt))
             .limit(200)
@@ -112,12 +124,19 @@ export class LiveService {
     }
 
     /** دیدن نکته‌ی مشتری — قبل از اجازه‌ی تایید (قرارداد فرانت) */
-    async viewNote(adminUserId: string, displayId: string): Promise<{ note: string | null }> {
+    async viewNote(
+        adminUserId: string,
+        viewerRole: string,
+        displayId: string,
+    ): Promise<{ note: string | null }> {
         const row = await this.mustGet(displayId)
 
         // امن-۳: مالک یا سفارشِ صف داخل scope — همان چشمی‌ که liveOrders می‌بیند.
         // قبلاً هر ادمین۲ نکته‌ی هر سفارشی را باز کرده و noteSeen ست می‌کرد.
-        await this.assertViewable(adminUserId, row)
+        // round-13: ادمین اصلی از بالاتر رد می‌شود (نظارت کامل).
+        if (viewerRole !== 'admin') {
+            await this.assertViewable(adminUserId, row)
+        }
 
         const note = row.customerNote
         await this.deps.db
@@ -135,9 +154,11 @@ export class LiveService {
      * تایید سفارش — قلب پنل:
      *  - نکته‌ی دیده‌نشده → رد
      *  - PAID + داخل scope → CONFIRMED + مالکیت + پیک + صف چاپ
+     *  - round-13: ادمین اصلی = scope کامل (سالن + بیرون‌بر)
      */
     async confirmOrder(
         adminUserId: string,
+        viewerRole: string,
         displayId: string,
         input: { courierId?: string | null; courierNote?: string | null; securityEnabled?: boolean },
     ): Promise<{ success: boolean; message?: string }> {
@@ -147,12 +168,14 @@ export class LiveService {
             return { success: false, message: 'ابتدا نکته مشتری را ببینید و تیک بزنید' }
         }
         // scope قبل از status — پیام درست برای ادمینِ خارج از حوزه
-        const scope = await this.deps.admin2.scopeOf(adminUserId)
-        if (!scope) return { success: false, message: 'دسترسی scope ندارید' }
-        const inScope =
-            (scope.hall && row.deliveryType === 'DINE_IN') ||
-            (scope.takeaway && (row.deliveryType === 'DELIVERY' || row.deliveryType === 'PICKUP'))
-        if (!inScope) return { success: false, message: 'این سفارش خارج از حوزه‌ی شماست' }
+        if (viewerRole !== 'admin') {
+            const scope = await this.deps.admin2.scopeOf(adminUserId)
+            if (!scope) return { success: false, message: 'دسترسی scope ندارید' }
+            const inScope =
+                (scope.hall && row.deliveryType === 'DINE_IN') ||
+                (scope.takeaway && (row.deliveryType === 'DELIVERY' || row.deliveryType === 'PICKUP'))
+            if (!inScope) return { success: false, message: 'این سفارش خارج از حوزه‌ی شماست' }
+        }
 
         if (row.status !== 'PAID') {
             return { success: false, message: 'این سفارش قابل تایید نیست' }
@@ -198,16 +221,21 @@ export class LiveService {
         return { success: true }
     }
 
-    /** تغییر/تخصیص پیک — فقط CONFIRMED و فقط تا قبل از رسیدن پیک */
+    /**
+     * تغییر/تخصیص پیک — فقط CONFIRMED و فقط تا قبل از رسیدن پیک.
+     * round-13: ادمین اصلی مالکیت را رد نمی‌کند — می‌تواند پیک سفارشِ
+     * تاییدشده‌ی هر ادمین۲ را هم عوض کند (نظارت کامل).
+     */
     async reassignCourier(
         adminUserId: string,
+        viewerRole: string,
         displayId: string,
         newCourierId: string | null,
     ): Promise<{ success: boolean; message?: string }> {
         const row = await this.mustGet(displayId)
         // امن-۳: فقط سفارش خودِ ادمین — قبلاً هر ادمین۲ می‌توانست پیکِ
         // سفارش CONFIRMED شده‌ی ادمین دیگر را عوض کند
-        if (row.confirmedBy !== adminUserId) {
+        if (viewerRole !== 'admin' && row.confirmedBy !== adminUserId) {
             return { success: false, message: 'این سفارش به شما تعلق ندارد' }
         }
         if (row.status !== 'CONFIRMED') {
@@ -308,7 +336,7 @@ export class LiveService {
             ...new Set(rows.map(({ o }) => o.confirmedBy).filter((x): x is string => x !== null)),
         ]
 
-        const [courierRows, profileRows] = await Promise.all([
+        const [courierRows, profileRows, confirmerUserRows] = await Promise.all([
             courierIds.length
                 ? this.deps.db
                     .select({ id: couriers.id, name: couriers.name, phone: couriers.phone })
@@ -325,14 +353,28 @@ export class LiveService {
                     .from(admin2Profiles)
                     .where(inArray(admin2Profiles.userId, confirmerIds.map(asUserId)))
                 : [],
+            // round-13 — fallback اسم تاییدکننده: ادمین اصلی admin2_profiles ندارد؛
+            // به‌علاوه پروفایل حذف‌شده‌ها را هم users پوشش می‌دهد. اولویت: پروفایل ادمین۲.
+            confirmerIds.length
+                ? this.deps.db
+                    .select({ id: users.id, name: users.name })
+                    .from(users)
+                    .where(inArray(users.id, confirmerIds))
+                : [],
         ])
 
         const courierMap = new Map(courierRows.map((c) => [c.id, c]))
         const profileMap = new Map(profileRows.map((p) => [p.userId as string, p]))
+        const confirmerNameMap = new Map(
+            confirmerUserRows.map((u) => [u.id as string, (u.name ?? '').trim()]),
+        )
 
         return rows.map(({ o, buyer }) => {
             const c = o.courierId ? courierMap.get(o.courierId) : undefined
             const p = o.confirmedBy ? profileMap.get(o.confirmedBy) : undefined
+            const confirmedByName =
+                (p ? `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() : '') ||
+                (o.confirmedBy ? confirmerNameMap.get(o.confirmedBy) ?? '' : '')
             return {
                 id: o.displayId,
                 userPhone: buyer.phone,
@@ -344,7 +386,7 @@ export class LiveService {
                 customerNote: o.customerNote,
                 noteSeen: o.noteSeen,
                 confirmedBy: o.confirmedBy,
-                confirmedByName: p ? `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() : null,
+                confirmedByName: confirmedByName || null,
                 courierId: o.courierId,
                 courierName: c?.name ?? null,
                 courierPhone: c?.phone ?? null,

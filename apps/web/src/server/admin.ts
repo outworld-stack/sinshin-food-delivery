@@ -446,3 +446,24 @@ export async function setRestaurantOpen(input: {
 	await authJson<unknown>('/admin/settings/restaurant', 'POST', input.data)
 	return { success: true }
 }
+
+// ============= round-13 — بسته/باز موقت با علت (هر دو نقش) =============
+
+export interface RestaurantFullStatus {
+	isOpen: boolean
+	temporarilyClosed: boolean
+	temporaryCloseReason: string | null
+	nextOpenTime: string
+	anyClosed: boolean
+}
+
+export async function getRestaurantStatusFull(): Promise<RestaurantFullStatus> {
+	return authJson<RestaurantFullStatus>('/admin/settings/restaurant/status', 'GET')
+}
+
+export async function setTemporaryClose(input: {
+	data: { closed: boolean; reason: string }
+}): Promise<{ success: boolean }> {
+	await authJson<unknown>('/admin/settings/temporary-close', 'POST', input.data)
+	return { success: true }
+}

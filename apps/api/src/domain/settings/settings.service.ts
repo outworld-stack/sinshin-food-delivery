@@ -3,6 +3,7 @@
 import { eq } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
+import type { AppConfig } from '#/infra/config/env'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
 
 export interface RestaurantLocation {
@@ -26,7 +27,9 @@ export interface RestaurantLocation {
 const SETTINGS_CACHE_TTL_MS = 30_000
 
 export class SettingsService {
-  constructor(private readonly deps: { db: Db }) {}
+  constructor(
+    private readonly deps: { db: Db; config?: AppConfig },
+  ) {}
 
   private cache = new Map<string, { value: unknown; at: number }>()
 
@@ -91,7 +94,16 @@ export class SettingsService {
     return this.get<boolean>(SETTING_KEYS.liveTrackingEnabled, false)
   }
 
+  /**
+   * مختصات رستوران — مبدأ محاسبه‌ی فاصله‌ی ناحیه‌های ارسال.
+   * round-13 — اولویت: متغیر محیطی RESTAURANT_LAT/RESTAURANT_LNG، بعد کلید
+   * تنظیمات DB، بعد پیش‌فرض تهران. env «منبع حقیقت» عملیاتاتی است — بدون
+   * ری‌استارت عوض نمی‌شود (مثل GEO_BYPASS_IPS).
+   */
   async restaurantLocation(): Promise<RestaurantLocation> {
+    if (this.deps.config?.restaurantLocation) {
+      return this.deps.config.restaurantLocation
+    }
     return this.get<RestaurantLocation>(SETTING_KEYS.restaurantLocation, {
       lat: 35.6892,
       lng: 51.389,

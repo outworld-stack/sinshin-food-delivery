@@ -10,6 +10,8 @@ const FULL_PERMISSIONS: SubAdminPermissions = {
   couriersRead: true, couriersWrite: true,
   mainCategoriesRead: true, mainCategoriesWrite: true,
   orderDetailsRead: true,
+  // round-13 — ادمین اصلی همیشه می‌تواند بسته/باز موقت را toggle کند
+  canToggleTemporaryClose: true,
 }
 
 const EMPTY_PERMISSIONS: SubAdminPermissions = {

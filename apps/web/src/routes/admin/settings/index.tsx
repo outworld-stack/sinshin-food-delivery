@@ -9,7 +9,7 @@ import { useAuthStore, ensureAuthHydrated } from '#/stores/authStore'
 import {
   settingsTrackingOptions, settingsRestaurantOptions,
   aboutContentOptions, adminGalleryImagesOptions, deliveryZonesOptions,
-  settingsIranOnlyOptions,
+  settingsIranOnlyOptions, settingsRestaurantStatusOptions,
 } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { Toggle } from '#/components/shared/Toggle'
@@ -21,6 +21,7 @@ import { useSiteContentSettings } from '#/hooks/admin/useSiteContentSettings'
 import { AboutContentForm } from '#/components/admin/settings/AboutContentForm'
 import { GalleryManager } from '#/components/admin/settings/GalleryManager'
 import { DeliveryZonesManager } from '#/components/admin/settings/DeliveryZonesManager'
+import { TemporaryCloseCard } from '#/components/admin/settings/TemporaryCloseCard'
 import { Pin, Store, Discover2, Shield } from 'reicon-react'
 import type { UpdateGalleryImageInput } from '#/types/site/gallery'
 import { TermsEditor } from '#/components/admin/settings/TermsEditor'
@@ -37,7 +38,7 @@ const SettingsPage = memo(function SettingsPage() {
 })
 
 const SettingsContent = memo(function SettingsContent() {
-  const { isMainAdmin } = usePermissions()
+  const { isMainAdmin, permissions } = usePermissions()
   const content = useSiteContentSettings({ enabled: isMainAdmin })
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
@@ -112,6 +113,9 @@ const SettingsContent = memo(function SettingsContent() {
 
       {/* ⬅ ناحیه‌های ارسال — مشترک بین ادمین اصلی و ادمین۲ */}
       <DeliveryZonesManager />
+
+      {/* round-13 — بسته/باز موقت با علت: ادمین اصلی همیشه + ادمین۲ با پرمیشن */}
+      <TemporaryCloseCard visible={isMainAdmin || permissions.canToggleTemporaryClose === true} />
 
       {isMainAdmin && (
         <>
@@ -259,6 +263,8 @@ export const Route = createFileRoute('/admin/settings/')({
     if (role !== 'admin' && role !== 'admin2') return
 
     await context.queryClient.query(deliveryZonesOptions)
+    // round-13 — وضعیت کامل (بسته موقت + علت) برای کارت مشترک بسته/باز موقت
+    await context.queryClient.query(settingsRestaurantStatusOptions)
 
     if (role !== 'admin') return
     await Promise.all([

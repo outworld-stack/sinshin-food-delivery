@@ -1,11 +1,102 @@
 // src/components/shared/MapPicker.tsx
-import { memo, useRef, useEffect } from 'react'
+import { memo, useRef, useEffect, useState } from 'react'
 
 interface MapPickerProps {
   /** مختصات انتخاب‌شده (تهی = هنوز انتخاب نشده) */
   value: { lat: number; lng: number } | null
   onChange: (coords: { lat: number; lng: number }) => void
 }
+
+/**
+ * round-13 — fallback دستی مختصات وقتی کلید نقشه (VITE_NESHAN_API_KEY)
+ * تنظیم نشده است: بدون آن، قبلاً ذخیره‌ی آدرس (و سفارش تست ارسالی)
+ * عملاً غیرممکن بود. محدوده‌ها مثل API: lat ±90 / lng ±180.
+ */
+const ManualCoordsFallback = memo(function ManualCoordsFallback({
+  value,
+  onChangeRef,
+}: {
+  value: { lat: number; lng: number } | null
+  onChangeRef: React.RefObject<(coords: { lat: number; lng: number }) => void>
+}) {
+  // درفت محلی — تا پاک‌کردن/تایپ جزئی وسط کار، مقدار والد را نلرزاند
+  const [latDraft, setLatDraft] = useState(value ? String(value.lat) : '')
+  const [lngDraft, setLngDraft] = useState(value ? String(value.lng) : '')
+
+  useEffect(() => {
+    setLatDraft(value ? String(value.lat) : '')
+    setLngDraft(value ? String(value.lng) : '')
+  }, [value?.lat, value?.lng])
+
+  const push = (lat: string, lng: string) => {
+    const la = Number(lat)
+    const ln = Number(lng)
+    if (
+      lat.trim() !== '' && lng.trim() !== '' &&
+      Number.isFinite(la) && Number.isFinite(ln) &&
+      Math.abs(la) <= 90 && Math.abs(ln) <= 180
+    ) {
+      onChangeRef.current({ lat: la, lng: ln })
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="text-sm text-gray-600 dark:text-gray-300 bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 rounded-xl p-4 leading-relaxed">
+        کلید نقشه‌ی نشان تنظیم نشده — می‌توانید مختصات را دستی وارد کنید، یا{' '}
+        <code dir="ltr">VITE_NESHAN_API_KEY</code> را در <code dir="ltr">apps/web/.env</code> بگذار
+        (ثبت‌نام: platform.neshan.org)
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-DanaMedium text-gray-500 dark:text-gray-400 mb-1">
+            عرض جغرافیایی (lat)
+          </label>
+          <input
+            type="number"
+            inputMode="decimal"
+            dir="ltr"
+            value={latDraft}
+            onChange={(e) => {
+              setLatDraft(e.target.value)
+              push(e.target.value, lngDraft)
+            }}
+            placeholder="35.6892"
+            step="0.000001"
+            min="-90"
+            max="90"
+            className="w-full px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] outline-none text-sm text-gray-800 dark:text-white"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-DanaMedium text-gray-500 dark:text-gray-400 mb-1">
+            طول جغرافیایی (lng)
+          </label>
+          <input
+            type="number"
+            inputMode="decimal"
+            dir="ltr"
+            value={lngDraft}
+            onChange={(e) => {
+              setLngDraft(e.target.value)
+              push(latDraft, e.target.value)
+            }}
+            placeholder="51.3890"
+            step="0.000001"
+            min="-180"
+            max="180"
+            className="w-full px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] outline-none text-sm text-gray-800 dark:text-white"
+          />
+        </div>
+      </div>
+      {value && (
+        <p className="text-xs text-green-600 dark:text-green-400 font-DanaMedium" dir="ltr">
+          ✓ {value.lat.toFixed(6)}, {value.lng.toFixed(6)}
+        </p>
+      )}
+    </div>
+  )
+})
 
 // ═══ phase-3 — نقشه‌ی واقعی نشان ═══
 // قبلاً: مختصات از «پیکسل کلیک» ساخته می‌شد → آدرس‌های آشغال در DB.
@@ -119,11 +210,7 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
   }, [value?.lat, value?.lng])
 
   if (!NESHAN_KEY) {
-    return (
-      <div className="text-sm text-gray-600 dark:text-gray-300 bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 rounded-xl p-4 leading-relaxed">
-        کلید نقشه‌ی نشان تنظیم نشده — <code dir="ltr">VITE_NESHAN_API_KEY</code> را در <code dir="ltr">apps/web/.env</code> بگذار (ثبت‌نام: platform.neshan.org)
-      </div>
-    )
+    return <ManualCoordsFallback value={value} onChangeRef={onChangeRef} />
   }
 
   return (

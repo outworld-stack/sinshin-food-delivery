@@ -12,7 +12,12 @@ import type { RestaurantStatus, CheckoutPreviewData } from '#/types/site/checkou
 // ─── وضعیت رستوران ───
 export async function getRestaurantStatus(): Promise<RestaurantStatus> {
   const s = await getJson<RestaurantStatusDto>('/orders/restaurant-status')
-  return { isOpen: s.isOpen && !s.temporarilyClosed, nextOpenTime: s.nextOpenTime }
+  // round-13 — علت بسته‌شدن موقت برای نمایش در باکس خلاصه سفارش
+  return {
+    isOpen: s.isOpen && !s.temporarilyClosed,
+    nextOpenTime: s.nextOpenTime,
+    closeReason: s.temporarilyClosed ? s.temporaryCloseReason : null,
+  }
 }
 
 // ─── پیش‌نمایش چک‌اوت (phase-3) — قیمت‌گذاری ۱۰۰٪ سروری ───

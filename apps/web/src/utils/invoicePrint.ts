@@ -4,147 +4,167 @@
 //  • فروش: اقلام + ریز مبلغ + مشخصات مشتری + QR پیک (فقط ارسال با پیک)
 // QR روی «نسخهٔ فروش مشتری» چاپ می‌شود (نه سالن/اشپزخانه) — پیک با دوربین
 // گوشی آن را اسکن کرده و به /courier/scan/… می‌رسد.
+//
+// round-13 — هر فاکتور سندِ چاپ «جداگانه» است: بعد از تایید سفارش،
+// فاکتور اشپزخانه و فاکتور فروش پشت‌سرهم (هر کدام یک پنجرهٔ چاپ) ارسال
+// می‌شوند تا هر کدام روی پرینتر خودش (آشپزخانه / میز بیرون‌بر) چاپ شود.
 
-import { type PrintDocumentSpec, printHtmlDocument } from '#/lib/printDocument'
+import {
+        type PrintDocumentSpec,
+        printHtmlDocument,
+        printHtmlDocumentQueue,
+} from '#/lib/printDocument'
 import type { StaffInvoice } from '#/server/admin'
 import { formatDate, formatPrice } from '#/utils/format'
 import { qrSvgMarkup } from '#/utils/qrSvg'
 
 const DELIVERY_LABEL: Record<StaffInvoice['deliveryType'], string> = {
-	DELIVERY: 'ارسال با پیک',
-	PICKUP: 'بیرون‌بر (تحویل حضوری)',
-	DINE_IN: 'سرو در سالن',
+        DELIVERY: 'ارسال با پیک',
+        PICKUP: 'بیرون‌بر (تحویل حضوری)',
+        DINE_IN: 'سرو در سالن',
 }
 
 export type InvoiceKind = 'kitchen' | 'sales'
 
 /** لینک اسکن پیک — همان فرمول صفحهٔ جزئیات سفارش ادمین */
 export function courierScanUrl(order: {
-	orderId: string
-	courierId: string | null
-	courierSecurityEnabled: boolean
+        orderId: string
+        courierId: string | null
+        courierSecurityEnabled: boolean
 }): string {
-	const suffix =
-		order.courierSecurityEnabled && order.courierId
-			? `?courier=${order.courierId}`
-			: ''
-	return `${window.location.origin}/courier/scan/${order.orderId}${suffix}`
+        const suffix =
+                order.courierSecurityEnabled && order.courierId
+                        ? `?courier=${order.courierId}`
+                        : ''
+        return `${window.location.origin}/courier/scan/${order.orderId}${suffix}`
 }
 
-function kitchenSection(inv: StaffInvoice, pageBreak: boolean) {
-	return {
-		heading: `فاکتور اشپزخانه — سفارش ${inv.orderId}`,
-		metaLines: [
-			`تاریخ: ${formatDate(inv.date)}`,
-			`نوع تحویل: ${DELIVERY_LABEL[inv.deliveryType]}`,
-		],
-		bigTables: true,
-		tables: [
-			{
-				head: ['محصول', 'سایز', 'تعداد'],
-				rows: inv.items.map((i) => [
-					i.name,
-					i.sizeName ?? '—',
-					i.quantity.toLocaleString('fa-IR'),
-				]),
-			},
-		],
-		note: inv.customerNote ? `نکته مشتری: ${inv.customerNote}` : undefined,
-		pageBreakAfter: pageBreak,
-	}
+function kitchenSection(inv: StaffInvoice) {
+        return {
+                heading: `فاکتور اشپزخانه — سفارش ${inv.orderId}`,
+                metaLines: [
+                        `تاریخ: ${formatDate(inv.date)}`,
+                        `نوع تحویل: ${DELIVERY_LABEL[inv.deliveryType]}`,
+                ],
+                bigTables: true,
+                tables: [
+                        {
+                                head: ['محصول', 'سایز', 'تعداد'],
+                                rows: inv.items.map((i) => [
+                                        i.name,
+                                        i.sizeName ?? '—',
+                                        i.quantity.toLocaleString('fa-IR'),
+                                ]),
+                        },
+                ],
+                note: inv.customerNote ? `نکته مشتری: ${inv.customerNote}` : undefined,
+        }
 }
 
 async function salesSection(inv: StaffInvoice) {
-	const rows = inv.items.map((i) => [
-		i.name,
-		i.sizeName ?? '—',
-		i.quantity.toLocaleString('fa-IR'),
-		formatPrice(i.price),
-		formatPrice(i.price * i.quantity),
-	])
-	const b = inv.breakdown
-	const stats = [
-		{ label: 'جمع اقلام', value: `${formatPrice(b.foodTotal)} تومان` },
-		...(b.discount > 0
-			? [{ label: 'تخفیف', value: `−${formatPrice(b.discount)}` }]
-			: []),
-		...(b.deliveryFee > 0
-			? [{ label: 'هزینه ارسال', value: formatPrice(b.deliveryFee) }]
-			: []),
-		...(b.packagingFee > 0
-			? [{ label: 'بسته‌بندی', value: formatPrice(b.packagingFee) }]
-			: []),
-		...(b.walletDeduction > 0
-			? [{ label: 'کسر از کیف پول', value: formatPrice(b.walletDeduction) }]
-			: []),
-		{ label: 'مبلغ نهایی', value: `${formatPrice(b.totalAmount)} تومان` },
-	]
+        const rows = inv.items.map((i) => [
+                i.name,
+                i.sizeName ?? '—',
+                i.quantity.toLocaleString('fa-IR'),
+                formatPrice(i.price),
+                formatPrice(i.price * i.quantity),
+        ])
+        const b = inv.breakdown
+        const stats = [
+                { label: 'جمع اقلام', value: `${formatPrice(b.foodTotal)} تومان` },
+                ...(b.discount > 0
+                        ? [{ label: 'تخفیف', value: `−${formatPrice(b.discount)}` }]
+                        : []),
+                ...(b.deliveryFee > 0
+                        ? [{ label: 'هزینه ارسال', value: formatPrice(b.deliveryFee) }]
+                        : []),
+                ...(b.packagingFee > 0
+                        ? [{ label: 'بسته‌بندی', value: formatPrice(b.packagingFee) }]
+                        : []),
+                ...(b.walletDeduction > 0
+                        ? [{ label: 'کسر از کیف پول', value: formatPrice(b.walletDeduction) }]
+                        : []),
+                { label: 'مبلغ نهایی', value: `${formatPrice(b.totalAmount)} تومان` },
+        ]
 
-	const meta = [
-		`تاریخ: ${formatDate(inv.date)}`,
-		`نوع تحویل: ${DELIVERY_LABEL[inv.deliveryType]}`,
-		inv.userName ? `مشتری: ${inv.userName}` : null,
-		inv.userPhone ? `موبایل: ${inv.userPhone}` : null,
-		inv.deliveryType === 'DELIVERY' && inv.address
-			? `آدرس: ${inv.address}`
-			: null,
-		inv.courierName
-			? `پیک: ${inv.courierName}${inv.courierPhone ? ` — ${inv.courierPhone}` : ''}`
-			: null,
-	].filter((x): x is string => !!x)
+        const meta = [
+                `تاریخ: ${formatDate(inv.date)}`,
+                `نوع تحویل: ${DELIVERY_LABEL[inv.deliveryType]}`,
+                inv.userName ? `مشتری: ${inv.userName}` : null,
+                inv.userPhone ? `موبایل: ${inv.userPhone}` : null,
+                inv.deliveryType === 'DELIVERY' && inv.address
+                        ? `آدرس: ${inv.address}`
+                        : null,
+                inv.courierName
+                        ? `پیک: ${inv.courierName}${inv.courierPhone ? ` — ${inv.courierPhone}` : ''}`
+                        : null,
+        ].filter((x): x is string => !!x)
 
-	// QR پیک — فقط سفارش‌های ارسالی، فقط روی نسخهٔ فروش
-	const qr =
-		inv.deliveryType === 'DELIVERY'
-			? {
-					svg: await qrSvgMarkup(courierScanUrl(inv), 220),
-					orderId: inv.orderId,
-					caption: inv.courierSecurityEnabled
-						? 'این QR فقط برای پیک تخصیص‌یافتهٔ این سفارش قابل اسکن است.'
-						: 'پیک: برای شروع ارسال، این QR را با گوشی خود اسکن کنید.',
-				}
-			: undefined
+        // QR پیک — فقط سفارش‌های ارسالی، فقط روی نسخهٔ فروش
+        const qr =
+                inv.deliveryType === 'DELIVERY'
+                        ? {
+                                        svg: await qrSvgMarkup(courierScanUrl(inv), 220),
+                                        orderId: inv.orderId,
+                                        caption: inv.courierSecurityEnabled
+                                                ? 'این QR فقط برای پیک تخصیص‌یافتهٔ این سفارش قابل اسکن است.'
+                                                : 'پیک: برای شروع ارسال، این QR را با گوشی خود اسکن کنید.',
+                                }
+                        : undefined
 
-	return {
-		heading: `فاکتور فروش — سفارش ${inv.orderId}`,
-		metaLines: meta,
-		stats,
-		tables: [
-			{
-				head: ['محصول', 'سایز', 'تعداد', 'قیمت واحد (تومان)', 'جمع (تومان)'],
-				rows,
-			},
-		],
-		note: inv.customerNote ? `نکته مشتری: ${inv.customerNote}` : undefined,
-		qr,
-	}
+        return {
+                heading: `فاکتور فروش — سفارش ${inv.orderId}`,
+                metaLines: meta,
+                stats,
+                tables: [
+                        {
+                                head: ['محصول', 'سایز', 'تعداد', 'قیمت واحد (تومان)', 'جمع (تومان)'],
+                                rows,
+                        },
+                ],
+                note: inv.customerNote ? `نکته مشتری: ${inv.customerNote}` : undefined,
+                qr,
+        }
 }
 
-/** ساخت PrintDocumentSpec فاکتور — بدون I/O اگر QR لازم نباشد */
-async function buildSpec(
-	inv: StaffInvoice,
-	kinds: InvoiceKind[],
-): Promise<PrintDocumentSpec> {
-	const sections = []
-	if (kinds.includes('kitchen')) {
-		sections.push(kitchenSection(inv, kinds.includes('sales')))
-	}
-	if (kinds.includes('sales')) {
-		sections.push(await salesSection(inv))
-	}
-	return {
-		fileName: `sinshin-invoice-${inv.orderId}`,
-		brand: 'سین‌شین فودپارک',
-		sections,
-		footerNote: 'از خرید شما سپاسگزاریم',
-	}
+/** round-13 — یک spec مستقل به‌ازای هر نوع فاکتور (فایل/دیالوگ چاپ جدا) */
+async function buildSpecs(
+        inv: StaffInvoice,
+        kinds: InvoiceKind[],
+): Promise<PrintDocumentSpec[]> {
+        const specs: PrintDocumentSpec[] = []
+        if (kinds.includes('kitchen')) {
+                specs.push({
+                        fileName: `sinshin-kitchen-${inv.orderId}`,
+                        brand: 'سین‌شین فودپارک',
+                        sections: [kitchenSection(inv)],
+                        footerNote: 'فاکتور اشپزخانه — بدون قیمت',
+                })
+        }
+        if (kinds.includes('sales')) {
+                specs.push({
+                        fileName: `sinshin-sales-${inv.orderId}`,
+                        brand: 'سین‌شین فودپارک',
+                        sections: [await salesSection(inv)],
+                        footerNote: 'از خرید شما سپاسگزاریم',
+                })
+        }
+        return specs
 }
 
-/** چاپ فاکتور(های) سفارش — وفق داده + چاپ در سند مستقل */
+/**
+ * چاپ فاکتور(های) سفارش — هر نوع فاکتور = یک سند چاپ جداگانه.
+ * چند فاکتور → صف چاپ: دیالوگ اول (مثلاً اشپزخانه) بسته شود، دومی (فروش)
+ * خودکار باز می‌شود — هر کدام را روی پرینتر خودش بفرستید.
+ */
 export async function printOrderInvoices(
-	inv: StaffInvoice,
-	kinds: InvoiceKind[],
+        inv: StaffInvoice,
+        kinds: InvoiceKind[],
 ): Promise<void> {
-	const spec = await buildSpec(inv, kinds)
-	printHtmlDocument(spec)
+        const specs = await buildSpecs(inv, kinds)
+        if (specs.length <= 1) {
+                printHtmlDocument(specs[0]!)
+                return
+        }
+        await printHtmlDocumentQueue(specs)
 }

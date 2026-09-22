@@ -51,8 +51,9 @@ export const ReferralsBox = memo(function ReferralsBox({ referrals }: ReferralsB
 
   const filtered = useMemo(() => {
     let res = referrals.filter(r => r.phone.includes(applied.searchPhone))
-    if (applied.sortDate === 'newest') res = [...res].sort((a, b) => b.registeredAt.getTime() - a.registeredAt.getTime())
-    if (applied.sortDate === 'oldest') res = [...res].sort((a, b) => a.registeredAt.getTime() - b.registeredAt.getTime())
+    // round-13 — رفع کرش getTime: روی سیم JSON تاریخ‌ها رشته‌اند (مثل OrdersBox)
+    if (applied.sortDate === 'newest') res = [...res].sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime())
+    if (applied.sortDate === 'oldest') res = [...res].sort((a, b) => new Date(a.registeredAt).getTime() - new Date(b.registeredAt).getTime())
     if (applied.sortOrders === 'most') res = [...res].sort((a, b) => b.totalOrders - a.totalOrders)
     if (applied.sortOrders === 'least') res = [...res].sort((a, b) => a.totalOrders - b.totalOrders)
     return res

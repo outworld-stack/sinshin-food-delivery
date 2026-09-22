@@ -1,7 +1,8 @@
 // src/components/admin/admin2/LiveOrderCard.tsx
 import { memo } from 'react'
+import { Link } from '@tanstack/react-router'
 import { formatPrice, formatDate } from '#/utils/format'
-import { Bell, Stickynote, Check, Printer, Phone, Bicycle, Refresh } from 'reicon-react'
+import { Bell, Stickynote, Check, Printer, Phone, Bicycle, Refresh, File } from 'reicon-react'
 import type { LiveOrder } from '#/server/admin'
 import { StatusBadge } from '#/components/shared/StatusBadge'
 
@@ -77,6 +78,17 @@ export const LiveOrderCard = memo(function LiveOrderCard({ order, onRequestConfi
 
         {/* اکشن‌ها */}
         <div className="flex items-center gap-2">
+          {/* round-13 — جزئیات و فاکتور: صفحه‌ی مشترک سفارش (آیتم‌ها + چاپ اشپزخانه/فروش) */}
+          <Link
+            to="/admin/orders/$orderId"
+            params={{ orderId: order.id }}
+            className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 text-xs font-DanaDemiBold hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer flex items-center gap-1.5"
+            title="جزئیات کامل سفارش + چاپ فاکتور اشپزخانه/فروش"
+          >
+            <File size={14} />
+            جزئیات و فاکتور
+          </Link>
+
           {/* نکته دیده‌نشده → دکمه اجباری */}
           {hasUnseenNote && (
             <button

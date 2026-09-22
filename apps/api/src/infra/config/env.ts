@@ -26,6 +26,11 @@ export interface GatewayConfig {
   sepTerminalId: string
 }
 
+export interface RestaurantLocationConfig {
+  lat: number
+  lng: number
+}
+
 export interface DeviceConfig {
   linkThreshold: number
   autoblockScore: number
@@ -73,6 +78,9 @@ export class AppConfig {
   readonly couponNudgeTime: string
 
   readonly geoBypassIps: string[]
+
+  /** round-13 — مختصات رستوران (مبدأ محاسبه‌ی هزینه‌ی ارسال) از env؛ فقط وقتی هر دو مقدار معتبر باشند */
+  readonly restaurantLocation: RestaurantLocationConfig | null
 
   constructor(source: Record<string, string | undefined> = Bun.env) {
     const str = (key: string, fallback = ''): string => {
@@ -165,6 +173,16 @@ export class AppConfig {
       .split(',')
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
+
+    // round-13 — RESTAURANT_LAT / RESTAURANT_LNG — مبدأ ناحیه‌های ارسال.
+    // هر دو باید finite و در بازه‌ی معتبر باشند؛ وگرنه null (می‌رود سراغ تنظیمات DB).
+    const lat = Number(source['RESTAURANT_LAT'])
+    const lng = Number(source['RESTAURANT_LNG'])
+    this.restaurantLocation =
+      Number.isFinite(lat) && Number.isFinite(lng) &&
+      Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+        ? { lat, lng }
+        : null
 
     // ── phase-1: جایگزین چک قبلی (که فقط DEV-JWT می‌گرفت) ──
     this.assertProdInvariants()

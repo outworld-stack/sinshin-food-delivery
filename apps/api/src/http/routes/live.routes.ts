@@ -21,34 +21,68 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
   new Elysia({ prefix: '/live', tags: ['Live Panel'] })
     .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
 
-    /** سشن ادمین۲ — نتیجه‌ی queueCount هم اینجاست */
+    /**
+     * سشن پنل زنده — round-13: ادمین اصلی هم سشن کامل می‌گیرد
+     * (isAdmin2LoggedIn=true + صف کل) تا همان پنل را مثل ادمین۲ ببیند.
+     * مصرف‌کننده‌های قدیمی فقط برای role==='admin2' به این فیلد نگاه می‌کنند.
+     */
     .get(
       '/session',
       async ({ user, admin2 }) => {
+        if (user.role === 'admin') {
+          return {
+            isAdmin2LoggedIn: true,
+            admin: {
+              userId: user.id,
+              firstName: user.name ?? 'ادمین اصلی',
+              lastName: null,
+              permissions: {
+                hall: true,
+                takeaway: true,
+                productsRead: true,
+                productsWrite: true,
+                usersRead: true,
+                usersWrite: true,
+                couriersRead: true,
+                couriersWrite: true,
+                mainCategoriesRead: true,
+                mainCategoriesWrite: true,
+                orderDetailsRead: true,
+                canToggleTemporaryClose: true,
+                canEditPackagingFee: true,
+              },
+            },
+            queueCount: await deps.admin2.queueCountFor(user.id, user.role),
+          }
+        }
         if (user.role !== 'admin2' || !admin2) {
           return { isAdmin2LoggedIn: false, admin: null }
         }
+        // round-13 — اسم ادمین۲ هم در سشن (قبلاً خالی بود)
+        const p = await deps.admin2.profile(user.id)
         return {
           isAdmin2LoggedIn: true,
           admin: {
             userId: user.id,
+            firstName: p?.firstName ?? null,
+            lastName: p?.lastName ?? null,
             permissions: admin2,
           },
-          queueCount: await deps.admin2.queueCountFor(user.id),
+          queueCount: await deps.admin2.queueCountFor(user.id, user.role),
         }
       },
-      { detail: { summary: 'Level-2 admin session + queue count' } },
+      { detail: { summary: 'Live-panel session + queue count (admin + admin2)' } },
     )
 
-    /** لیست زنده — صفِ scope + مالِ خودش */
+    /** لیست زنده — صفِ scope + مالِ خودش؛ ادمین اصلی: کل صف + همهٔ فعال‌ها */
     .get(
       '/orders',
-      ({ user }) => deps.live.liveOrders(user.id),
+      ({ user }) => deps.live.liveOrders(user.id, user.role),
       {
         detail: {
-          summary: 'Live orders for this admin — queue (scope) + own confirmed',
+          summary: 'Live orders — queue (scope) + own confirmed; main admin sees all',
           description:
-            'Queue = PAID without confirmedBy, filtered by scope (hall=DINE_IN, takeaway=DELIVERY+PICKUP). Own = CONFIRMED/ON_THE_WAY by me. deliveryType drives panel colors (blue/purple/green).',
+            'Queue = PAID without confirmedBy, filtered by scope (hall=DINE_IN, takeaway=DELIVERY+PICKUP). Own = CONFIRMED/ON_THE_WAY by me. Main admin (role=admin): full queue + ALL active orders. deliveryType drives panel colors (blue/purple/green).',
         },
       },
     )
@@ -63,21 +97,21 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
       detail: { summary: 'Active couriers for assignment' },
     })
 
-    /** دیدن نکته‌ی مشتری — قبل از تایید اجباری */
+    /** دیدن نکته‌ی مشتری — قبل از تایید اجباری (ادمین اصلی آزاد) */
     .post(
       '/orders/:displayId/note',
-      ({ user, params }) => deps.live.viewNote(user.id, params.displayId),
+      ({ user, params }) => deps.live.viewNote(user.id, user.role, params.displayId),
       {
         params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
         detail: { summary: 'View customer note (marks noteSeen)' },
       },
     )
 
-    /** تایید سفارش — قلب پنل */
+    /** تایید سفارش — قلب پنل (ادمین اصلی = scope کامل) */
     .post(
       '/orders/:displayId/confirm',
       ({ user, params, body }) =>
-        deps.live.confirmOrder(user.id, params.displayId, {
+        deps.live.confirmOrder(user.id, user.role, params.displayId, {
           courierId: body.courierId ?? null,
           courierNote: body.courierNote ?? null,
           securityEnabled: body.securityEnabled ?? false,
@@ -98,11 +132,11 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
       },
     )
 
-    /** تغییر/تخصیص پیک — تا قبل از رسیدن */
+    /** تغییر/تخصیص پیک — تا قبل از رسیدن (ادمین اصلی: هر سفارشی) */
     .post(
       '/orders/:displayId/reassign',
       ({ user, params, body }) =>
-        deps.live.reassignCourier(user.id, params.displayId, body.courierId ?? null),
+        deps.live.reassignCourier(user.id, user.role, params.displayId, body.courierId ?? null),
       {
         params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
         body: t.Object({

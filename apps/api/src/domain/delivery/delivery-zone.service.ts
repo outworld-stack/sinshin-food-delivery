@@ -56,6 +56,28 @@ export class DeliveryZoneService {
     return { success: true }
   }
 
+  /** round-13 — ویرایش ناحیه: شعاع (کلید یکتا) و هزینه؛ شعاع جدید نباید با ناحیه‌ی دیگری تصادم کند */
+  async update(
+    radiusKm: number,
+    newRadiusKm: number,
+    fee: number,
+  ): Promise<{ success: boolean; message?: string }> {
+    if (newRadiusKm < 0.5) return { success: false, message: 'شعاع حداقل ۰.۵ کیلومتر است' }
+    if (fee < 0) return { success: false, message: 'هزینه معتبر نیست' }
+    const zones = await this.list()
+    if (!zones.some((z) => z.radiusKm === radiusKm)) {
+      return { success: false, message: 'ناحیه یافت نشد' }
+    }
+    if (zones.some((z) => z.radiusKm === newRadiusKm && z.radiusKm !== radiusKm)) {
+      return { success: false, message: 'ناحیه‌ی دیگری با این شعاع موجود است' }
+    }
+    await this.deps.db
+      .update(deliveryZones)
+      .set({ radiusKm: newRadiusKm, fee })
+      .where(eq(deliveryZones.radiusKm, radiusKm))
+    return { success: true }
+  }
+
   async remove(radiusKm: number): Promise<{ success: boolean; message?: string }> {
     const zones = await this.list()
     if (zones.length <= 1) {
