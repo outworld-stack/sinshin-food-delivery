@@ -26,7 +26,7 @@ export const Footer = memo(function Footer() {
 
       {/* نوار بالایی فوتر */}
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-10">
 
           {/* برند و توضیحات */}
           <div className="flex flex-col items-center sm:items-start gap-5">
@@ -34,15 +34,7 @@ export const Footer = memo(function Footer() {
             <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaRegular leading-relaxed text-center sm:text-right">
               فودپارک سین شین؛ تجربه‌ای متفاوت از سفارش آنلاین غذا. طعم زندگی، درِ خانه شما، در سریع‌ترین زمان ممکن.
             </p>
-            {/* شبکه‌های اجتماعی */}
-            <div className="flex items-center gap-3">
-              <a href="#" aria-label="اینستاگرام" className="w-10 h-10 rounded-full bg-gray-100 dark:bg-[#2a1015] flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-primary hover:text-white dark:hover:bg-dark-primary transition cursor-pointer">
-                <Instagram size={20} />
-              </a>
-              <a href="tel:02112345678" aria-label="تماس" className="w-10 h-10 rounded-full bg-gray-100 dark:bg-[#2a1015] flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-primary hover:text-white dark:hover:bg-dark-primary transition cursor-pointer">
-                <Phone size={20} />
-              </a>
-            </div>
+
           </div>
 
           {/* ستون درباره ما — مقالات دقیقا زیر درباره ما و گالری */}
@@ -71,28 +63,9 @@ export const Footer = memo(function Footer() {
             </ul>
           </div>
 
-          {/* ستون دسترسی سریع */}
-          <div className="flex flex-col items-center sm:items-start">
-            <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-5 relative pb-2
-                           after:absolute after:right-0 after:bottom-0 after:w-10 after:h-0.5 after:bg-primary dark:after:bg-dark-primary">
-              دسترسی سریع
-            </h3>
-            <ul className="space-y-3">
-              {QUICK_LINKS.map((item) => (
-                <li key={item.label}>
-                  <Link
-                    to={item.to} search={item.tab ? { tab: item.tab } : undefined}
-                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-primary dark:hover:text-dark-primary transition font-DanaMedium"
-                  >
-                    {item.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
 
           {/* ستون تماس با ما */}
-          <div className="flex flex-col items-center sm:items-start">
+          <div className="flex flex-col items-center sm:items-start lg:col-start-4">
             <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-5 relative pb-2
                            after:absolute after:right-0 after:bottom-0 after:w-10 after:h-0.5 after:bg-primary dark:after:bg-dark-primary">
               تماس با ما
@@ -102,19 +75,21 @@ export const Footer = memo(function Footer() {
                 <span className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
                   <Pin size={16} />
                 </span>
-                <span>تهران، فودپارک سین شین</span>
+                <h2 className='text-sm font-MorabbaMedium bg-linear-to-l from-sky-500  to-emerald-500 bg-clip-text text-transparent '>
+                  بندرانزلی ، کیلومتر یک پاسداران
+                </h2>
               </li>
               <li className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">
-                <a href="tel:02112345678" dir="ltr" className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0 hover:opacity-80 transition">
+                <a href="tel:01344552313" dir="ltr" className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0 hover:opacity-80 transition">
                   <Phone size={16} />
                 </a>
-                <span dir="ltr">۰۲۱-۱۲۳۴۵۶۷۸</span>
+                <span dir="ltr">013-44552313</span>
               </li>
               <li className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">
-                <span className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
-                  <Envelope2 size={16} />
-                </span>
-                <span dir="ltr">info@sinshin.com</span>
+              <a href="https://www.instagram.com/sinshin_foodpark" aria-label="اینستاگرام" className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0 hover:opacity-80 transition">
+                <Instagram size={20} />
+              </a>
+                <span dir="ltr">sinshin_foodpark</span>
               </li>
               <li className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">
                 <span className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
