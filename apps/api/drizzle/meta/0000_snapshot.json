@@ -1,5 +1,5 @@
 {
-  "id": "3520e1a3-08dc-4109-b612-e1a1db67beb7",
+  "id": "da8907d4-8277-4972-a918-fe07bf23e727",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -3552,6 +3552,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": true
+        },
+        "internal_note_print": {
+          "name": "internal_note_print",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "confirmed_by": {
           "name": "confirmed_by",

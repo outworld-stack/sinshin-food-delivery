@@ -349,6 +349,7 @@ CREATE TABLE "orders" (
 	"customer_note" varchar(300),
 	"internal_note" varchar(300),
 	"note_seen" boolean DEFAULT true NOT NULL,
+	"internal_note_print" boolean DEFAULT false NOT NULL,
 	"confirmed_by" uuid,
 	"courier_id" uuid,
 	"courier_security_enabled" boolean DEFAULT false NOT NULL,
