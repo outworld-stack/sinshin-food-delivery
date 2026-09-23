@@ -18,7 +18,7 @@ interface OrderSummaryProps {
 	isSubmitBlocked: boolean
 	isSubmitting: boolean
 	onSubmit: () => void
-	restaurantStatus: { isOpen: boolean; nextOpenTime: string }
+	restaurantStatus: { isOpen: boolean; nextOpenTime: string; closeReason?: string | null }
 }
 
 export const OrderSummary = memo(function OrderSummary({
@@ -154,6 +154,13 @@ export const OrderSummary = memo(function OrderSummary({
 									</span>
 									برایتان ارسال می‌شود.
 								</p>
+								{/* round-13 — علت بسته‌شدن موقت (اعلام‌شده توسط ادمین) */}
+								{restaurantStatus.closeReason && (
+									<p className="text-[11px] text-orange-500 dark:text-orange-300 font-DanaMedium leading-relaxed text-center mt-2 pt-2 border-t border-orange-200 dark:border-orange-500/20">
+										<span className="font-DanaDemiBold">دلیل: </span>
+										{restaurantStatus.closeReason}
+									</p>
+								)}
 							</div>
 						)}
 						{/* قانون: بدون لغو — فقط پرداخت ناموفق (پرسش ۴) */}

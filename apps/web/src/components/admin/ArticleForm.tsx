@@ -86,6 +86,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
   }
 
   const selectedCat = categories?.find(c => c.id === formData.categoryId)
+  const selectedSub = selectedCat?.subCategories?.find(s => s.id === formData.subCategoryId)
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
@@ -179,6 +180,23 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
           </div>
         </div>
       </div>
+
+      {/* round-13 — بج دسته‌بندی و ساب‌کتگوری فعلی مقاله، بالای ردیف انصراف/ذخیره */}
+      {(selectedCat || selectedSub) && (
+        <div className="flex flex-wrap items-center gap-2 pt-4 border-t border-gray-100 dark:border-white/5">
+          <span className="text-[11px] text-gray-400 font-DanaMedium">دسته‌بندی‌های این مقاله:</span>
+          {selectedCat && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary text-xs font-DanaDemiBold">
+              {selectedCat.name}
+            </span>
+          )}
+          {selectedSub && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-DanaDemiBold">
+              {selectedSub.name}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-3 pt-4 border-t border-gray-100 dark:border-white/5">
         <Link to="/admin/articles" className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium text-center cursor-pointer hover:bg-gray-200 dark:hover:bg-[#3a151c] transition">انصراف</Link>
