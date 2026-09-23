@@ -10,10 +10,23 @@ const NAME_RE = /^[a-f0-9-]{36}\.(png|webp)$/
 
 export class UploadService {
   private readonly ready: Promise<void>
+  /** round-16 — خطای آماده‌سازی ذخیره‌شده تا reject خاموش (unhandledRejection) تولید نشود */
+  private dirError: unknown = null
 
   constructor(private readonly dir: string) {
     // Bun-native — بدون node:fs؛ یک‌بار در عمر سرویس
-    this.ready = Bun.$`mkdir -p ${this.dir}`.then(() => {})
+    // round-16: خطای mkdir می‌ماند و در save با خطای شفاف ۵۰۳ سرو می‌شود
+    this.ready = Bun.$`mkdir -p ${this.dir}`
+      .then(() => {})
+      .catch((err) => {
+        this.dirError = err
+        console.error('[uploads] storage dir not writable:', err)
+      })
+  }
+
+  /** round-16 — برای health route: پوشهٔ آپلود قابل نوشتن است؟ */
+  get storageReady(): boolean {
+    return this.dirError === null
   }
 
   async save(file: File): Promise<{ url: string }> {
@@ -21,6 +34,11 @@ export class UploadService {
     if (!ext) throw Err.validation('فقط PNG یا WebP مجاز است.')
     if (file.size > MAX_BYTES) throw Err.validation('حداکثر حجم ۲ مگابایت است.')
     await this.ready
+    if (this.dirError !== null) {
+      throw Err.serviceUnavailable(
+        'ذخیره‌سازی فایل در دسترس نیست — پوشهٔ آپلود سرور قابل نوشتن نیست.',
+      )
+    }
 
     const name = `${crypto.randomUUID()}.${ext}`
     await Bun.write(`${this.dir}/${name}`, file)

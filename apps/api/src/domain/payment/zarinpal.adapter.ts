@@ -39,8 +39,11 @@ export class ZarinpalAdapter implements PaymentGateway {
       }),
       signal: AbortSignal.timeout(15_000),
     })
-    const json = (await res.json()) as { data?: { authority?: string } }
-    const authority = json.data?.authority
+    // round-16 — پاسخ غیر-JSON درگاه (صفحهٔ خطای HTML ساپارک) نباید ۵۰۰/کرش بدهد
+    const json = (await res.json().catch(() => null)) as {
+      data?: { authority?: string }
+    } | null
+    const authority = json?.data?.authority
     if (!authority) throw Err.conflict('ایجاد پرداخت زرین‌پال ناموفق بود.')
     return { paymentUrl: `${STARTPAY}/${authority}`, gatewayRef: authority }
   }

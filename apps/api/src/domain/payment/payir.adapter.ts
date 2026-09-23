@@ -38,8 +38,9 @@ export class PayirAdapter implements PaymentGateway {
       }),
       signal: AbortSignal.timeout(15_000),
     })
-    const json = (await res.json()) as { token?: string }
-    if (!json.token) throw Err.conflict('ایجاد پرداخت پی‌ایر ناموفق بود.')
+    // round-16 — پاسخ غیر-JSON درگاه نباید ۵۰۰ بدهد
+    const json = (await res.json().catch(() => null)) as { token?: string } | null
+    if (!json?.token) throw Err.conflict('ایجاد پرداخت پی‌ایر ناموفق بود.')
     return { paymentUrl: `https://pay.ir/pg/${json.token}`, gatewayRef: json.token }
   }
 
@@ -54,7 +55,16 @@ export class PayirAdapter implements PaymentGateway {
       body: JSON.stringify({ api: this.apiKey, token }),
       signal: AbortSignal.timeout(15_000),
     })
-    const json = (await res.json()) as { status?: number; amount?: number }
+    // round-16 — پاسخ غیر-JSON درگاه (HTML/تایم‌اوت سرویس): وضعیت «نامشخص»،
+    // نه شکست قطعی — failPayment بدون اطلاع یعنی بازگشت وجه اشتباه؛
+    // job تایم‌اوت دوباره verify می‌کند (هم‌تراز با indeterminate زرین‌پال)
+    const json = (await res.json().catch(() => null)) as {
+      status?: number
+      amount?: number
+    } | null
+    if (json === null) {
+      return { success: false, gatewayRef: token, indeterminate: true }
+    }
     // phase-2: چک مبلغ — پاسخ verify پی‌ایر شامل amount است؛ تطابق اجباری
     const amountOk = json.amount === undefined || Number(json.amount) === input.amount * 10
     if (json.status === 1 && !amountOk) {

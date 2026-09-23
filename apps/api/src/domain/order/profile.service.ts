@@ -140,7 +140,10 @@ export class ProfileService {
               .from(walletTransactions)
               .leftJoin(orders, eq(orders.id, walletTransactions.orderId))
               .where(eq(walletTransactions.userId, userId))
-              .orderBy(desc(walletTransactions.createdAt)),
+              // round-16 — سقف دفاعی: صفحهٔ کیف پول سمت کلاینت صفحه‌بندی دارد؛
+              // ۲۰۰ تراکنش آخر کفایت می‌کند و پاسخ بی‌سقف با گذر زمان بمب حافظه/پهنای‌باند است
+              .orderBy(desc(walletTransactions.createdAt))
+              .limit(200),
         db.select().from(addresses).where(eq(addresses.userId, userId)),
         light
           ? Promise.resolve([] as {
@@ -214,7 +217,12 @@ export class ProfileService {
 
   private async myReferrals(userId: string) {
     const { db } = this.deps
-    const referrals = await db.select().from(users).where(eq(users.referredBy, userId))
+    // round-16 — سقف دفاعی: ۲۰۰ زیرمجموعهٔ آخر (لیست سمت کلاینت صفحه‌بندی دارد)
+    const referrals = await db
+      .select()
+      .from(users)
+      .where(eq(users.referredBy, userId))
+      .limit(200)
     if (referrals.length === 0) return []
 
     const buyerIds = referrals.map((r) => r.id)

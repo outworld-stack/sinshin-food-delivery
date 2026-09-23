@@ -39,16 +39,15 @@ export class AdminService {
     }> {
         const { db } = this.deps
 
-        const [totalUsers, activeUsers, totalOrdersAgg, totalRevenueAgg, recentOrders, latestUsers] =
+        const [totalUsers, activeUsers, totalOrdersAgg, totalRevenueAgg, recentOrders, latestUsers, chartItems] =
             await Promise.all([
                 db.select({ count: sql<number>`count(*)::int` }).from(users).then((r) => r[0]?.count ?? 0),
                 db.select({ count: sql<number>`count(*)::int` }).from(users)
                     .where(isNull(users.bannedAt)).then((r) => r[0]?.count ?? 0),
                 db.select({
                     count: sql<number>`count(*)::int`,
-                    revenue: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
                 }).from(orders)
-                    .where(ne(orders.status, 'CANCELED')).then((r) => r[0] ?? { count: 0, revenue: 0 }),
+                    .where(ne(orders.status, 'CANCELED')).then((r) => r[0] ?? { count: 0 }),
                 // totalRevenue جدا:
                 db.select({
                     revenue: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
@@ -74,16 +73,13 @@ export class AdminService {
                 }).from(users)
                     .orderBy(desc(users.createdAt))
                     .limit(5),
+                // stage-15 — چارت با معنای «بازهٔ جاری» (۶ ستونِ ۴ساعتهٔ امروز /
+                // هفتهٔ شنبه‌محور / ماه و سال شمسی) از اقلام خام ساخته می‌شود؛
+                // round-16 — داخل همان Promise.all (قبلاً پشتِ آن، موازی نمی‌شد)
+                db.select({ date: orders.createdAt, value: orders.totalAmount })
+                    .from(orders)
+                    .where(and(gte(orders.createdAt, currentPeriodStart()), ne(orders.status, 'CANCELED'))),
             ])
-
-        // stage-15 — چارت با معنای «بازهٔ جاری» (۶ ستونِ ۴ساعتهٔ امروز /
-        // هفتهٔ شنبه‌محور / ماه و سال شمسی) از اقلام خام ساخته می‌شود؛
-        // پیش‌تجمیع روزانه دیگر کافی نیست چون باکت ساعتی لازم است.
-        // کران پایین = currentPeriodStart (ابتدای سال شمسی یا هفتهٔ جاری).
-        const chartItems = await db
-            .select({ date: orders.createdAt, value: orders.totalAmount })
-            .from(orders)
-            .where(and(gte(orders.createdAt, currentPeriodStart()), ne(orders.status, 'CANCELED')))
 
         return {
             totalUsers,

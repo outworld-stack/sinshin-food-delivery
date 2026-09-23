@@ -37,6 +37,9 @@ export interface Admin2Permissions extends Admin2Scope {
     canEditPackagingFee: boolean
 }
 
+/** round-16 — TTL کش درون‌پروسه‌ای پروفایل ادمین۲ (permissionsOf/scopeOf) */
+const PROFILE_CACHE_TTL_MS = 15_000
+
 /**
  * سرویس ادمین سطح ۲ — بدون تک‌نشست (چند ادمین هم‌زمان).
  *
@@ -44,6 +47,12 @@ export interface Admin2Permissions extends Admin2Scope {
  * لاگین موفق → ردیف admin2Sessions + رویداد LOGIN + اطلاعِ صفِ داخل scope.
  */
 export class Admin2Service {
+    /** round-16 — userId → { at, profile|null } — ایندکس‌شده با TTL ۱۵s */
+    private readonly profileCache = new Map<
+        string,
+        { at: number; p: typeof admin2Profiles.$inferSelect | null }
+    >()
+
     constructor(
         private readonly deps: { db: Db; config: AppConfig; settings: SettingsService; hub: SseHub },
     ) { }
@@ -129,13 +138,13 @@ export class Admin2Service {
     }
 
     async scopeOf(userId: string): Promise<Admin2Scope | null> {
-        const p = await this.profile(userId)
+        const p = await this.cachedProfile(userId)
         if (!p) return null
         return { hall: p.scopeHall, takeaway: p.scopeTakeaway }
     }
 
     async permissionsOf(userId: string): Promise<Admin2Permissions | null> {
-        const p = await this.profile(userId)
+        const p = await this.cachedProfile(userId)
         if (!p) return null
         if (!p.isActive) throw Err.forbidden('دسترسی این ادمین غیرفعال است.')
         return {
@@ -313,6 +322,9 @@ export class Admin2Service {
             scopeTakeaway: input.scopeTakeaway,
         } as typeof admin2Profiles.$inferInsert)
 
+        // round-16 — پروفایل جدید ممکن است قبلاً «نبود» کش شده باشد
+        this.invalidateProfileCache()
+
         return { success: true, userId: created.id }
     }
 
@@ -325,6 +337,8 @@ export class Admin2Service {
             .update(admin2Profiles)
             .set({ ...perms, updatedAt: new Date() })
             .where(eq(admin2Profiles.userId, uid))
+        // round-16 — کش پروفایل همان لحظه بی‌اعتبار
+        this.invalidateProfileCache(adminUserId)
     }
 
     async toggleActive(adminUserId: string): Promise<void> {
@@ -335,6 +349,8 @@ export class Admin2Service {
             .update(admin2Profiles)
             .set({ isActive: !p.isActive, updatedAt: new Date() })
             .where(eq(admin2Profiles.userId, uid))
+        // round-16 — غیرفعال‌سازی باید بی‌تأخیر بر افزودن مجدد بنشیند
+        this.invalidateProfileCache(adminUserId)
     }
 
     // stage-10: setPackagingFee حذف شد — بسته‌بندی per-product در فرم محصول است.
@@ -370,6 +386,30 @@ export class Admin2Service {
     }
 
     // ── داخلی ──
+
+    /**
+     * round-16 — کش درون‌پروسه‌ای ۱۵ ثانیه‌ای پروفایل ادمین۲:
+     * هر درخواستِ احراز ادمین۲ (permissionsOf/scopeOf — از جمله پول ۲.۵ثانیه‌ای
+     * پنل زنده) قبلاً یک SELECT کامل پروفایل می‌زد؛ حالا حداکثر یک‌بار در ۱۵s.
+     * invalidation فوری: setPermissions / toggleActive / add.
+     */
+    private async cachedProfile(
+        userId: string,
+    ): Promise<typeof admin2Profiles.$inferSelect | null> {
+        const hit = this.profileCache.get(userId)
+        if (hit && Date.now() - hit.at < PROFILE_CACHE_TTL_MS) return hit.p
+        // findFirst → undefined؛ قرارداد کش null است
+        const p = (await this.profile(userId)) ?? null
+        this.profileCache.set(userId, { at: Date.now(), p })
+        // سقف حافظه — تازه‌سازی کامل (ادمین‌های سطح ۲ معدودند)
+        if (this.profileCache.size > 200) this.profileCache.clear()
+        return p
+    }
+
+    private invalidateProfileCache(userId?: string): void {
+        if (userId) this.profileCache.delete(userId)
+        else this.profileCache.clear()
+    }
 
     /** شرط scope روی deliveryType */
     private scopeClause(scope: Admin2Scope) {

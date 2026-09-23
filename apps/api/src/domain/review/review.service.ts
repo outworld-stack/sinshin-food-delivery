@@ -72,6 +72,9 @@ export class ReviewService {
       .innerJoin(orders, eq(orders.id, reviews.orderId))
       .where(status ? eq(reviews.status, status) : sql`true`)
       .orderBy(desc(reviews.createdAt))
+      // round-16 — سقف دفاعی: تنها لیست بی‌سقف باقی‌مانده بود؛ نظرات با تحویل‌ها
+      // برای همیشه رشد می‌کنند و صفحهٔ مودریشن ادمین کل آن را می‌کشید
+      .limit(300)
 
     return rows.map(({ r, u, p, o }) => ({
       id: r.id,
@@ -95,6 +98,8 @@ export class ReviewService {
       .innerJoin(users, eq(users.id, reviews.userId))
       .where(and(eq(reviews.productId, asProductId(productId)), eq(reviews.status, 'approved')))
       .orderBy(desc(reviews.createdAt))
+      // round-16 — سقف نمایش عمومی (جدیدترین‌ها)
+      .limit(100)
     return rows.map(({ r, u }) => ({
       id: r.id,
       orderId: r.orderId,

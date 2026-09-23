@@ -24,6 +24,13 @@ export interface SessionIssue {
 }
 
 export class SessionService {
+  /**
+   * round-16 — throttle نوشتن lastUsedAt: حداکثر یک UPDATE در ۶۰ ثانیه برای هر
+   * نشست (قبلاً «هر» درخواستِ احراز یک UPDATE مستقل می‌نوشت — تقویت نوشتاری
+   * بی‌مص روی WAL/vacuum؛ پنل زنده با پول ۲.۵ ثانیه‌ای یعنی ~۲۴ نویت در دقیقه).
+   */
+  private readonly lastTouch = new Map<string, number>()
+
   constructor(
     private readonly deps: { db: Db; config: AppConfig; tokens: TokenService },
   ) {}
@@ -119,29 +126,40 @@ export class SessionService {
     const claims = await this.deps.tokens.verify(token)
     if (!claims) throw Err.unauthorized('نشست شما منقضی شده است؛ دوباره وارد شوید.')
 
-    const user = await db.query.users.findFirst({ where: eq(users.id, claims.sub) })
-    if (!user) throw Err.unauthorized()
+    // round-16 — user + session با یک JOIN (قبلاً دو کوئری پشت‌سرهم در هر درخواست)
+    const rows = await db
+      .select({ user: users, session: sessions })
+      .from(sessions)
+      .innerJoin(users, eq(users.id, sessions.userId))
+      .where(eq(sessions.id, asSessionId(claims.ses)))
+      .limit(1)
+    const found = rows[0]
+    if (!found) throw Err.unauthorized()
+    const { user, session } = found
+    // توکن امضاشده است؛ این گارد فقط برای عمق دفاعی (عدم تطابق sub/ses):
+    if (user.id !== claims.sub) throw Err.unauthorized()
     if (user.bannedAt) throw Err.banned()
     if (user.tokenVersion !== claims.tv) {
       throw Err.unauthorized('همه‌ی نشست‌های شما باطل شده‌اند؛ دوباره وارد شوید.')
     }
-
-    const session = await db.query.sessions.findFirst({
-      where: eq(sessions.id, asSessionId(claims.ses)),
-    })
-    if (!session) throw Err.unauthorized()
     this.assertUsable(session)
 
-    void (async () => {
-      try {
-        await db
-          .update(sessions)
-          .set({ lastUsedAt: new Date() })
-          .where(eq(sessions.id, session.id))
-      } catch {
-        /* noop */
-      }
-    })()
+    const now = Date.now()
+    if (now - (this.lastTouch.get(session.id) ?? 0) >= 60_000) {
+      this.lastTouch.set(session.id, now)
+      // سقف حافظه — نقشهٔ تازه (نشست‌های مرده مهم نیستند)
+      if (this.lastTouch.size > 10_000) this.lastTouch.clear()
+      void (async () => {
+        try {
+          await db
+            .update(sessions)
+            .set({ lastUsedAt: new Date() })
+            .where(eq(sessions.id, session.id))
+        } catch {
+          /* noop */
+        }
+      })()
+    }
 
     return {
       user,

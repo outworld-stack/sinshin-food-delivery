@@ -6,25 +6,24 @@
 // invalidate های پنل زنده، واقعاً این صفحه را به‌روز می‌کنند + پری‌فچ روی هاور.
 //
 // round-12: ①حضوری‌ها «پیک هنوز تخصیص نیافته»/باکس اسکن پیک نمی‌بینند
-// ②QR واقعی به‌جای لینک متنی ③دکمه‌های چاپ فاکتور (اشپزخانه/فروش) با موتور مستقل
+// ②QR واقعی به‌جای لینک متنی
+// round-16: ③باکس چاپ فاکتور حذف شد (درخواست کاربر) — چاپ فقط از پنل زنده/مودال تایید
 
 import type { OrderBreakdown } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { QRCodeSVG } from 'qrcode.react'
-import { memo, useCallback, useState } from 'react'
-import { ChevronRight, Phone, Printer, Store } from 'reicon-react'
+import { memo } from 'react'
+import { ChevronRight, Phone, Store } from 'reicon-react'
 import { AdminOrderDetailSkeleton } from '#/components/LoadingSkeletons'
 import { OrderBreakdownCard } from '#/components/shared/OrderBreakdownCard'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { StatusBadge } from '#/components/shared/StatusBadge'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { useHydrated } from '#/hooks/useHydrated'
-import { getStaffOrderInvoice, type StaffInvoice } from '#/server/admin'
 import { ensureAuthHydrated, useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { formatDate, formatPrice } from '#/utils/format'
-import { printOrderInvoices } from '#/utils/invoicePrint'
 import { adminOrderDetailsOptions } from '#/utils/queryOptions'
 
 const OrderDetailPage = memo(function OrderDetailPage() {
@@ -32,7 +31,6 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 	const showToast = useToastStore((s) => s.showToast)
 	const hydrated = useHydrated()
 	const { permissions, isMainAdmin } = usePermissions()
-	const [printing, setPrinting] = useState(false)
 
 	// نقش‌محور: ادمین۲ فقط سفارش خودش (بک: adminId از کوکی)
 	const role = useAuthStore((s) => s.role)
@@ -48,26 +46,6 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 
 	// ریز فاکتور — ادمین اصلی همیشه / ادمین۲ با پرمیشن orderDetailsRead
 	const canSeeBreakdown = isMainAdmin || permissions.orderDetailsRead
-
-	// round-12 — چاپ مجدد فاکتور از صفحهٔ جزئیات (اشپزخانه + فروش)
-	const handlePrint = useCallback(
-		async (kinds: ('kitchen' | 'sales')[]) => {
-			setPrinting(true)
-			try {
-				const inv: StaffInvoice = await getStaffOrderInvoice(orderId)
-				await printOrderInvoices(inv, kinds)
-				showToast('پنجرهٔ چاپ فاکتور باز شد — از «Save as PDF» استفاده کنید')
-			} catch (err) {
-				showToast(
-					err instanceof Error ? err.message : 'چاپ فاکتور ناموفق بود',
-					'error',
-				)
-			} finally {
-				setPrinting(false)
-			}
-		},
-		[orderId, showToast],
-	)
 
 	if (!order) {
 		// در حال ریفچ بعد از invalidate یا سفارش خارج از دسترس نقش
@@ -114,53 +92,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 				</div>
 			</div>
 
-			{/* round-12 — چاپ فاکتور: اشپزخانه (بدون قیمت) + فروش (کامل، با QR پیک) */}
-			<div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-				<h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-2">
-					چاپ فاکتور
-				</h2>
-				<p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-4 leading-relaxed">
-					هر فاکتور در پنجرهٔ چاپ جداگانه و با فرمت رسیدی (ستونی ۸۰mm — مناسب
-					پرینترهای مغازه) ارسال می‌شود تا هر کدام روی پرینتر خودش (اشپزخانه /
-					میز بیرون‌بر) چاپ شود. فاکتور فروش، QR مخصوص پیک دارد و فقط برای
-					سفارش‌های «ارسال با پیک» چاپ می‌شود؛ اگر موقع تایید، «چاپ یادداشت در
-					فاکتور بیرون‌بر» روشن بوده باشد، یادداشت ادمین هم روی آن می‌آید.
-				</p>
-				<div className="flex flex-col sm:flex-row gap-3">
-					<button
-						type="button"
-						onClick={() => void handlePrint(['kitchen'])}
-						disabled={printing}
-						className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-700 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
-					>
-						<Printer size={16} />
-						فاکتور اشپزخانه
-					</button>
-					<button
-						type="button"
-						onClick={() => void handlePrint(['sales'])}
-						disabled={printing}
-						className="flex-1 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
-					>
-						<Printer size={16} />
-						فاکتور فروش{isDelivery ? ' (با QR پیک)' : ''}
-					</button>
-					<button
-						type="button"
-						onClick={() => void handlePrint(['kitchen', 'sales'])}
-						disabled={printing}
-						className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-700 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
-					>
-						<Printer size={16} />
-						هر دو فاکتور
-					</button>
-				</div>
-			</div>
-
-			<div
-				className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-				id="order-detail-print"
-			>
+			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				{/* ستون راست: اطلاعات سفارش */}
 				<div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
 					<h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-6 pb-4 border-b border-gray-100 dark:border-white/5">
@@ -324,7 +256,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 			)}
 
 			{/* round-12 — QR اسکن پیک: فقط سفارش‌های ارسالی + رندر واقعی QR
-          (قبلاً لینک متنی «شبیه‌سازی» بود و همهٔ سفارش‌ها حتی حضوری‌ها می‌گرفتند) */}
+	  (قبلاً لینک متنی «شبیه‌سازی» بود و همهٔ سفارش‌ها حتی حضوری‌ها می‌گرفتند) */}
 			{isDelivery && (
 				<div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
 					<h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-2">

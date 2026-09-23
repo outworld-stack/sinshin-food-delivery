@@ -136,6 +136,9 @@ export const orders = pgTable(
 		index("orders_queued_idx").on(t.queuedAt),
 		/** پنل زنده: لیست صف بر اساس (status, deliveryType) */
 		index("orders_live_idx").on(t.status, t.deliveryType),
+		/** round-16 — سفارش‌های مشتری (myOrders/myOrdersLight/پروفایل):
+		 *  where user_id=… order by created_at desc — ایندکس تک‌ستونی user مجبور به sort کل ردیف‌های کاربر می‌کرد */
+		index("orders_user_created_idx").on(t.userId, t.createdAt),
 	],
 );
 

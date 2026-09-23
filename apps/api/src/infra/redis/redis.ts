@@ -11,6 +11,9 @@ export class RedisService {
   private readonly client: RedisClient
   private subscriber: RedisClient | null = null
   private readonly subscribed = new Set<string>()
+  /** round-16 — کانال→هندلر برای re-subscribe دوره‌ای (drift guard پس از قطعی ردیس) */
+  private readonly subHandlers = new Map<string, (message: string) => void>()
+  private resubTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly url: string) {
     this.client = new RedisClient(url)
@@ -129,21 +132,47 @@ export class RedisService {
     channel: string,
     handler: (message: string) => void,
   ): Promise<boolean> {
+    this.subHandlers.set(channel, handler)
     if (this.subscribed.has(channel)) return true
     if (!this.subscriber) this.subscriber = new RedisClient(this.url)
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
         this.subscriber.subscribe(channel, handler),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('subscribe timeout')), OP_TIMEOUT_MS),
-        ),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('subscribe timeout')), OP_TIMEOUT_MS)
+        }),
       ])
       this.subscribed.add(channel)
+      this.startResubscribeLoop()
       return true
     } catch (err) {
       console.error(`[redis] subscribe(${channel}) failed:`, err)
       return false
+    } finally {
+      // round-16 — تایمر timeout پس از settle پاک شود (نشت تایمر)
+      if (timer) clearTimeout(timer)
     }
+  }
+
+  /**
+   * round-16 — drift guard: بعد از قطعی/ری‌کانکت ردیس، اتصال pub/sub ممکن است
+   * بدون سابسکریپتون برگردد؛ SUBSCRIBE ایدمپوتنت است، پس هر ۶۰ ثانیه برای همهٔ
+   * کانال‌های ثبت‌شده دوباره صادر می‌شود (خطا بی‌صدا — تیک بعدی دوباره می‌کوشد).
+   */
+  private startResubscribeLoop(): void {
+    if (this.resubTimer) return
+    this.resubTimer = setInterval(() => {
+      const sub = this.subscriber
+      if (!sub || this.subHandlers.size === 0) return
+      for (const [channel, handler] of this.subHandlers) {
+        try {
+          void Promise.resolve(sub.subscribe(channel, handler)).catch(() => {})
+        } catch {
+          /* noop — تیک بعدی */
+        }
+      }
+    }, 60_000)
   }
 
   unsubscribe(channel: string): void {
@@ -153,9 +182,14 @@ export class RedisService {
       /* noop */
     }
     this.subscribed.delete(channel)
+    this.subHandlers.delete(channel)
   }
 
   async close(): Promise<void> {
+    if (this.resubTimer) {
+      clearInterval(this.resubTimer)
+      this.resubTimer = null
+    }
     try {
       this.client.close()
     } catch {

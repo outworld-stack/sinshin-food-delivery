@@ -22,5 +22,7 @@ export const auditLogs = pgTable(
     index('audit_user_idx').on(t.userId),
     index('audit_created_idx').on(t.createdAt),
     index('audit_action_idx').on(t.action),
+    /** round-16 — فیلتر گزارش ممیزی بر اساس عامل: where actor_id=… order by created_at desc */
+    index('audit_actor_created_idx').on(t.actorId, t.createdAt),
   ],
 )

@@ -7,6 +7,7 @@ import type { PaymentId } from '#/domain/shared/brand'
 import type { AppConfig } from '#/infra/config/env'
 import { AppError, Err } from '#/domain/shared/errors'
 import type { OrderService } from '#/domain/order/order.service'
+import type { SseHub } from '#/infra/realtime/sse-hub'
 import { signState, verifyState } from './state'
 import { MockAdapter } from './mock.adapter'
 import { ZarinpalAdapter } from './zarinpal.adapter'
@@ -19,7 +20,13 @@ export class PaymentService {
   private readonly gateways: Map<string, PaymentGateway>
 
   constructor(
-    private readonly deps: { db: Db; config: AppConfig; orders: OrderService },
+    private readonly deps: {
+      db: Db
+      config: AppConfig
+      orders: OrderService
+      /** round-16 — اعلام سفارش جدید/نهایی‌شده به پنل زنده (SSE) */
+      hub: SseHub
+    },
   ) {
     this.gateways = new Map<string, PaymentGateway>([
       ['MOCK', new MockAdapter(deps.config)],
@@ -223,7 +230,7 @@ export class PaymentService {
   ): Promise<{ orderDisplayId: string; paymentStatus: string }> {
     const { db } = this.deps
 
-    return db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // metadata فعلی برای merge — فقط خواندن؛ claim اتمیک همان update
       // با status=PENDING است، پس این select مسیر رقابت را عوض نمی‌کند
       const current = (
@@ -265,5 +272,19 @@ export class PaymentService {
       await this.deps.orders.failPayment(tx, orderRow)
       return { orderDisplayId: orderRow.displayId, paymentStatus: 'FAILED' }
     })
+
+    // round-16 — پس از commit (نه داخل tx): پنل زنده با SSE فوراً باخبر می‌شود.
+    // موفق = سفارش جدید در صف | شکست = حذف از صف (پنل رفرش می‌کند)
+    try {
+      this.deps.hub.publish(
+        'orders:new',
+        result.paymentStatus === 'SUCCESS'
+          ? { event: 'order-created', data: { id: result.orderDisplayId } }
+          : { event: 'order-updated', data: { id: result.orderDisplayId } },
+      )
+    } catch {
+      /* noop — publish هرگز نباید مسیر پرداخت را بشکند */
+    }
+    return result
   }
 }

@@ -819,12 +819,32 @@ export class OrderService {
 	// ── خواندن ──
 
 	async myOrders(userId: string) {
-		const rows = await this.deps.db
-			.select()
-			.from(orders)
-			.where(eq(orders.userId, userId))
-			.orderBy(desc(orders.createdAt));
-		return this.mapRows(rows);
+		// round-16 — سقف دفاعی: داشبورد مشتری پشت این endpoint است؛
+		// مشتری وفادار با صدها سفارش نباید پاسخ چندمگابایتی + fan-out آیتم‌ها بسازد.
+		// ۲۰۰ سفارش آخر + همهٔ سفارش‌های فعال (همان منطق merge پروفایل سبک).
+		const [recent, active] = await Promise.all([
+			this.deps.db
+				.select()
+				.from(orders)
+				.where(eq(orders.userId, userId))
+				.orderBy(desc(orders.createdAt))
+				.limit(200),
+			this.deps.db
+				.select()
+				.from(orders)
+				.where(
+					and(
+						eq(orders.userId, userId),
+						inArray(orders.status, ["PAID", "CONFIRMED", "ON_THE_WAY"]),
+					),
+				),
+		]);
+		const seen = new Set(recent.map((r) => r.id));
+		const merged = [...recent];
+		for (const r of active) {
+			if (!seen.has(r.id)) merged.push(r);
+		}
+		return this.mapRows(merged);
 	}
 
 	/**
@@ -869,16 +889,19 @@ export class OrderService {
 				.where(eq(orders.displayId, displayId))
 		)[0];
 		if (!row || row.userId !== userId) throw Err.notFound("سفارش پیدا نشد.");
-		const items = await this.deps.db
-			.select()
-			.from(orderItems)
-			.where(eq(orderItems.orderId, row.id));
-		const profit = await this.deps.db
-			.select({ amount: referralProfits.amount })
-			.from(referralProfits)
-			.where(eq(referralProfits.orderId, row.id))
-			.then((r) => r[0]?.amount ?? 0);
-		const courier = await this.courierOf(row.courierId);
+		// round-16 — سه کوئری مستقل → Promise.all (همان نتیجه، یک رفت‌وبرگشت)
+		const [items, profit, courier] = await Promise.all([
+			this.deps.db
+				.select()
+				.from(orderItems)
+				.where(eq(orderItems.orderId, row.id)),
+			this.deps.db
+				.select({ amount: referralProfits.amount })
+				.from(referralProfits)
+				.where(eq(referralProfits.orderId, row.id))
+				.then((r) => r[0]?.amount ?? 0),
+			this.courierOf(row.courierId),
+		]);
 		return this.mapOne(row, items, profit, courier);
 	}
 

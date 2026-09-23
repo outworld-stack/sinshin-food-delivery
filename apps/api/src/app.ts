@@ -129,6 +129,7 @@ export const buildApp = (deps: AppDeps) => {
       healthRoutes({
         db: deps.db,
         redis: deps.redis,
+        uploads: deps.uploads,
         config: deps.config,
         startedAt: Date.now(),
       }),
@@ -198,14 +199,17 @@ export const buildApp = (deps: AppDeps) => {
         profile: deps.profile,
         settings: deps.settings,
         payments: deps.payments,
-        redis: deps.redis
+        redis: deps.redis,
+        hub: deps.sseHub,
       }),
     )
     .use(paymentRoutes({ payments: deps.payments }))
     .use(reconcileRoutes({ sessions: deps.sessions, reconcile: deps.reconcile }))
     .use(geoRoutes({ geo: deps.geo, sessions: deps.sessions, redis: deps.redis }))
 
-  return new Elysia()
+  // round-16 — سقف بدنهٔ درخواست در سطح سوکت (پیش از بافر شدن کامل در حافظه):
+  // آپلودها ۲MB هستند؛ ۸MB سقف سخاوتمندانه برای multipart + JSON های بزرگ
+  return new Elysia({ serve: { maxRequestBodySize: 8 * 1024 * 1024 } })
     .use(openapiPlugin(deps.config))
     .use(
       cors({

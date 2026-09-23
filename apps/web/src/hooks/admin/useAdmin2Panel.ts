@@ -1,11 +1,12 @@
 // src/hooks/admin/useAdmin2Panel.ts
-import { useReducer, useCallback, useRef, useEffect } from 'react'
+import { useReducer, useCallback, useRef, useEffect, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import {
   subAdminLogout, viewOrderNote,
 } from '#/server/admin'
 import { useNavigate } from '@tanstack/react-router'
-import { onUnauthorized } from '#/lib/auth-session'
+import { onUnauthorized, getAccessToken } from '#/lib/auth-session'
+import { apiBase } from '#/lib/api'
 import { admin2SessionOptions, admin2LiveOrdersOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
@@ -51,6 +52,14 @@ const POLL_ACTIVE_MS = 2_500   // سفارش در صف انتظار (PAID) → �
 const POLL_IDLE_MS = 10_000    // صف خالی → پول آرام (سرور و باتری راحته)
 const ORDERS_PER_PAGE = 20
 
+// round-16 — SSE: زیرساختش از قبل کامل بود ولی مصرف‌کننده‌ای نداشت؛
+// حالا رویدادهای سرور (سفارش جدید/تأیید/تغییر پیک) ریفچ فوری می‌دهند و
+// پول فقط «تور ایمنی» می‌ماند — بار دیتابیس پنل زنده به کسری از قبل می‌رسد.
+// هر خطا → بازگشت بی‌درنگ به پول تطبیقی قبلی + تلاش دوبارهٔ SSE پس از ۶۰s.
+const SSE_SAFETY_POLL_MS = 60_000
+const SSE_RETRY_MS = 60_000
+const SSE_EVENTS = ['order-created', 'order-updated', 'order-confirmed'] as const
+
 // --- هوک ---
 export function useAdmin2Panel() {
   const [state, dispatch] = useReducer(admin2Reducer, initialState)
@@ -70,15 +79,72 @@ export function useAdmin2Panel() {
   // ux-۱: refetchIntervalInBackground روشن شد — این پنل «قلب رستوران» است؛
   // تب مخفی هم باید سفارشِ پول‌خورده را ببیند (قبلاً در تب مخفی polling
   // می‌ایستاد و سفارش جدید دیده نمی‌شد تا بازگشت به تب)
-  const { data: liveData } = useQuery({
+  // ⬅ round-16 — وضعیت SSE (قبل از کوئری تعریف می‌شود تا closure پول به آن دسترسی داشته باشد)
+  const [sseConnected, setSseConnected] = useState(false)
+  const { data: liveData, refetch: refetchLive } = useQuery({
     ...admin2LiveOrdersOptions(adminId),
     enabled: session?.isAdmin2LoggedIn === true,
     refetchInterval: (query) => {
+      // SSE وصل است → فقط تور ایمنی ۶۰s؛ وگرنه پول تطبیقی (۲.۵s/۱۰s)
+      if (sseConnected) return SSE_SAFETY_POLL_MS
       const orders = query.state.data?.orders ?? []
       return orders.some(o => o.status === 'PAID') ? POLL_ACTIVE_MS : POLL_IDLE_MS
     },
     refetchIntervalInBackground: true,
   })
+
+  // ⬅ round-16 — اتصال SSE به کانال orders:new (توکن در query — EventSource
+  // هدر نمی‌تواند بفرستد؛ requireAuth سمت سرور ?token= را می‌پذیرد)
+  useEffect(() => {
+    if (!session?.isAdmin2LoggedIn) return
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
+
+    let es: EventSource | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    let disposed = false
+
+    // انباشت رویدادها (مثلاً ۵ سفارش هم‌زمان) → فقط یک ریفچ
+    const requestRefetch = () => {
+      if (debounceTimer) return
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null
+        void refetchLive()
+      }, 400)
+    }
+
+    const connect = () => {
+      if (disposed) return
+      const token = getAccessToken()
+      if (!token) return // لاگین نیست/توکن در دسترس نیست → پول تطبیقی کافی است
+      es = new EventSource(
+        `${apiBase()}/realtime/stream?channel=orders:new&token=${encodeURIComponent(token)}`,
+      )
+      es.addEventListener('open', () => setSseConnected(true))
+      for (const ev of SSE_EVENTS) es.addEventListener(ev, requestRefetch)
+      es.addEventListener('error', () => {
+        // قطع/خطا: پول تطبیقی فوراً برمی‌گردد؛ ۶۰s بعد با توکن تازه دوباره
+        setSseConnected(false)
+        es?.close()
+        es = null
+        if (!disposed && !retryTimer) {
+          retryTimer = setTimeout(() => {
+            retryTimer = null
+            connect()
+          }, SSE_RETRY_MS)
+        }
+      })
+    }
+    connect()
+
+    return () => {
+      disposed = true
+      if (debounceTimer) clearTimeout(debounceTimer)
+      if (retryTimer) clearTimeout(retryTimer)
+      es?.close()
+      setSseConnected(false)
+    }
+  }, [session?.isAdmin2LoggedIn, refetchLive])
 
   // دینگ سفارش جدید
   const prevCountRef = useRef(0)

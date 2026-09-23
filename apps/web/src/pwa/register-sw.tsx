@@ -66,6 +66,9 @@ export function PwaRegister() {
       return
     }
 
+    // round-16 — پاک‌کننده‌های ثبتِ SW (داخل then پر می‌شوند؛ cleanup انتها می‌گیردشان)
+    const swCleanupFns: Array<() => void> = []
+
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
@@ -74,24 +77,42 @@ export function PwaRegister() {
           setWaitingWorker(reg.waiting)
           setShowUpdate(true)
         }
-        reg.addEventListener('updatefound', () => {
+        const onUpdateFound = () => {
           const nw = reg.installing
           if (!nw) return
-          nw.addEventListener('statechange', () => {
+          const onStateChange = () => {
             if (nw.state === 'installed' && navigator.serviceWorker.controller) {
               setWaitingWorker(nw)
               setShowUpdate(true)
             }
-          })
-        })
+          }
+          nw.addEventListener('statechange', onStateChange)
+        }
+        reg.addEventListener('updatefound', onUpdateFound)
 
         // reload کنترل‌شده — فقط یک‌بار (فلگ ضد loop)
         let reloaded = false
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
+        const onControllerChange = () => {
           if (reloaded) return
           reloaded = true
           window.location.reload()
-        })
+        }
+        navigator.serviceWorker.addEventListener('controllerchange', onControllerChange)
+
+        // round-16 — پنل زنده روزها باز می‌ماند؛ مرورگر خودش به‌ندرت چک می‌کند.
+        // هر ۶ ساعت reg.update() → هات‌فیکس‌ها همان روز دیده می‌شوند.
+        const updateTimer = setInterval(() => {
+          void reg.update().catch(() => {/* noop */})
+        }, 6 * 3600_000)
+
+        // round-16 — پاک‌سازی کامل listener ها و تایمر (قبلاً فقط beforeinstallprompt پاک می‌شد)
+        swCleanupFns.push(
+          () => {
+            clearInterval(updateTimer)
+            reg.removeEventListener('updatefound', onUpdateFound)
+            navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange)
+          },
+        )
       })
       .catch(() => {/* SW نشد — اپ عادی */ })
 
@@ -107,10 +128,11 @@ export function PwaRegister() {
     window.addEventListener('beforeinstallprompt', onBeforeInstall)
 
     // نصب شد → dismissal پاک شود (uninstall/reinstall → پرامپت برگردد)
-    window.addEventListener('appinstalled', () => {
+    const onAppInstalled = () => {
       setShowInstall(false)
       try { localStorage.removeItem(DISMISS_KEY) } catch { /* noop */ }
-    })
+    }
+    window.addEventListener('appinstalled', onAppInstalled)
 
     // ── iOS راهنما — فقط iOS + غیر standalone + پایدار بسته‌نشده (pwa-۲) ──
     const isIos = /iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent)
@@ -118,7 +140,11 @@ export function PwaRegister() {
       setShowIosGuide(true)
     }
 
-    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstall)
+      window.removeEventListener('appinstalled', onAppInstalled)
+      for (const fn of swCleanupFns) fn()
+    }
   }, [])
 
   // ── آپدیت: تأیید کاربر → skipWaiting → controllerchange → reload (یک‌بار) ──

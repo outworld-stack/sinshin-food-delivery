@@ -6,12 +6,22 @@ import type { DeviceService } from '#/domain/device/device.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2, requireAdmin2Permission } from '#/http/hooks/require-admin2'
-import type { AdminService } from '#/domain/admin/admin.service'
+import type { AdminService, AdminUserSort } from '#/domain/admin/admin.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { Err } from '#/domain/shared/errors'
 import { asUserId } from '#/domain/shared/brand'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+/** round-16 — sorts خام کاربر است؛ JSON خراب باید ۴۲۲ بدهد نه ۵۰۰ */
+function parseSorts(raw: string | undefined): AdminUserSort[] | undefined {
+  if (!raw) return undefined
+  try {
+    return JSON.parse(raw) as AdminUserSort[]
+  } catch {
+    throw Err.validation('پارامتر sorts باید JSON معتبر باشد.')
+  }
+}
 
 export interface AdminRoutesDeps {
   sessions: SessionService
@@ -86,7 +96,7 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
           search: query.search || undefined,
           device: query.device || undefined,
           status: query.status || undefined,
-          sorts: query.sorts ? JSON.parse(query.sorts) : undefined,
+          sorts: parseSorts(query.sorts),
         }),
       {
         query: t.Object({

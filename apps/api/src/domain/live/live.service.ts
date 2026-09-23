@@ -1,6 +1,6 @@
 //src/domain/live/live.service.ts
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { buildRangeCharts } from "#/domain/shared/charts";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { buildRangeCharts, currentPeriodStart } from "#/domain/shared/charts";
 import type { Db } from "#/infra/db/client";
 import {
 	admin2Profiles,
@@ -90,7 +90,7 @@ export class LiveService {
 			.innerJoin(users, eq(users.id, orders.userId))
 			.where(
 				sql`(${orders.status} = 'PAID' and ${orders.confirmedBy} is null and ${scopeSql})
-            or (${ownershipSql} and ${orders.status} in ('CONFIRMED', 'ON_THE_WAY'))`,
+	    or (${ownershipSql} and ${orders.status} in ('CONFIRMED', 'ON_THE_WAY'))`,
 			)
 			.orderBy(desc(orders.createdAt))
 			.limit(200);
@@ -103,31 +103,46 @@ export class LiveService {
 
 	/** آمار داشبورد ادمین۲ — فقط سفارشات خودش */
 	async admin2Stats(adminUserId: string) {
-		const rows = await this.deps.db
-			.select()
-			.from(orders)
-			.where(
-				and(
-					eq(orders.confirmedBy, adminUserId),
-					sql`${orders.status} in ('CONFIRMED', 'ON_THE_WAY', 'DELIVERED')`,
-				),
-			)
-			.orderBy(desc(orders.createdAt));
+		const mine = and(
+			eq(orders.confirmedBy, adminUserId),
+			sql`${orders.status} in ('CONFIRMED', 'ON_THE_WAY', 'DELIVERED')`,
+		);
 
-		const totalAmount = rows.reduce((s, o) => s + o.totalAmount, 0);
+		// round-16 — تجمیع در SQL: قبلاً «کل» تاریخچهٔ تأییدهای ادمین
+		// بارگذاری و در JS جمع می‌شد (ردیف‌ها هر روز برای همیشه رشد می‌کردند).
+		// نمودار هم فقط بازهٔ جاری (کران سال/هفتهٔ شمسی) را می‌خواند.
+		const [agg, recentOrders, chartRows] = await Promise.all([
+			this.deps.db
+				.select({
+					count: sql<number>`count(*)::int`,
+					sum: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
+				})
+				.from(orders)
+				.where(mine)
+				.then((r) => r[0]),
+			this.deps.db
+				.select({
+					id: orders.displayId,
+					amount: orders.totalAmount,
+					date: orders.createdAt,
+					status: orders.status,
+				})
+				.from(orders)
+				.where(mine)
+				.orderBy(desc(orders.createdAt))
+				.limit(5),
+			this.deps.db
+				.select({ date: orders.createdAt, value: orders.totalAmount })
+				.from(orders)
+				.where(and(mine, gte(orders.createdAt, currentPeriodStart()))),
+		]);
+
 		return {
-			totalOrders: rows.length,
-			totalAmount,
-			recentOrders: rows.slice(0, 5).map((o) => ({
-				id: o.displayId,
-				amount: o.totalAmount,
-				date: o.createdAt,
-				status: o.status,
-			})),
-			// ⬅ phase-3: نمودار از داده‌ی واقعی — مبلغ سفارشات تاییدشده‌ی خودم
-			chartData: buildRangeCharts(
-				rows.map((o) => ({ date: o.createdAt, value: o.totalAmount })),
-			),
+			totalOrders: agg?.count ?? 0,
+			totalAmount: Number(agg?.sum ?? 0),
+			recentOrders,
+			// ⬅ phase-3: نمودار از دادهٔ واقعی — مبلغ سفارشات تأییدشدهٔ خودم
+			chartData: buildRangeCharts(chartRows),
 		};
 	}
 

@@ -96,6 +96,8 @@ export const deviceEvents = pgTable(
   (t) => [
     index('device_events_device_idx').on(t.deviceId, t.createdAt),
     index('device_events_event_idx').on(t.event),
+    /** round-16 — لاگ‌های کاربر در پنل ادمین: where phone=… order by created_at desc — قبلاً seq scan + sort */
+    index('device_events_phone_created_idx').on(t.phone, t.createdAt),
   ],
 )
 

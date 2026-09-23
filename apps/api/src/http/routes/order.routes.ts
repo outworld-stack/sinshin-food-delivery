@@ -7,6 +7,7 @@ import type { ProfileService } from '#/domain/order/profile.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { PaymentService } from '#/domain/payment/payment.service'
 import type { RedisService } from '#/infra/redis/redis'
+import type { SseHub } from '#/infra/realtime/sse-hub'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { Err } from '#/domain/shared/errors'
 
@@ -21,6 +22,8 @@ export interface OrderRoutesDeps {
   settings: SettingsService
   payments: PaymentService
   redis: RedisService
+  /** round-16 — چک‌اوت تمام-کیف‌پول: سفارش PAID بلافاصله به پنل زنده اعلام شود */
+  hub: SseHub
 }
 
 export const orderRoutes = (deps: OrderRoutesDeps) => {
@@ -133,7 +136,15 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         const redisKey = idemKey ? `idem:checkout:${user.id}:${idemKey}` : null
         if (redisKey) {
           const cached = await deps.redis.get(redisKey)
-          if (cached) return JSON.parse(cached)
+          // round-16 — کش خراب (JSON نامعتبر) نباید ۲۴ ساعت ۵۰۰ بدهد؛
+          // کلید پاک و مسیر تازهٔ چک‌اوت ادامه می‌یابد
+          if (cached !== null) {
+            try {
+              return JSON.parse(cached) as Record<string, unknown>
+            } catch {
+              await deps.redis.del(redisKey)
+            }
+          }
           // phase-fix: claim اتمیک — دو درخواست موازی با همان کلید فقط یکی
           // سفارش می‌سازد؛ قبلاً get-then-set بود و هر دو از کنار می‌گذشتند.
           // null = ردیس پایین → بدون idempotency ادامه (fail-open؛ چک‌اوت نباید بمیرد)
@@ -147,6 +158,18 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         let response: Record<string, any>
         try {
           const r = await deps.orders.checkout(user.id, body)
+          // round-16 — چک‌اوت تمام-کیف‌پول همین‌جا PAID می‌شود؛
+          // پس از commit به پنل زنده اعلام (مسیر درگاهی در PaymentService.finalize اعلام می‌کند)
+          if (!r.requiresPayment) {
+            try {
+              deps.hub.publish('orders:new', {
+                event: 'order-created',
+                data: { id: r.displayId },
+              })
+            } catch {
+              /* noop */
+            }
+          }
           response = !r.requiresPayment || !r.paymentId
             ? {
               orderCompleted: true,

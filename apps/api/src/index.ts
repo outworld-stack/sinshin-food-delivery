@@ -43,6 +43,7 @@ import { ReconcileJob } from '#/workers/jobs/reconcile.job'
 import { ArticleService } from '#/domain/article/article.service'
 import { GalleryService } from '#/domain/gallery/gallery.service'
 import { PaymentTimeoutJob } from '#/workers/jobs/payment-timeout.job'
+import { RetentionJob } from '#/workers/jobs/retention.job'
 import { GeoService } from '#/domain/geo/geo.service'
 import { buildApp } from '#/app'
 
@@ -82,7 +83,7 @@ const coupons = new CouponService({ db })
 const termsService = new TermsService({ db })
 const orders = new OrderService({ db, config, zones, settings, coupons })
 const profile = new ProfileService({ db, config, orders, devices })
-const payments = new PaymentService({ db, config, orders })
+const payments = new PaymentService({ db, config, orders, hub: sseHub })
 const uploads = new UploadService(config.uploadDir)
 const admin2 = new Admin2Service({ db, config, settings, hub: sseHub })
 const live = new LiveService({ db, config, admin2, hub: sseHub })
@@ -109,6 +110,8 @@ if (!g.__sinshin_cron_registered) {
   scheduler.register(new DailyReportJob({ config, db, sms, reports }))
   scheduler.register(new WeeklyReportJob({ config, db, sms, reports }))
   scheduler.register(new ReconcileJob({ config, db, reconcile }))
+  // round-16 — پاک‌سازی دوره‌ای جدول‌های لاگی/سشن (۱۸۰/۹۰ روز، حذف Bound‌شده)
+  scheduler.register(new RetentionJob({ db }))
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
   // phase-fix: تازه‌سازی روزانه‌ی بازه‌های IP ایران (RIPE)
   scheduler.registerInterval({
@@ -118,6 +121,42 @@ if (!g.__sinshin_cron_registered) {
       await geo.refresh()
     },
   })
+}
+
+// ── process-level safety net — round-16: باید «قبل از listen» ثبت شوند تا │
+// خطای بوت (مثلاً پر بودن پورت) از لایهٔ keep-alive رد نشود و پروسه بی‌صدا نمیرد ──
+if (!g.__sinshin_signals) {
+  g.__sinshin_signals = true
+  // لاگ می‌ماند، پروسه زنده می‌ماند (restart خودش فقط برای خطاهای مهلک)
+  process.on('unhandledRejection', (reason) => {
+    console.error('[api] unhandledRejection (kept alive):', reason)
+  })
+  process.on('uncaughtException', (err) => {
+    console.error('[api] uncaughtException (kept alive):', err)
+  })
+  const shutdown = async (signal: string) => {
+    console.log(`[api] ${signal} received — shutting down`)
+    scheduler.stop()
+    try {
+      app.stop()
+    } catch {
+      /* noop */
+    }
+    try {
+      redis.close()
+    } catch {
+      /* noop */
+    }
+    // phase-5: قفل‌های pool در جریان تمام شوند — exit بعد از بستنِ واقعی
+    try {
+      await database.close()
+    } catch {
+      /* noop */
+    }
+    process.exit(0)
+  }
+  process.on('SIGINT', () => void shutdown('SIGINT'))
+  process.on('SIGTERM', () => void shutdown('SIGTERM'))
 }
 
 // ── app ──
@@ -154,7 +193,19 @@ const app = buildApp({
   gallery,
   geo,
 })
-app.listen({ port: config.port, hostname: config.host })
+
+// round-16 — گارد بوت: اگر پورت گرفته شده باشد/ bind شکست بخورد، با پیام
+// شفاف exit می‌کنیم تا compose ری‌استارت بزند و لاگ عملیات قابل تشخیص باشد
+// (پروسهٔ زندهٔ بی‌سرور بدتر از ری‌استارت شفاف است).
+try {
+  app.listen({ port: config.port, hostname: config.host })
+} catch (err) {
+  console.error(
+    `[boot] listen failed on ${config.host}:${config.port} — port already in use or bind error:`,
+    err,
+  )
+  process.exit(1)
+}
 
 // phase-fix: لود بازه‌های IP ایران — fire-and-forget (fail-open تا آماده شود)
 geo.warmup()
@@ -175,41 +226,6 @@ console.log(
 console.log(
   `[api] sms: ${sms.describe()} │ otp: cooldown ${config.otp.cooldownSeconds}s / ${config.otp.maxAttempts} attempts`,
 )
-
-// ── graceful shutdown — registered once ──
-if (!g.__sinshin_signals) {
-  g.__sinshin_signals = true
-  // لاگ می‌ماند، پروسه زنده می‌ماند (restart خودش فقط برای خطاهای مهلک)
-  process.on('unhandledRejection', (reason) => {
-    console.error('[api] unhandledRejection (kept alive):', reason)
-  })
-  process.on('uncaughtException', (err) => {
-    console.error('[api] uncaughtException (kept alive):', err)
-  })
-  const shutdown = async (signal: string) => {
-    console.log(`[api] ${signal} received — shutting down`)
-    scheduler.stop()
-    try {
-      app.stop()
-    } catch {
-      /* noop */
-    }
-    try {
-      redis.close()
-    } catch {
-      /* noop */
-    }
-    // phase-5: قفل‌های pool در جریان تمام شوند — exit بعد از بستنِ واقعی
-    try {
-      await database.close()
-    } catch {
-      /* noop */
-    }
-    process.exit(0)
-  }
-  process.on('SIGINT', () => void shutdown('SIGINT'))
-  process.on('SIGTERM', () => void shutdown('SIGTERM'))
-}
 
 /** for Eden — type-only export, zero runtime footprint */
 export type App = typeof app
