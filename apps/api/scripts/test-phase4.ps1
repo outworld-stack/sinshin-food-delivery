@@ -36,7 +36,7 @@ function P($name, $ok, $extra) {
 # ══ self-clean: آثار اجراهای قبلی — اسکریپت را idempotent می‌کند ══
 Write-Host '== cleanup previous run ==' -ForegroundColor Cyan
   function Pg($sql) {
-    (podman compose -f compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
+    (docker compose -f compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
   }
  $sqls = @(
   "DELETE FROM wallet_transactions WHERE user_id IN (SELECT id FROM users WHERE phone IN ('09120000010','09120000011'))",
@@ -54,7 +54,7 @@ Write-Host '== cleanup previous run ==' -ForegroundColor Cyan
   "UPDATE coupons SET used_count = 0 WHERE code = 'SINSHIN20'"
 )
 foreach ($s in $sqls) { Pg $s | Out-Null }
-podman compose -f compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
+docker compose -f compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
 Write-Host 'cleanup done' -ForegroundColor Cyan
 
 # ══ setup ══

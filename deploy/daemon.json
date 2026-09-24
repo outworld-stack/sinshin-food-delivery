@@ -1,0 +1,9 @@
+{
+  "registry-mirrors": ["https://docker.mobinhost.com"],
+  "insecure-registries": ["docker.mobinhost.com"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}

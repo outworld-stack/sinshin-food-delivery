@@ -1,220 +1,229 @@
-# مهاجرت از Docker به Podman — راهنمای سین‌شین
+# اجرا با Docker — راهنمای سین‌شین
 
-> چرا؟ داکر در ایران تحریم است؛ دانلود از Docker Hub کند/ناممکن شده و روند توسعه را
-> کند کرده است. Podman خودش (ابزار) از GitHub توزیع می‌شود و نیازی به لایسنس یا
-> اکانت Docker ندارد. مشکل واقعی فقط **رجیستری Docker Hub** است — و با «میرور» حل می‌شود.
+> استک کامل با **docker compose** روی یک سرور لینوکسی شخصی — کالیبره برای
+> ۴ هسته / ۸GB رم / ۴۰GB دیسک. مشکل واقعی داکر در ایران فقط **رجیستری Docker Hub**
+> است — و با «میرور» حل می‌شود (بند ۲).
 
-این سند: نصب (ویندوز/لینوکس) ← تنظیم میرور ← دستورات روزمره ← انتقال داده‌های قدیمی ← رفع اشکال.
-
----
-
-## ۱) نصب
-
-### ویندوز (WSL2 لازم دارد — مثل خود Docker Desktop)
-
-```powershell
-# podman از GitHub (برای ایران بدون مشکل):
-winget install RedHat.Podman            # یا: choco install podman-cli
-# رابط گرافیکی اختیاری:
-winget install RedHat.Podman-Desktop
-
-# ماشین مجازی podman (یک‌بار برای همیشه):
-podman machine init
-podman machine start                    # بعد از هر ری‌استارت ویندوز هم اگر لازم شد
-```
-
-### لینوکس
-
-```bash
-# Fedora/RHEL:  sudo dnf install podman
-# Debian/Ubuntu: sudo apt install podman
-```
-
-### Compose — **قدمِ کلیدی، دو راه دارد:**
-
-**راه الف (پیشنهادی): باینری مستقل docker-compose به‌عنوان provider.**
-`podman compose` خودش هیچ compose engine‌ای ندارد؛ اگر باینری docker-compose را
-نصب کرده باشد، همان را در برابر سوکت podman اجرا می‌کند — یعنی **صددرصد سازگار با
-همه‌ی امکانات compose** (از جمله `depends_on: condition: service_healthy` و
-`service_completed_successfully` که این پروژه به آن‌ها وابسته است):
-
-```powershell
-# ویندوز: از GitHub Releases دانلود کن (برای ایران در دسترس):
-#   https://github.com/docker/compose/releases  → docker-compose-windows-x86_64.exe
-#   به‌عنوان docker-compose.exe داخل PATH بگذار (مثلاً C:\Windows یا ~\bin)
-docker-compose version   # تست
-podman compose version   # podman خودش همین باینری را پیدا می‌کند و DOCKER_HOST را می‌سازد
-```
-
-**راه ب: podman-compose (پایتونی).** `pip install podman-compose` — برای فایل dev
-کفایت می‌کند؛ فقط همیشه با `--in-pod=false` اجرا کن (در غیر این صورت همه‌ی
-سرویس‌ها داخل یک pod مشترک می‌نشینند و DNS اسم سرویس‌ها کار نمی‌کند — Caddyfile
-و DATABASE_URL خراب می‌شوند). در هر دو فایل compose مقدار `x-podman.in_pod: false`
-گذاشته شده که نسخه‌های جدید podman-compose را به‌خوبی می‌خواند، ولی فلگ صریح
-مطمئن‌تر است:
-
-```bash
-podman-compose --in-pod=false -f compose.dev.yml up -d
-```
-
-> از این‌جا به بعد همه‌ی مثال‌ها با `podman compose` (راه الف) هستند.
+این سند: نصب ← تنظیم میرور ← دستورات روزمره ← مهاجرت از podman با حفظ داده‌ها ← رفع اشکال.
 
 ---
 
-## ۲) میرور Docker Hub — قلب مهاجرت
+## ۱) نصب Docker (لینوکس — سرور تولید)
 
-ایمیج‌هایی که این پروژه از Docker Hub می‌کشد (با نام کامل در compose/Dockerfile‌ها):
+```bash
+# نصب رسمی (Docker Engine + compose plugin):
+curl -fsSL https://get.docker.com | sh
+
+# اجرای خودکار بعد از ری‌استارت سرور:
+sudo systemctl enable --now docker
+
+# کاربر جاری به گروه docker (دیگر نیاز به sudo نداری):
+sudo usermod -aG docker $USER
+# خروج و ورود دوباره (یا: newgrp docker)
+
+# راستی‌آزمایی:
+docker version
+docker compose version    # باید v2.x باشد (پلاگین، همراه نصب رسمی می‌آید)
+```
+
+> **ویندوز (فقط برای dev):** Docker Desktop یا Docker CE داخل WSL2 — همان daemon.json
+> بند ۲ را در WSL اعمال کن. حالت پیشنهادی dev روزمره: فقط زیرساخت داخل داکر،
+> خود اپ‌ها با bun روی سیستم (بند ۳).
+
+---
+
+## ۲) میرور Docker Hub — قلب کار
+
+ایمیج‌هایی که این پروژه می‌کشد (با نام کوتاه در compose/Dockerfile‌ها — پیش‌فرض docker.io):
 
 | ایمیج | چرا |
 |---|---|
-| `docker.io/oven/bun:1.3.14-slim` | بیس هر دو Dockerfile (api و web) |
-| `docker.io/library/postgres:18.6-alpine` | دیتابیس |
-| `docker.io/library/redis:8-alpine` | کش/صف |
-| `docker.io/library/caddy:2.10-alpine` | لبه/TLS |
+| `oven/bun:1.3.14-slim` | بیس هر دو Dockerfile (api و web) |
+| `postgres:18.6-alpine` | دیتابیس + سرویس بکاپ |
+| `redis:8-alpine` | کش/صف |
+| `caddy:2.10-alpine` | لبه/TLS |
 
-> نکته: میرور رسمی bun روی GHCR (ghcr.io/oven-sh/bun) هنوز منتشر نشده —
-> PR آن در oven-sh/bun باز است؛ وقتی منتشر شد می‌توان FROM را عوض کرد و برای bun
-> اصلاً به میرور نیاز نباشد. تا آن زمان همه از میرور می‌آیند.
+فایل آماده در ریپو هست: `deploy/docker/daemon.json` — دو کار انجام می‌دهد:
 
-فایل تنظیم را بساز:
-
-**ویندوز** (داخل ماشین podman — نه روی درایو ویندوز):
-
-```powershell
-podman machine ssh
-sudo tee /etc/containers/registries.conf <<'EOF'
-[[registry]]
-prefix = "docker.io"
-location = "docker.io"
-
-  # آینه‌ی اول — DaoCloud (تست‌شده: oven/bun، postgres، redis، caddy با همین تگ‌ها)
-  [[registry.mirror]]
-  location = "docker.m.daocloud.io"
-
-  # آینه‌ی پشتیبان — هر میرور دیگری که برای شما کار کند؛ چند نمونه‌ی رایج:
-  # [[registry.mirror]]
-  # location = "docker.1ms.run"
-EOF
-exit
-podman machine stop && podman machine start
-```
-
-**لینوکس** (rootless):
+1. **میرور**: همهٔ pull های docker.io (هم `docker pull`، هم `docker build` با درایور
+   پیش‌فرض BuildKit) اول از `docker.mobinhost.com` می‌آیند؛ اگر میرور مرد، خود docker.io.
+2. **چرخش لاگ**: هر کانتینر حداکثر ۳ فایل × ۱۰MB لاگ — لاگِ بی‌مرز، دیسک ۴۰GB را
+   یک روز پر می‌کند و کل سرور را می‌خواباند. اینجا یک‌بار برای همیشه حل است.
 
 ```bash
-mkdir -p ~/.config/containers
-# همین محتوا را در ~/.config/containers/registries.conf بگذار
+sudo mkdir -p /etc/docker
+sudo cp deploy/docker/daemon.json /etc/docker/daemon.json
+sudo systemctl restart docker
+
+# راستی‌آزمایی میرور:
+docker info 2>/dev/null | grep -A3 'Registry Mirrors'
+#   Registry Mirrors:
+#    https://docker.mobinhost.com
+
+# تست pull واقعی از میرور:
+docker pull redis:8-alpine
 ```
 
-چطور کار می‌کند؟ برای هر pull از `docker.io/...` اول آینه‌ها به‌ترتیب امتحان
-می‌شوند؛ اگر همه شکست خوردند، خود docker.io. یعنی **رفتار پیش‌فرض دست نخورده** و
-فقط یک مسیر سریع‌تر جلو افتاده است. اسم ایمیج‌ها هیچ تغییری نمی‌خواهند.
-
-تست سلامت میرور (قبل از اعتماد، از شبکه‌ی خودت):
-
-```bash
-curl -sI --max-time 10 https://docker.m.daocloud.io/v2/ | head -1
-# هر چیزی غیر از timeout (مثلاً 401) یعنی زنده است
-```
-
-میرورهای عمومی می‌آیند و می‌روند؛ اگر یک روز همه مردند، فقط همین فایل را عوض کن —
-نه هیچ فایل دیگری از پروژه.
+> **دو نکته دربارهٔ فرم فایل:**
+> - در `registry-mirrors` آدرس با `https://` می‌آید، اما در `insecure-registries`
+>   طبق استاندارد داکر **بدون scheme** نوشته می‌شود (`"docker.mobinhost.com"`) —
+>   با scheme آن‌جا بی‌اثر می‌شود. اگر گواهی TLS میرور برایتان معتبر است و خطا
+>   نمی‌گیرید، می‌توانید خط `insecure-registries` را کلاً حذف کنید.
+> - میرورهای عمومی می‌آیند و می‌روند؛ اگر یک روز مرد، فقط همین یک فایل را عوض کن —
+>   نه هیچ فایل دیگری از پروژه.
 
 ---
 
-## ۳) دستورات روزمره (نگاشت docker → podman)
+## ۳) دستورات روزمره
 
-| قبلاً (Docker) | حالا (Podman) |
-|---|---|
-| `docker compose up -d` | `podman compose up -d` |
-| `docker compose -f docker-compose.dev.yml up -d` | `podman compose -f compose.dev.yml up -d` |
-| `docker compose logs -f api` | `podman compose logs -f api` |
-| `docker compose ps` | `podman compose ps` |
-| `docker compose down` | `podman compose down` |
-| `docker compose up -d --build` | `podman compose up -d --build` |
-| `docker ps` / `docker images` | `podman ps` / `podman images` |
-| `docker exec -it sinshin-api sh` | `podman exec -it sinshin-api sh` |
-| `docker volume ls` | `podman volume ls` |
-| `docker system prune -a` | `podman system prune -a` |
-
-> عادت دست‌ها؟ در PowerShell پروفایل‌ت (`$PROFILE`) بگذار:
-> `Set-Alias docker podman` — ولی `docker compose` باید همان `podman compose` بماند.
-
-### اجرای استک کامل (تولید)
+### استک کامل (تولید)
 
 ```bash
-podman compose up -d            # postgres و redis و migrate و api و web و caddy
-podman compose ps
+docker compose up -d --build   # postgres، redis، migrate، api، web، caddy، backup
+docker compose ps              # همه باید healthy/running باشند
 ```
 
-### فقط زیرساخت + اپ روی سیستم (پیشنهادی برای dev روزمره روی ویندوز)
+### محیط توسعه (فقط زیرساخت؛ اپ‌ها با bun روی خود سیستم)
 
 ```bash
-podman compose -f compose.dev.yml up -d postgres redis
-# بعد apps/api/.env.local و apps/web طبق README — اپ‌ها را خودت با bun اجرا کن
+docker compose -f compose.dev.yml up -d postgres redis
+# بعد apps/api/.env.local طبق انتهای apps/api/.env.example
 ```
 
 ### seed (یک‌بار، صریح)
 
 ```bash
-podman compose --profile seed run --rm seed
+docker compose --profile seed run --rm seed
 ```
 
-### اسکریپت‌های تست فاز (PowerShell)
-
-`apps/api/scripts/test-phase*.ps1` همه به `podman compose -f compose.dev.yml ...`
-مهاجرت کرده‌اند — مثل قبل اجرا شوند.
-
----
-
-## ۴) تفاوت‌ها و گوتچاها
-
-1. **in_pod** — فقط برای کاربران podman-compose: به‌صورت پیش‌فرض همه‌ی سرویس‌ها
-   در یک pod مشترک (شبکه‌ی اشتراکی) می‌نشینند و DNS اسم سرویس‌ها (`api`، `postgres`، …)
-   کار نمی‌کند. هر دو فایل compose مقدار `x-podman.in_pod: false` دارند و فلگ
-   `--in-pod=false` هم مستند است. با provider راه الف اصلاً موضوعیت ندارد.
-
-2. **پورت‌های ۸۰/۴۴۳** — روی ویندوز (podman machine) بدون مشکل باز می‌شوند.
-   روی **لینوکس rootless** اگر خطای bind داد:
-   `sudo sysctl net.ipv4.ip_unprivileged_port_start=80` (و برای ماندگاری در
-   `/etc/sysctl.d/` بگذار) — یا کانتینر caddy را rootful بالا بیاور.
-
-3. **healthcheck** — podman به‌تنهایی HEALTHCHECK داخل Dockerfile را اجرا نمی‌کند
-   (ما هم نداریم)؛ healthcheckهای داخل فایل‌های compose توسط compose provider
-   اجرا می‌شوند و `depends_on` با شرط‌ها درست کار می‌کند (دلیل پیشنهاد راه الف).
-
-4. **volumeهای Docker Desktop منتقل نمی‌شوند** — حجم‌های podman جداست. برای داده‌ها
-   بند ۵ را ببین.
-
-5. **`RUN --mount=type=cache`** — Buildah (موتور بیلد podman) آن را پشتیبانی
-   می‌کند؛ بدترین حالت، عدم اشتراک کش بین بیلدهاست = فقط بیلد کندتر، نه شکسته.
-
-6. **`.dockerignore`** — همان‌طور می‌ماند؛ podman build آن را می‌خواند
-   (نام جدید `.containerignore` هم می‌پذیرد ولی لازم نیست).
-
-7. **DNS داخلی** — با provider یا `--in-pod=false`، اسم سرویس‌ها مثل docker
-   resolve می‌شود (netavark/aardvark). Caddyfile (`api:3000`، `web:3000`) بدون
-   تغییر کار می‌کند.
-
----
-
-## ۵) انتقال داده از Docker Desktop (یک‌بار)
+### به‌روزرسانی بعد از تغییر کد
 
 ```bash
-# ── دیتابیس ──
-# ۱) dump از داکر قدیمی (تا وقتی هنوز نصب است):
-docker compose -f docker-compose.dev.yml exec -T postgres pg_dump -U sinshin -d sinshin > backup.sql
-# ۲) استک podman را بالا بیاور (حجم تازه ساخته می‌شود)، بعد restore:
-podman compose -f compose.dev.yml exec -T postgres psql -U sinshin -d sinshin < backup.sql
-
-# ── آپلودها (تولید) ──
-docker cp sinshin-api:/data/uploads ./uploads-backup
-podman volume create sinshin_uploads_data
-# راه ساده‌تر: بعد از up استک، یک‌بار کپی داخل کانتینر:
-podman cp ./uploads-backup/. sinshin-api:/data/uploads/
+git pull
+docker compose up -d --build   # فقط سرویس‌های تغییریافته recreate می‌شوند
+docker compose ps              # منتظر healthy بمان
 ```
 
-اگر داده‌ی مهم نداری، کل این بند را رد کن — استک تازه با migrate/seed خودش بالا می‌آید.
+### بقیهٔ دستورها
+
+| کار | دستور |
+|---|---|
+| لاگ زندهٔ یک سرویس | `docker compose logs -f api --tail 100` |
+| ورود به کانتینر | `docker exec -it sinshin-api sh` |
+| ری‌استارت یک سرویس | `docker compose restart api` |
+| توقف کل استک (داده‌ها می‌مانند) | `docker compose down` |
+| لیست حجم‌ها | `docker volume ls` |
+| بازیابی بکاپ | `gunzip -c sinshin-....sql.gz \| docker exec -i sinshin-postgres psql -U sinshin -d sinshin` |
+| وضعیت سلامت API | `curl -s localhost/api/health` |
+
+> اسکریپت‌های تست فاز (`apps/api/scripts/test-phase*.ps1`) همگی به
+> `docker compose -f compose.dev.yml ...` مهاجرت کرده‌اند — مثل قبل اجرا شوند.
+
+---
+
+## ۴) مهاجرت از podman با حفظ داده‌ها (یک‌بار — رولبوک دقیق)
+
+> زمان تقریبی: ۱۵ تا ۳۰ دقیقه + چند دقیقه قطعی سایت.
+> تا قدم ۹ هر چیزی خراب شد، مسیر بازگشت در قدم ۸ هست.
+
+**۰) دامپ ایمنی — قبل از هر کاری:**
+
+```bash
+podman exec sinshin-postgres pg_dump -U sinshin -d sinshin | gzip > ~/sinshin-safety-$(date +%F).sql.gz
+ls -lh ~/sinshin-safety-*.sql.gz   # باید چند MB باشد؛ اگر 0 بود، ادامه نده
+```
+
+**۱) توقف کامل استک podman** (volume ها حذف نمی‌شوند):
+
+```bash
+cd /path/to/sinshin-food-delivery
+podman compose down
+```
+
+**۲) کد جدید (راند ۲۱):** `git pull` (یا اعمال فایل‌های پنل تحویل راند ۲۱)
+
+**۳) انتقال volume ها به docker** — برای هر حجم: خروجی tar از podman، ورودی به docker.
+کانتینر کمکی همان ایمیج postgres است که به‌هرحال لازم است (pull از میرور):
+
+```bash
+mkdir -p ~/sinshin-migration && cd ~/sinshin-migration
+
+# ── دیتابیس ──
+podman volume export sinshin_pg_data -o pg_data.tar
+docker volume create sinshin_pg_data
+docker run --rm -v sinshin_pg_data:/data -v ~/sinshin-migration:/backup \
+  postgres:18.6-alpine tar -C /data -xf /backup/pg_data.tar
+
+# ── آپلودها ──
+podman volume export sinshin_uploads_data -o uploads.tar
+docker volume create sinshin_uploads_data
+docker run --rm -v sinshin_uploads_data:/data -v ~/sinshin-migration:/backup \
+  postgres:18.6-alpine tar -C /data -xf /backup/uploads.tar
+
+# ── گواهی‌های Caddy (مهم: بدون این، ACME از نو صادر می‌کند و
+#    ممکن است به rate-limit بخورد) ──
+podman volume export sinshin_caddy_data -o caddy_data.tar
+docker volume create sinshin_caddy_data
+docker run --rm -v sinshin_caddy_data:/data -v ~/sinshin-migration:/backup \
+  postgres:18.6-alpine tar -C /data -xf /backup/caddy_data.tar
+
+# ── کانفیگ Caddy (اختیاری، بی‌ضرر) ──
+podman volume export sinshin_caddy_config -o caddy_config.tar
+docker volume create sinshin_caddy_config
+docker run --rm -v sinshin_caddy_config:/data -v ~/sinshin-migration:/backup \
+  postgres:18.6-alpine tar -C /data -xf /backup/caddy_config.tar
+```
+
+**۴) ردیس: انتقال لازم نیست.** نشست‌های کاربران از راند ۲۰ مقیم دیتابیس‌اند؛
+ردیس فقط کش منو، قفل‌های job، محدودیت نرخ OTP و پل SSE است — تازه بالا می‌آید.
+
+**۵) راه‌اندازی با docker:**
+
+```bash
+docker compose up -d --build
+```
+
+**۶) راستی‌آزمایی:**
+
+```bash
+docker compose ps                          # همه healthy
+curl -s localhost/api/health               # status: "ok" (یا degraded اگر ردیس هنوز بالا نیامده)
+docker compose logs -f api --tail 50       # بدون خطای تکرارشونده
+# در مرورگر: سایت، ورود، سفارش، پنل ادمین
+```
+
+**۷) پاک‌سازی فایل‌های موقت:** `rm -rf ~/sinshin-migration` (دامپ ایمنی را نگه دار)
+
+**۸) مسیر بازگشت (تا وقتی مطمئن نشده‌ای، podman را پاک نکن):**
+
+```bash
+docker compose down
+# فایل‌های compose/Dockerfile را به نسخهٔ قبل از راند ۲۱ برگردان:
+git log --oneline -5        # هش کامیت «stage twenty» را از اینجا بردار
+git checkout <هش> -- compose.yml compose.dev.yml apps/api/Dockerfile apps/web/Dockerfile
+podman compose up -d        # volume های podman هنوز سر جایشاناند
+# (اگر راند ۲۱ هنوز کامیت نشده و فقط فایل‌ها را کپی کرده‌ای:
+#  git checkout -- compose.yml compose.dev.yml apps/api/Dockerfile apps/web/Dockerfile)
+```
+
+**۹) بعد از چند روز عملکرد سالم:** `podman system prune -a` (volume های podman را
+هم می‌توانی حذف کنی — ولی دامپ ایمنی را همیشه نگه دار).
+
+---
+
+## ۵) تفاوت‌ها و نکته‌ها
+
+1. **سقف منابع** — هر سرویس در compose.yml سقف cpus/memory دارد (سقف، نه رزرو).
+   نشت حافظهٔ یک کانتینر دیگر نمی‌تواند بقیهٔ استک و میزبان ۸GB را بکُشد.
+   مجموع سقف‌ها ~۴.۹GB است؛ مصرف عادی خیلی پایین‌تر.
+2. **healthcheck** — رویخلاف podman، docker اجرا و enforce می‌کند؛ `depends_on`
+   با شرط‌ها و `restart: unless-stopped` دقیقاً همان‌طور که compose-spec می‌گوید.
+3. **`RUN --mount=type=cache`** — BuildKit داکر بومی پشتیبانی می‌کند؛ کش بین
+   بیلدها حفظ می‌شود.
+4. **DNS داخلی** — اسم سرویس‌ها (`api:3000`، `web:3000`، `postgres:5432`) با
+   DNS خود docker resolve می‌شود؛ Caddyfile بدون هیچ تغییری کار می‌کند.
+5. **پورت‌های ۸۰/۴۴۳** — روی سرور لینوکسی با docker (rootful) بدون مشکل.
+6. **`.dockerignore`** — دست‌نخورده؛ docker build همان‌طور می‌خواندش.
 
 ---
 
@@ -222,36 +231,36 @@ podman cp ./uploads-backup/. sinshin-api:/data/uploads/
 
 | نشانه | علت/راه‌حل |
 |---|---|
-| `unauthorized: authentication required` هنگام pull | میرور پاسخ 401 می‌دهد ولی token نمی‌دهد → میرور را عوض کن (بند ۲) |
-| pull اصلاً شروع نمی‌شود / timeout | registries.conf داخل **ماشین** نوشته نشده یا machine ری‌استارت نشده |
-| `api:3000` در Caddy resolve نمی‌شود | podman-compose بدون `--in-pod=false` اجرا شده → راه الف یا فلگ |
-| bind mount روی ویندوز کند است / HMR نمی‌آید | فایل‌ها روی درایو ویندوزند؛ حالت «فقط زیرساخت + اپ روی سیستم» (بند ۳) یا کلون داخل WSL |
-| خطای پورت ۸۰ اشغال | چیزی روی ۸۰ ویندوز/لینوکس است (IIS؟) → آزادش کن یا `ports` را موقتاً عوض کن |
-| `podman compose` می‌گوید provider پیدا نمی‌شود | باینری docker-compose در PATH نیست (بند ۱ راه الف) |
+| `unauthorized` یا timeout هنگام pull | daemon.json داخل `/etc/docker/` نیست یا داکر ری‌استارت نشده — `docker info` را چک کن |
+| میرور در `docker info` نیست | فایل را با sudo کپی کردی؟ `systemctl restart docker`؟ |
+| `docker compose` نمی‌شناسد | پلاگین نصب نیست — `docker compose version` باید v2.x بدهد |
+| permission denied روی docker.sock | کاربر در گروه docker نیست — بند ۱ |
+| پورت ۸۰/۴۴۳ اشغال | `sudo ss -ltnp \| grep -E ':80\|:443'` — سرویس بیرونی را آزاد کن |
+| بیلد روی `bun install` می‌ماند | شبکه/رجیستری npm — bunfig.toml را ببین (نکتهٔ registry آنجا) |
+| `api:3000` در Caddy resolve نمی‌شود | سرویس api بالا نیست — `docker compose ps` و لاگ migrate |
 
 ---
 
-## ۷) خلاصه‌ی تغییرات این مهاجرت در مخزن
+## ۷) خلاصهٔ تغییرات این مهاجرت در مخزن
 
 | فایل | تغییر |
 |---|---|
-| `apps/api/Dockerfile` ، `apps/web/Dockerfile` | `FROM docker.io/oven/bun:...` (نام کامل) + حذف `# syntax=docker/dockerfile:1` |
-| `docker-compose.yml` → `compose.yml` | تغییر نام + ایمیج‌های docker.io کامل + `x-podman.in_pod: false` + کامنت‌ها |
-| `docker-compose.dev.yml` → `compose.dev.yml` | همان درمان |
-| `apps/api/scripts/test-phase*.ps1` | `docker compose` → `podman compose` |
-| `apps/api/.env.example` | به‌روزرسانی دستورها در کامنت‌ها |
-| `README.md` | بخش اجرای Podman |
-| `PODMAN.md` | همین سند |
+| `compose.yml` | docker خالص: حذف `x-podman`، نام کوتاه ایمیج‌ها، سقف منابع هر سرویس |
+| `compose.dev.yml` | همان درمان (بدون سقف منابع — ماشین‌های dev متنوع‌اند) |
+| `apps/api/Dockerfile` ، `apps/web/Dockerfile` | `FROM` با نام کوتاه + سربرگ BuildKit |
+| `deploy/docker/daemon.json` | جدید — میرور mobinhost + چرخش لاگ |
+| `apps/api/scripts/test-phase*.ps1` | `podman compose` → `docker compose` |
+| `.env.example` ، `apps/api/.env.example` ، `deploy/backup/backup.sh` ، `health-alert.job.ts` | دستورها/کامنت‌ها → docker |
+| `README.md` | همین سند |
 
-`.dockerignore`، `Caddyfile`، و هر دو Dockerfile از نظر **منطق** دست‌نخورده‌اند —
-فقط رجیستری/نام‌گذاری. یعنی اگر فردا خواستی به docker برگردی، فقط نام فایل‌ها و
-اسم رجیستری‌ها را برمی‌گردانی.
+`Caddyfile`، `bunfig.toml`، `deploy/backup/backup.sh` (منطق) و همهٔ کد اپلیکیشن
+دست‌نخورده — این مهاجرت فقط زیرساخت اجراست.
+
+---
 
 
 
 ------------------------------
-
-
 
 سین‌شین فودپارک (Sinshin Foodpark)
 اپلیکیشن سفارش غذا — تک‌سرور، غیرمیکروسرویس، تیم کوچک.
@@ -259,27 +268,14 @@ podman cp ./uploads-backup/. sinshin-api:/data/uploads/
 یک فایل کامپوز برای کل استک؛ نه فایل جدا برای هر اپ، نه شبکه‌ی دستی، نه پیش‌نیاز پنهان.
 
 معماری
-اینترنت ──▶ caddy (TLS) ──▶ web ← فرانت TanStack Start (SSR)
-└──▶ api ← بک‌اند Elysia + Bun (مسیر /api/*)
-├──▶ postgres 18.6
-└──▶ redis
 
-اجرا با Podman
-کامل این مهاجرت در PODMAN.md است (نصب ویندوز/لینوکس، میرور Docker Hub،
-رفع گوتچاها). خلاصه‌ی دستورات:
+    اینترنت ──▶ caddy (TLS) ──▶ web ← فرانت TanStack Start (SSR)
+                    └──▶ api ← بک‌اند Elysia + Bun (مسیر /api/*)
+                          ├──▶ postgres 18.6
+                          └──▶ redis
 
-استک کامل (تولید):
+اجرای کامل با Docker — خلاصه‌ی دستورات (شرح کامل همین سند):
 
-    podman compose up -d
-
-محیط توسعه (فقط زیرساخت؛ اپ‌ها با bun روی خود سیستم):
-
-    podman compose -f compose.dev.yml up -d postgres redis
-
-seed (صریح، یک‌بار):
-
-    podman compose --profile seed run --rm seed
-
-نکته: docker-compose روی این پروژه با podman هم قابل اجراست
-(podman compose) — فایل‌های compose.yml و compose.dev.yml
-برای هر دو سازگارند.
+    docker compose up -d --build        # استک کامل (تولید)
+    docker compose -f compose.dev.yml up -d postgres redis   # فقط زیرساخت (dev)
+    docker compose --profile seed run --rm seed              # seed (صریح)

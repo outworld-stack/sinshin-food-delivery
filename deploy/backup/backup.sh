@@ -21,7 +21,7 @@
 #   • شکست هرگز اسکریپت را نمی‌کُشد — فقط لاگ؛ فردا دوباره تلاش می‌شود
 #
 # بازیابی (روی هاست، با مقادیر .env خودتان):
-#   gunzip -c sinshin-....sql.gz | podman exec -i sinshin-postgres \
+#   gunzip -c sinshin-....sql.gz | docker exec -i sinshin-postgres \
 #     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 # ══════════════════════════════════════════════════════════════════
 set -u

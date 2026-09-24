@@ -1,14 +1,15 @@
-# apps/api/Dockerfile — با podman build و docker build هر دو سازگار است.
+# apps/api/Dockerfile — برای Docker (BuildKit) نوشته شده.
 #
-# چرا FROM با رجیستری کامل (docker.io/...)؟
-#  • podman بدون ابهام پول می‌کند (بدون پرامپت short-name در محیط تعاملی)
-#  • میرور تنظیم‌شده در registries.conf دقیقاً روی prefix «docker.io» اعمال
-#    می‌شود — یعنی دانلود از آینه، بدون هیچ تغییری در این فایل.
+# چرا FROM با نام کوتاه (بدون پیشوند docker.io)؟
+#  • پیش‌فرض docker.io است و نام کوتاه خواناتر است.
+#  • میرور تعریف‌شده در /etc/docker/daemon.json به‌صورت خودکار روی
+#    pull از docker.io اعمال می‌شود — هم برای `docker pull` و هم برای
+#    `docker build` با درایور پیش‌فرض (BuildKit داخل همان daemon).
 #
-# RUN --mount=type=cache توسط Buildah (podman build) پشتیبانی می‌شود؛
-# بدترین حالت فقط کندتر شدن بیلد است، نه شکست آن.
+# RUN --mount=type=cache در BuildKit داکر به‌صورت بومی پشتیبانی
+# می‌شود — کش بیلد بین اجراها حفظ می‌شود و بیلدها سریع می‌مانند.
 
-FROM docker.io/oven/bun:1.3.14-slim AS base
+FROM oven/bun:1.3.14-slim AS base
 WORKDIR /app
 ENV TZ=Asia/Tehran \
     BUN_TELEMETRY_DISABLED=1

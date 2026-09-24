@@ -1,20 +1,19 @@
 name: sinshin
 
 # ══════════════════════════════════════════════════════════════
-# استک کامل سین‌شین — برای podman compose نوشته شده.
+# استک کامل سین‌شین — برای docker compose نوشته شده.
 #
-#  • ایمیج‌های بیرونی با رجیستری کامل (docker.io/...) آمده‌اند تا میرور
-#    تنظیم‌شده در registries.conf بدون ابهام اعمال شود — راهنمای کامل:
-#    PODMAN.md (نصب ویندوز/لینوکس + میرور + دستورات روزمره).
+#  • نام ایمیج‌های بیرونی بدون پیشوند رجیستری نوشته شده‌اند
+#    (پیش‌فرض docker.io) تا میرور تعریف‌شده در /etc/docker/daemon.json
+#    بدون ابهام اعمال شود — راهنمای کامل: README.md
+#    (نصب + میرور + مهاجرت از podman + دستورات روزمره).
 #
-#  • x-podman.in_pod=false فقط برای podman-compose است (رفع گوتچای
-#    «همه در یک pod» که DNS اسم سرویس‌ها را می‌شکند؛ Caddyfile با
-#    api:3000 و web:3000 به همان DNS وابسته است). با docker-compose
-#    provider و نسخه‌های جدید podman-compose بی‌اثر/بی‌ضرر است.
+#  • سقف منابع هر سرویس با deploy.resources.limits تنظیم شده و
+#    docker compose v2 همان‌ها را هنگام up اعمال می‌کند (بدون swarm).
+#    کالیبره برای سرور ۴ هسته / ۸GB RAM / ۴۰GB دیسک. اینها سقف‌اند
+#    نه رزرو — مصرف عادی خیلی پایین‌تر است؛ هدف فقط است که نشتِ
+#    حافظه‌ی یک کانتینر نتواند بقیه‌ی استک و میزبان را بکُشد.
 # ══════════════════════════════════════════════════════════════
-
-x-podman:
-  in_pod: false
 
 # ══════════════════════════════════════════════════════════════
 # Shared API configuration
@@ -71,6 +70,12 @@ x-api-service: &api-service
 
   stop_grace_period: 30s
 
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 1g
+
   networks:
     - edge
     - internal
@@ -83,7 +88,8 @@ services:
   # ════════════════════════════════════════════════════════════
 
   caddy:
-    image: docker.io/library/caddy:2.10-alpine
+    image: caddy:2.10-alpine
+
     container_name: sinshin-caddy
 
     restart: unless-stopped
@@ -111,6 +117,12 @@ services:
       # Caddy configuration.
       - caddy_config:/config
 
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+
     networks:
       - edge
 
@@ -131,7 +143,7 @@ services:
   #
   #   API_UPSTREAMS="api:3000 api2:3000 api3:3000"
   #
-  #   podman compose --profile scaled up -d
+  #   docker compose --profile scaled up -d
   #
   # All replicas share uploads_data on this host.
   # ════════════════════════════════════════════════════════════
@@ -199,6 +211,12 @@ services:
       retries: 6
       start_period: 15s
 
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 768m
+
     networks:
       - edge
 
@@ -233,6 +251,12 @@ services:
 
     restart: "no"
 
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
     networks:
       - internal
 
@@ -244,7 +268,7 @@ services:
   #
   # Run:
   #
-  #   podman compose --profile seed run --rm seed
+  #   docker compose --profile seed run --rm seed
   #
   # NEVER run automatically as part of normal production startup.
   # ════════════════════════════════════════════════════════════
@@ -275,6 +299,12 @@ services:
 
     restart: "no"
 
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
     profiles:
       - seed
 
@@ -287,7 +317,7 @@ services:
   # ════════════════════════════════════════════════════════════
 
   postgres:
-    image: docker.io/library/postgres:18.6-alpine
+    image: postgres:18.6-alpine
 
     container_name: sinshin-postgres
 
@@ -310,6 +340,12 @@ services:
 
     volumes:
       - pg_data:/var/lib/postgresql
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1536m
 
     networks:
       - internal
@@ -345,7 +381,7 @@ services:
   # ════════════════════════════════════════════════════════════
 
   backup:
-    image: docker.io/library/postgres:18.6-alpine
+    image: postgres:18.6-alpine
 
     container_name: sinshin-backup
 
@@ -375,6 +411,12 @@ services:
       postgres:
         condition: service_healthy
 
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+
     networks:
       - internal
 
@@ -384,7 +426,7 @@ services:
   # ════════════════════════════════════════════════════════════
 
   redis:
-    image: docker.io/library/redis:8-alpine
+    image: redis:8-alpine
 
     container_name: sinshin-redis
 
@@ -402,6 +444,12 @@ services:
 
     volumes:
       - redis_data:/data
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 768m
 
     networks:
       - internal

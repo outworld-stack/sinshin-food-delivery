@@ -130,7 +130,7 @@ export class HealthAlertJob implements IntervalJob {
 
   /**
    * ارسال به همهٔ گیرنده‌ها به‌موازات (سهم هر پیامک حداکثر ۱۰s — سقف خود سرویس).
-   * بدون گیرنده، متن در لاگ می‌ماند تا در podman logs دیده شود. غیر-پرتاب.
+   * بدون گیرنده، متن در لاگ می‌ماند تا در docker logs دیده شود. غیر-پرتاب.
    */
   private alert(message: string): void {
     const phones = this.deps.config.healthAlert.phones

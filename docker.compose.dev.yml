@@ -1,27 +1,25 @@
 name: sinshin-dev
 
 # ══════════════════════════════════════════════════════════════
-# محیط توسعه — برای podman compose نوشته شده (راهنما: PODMAN.md).
+# محیط توسعه — برای docker compose نوشته شده (راهنما: README.md).
 #
-#  • ایمیج‌های بیرونی با رجیستری کامل (docker.io/...) آمده‌اند تا میرور
-#    registries.conf بدون ابهام اعمال شود.
+#  • نام ایمیج‌های بیرونی بدون پیشوند رجیستری نوشته شده‌اند
+#    (پیش‌فرض docker.io) تا میرور تعریف‌شده در daemon.json
+#    بدون ابهام اعمال شود.
 #
-#  • x-podman.in_pod=false فقط برای podman-compose است (رفع گوتچای
-#    «همه در یک pod» که DNS اسم سرویس‌ها را می‌شکند — DATABASE_URL
-#    و API_URL به postgres:5432 و api:3000 وابسته‌اند).
+#  • سقف منابع (deploy.resources.limits) فقط در compose.yml اصلی
+#    (تولید) تعریف شده — اینجا عمداً نیست: ماشین‌های توسعه
+#    متنوع‌اند و سقفِ ثابت بیشتر ضرر می‌زند تا سود.
 #
 #  • روی ویندوز، حالت پیشنهادی dev روزمره: فقط زیرساخت با این فایل
 #    بالا بیاور و اپ‌ها را روی خود سیستم با bun اجرا کن:
-#      podman compose -f compose.dev.yml up -d postgres redis
+#      docker compose -f compose.dev.yml up -d postgres redis
 #    (سپس apps/api/.env.local طبق انتهای apps/api/.env.example)
 # ══════════════════════════════════════════════════════════════
 
-x-podman:
-  in_pod: false
-
 services:
   postgres:
-    image: docker.io/library/postgres:18.6-alpine
+    image: postgres:18.6-alpine
     container_name: sinshin-dev-postgres
     restart: unless-stopped
     env_file:
@@ -44,7 +42,7 @@ services:
       - dev
 
   redis:
-    image: docker.io/library/redis:8-alpine
+    image: redis:8-alpine
     container_name: sinshin-dev-redis
     restart: unless-stopped
     command:
