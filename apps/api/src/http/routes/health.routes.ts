@@ -11,6 +11,7 @@ import type { SseHub } from '#/infra/realtime/sse-hub'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { SystemMetricsDto } from '@sinshin/shared'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { probe } from '#/infra/health/probes'
 
 export interface HealthDeps {
   db: Database
@@ -26,26 +27,7 @@ export interface HealthDeps {
   sseHub: SseHub
 }
 
-/** نتیجهٔ probe با مدت‌اندیشی — منبع مشترک / و /metrics */
-interface ProbeResult {
-  dbUp: boolean
-  dbMs: number
-  redisUp: boolean
-  redisMs: number
-}
-
-async function probe(db: Database, redis: RedisService): Promise<ProbeResult> {
-  const timed = async (ping: () => Promise<boolean>): Promise<{ ok: boolean; ms: number }> => {
-    const t0 = performance.now()
-    const ok = await ping()
-    return { ok, ms: Math.round(performance.now() - t0) }
-  }
-  const [database, redisProbe] = await Promise.all([
-    timed(() => db.ping()),
-    timed(() => redis.ping()),
-  ])
-  return { dbUp: database.ok, dbMs: database.ms, redisUp: redisProbe.ok, redisMs: redisProbe.ms }
-}
+/** round-19 — probe به infra/health/probes.ts منتقل شد (مشترک با job هشدار) */
 
 export const healthRoutes = (deps: HealthDeps) =>
   new Elysia({ prefix: '/health', tags: ['Health'] })

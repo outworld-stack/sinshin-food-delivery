@@ -44,6 +44,7 @@ import { ArticleService } from '#/domain/article/article.service'
 import { GalleryService } from '#/domain/gallery/gallery.service'
 import { PaymentTimeoutJob } from '#/workers/jobs/payment-timeout.job'
 import { RetentionJob } from '#/workers/jobs/retention.job'
+import { HealthAlertJob } from '#/workers/jobs/health-alert.job'
 import { GeoService } from '#/domain/geo/geo.service'
 import { MetricsService } from '#/infra/monitor/metrics'
 import { JobRunRegistry } from '#/infra/monitor/job-registry'
@@ -125,6 +126,10 @@ if (!g.__sinshin_cron_registered) {
   // round-16 — پاک‌سازی دوره‌ای جدول‌های لاگی/سشن (۱۸۰/۹۰ روز، حذف Bound‌شده)
   scheduler.register(new RetentionJob({ db }))
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
+  // round-19 — دیده‌بان سلامت: پیامک قطعی/برگشت db/redis/uploads (بدون قفل — موثق در job)
+  scheduler.registerInterval(
+    new HealthAlertJob({ config, db: database, redis, uploads, sms }),
+  )
   // phase-fix: تازه‌سازی روزانه‌ی بازه‌های IP ایران (RIPE)
   scheduler.registerInterval({
     name: 'geo-refresh',

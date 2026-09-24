@@ -38,6 +38,16 @@ export interface DeviceConfig {
   similarityWindowDays: number
 }
 
+/** round-19 — دیده‌بان سلامت: پیامک هنگام قطعی/برگشت db/redis/uploads */
+export interface HealthAlertConfig {
+  /** گیرنده‌ها؛ خالی = fallback به SUPER_ADMIN_PHONES */
+  phones: string[]
+  /** فاصلهٔ سنجش (ثانیه) */
+  everySeconds: number
+  /** یادآوری قطعیِ پایدار (دقیقه) */
+  repeatMinutes: number
+}
+
 const DEV_JWT_SECRET = 'dev-only-insecure-secret'
 
 /**
@@ -73,6 +83,7 @@ export class AppConfig {
   readonly otp: OtpConfig
   readonly gateway: GatewayConfig
   readonly device: DeviceConfig
+  readonly healthAlert: HealthAlertConfig
 
   readonly couponScanTime: string
   readonly couponNudgeTime: string
@@ -97,6 +108,12 @@ export class AppConfig {
       if (v === 'off' || v === 'false' || v === '0') return false
       return fallback
     }
+    /** لیست شمارهٔ موبایل جدا شده با کاما — نرمال‌شده، بدون تهی (SUPER_ADMIN و HEALTH_ALERT) */
+    const phoneList = (key: string): string[] =>
+      str(key)
+        .split(',')
+        .map((p) => normalizePhone(p))
+        .filter((p): p is string => p !== null)
 
     const envRaw = str('APP_ENV', 'development').toLowerCase()
     this.env = (['development', 'production', 'test'] as const).includes(
@@ -123,10 +140,7 @@ export class AppConfig {
     this.sessionTtlDays = num('SESSION_TTL_DAYS', 30)
     this.accessTokenTtlMinutes = num('ACCESS_TOKEN_TTL_MINUTES', 15)
 
-    this.superAdminPhones = str('SUPER_ADMIN_PHONES')
-      .split(',')
-      .map((p) => normalizePhone(p))
-      .filter((p): p is string => p !== null)
+    this.superAdminPhones = phoneList('SUPER_ADMIN_PHONES')
 
     const enforcementRaw = (source['DEVICE_ENFORCEMENT'] ?? '').trim()
     this.deviceEnforcement =
@@ -164,6 +178,14 @@ export class AppConfig {
       autoblockScore: Number(source['DEVICE_AUTOBLOCK_SCORE']) || 80,
       referralBlockAfter: Number(source['DEVICE_REFERRAL_BLOCK_AFTER']) || 3,
       similarityWindowDays: Number(source['DEVICE_SIMILARITY_WINDOW_DAYS']) || 7,
+    }
+
+    // round-19 — بدون HEALTH_ALERT_PHONES، ادمین‌های اصلی گیرنده‌اند (بدون کانفیگ اضافه)
+    const alertPhones = phoneList('HEALTH_ALERT_PHONES')
+    this.healthAlert = {
+      phones: alertPhones.length > 0 ? alertPhones : this.superAdminPhones,
+      everySeconds: num('HEALTH_ALERT_EVERY_SECONDS', 60),
+      repeatMinutes: num('HEALTH_ALERT_REPEAT_MINUTES', 60),
     }
 
     this.couponScanTime = str('COUPON_SCAN_TIME', '02:00')

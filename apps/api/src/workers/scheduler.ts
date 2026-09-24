@@ -18,6 +18,13 @@ export interface IntervalJob {
   name: string
   /** فاصله‌ی اجرا به ثانیه */
   everySeconds: number
+  /**
+   * round-19 — اجرا بدون قفل Redis (پیش‌فرض false).
+   * فقط برای jobهایی که باید خرابیِ خودِ ردیس را ببینند: قفلِ مبتنی بر ردیس،
+   * هنگام قطعی ردیس کار را متوقف می‌کند و دیده‌بان کور می‌شود. بدون قفل،
+   * هر رپلیکا مستقل اجرا و هشدار می‌دهد (امروز تک‌رپلیکا = بدون تفاوت).
+   */
+  noLock?: boolean
   run: () => Promise<void>
 }
 
@@ -84,9 +91,11 @@ export class CronScheduler {
     this.recorder.define({
       name: job.name,
       kind: 'interval',
-      schedule: `every ${job.everySeconds}s`,
+      schedule: `every ${job.everySeconds}s${job.noLock ? ' (بدون قفل)' : ''}`,
     })
-    console.log(`[cron] registered interval "${job.name}" every ${job.everySeconds}s`)
+    console.log(
+      `[cron] registered interval "${job.name}" every ${job.everySeconds}s${job.noLock ? ' [no-lock]' : ''}`,
+    )
   }
 
   async start(): Promise<void> {
@@ -188,8 +197,11 @@ export class CronScheduler {
 
   /** phase-2 — قفل per-window: با N رپلیکا فقط یکی اجرا می‌شود */
   private async fireInterval(job: IntervalJob): Promise<void> {
-    const window = Math.floor(Date.now() / 1000 / job.everySeconds)
-    if (!(await this.tryLock(`cron:ilock:${job.name}:${window}`))) return
+    // round-19 — noLock: بدون قفل اجرا شود (موثق در تعریف IntervalJob)
+    if (!job.noLock) {
+      const window = Math.floor(Date.now() / 1000 / job.everySeconds)
+      if (!(await this.tryLock(`cron:ilock:${job.name}:${window}`))) return
+    }
     void this.execute(job)
   }
 
