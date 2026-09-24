@@ -54,7 +54,7 @@ function P($name, $ok, $extra) {
 function OK($r) { $null -eq $r.__status }
 
 function Pg($sql) {
-  (docker compose -f compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
+  (docker compose -f docker-compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
 }
 
 # ============ self-clean ============
@@ -73,7 +73,7 @@ Write-Host '== cleanup ==' -ForegroundColor Cyan
   "DELETE FROM couriers WHERE phone = '09120000099'"
 )
 foreach ($s in $sqls) { Pg $s | Out-Null }
-docker compose -f compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
+docker compose -f docker-compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
 Write-Host 'cleanup done' -ForegroundColor Cyan
 
 # ============ setup ============
@@ -107,7 +107,7 @@ P 'T1 clean run totalOpen=0' ((OK $run1) -and $run1.totalOpen -eq 0) "total=$($r
 # M2: R3 — با INSERT جعلیِ تراکنشِ اضافه (عدد ناهمسان با breakdown)
 # سفارش settle-شده walletDeduction=0 دارد؛ یک WITHDRAW جعلی 50000 به آن بچسبان → mismatch قطعی
  $m2ins = 'INSERT INTO wallet_transactions (user_id, type, amount, description, order_id) SELECT user_id, ''WITHDRAW'', 50000, ''reconcile-test-fake'', id FROM orders WHERE display_id = ''' + $co.orderId + ''''
- $m2ins | docker compose -f compose.dev.yml exec -T postgres psql -U sinshin -d sinshin
+ $m2ins | docker compose -f docker-compose.dev.yml exec -T postgres psql -U sinshin -d sinshin
 
 # M3: R10 — سفارش stuck در PENDING_PAYMENT بیش از ۳۰ دقیقه
  $stuck = Send-Json Post "$base/api/orders/checkout" @{
@@ -143,11 +143,11 @@ Write-Host "T3 pay2 status: $($pay2.paymentStatus)" -ForegroundColor Yellow
  $upSql = @"
 UPDATE orders SET status = 'PENDING_PAYMENT' WHERE display_id = '$($co2.orderId)';
 "@
- $upSql | docker compose -f compose.dev.yml exec -T postgres psql -U sinshin -d sinshin
+ $upSql | docker compose -f docker-compose.dev.yml exec -T postgres psql -U sinshin -d sinshin
 
 # دیاگنوستیک — وضعیت واقعی برای R1 (stdin-pipe)
  $dg = 'SELECT p.status || '' | '' || o.status || '' | '' || p.amount::text || '' | '' || (o.breakdown->>''amountPaidOnline'') FROM payments p JOIN orders o ON o.id = p.order_id WHERE display_id = ''' + $co2.orderId + ''''
- $diagOut = $dg | docker compose -f compose.dev.yml exec -T postgres psql -U sinshin -d sinshin -t
+ $diagOut = $dg | docker compose -f docker-compose.dev.yml exec -T postgres psql -U sinshin -d sinshin -t
 Write-Host "T3 diag: $diagOut" -ForegroundColor Yellow
 
 # اجرای reconcile — R1 باید wouldFix=1 بدهد
@@ -159,7 +159,7 @@ P 'T3 R1 wouldFix=1' ($r1check.wouldFix -eq 1) "wf=$($r1check.wouldFix)"
  $statusSql = @"
 SELECT status FROM orders WHERE display_id = '$($co2.orderId)';
 "@
- $statusOut = $statusSql | docker compose -f compose.dev.yml exec -T postgres psql -U sinshin -d sinshin -t
+ $statusOut = $statusSql | docker compose -f docker-compose.dev.yml exec -T postgres psql -U sinshin -d sinshin -t
 P 'T3 auto-fix off still PENDING' ("$statusOut".Trim() -eq 'PENDING_PAYMENT') "s=$statusOut"
 
 # ============ T4: findings API + acknowledge ============

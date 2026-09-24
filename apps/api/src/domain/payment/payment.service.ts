@@ -32,7 +32,7 @@ export class PaymentService {
       ['MOCK', new MockAdapter(deps.config)],
       ['ZARINPAL', new ZarinpalAdapter(deps.config)],
       ['PAYIR', new PayirAdapter(deps.config)],
-      ['SEP', new SepAdapter()],
+      ['SEP', new SepAdapter(deps.config)],
     ])
   }
 
@@ -126,6 +126,16 @@ export class PaymentService {
     // phase-fix: نتیجه‌ی قطعی نیست (خطای گذرای درگاه) — سفارش را fail نکن؛
     // job تایم‌اوت دوباره verify می‌کند و مشتری به صفحه سفارشش برمی‌گردد.
     if (v.indeterminate) {
+      // round-23 (سامان): اگر آداپتور در این تلاش مرجع تازه‌ای یافته (RefNum
+      // سامان — فقط در callback می‌رسد)، همین‌جا ذخیره کن تا re-verify بعدیِ
+      // job تایم‌اوت بدون query هم ممکن باشد. برای زرین‌پال/پی‌ایر مرجع
+      // ثابت است و این write عملاً no-op می‌شود.
+      if (v.gatewayRef && v.gatewayRef !== payment.gatewayRef) {
+        await this.deps.db
+          .update(payments)
+          .set({ gatewayRef: v.gatewayRef, updatedAt: new Date() })
+          .where(eq(payments.id, paymentId))
+      }
       throw Err.serviceUnavailable(
         'نتیجه‌ی پرداخت فعلاً از درگاه قابل دریافت نیست — چند دقیقه بعد صفحه‌ی سفارش را دوباره باز کنید.',
       )

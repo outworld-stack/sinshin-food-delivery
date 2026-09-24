@@ -50,7 +50,7 @@ function P($name, $ok, $extra) {
  $script:failed = $false
 
 function Pg($sql) {
-  (docker compose -f compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
+  (docker compose -f docker-compose.dev.yml exec postgres psql -U sinshin -d sinshin -t -c $sql) -join ''
 }
 
 # ══ self-clean ══
@@ -79,7 +79,7 @@ Write-Host '== cleanup ==' -ForegroundColor Cyan
   "UPDATE settings SET value = 'false' WHERE key = 'temporarily_closed'"
 )
 foreach ($s in $sqls) { Pg $s | Out-Null }
-docker compose -f compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
+docker compose -f docker-compose.dev.yml exec redis redis-cli FLUSHALL | Out-Null
 Write-Host 'cleanup done' -ForegroundColor Cyan
 
 # ══ setup: ادمین اصلی + مشتری + منو ══
