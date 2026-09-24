@@ -7,6 +7,7 @@ import type { ProfileService } from '#/domain/order/profile.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { PaymentService } from '#/domain/payment/payment.service'
 import type { RedisService } from '#/infra/redis/redis'
+import type { CheckoutIdempotency } from '#/domain/order/checkout-idempotency.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { Err } from '#/domain/shared/errors'
@@ -21,7 +22,10 @@ export interface OrderRoutesDeps {
   profile: ProfileService
   settings: SettingsService
   payments: PaymentService
+  /** فقط perUserLimit — سقف ضد-اسپم با fallback ردیس */
   redis: RedisService
+  /** round-20 — claim اتمیک روی PK مرکب؛ مقیم DB، مستقل از ردیس */
+  idempotency: CheckoutIdempotency
   /** round-16 — چک‌اوت تمام-کیف‌پول: سفارش PAID بلافاصله به پنل زنده اعلام شود */
   hub: SseHub
 }
@@ -126,30 +130,22 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         // phase-fix: سقف هر کاربر — ۱۰ چک‌اوت در دقیقه (ضد اسپم سفارش/کوپن)
         await perUserLimit(user.id, 'checkout', 10, 60)
 
-        // ── phase-2: idempotency — retry شبکه نباید سفارش دوم بسازد ──
-        // فرانت برای هر «نیت خرید» یک UUID در هدر Idempotency-Key می‌فرستد
-        // (سمت فرانت در فاز ۳ سیم‌کشی می‌شود؛ تا آن موقع بدون هدر = رفتار قبلی)
+        // ── phase-2 → round-20: idempotency مقیم در DB ──
+        // فرانت برای هر «نیت خرید» یک UUID در هدر Idempotency-Key می‌فرستد؛
+        // retry شبکه همان پاسخ قبلی را می‌گیرد، نه سفارش دوم. claim اتمیک
+        // روی PK مرکب (user_id, key) است و برخلاف نسخهٔ Redis در قطعی و
+        // ری‌استارت ردیس هم پابرجا می‌ماند (مسیر پول از ردیس جدا شد).
         const idemKey = headers['idempotency-key']
         if (idemKey !== undefined && !/^[A-Za-z0-9-]{8,64}$/.test(idemKey)) {
           throw Err.validation('Idempotency-Key باید ۸ تا ۶۴ کاراکتر حرفی/عددی باشد.')
         }
-        const redisKey = idemKey ? `idem:checkout:${user.id}:${idemKey}` : null
-        if (redisKey) {
-          const cached = await deps.redis.get(redisKey)
-          // round-16 — کش خراب (JSON نامعتبر) نباید ۲۴ ساعت ۵۰۰ بدهد؛
-          // کلید پاک و مسیر تازهٔ چک‌اوت ادامه می‌یابد
-          if (cached !== null) {
-            try {
-              return JSON.parse(cached) as Record<string, unknown>
-            } catch {
-              await deps.redis.del(redisKey)
-            }
-          }
-          // phase-fix: claim اتمیک — دو درخواست موازی با همان کلید فقط یکی
-          // سفارش می‌سازد؛ قبلاً get-then-set بود و هر دو از کنار می‌گذشتند.
-          // null = ردیس پایین → بدون idempotency ادامه (fail-open؛ چک‌اوت نباید بمیرد)
-          const claimed = await deps.redis.setNx(redisKey, 'PENDING', { ex: 15 })
-          if (claimed === false) {
+        if (idemKey) {
+          const claim = await deps.idempotency.claim(user.id, idemKey)
+          // replay: همان پاسخ قبلی — بدون ساخت سفارش
+          if (claim.kind === 'replay') return claim.response
+          // claim زندهٔ دیگری (درخواست موازی/تاخیرافتن) — 409؛ retry با
+          // کلید تازه بی‌درنگ موفق می‌شود
+          if (claim.kind === 'in-flight') {
             throw Err.conflict('درخواست قبلی هنوز در حال پردازش است — چند لحظه صبر کنید.')
           }
         }
@@ -191,13 +187,13 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
               breakdown: r.breakdown,
             }
         } catch (e) {
-          // شکست چک‌اوت — نشانه آزاد شود تا retry ممکن باشد
-          if (redisKey) await deps.redis.del(redisKey)
+          // شکست چک‌اوت — claim آزاد شود تا retry ممکن باشد
+          if (idemKey) await deps.idempotency.release(user.id, idemKey)
           throw e
         }
 
-        if (redisKey) {
-          await deps.redis.set(redisKey, JSON.stringify(response), { ex: 86_400 })
+        if (idemKey) {
+          await deps.idempotency.complete(user.id, idemKey, response)
         }
         return response
       },
@@ -221,7 +217,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         detail: {
           summary: 'Checkout — server-priced order + payment initiation (idempotent)',
           description:
-            'All pricing server-side (size/discount/coupon/zone-aware delivery fee). Wallet-only orders settle instantly. Send Idempotency-Key header (UUID per purchase intent) so network retries never create a second order. Response cached 24h per key.',
+            'All pricing server-side (size/discount/coupon/zone-aware delivery fee). Wallet-only orders settle instantly. Send Idempotency-Key header (UUID per purchase intent) so network retries never create a second order — the claim lives in the database (atomic composite PK), independent of Redis. Response is replayed for 48h per key.',
         },
       },
     )

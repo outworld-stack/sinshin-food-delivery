@@ -16,6 +16,10 @@ import type { DailyJob } from '#/workers/scheduler'
  *    اگر بیشتر باشد، روز بعد ادامه می‌یابد (بدون تراکنش طولانی/قفل سنگین).
  *  • داده‌ی مالی (سفارش‌ها/کیف پول/پرداخت‌ها) هرگز لمس نمی‌شود.
  *  • نشست مرده = منقضی‌شده یا باطل‌شده‌ای که ۹۰ روز از مرگش گذشته.
+ *
+ * round-20 — checkout_idempotency: پنجرهٔ replay چک‌اوت؛ ردیف‌های
+ * ۴۸-ساعته (تکمیل‌شده یا رهاشده) حذف می‌شوند — ادعای زنده هرگز
+ * این‌قدر قدیمی نیست (تصرف خودکار بعد از ۶۰ ثانیه).
  */
 export class RetentionJob implements DailyJob {
   readonly name = 'retention'
@@ -77,6 +81,19 @@ export class RetentionJob implements DailyJob {
             select id from sessions
             where (expires_at < ${deadSessionCutoff})
                or (revoked_at is not null and revoked_at < ${deadSessionCutoff})
+            limit ${BATCH}
+          )
+        `,
+      },
+      {
+        // ctid — شناسهٔ فیزیکی ردیف؛ PK این جدول مرکب است و ctid از
+        // تکرار شرط کلید در delete بی‌نیاز می‌کند (همان الگوی id ساده)
+        label: 'checkout_idempotency',
+        stmt: sql`
+          delete from checkout_idempotency
+          where ctid in (
+            select ctid from checkout_idempotency
+            where updated_at < now() - interval '48 hours'
             limit ${BATCH}
           )
         `,

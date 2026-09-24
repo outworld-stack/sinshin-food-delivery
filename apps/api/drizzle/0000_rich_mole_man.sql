@@ -100,6 +100,15 @@ CREATE TABLE "audit_logs" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "checkout_idempotency" (
+	"user_id" uuid NOT NULL,
+	"key" varchar(64) NOT NULL,
+	"response" jsonb,
+	"claimed_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "checkout_idempotency_user_id_key_pk" PRIMARY KEY("user_id","key")
+);
+--> statement-breakpoint
 CREATE TABLE "coupon_conditions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"coupon_id" uuid NOT NULL,
@@ -465,6 +474,7 @@ ALTER TABLE "articles" ADD CONSTRAINT "articles_category_id_article_categories_i
 ALTER TABLE "articles" ADD CONSTRAINT "articles_sub_category_id_article_sub_categories_id_fk" FOREIGN KEY ("sub_category_id") REFERENCES "public"."article_sub_categories"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_actor_id_users_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "checkout_idempotency" ADD CONSTRAINT "checkout_idempotency_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "coupon_conditions" ADD CONSTRAINT "coupon_conditions_coupon_id_coupons_id_fk" FOREIGN KEY ("coupon_id") REFERENCES "public"."coupons"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "coupon_grants" ADD CONSTRAINT "coupon_grants_coupon_id_coupons_id_fk" FOREIGN KEY ("coupon_id") REFERENCES "public"."coupons"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "coupon_grants" ADD CONSTRAINT "coupon_grants_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

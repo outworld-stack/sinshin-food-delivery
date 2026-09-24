@@ -17,6 +17,7 @@ import type { DeliveryZoneService } from '#/domain/delivery/delivery-zone.servic
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { OrderService } from '#/domain/order/order.service'
 import type { ProfileService } from '#/domain/order/profile.service'
+import type { CheckoutIdempotency } from '#/domain/order/checkout-idempotency.service'
 import type { PaymentService } from '#/domain/payment/payment.service'
 import type { UploadService } from '#/infra/uploads/upload.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
@@ -86,6 +87,8 @@ export interface AppDeps {
   settings: SettingsService
   orders: OrderService
   profile: ProfileService
+  /** round-20 — claim اتمیک idempotency چک‌اوت (مقیم DB) */
+  checkoutIdempotency: CheckoutIdempotency
   payments: PaymentService
   uploads: UploadService
   admin2: Admin2Service
@@ -208,6 +211,7 @@ export const buildApp = (deps: AppDeps) => {
         settings: deps.settings,
         payments: deps.payments,
         redis: deps.redis,
+        idempotency: deps.checkoutIdempotency,
         hub: deps.sseHub,
       }),
     )

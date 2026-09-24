@@ -21,6 +21,7 @@ import { AddressService } from '#/domain/address/address.service'
 import { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
 import { OrderService } from '#/domain/order/order.service'
 import { ProfileService } from '#/domain/order/profile.service'
+import { CheckoutIdempotency } from '#/domain/order/checkout-idempotency.service'
 import { PaymentService } from '#/domain/payment/payment.service'
 import { UploadService } from '#/infra/uploads/upload.service'
 import { Admin2Service } from '#/domain/admin2/admin2.service'
@@ -96,6 +97,8 @@ const coupons = new CouponService({ db })
 const termsService = new TermsService({ db })
 const orders = new OrderService({ db, config, zones, settings, coupons })
 const profile = new ProfileService({ db, config, orders, devices })
+// round-20 — idempotency چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)
+const checkoutIdempotency = new CheckoutIdempotency({ db })
 const payments = new PaymentService({ db, config, orders, hub: sseHub })
 const uploads = new UploadService(config.uploadDir)
 const admin2 = new Admin2Service({ db, config, settings, hub: sseHub })
@@ -195,6 +198,7 @@ const app = buildApp({
   settings,
   orders,
   profile,
+  checkoutIdempotency,
   payments,
   uploads,
   admin2,
@@ -232,8 +236,11 @@ geo.warmup()
 
 // ── probes ──
 const [dbUp, redisUp] = await Promise.all([database.connect(), redis.connect()])
-if (!dbUp) console.error('[boot] postgres unreachable — /api/health will report degraded')
-if (!redisUp) console.error('[boot] redis unreachable — OTP/locks/SSE bridge are down')
+if (!dbUp) console.error('[boot] postgres unreachable — /api/health will report 503 (replica out of rotation)')
+if (!redisUp) {
+  // round-20 — ردیس سخت نیست: سایت سرو می‌کند، فقط OTP/قفل‌ها/پل SSE می‌لنگند
+  console.error('[boot] redis unreachable — OTP login/locks/SSE bridge degraded (site keeps serving, /api/health stays 200)')
+}
 
 // round-18 — نمونه‌گیر تاخیر حلقهٔ رویداد (idempotent بین hot-reload ها)
 if (!g.__sinshin_metrics_started) {

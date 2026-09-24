@@ -36,10 +36,14 @@ export const healthRoutes = (deps: HealthDeps) =>
       async ({ set }) => {
         const { dbUp, dbMs, redisUp, redisMs } = await probe(deps.db, deps.redis)
         const uploadsUp = deps.uploads.storageReady
-        const ok = dbUp && redisUp && uploadsUp
-        if (!ok) set.status = 503
+        // round-20 — فقط database «سخت» است: تقریباً هیچ روتی بدون آن
+        // کار نمی‌کند (auth/منو/سفارش/پرداخت) → 503 یعنی Caddy/compose
+        // این رپلیکا را از چرخش درمی‌آورند. ردیس و uploads «نرم» اند: قطعی‌شان
+        // فقط قابلیت‌هایی را می‌شکند (ورود OTP، آپلود فایل) و بقیهٔ سایت با
+        // fallback های موجود سرو می‌کند — گزارش در بدنه، نه در کد وضعیت.
+        if (!dbUp) set.status = 503
         return {
-          status: ok ? 'ok' : 'degraded',
+          status: dbUp && redisUp && uploadsUp ? 'ok' : 'degraded',
           env: deps.config.env,
           checks: { database: dbUp, redis: redisUp, uploads: uploadsUp },
           // round-18 — افزایشی؛ مصرف‌کننده‌های موجود فقط status HTTP را می‌بینند
@@ -49,8 +53,9 @@ export const healthRoutes = (deps: HealthDeps) =>
       },
       {
         detail: {
-          summary: 'Readiness — postgres + redis + uploads',
-          description: 'Degrades to 503 so Caddy/compose pull the replica out of rotation.',
+          summary: 'Readiness — database hard, redis/uploads soft',
+          description:
+            '503 only when the database is down — the one dependency nearly every route needs; Caddy/compose then pull the replica out of rotation. A redis or uploads outage degrades specific features only (OTP login, file uploads) and is reported in the body while the site keeps serving. Full admin snapshot: /health/metrics.',
         },
       },
     )
