@@ -202,11 +202,23 @@ export class CourierService {
   }
 
   /**
-   * round-11 (اسکن H-3): لیست پیک‌ها با فیلتر و شکل واقعی صفحهٔ پنل —
-   * صفحهٔ /admin/couriers انتظار { couriers: [{id,name,phone,trips:[{...,deliveries:[]}]}], total }
-   * دارد ولی روت قبلی آرایهٔ خام ردیف‌ها برمی‌گرداند و فیلترها را نادیده می‌گرفت
-   * → لیست همیشه خالی بود («پیکِِی در این بازه یافت نشد») و آمار همیشه صفر.
+   * لیست پیک‌ها با فیلتر و شکل واقعی صفحهٔ پنل:
+   * { couriers: [{id,name,phone,trips:[{...,deliveries:[]}]}], total }
    * بازهٔ زمانی روی deliveredAt اعمال می‌شود؛ پیک/سفرِ بدون تحویل در بازه حذف می‌شود.
+   * (تاریخچه: round-11 شکل پاسخ ساخت؛ round-17 کوئری‌ها به SQL منتقل شدند)
+   *
+   * round-17 — صفحه‌بندی لیست پیک‌ها با push-down کامل به SQL:
+   *
+   * قبلاً «همه‌ی» سفرها و «همه‌ی» تحویل‌های تاریخچه به حافظه بارگذاری و
+   * بعد در JS فیلتر/صفحه‌بندی می‌شدند — با رشد ماه‌ها، هر بازدید این
+   * صفحه کل past را می‌کشید.
+   *
+   * حالا:
+   *  • «پیک‌های قابل‌دیدن» با EXISTS زیرکوئری در SQL (فیلتر بازه)
+   *  • سفرها/تحویل‌ها فقط برای پیک‌های «صفحه‌ی» فعلی
+   *  • فیلتر بازه‌ی تحویل‌ها داخل SQL (ایندکس delivered_at)
+   *
+   * شکل پاسخ عیناً دست‌نخورده ماند (قرارداد فرانت همان است).
    */
   async listCouriersPage(filters: {
     page: number
@@ -236,15 +248,38 @@ export class CourierService {
       ? or(ilike(couriers.name, `%${text}%`), ilike(couriers.phone, `%${text}%`))
       : undefined
 
-    // تعداد پیک‌های یک رستوران کم است؛ «در این بازه» فقط بعد از دیدن تحویل‌ها
-    // مشخص می‌شود، پس صفحه‌بندی صادقانه در JS است نه SQL.
+    // بازهٔ تحویل — تاریخ‌های خراب بی‌اثرند (نه ۵۰۰)
+    const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : undefined
+    const toDate = filters.dateTo ? new Date(filters.dateTo) : undefined
+    const from = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined
+    const to = toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined
+    const hasRange = from !== undefined || to !== undefined
+
+    // پیکِ قابل‌دیدن = (بدون بازه: همه) یا (با بازه: دارای حداقل یک
+    // تحویلِ داخل بازه) — EXISTS، بدون بارگذاری هیچ ردیفی
+    const rangeExists = hasRange
+      ? sql`exists (
+          select 1 from ${courierTrips} t
+          join ${courierDeliveries} d on d.trip_id = t.id
+          where t.courier_id = ${couriers.id}
+            ${from ? sql`and d.delivered_at >= ${from}` : sql``}
+            ${to ? sql`and d.delivered_at <= ${to}` : sql``}
+        )`
+      : undefined
+    const visibleWhere = and(courierWhere, rangeExists)
+
     const courierRows = await db
       .select()
       .from(couriers)
-      .where(courierWhere)
+      .where(visibleWhere)
       .orderBy(desc(couriers.createdAt))
 
-    const courierIds = courierRows.map((c) => c.id)
+    const total = courierRows.length
+    const start = (filters.page - 1) * filters.limit
+    const pageRows = courierRows.slice(start, start + filters.limit)
+
+    // سفرها و تحویل‌ها فقط برای همین صفحه — نه کل پیک‌ها
+    const courierIds = pageRows.map((c) => c.id)
     const trips = courierIds.length
       ? await db
         .select()
@@ -253,12 +288,7 @@ export class CourierService {
         .orderBy(desc(courierTrips.startedAt))
       : []
 
-    // بازهٔ تحویل — تاریخ‌های خراب بی‌اثرند (نه ۵۰۰)
-    const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : undefined
-    const toDate = filters.dateTo ? new Date(filters.dateTo) : undefined
-    const from = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined
-    const to = toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined
-
+    // فیلتر بازه داخل SQL — ایندکس courier_deliveries_delivered_idx
     const tripIds = trips.map((t) => t.id)
     const dConds: SQL[] = []
     if (tripIds.length > 0) dConds.push(inArray(courierDeliveries.tripId, tripIds))
@@ -272,8 +302,6 @@ export class CourierService {
           .where(dConds.length > 0 ? and(...dConds) : undefined)
         : []
 
-    const hasRange = from !== undefined || to !== undefined
-
     const byTrip = new Map<string, Array<typeof courierDeliveries.$inferSelect>>()
     for (const d of deliveries) {
       const list = byTrip.get(d.tripId as string) ?? []
@@ -286,19 +314,6 @@ export class CourierService {
       list.push(t)
       byCourier.set(t.courierId as string, list)
     }
-
-    // در حالت بازه: فقط پیک‌هایی که تحویلِ داخل بازه دارند
-    const visible = hasRange
-      ? courierRows.filter((c) =>
-        (byCourier.get(c.id as string) ?? []).some(
-          (t) => (byTrip.get(t.id as string) ?? []).length > 0,
-        ),
-      )
-      : courierRows
-
-    const total = visible.length
-    const start = (filters.page - 1) * filters.limit
-    const pageRows = visible.slice(start, start + filters.limit)
 
     return {
       couriers: pageRows.map((c) => ({
@@ -326,7 +341,13 @@ export class CourierService {
 
   // ── سفرها (گزارش پنل) ──
 
-  /** جزئیات پیک — سفرها + تحویل‌ها؛ admin2Id فقط تحویل‌های سفارشات خودش */
+  /**
+   * جزئیات پیک — سفرها + تحویل‌ها؛ admin2Id فقط تحویل‌های سفارشات خودش.
+   *
+   * round-17 — فیلتر admin2 با semi-join در SQL: قبلاً «همه‌ی» شناسه‌ی
+   * سفارش‌های تاییدشده‌ی ادمین۲ بارگذاری و در JS عضویت چک می‌شد
+   * (هزاران ردیف برای هر بازدید). شکل پاسخ عیناً همان است.
+   */
   async courierDetail(courierId: string, admin2Id?: string) {
     const courier = await this.deps.db.query.couriers.findFirst({
       where: eq(couriers.id, asCourierId(courierId)),
@@ -340,22 +361,20 @@ export class CourierService {
       .orderBy(desc(courierTrips.startedAt))
 
     const tripIds = trips.map((t) => t.id)
-    let deliveries = tripIds.length
+    // فقط تحویل‌های سفارشاتی که خودش تایید کرده — زیرکوئری روی
+    // ایندکس orders_confirmed_by_idx، بدون بارگذاری هیچ id ی
+    const ownership = admin2Id
+      ? sql`and ${courierDeliveries.orderId} in (
+          select ${orders.id} from ${orders}
+          where ${orders.confirmedBy} = ${admin2Id}
+        )`
+      : sql``
+    const deliveries = tripIds.length
       ? await this.deps.db
         .select()
         .from(courierDeliveries)
-        .where(sql`${courierDeliveries.tripId} in ${tripIds}`)
+        .where(sql`${inArray(courierDeliveries.tripId, tripIds)} ${ownership}`)
       : []
-
-    // فیلتر admin2 — فقط تحویل‌های سفارشاتی که خودش تایید کرده
-    if (admin2Id) {
-      const myOrderIds = await this.deps.db
-        .select({ id: orders.id })
-        .from(orders)
-        .where(eq(orders.confirmedBy, admin2Id))
-        .then((rows) => rows.map((r) => r.id))
-      deliveries = deliveries.filter((d) => myOrderIds.includes(d.orderId))
-    }
 
     return {
       courier,

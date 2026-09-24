@@ -328,6 +328,58 @@ services:
 
 
   # ════════════════════════════════════════════════════════════
+  # Database backup — daily pg_dump with retention
+  #
+  # Same postgres image as the server → pg_dump is always
+  # version-matched and the image is already in local cache
+  # (no new download). Fully decoupled from the API: no API
+  # crash/restart can ever stop a backup.
+  #
+  # Schedule/retention via env (see .env.example):
+  #   BACKUP_HOUR (default 5) — Tehran time
+  #   BACKUP_KEEP (default 7) — versions kept
+  #
+  # To store backups on the host instead of a named volume,
+  # replace the backups_data mount with:
+  #   - ./backups:/backups
+  # ════════════════════════════════════════════════════════════
+
+  backup:
+    image: docker.io/library/postgres:18.6-alpine
+
+    container_name: sinshin-backup
+
+    restart: unless-stopped
+    init: true
+
+    entrypoint: ["/bin/sh", "/usr/local/bin/sinshin-backup"]
+
+    environment:
+      TZ: Asia/Tehran
+
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-sinshin}
+      PGUSER: ${POSTGRES_USER:-sinshin}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+
+      BACKUP_HOUR: ${BACKUP_HOUR:-5}
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+      BACKUP_DIR: /backups
+
+    volumes:
+      - ./deploy/backup/backup.sh:/usr/local/bin/sinshin-backup:ro
+      - backups_data:/backups
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - internal
+
+
+  # ════════════════════════════════════════════════════════════
   # Redis
   # ════════════════════════════════════════════════════════════
 
@@ -376,6 +428,9 @@ volumes:
 
   pg_data:
     name: sinshin_pg_data
+
+  backups_data:
+    name: sinshin_backups_data
 
   redis_data:
     name: sinshin_redis_data

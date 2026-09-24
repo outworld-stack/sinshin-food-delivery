@@ -529,6 +529,7 @@ CREATE UNIQUE INDEX "coupons_code_key" ON "coupons" USING btree ("code");--> sta
 CREATE INDEX "coupons_active_idx" ON "coupons" USING btree ("is_active","starts_at","ends_at");--> statement-breakpoint
 CREATE INDEX "courier_deliveries_trip_idx" ON "courier_deliveries" USING btree ("trip_id");--> statement-breakpoint
 CREATE INDEX "courier_deliveries_order_idx" ON "courier_deliveries" USING btree ("order_id");--> statement-breakpoint
+CREATE INDEX "courier_deliveries_delivered_idx" ON "courier_deliveries" USING btree ("delivered_at");--> statement-breakpoint
 CREATE INDEX "courier_trips_courier_idx" ON "courier_trips" USING btree ("courier_id");--> statement-breakpoint
 CREATE INDEX "courier_trips_started_idx" ON "courier_trips" USING btree ("started_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "couriers_phone_key" ON "couriers" USING btree ("phone");--> statement-breakpoint
@@ -577,6 +578,7 @@ CREATE INDEX "orders_courier_idx" ON "orders" USING btree ("courier_id");--> sta
 CREATE INDEX "orders_queued_idx" ON "orders" USING btree ("queued_at");--> statement-breakpoint
 CREATE INDEX "orders_live_idx" ON "orders" USING btree ("status","delivery_type");--> statement-breakpoint
 CREATE INDEX "orders_user_created_idx" ON "orders" USING btree ("user_id","created_at");--> statement-breakpoint
+CREATE INDEX "orders_queue_partial_idx" ON "orders" USING btree ("created_at") WHERE "orders"."status" = 'PAID' and "orders"."confirmed_by" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "terms_version_key" ON "terms" USING btree ("version");--> statement-breakpoint
 CREATE INDEX "payments_order_idx" ON "payments" USING btree ("order_id");--> statement-breakpoint
 CREATE INDEX "payments_user_idx" ON "payments" USING btree ("user_id");--> statement-breakpoint

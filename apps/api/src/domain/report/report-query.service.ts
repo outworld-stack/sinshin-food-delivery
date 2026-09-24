@@ -16,6 +16,7 @@ import {
 } from '#/infra/db/schema'
 import type { UserId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
+import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import type { AuditService } from '#/domain/audit/audit.service'
 
 /**
@@ -368,6 +369,12 @@ export class ReportQueryService {
 
     // ══ کاربران ══
 
+    /**
+     * round-17 — آمار هر کاربر با دو تجمیعِ گروه‌بندی‌شده + JOIN، نه
+     * سه زیرکوئری همبسته به‌ازای هر ردیف (۲۰۰۰ کاربر × ۳ = تا ۶۰۰۰
+     * زیرکوئری در هر گزارش). دقت همان است: تجمیع در SQL، معنای همان
+     * عبارت‌های قبلی (سفارش غیر-لغو / پرداخت موفق / مبلغ امضادار کیف).
+     */
     private async usersReport(
         from: Date | undefined,
         to: Date | undefined,
@@ -378,23 +385,35 @@ export class ReportQueryService {
         if (from) conditions.push(gte(users.createdAt, from))
         if (to) conditions.push(lte(users.createdAt, to))
 
+        const ordersAgg = this.deps.db
+            .select({
+                userId: orders.userId,
+                ordersCount: sql<number>`count(*) filter (where ${orders.status} <> 'CANCELED')::int`.as('orders_count'),
+                totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::int`.as('total_spent'),
+            })
+            .from(orders)
+            .groupBy(orders.userId)
+            .as('orders_agg')
+
+        const walletAgg = this.deps.db
+            .select({
+                userId: walletTransactions.userId,
+                wallet: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::int`.as('wallet'),
+            })
+            .from(walletTransactions)
+            .groupBy(walletTransactions.userId)
+            .as('wallet_agg')
+
         const rows = await this.deps.db
             .select({
                 u: users,
-                ordersCount: sql<number>`(
-                    select count(*)::int from orders o
-                    where o.user_id = ${users.id} and o.status != 'CANCELED'
-                )`,
-                totalSpent: sql<number>`coalesce((
-                    select sum(o.total_amount) from orders o
-                    where o.user_id = ${users.id} and o.payment_status = 'SUCCESS' and o.status != 'CANCELED'
-                ), 0)::int`,
-                wallet: sql<number>`coalesce((
-                    select sum(case when wt.type = 'DEPOSIT' then wt.amount else -wt.amount end)
-                    from wallet_transactions wt where wt.user_id = ${users.id}
-                ), 0)::int`,
+                ordersCount: ordersAgg.ordersCount,
+                totalSpent: ordersAgg.totalSpent,
+                wallet: walletAgg.wallet,
             })
             .from(users)
+            .leftJoin(ordersAgg, eq(ordersAgg.userId, users.id))
+            .leftJoin(walletAgg, eq(walletAgg.userId, users.id))
             .where(conditions.length > 0 ? and(...conditions) : undefined)
             .orderBy(desc(users.createdAt))
             .limit(2000)
@@ -415,9 +434,9 @@ export class ReportQueryService {
                         u.name ?? 'ناشناس',
                         u.phone,
                         u.bannedAt ? 'مسدود' : 'فعال',
-                        faNum(ordersCount),
-                        faNum(totalSpent),
-                        faNum(wallet),
+                        faNum(ordersCount ?? 0),
+                        faNum(totalSpent ?? 0),
+                        faNum(wallet ?? 0),
                         faDate(u.createdAt),
                     ]),
                 },
@@ -476,7 +495,7 @@ export class ReportQueryService {
                 .limit(200),
             this.deps.db
                 .select({
-                    balance: sql<number>`coalesce(sum(case when ${walletTransactions.type} = 'DEPOSIT' then ${walletTransactions.amount} else -${walletTransactions.amount} end), 0)::int`,
+                    balance: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::int`,
                 })
                 .from(walletTransactions)
                 .where(eq(walletTransactions.userId, target.id))

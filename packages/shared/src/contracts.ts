@@ -374,9 +374,15 @@ export interface ArticleDto {
   subCategoryName?: string
 }
 
-export interface ArticlesData {
-  articles: ArticleDto[]
-}
+/**
+ * round-17 — آیتم لیست مقالات: ArticleDto بدون content و processes و
+ * galleryImages (بارِ سنگینِ متنی). اندپوینت‌های «لیست» این را برمی‌گردانند؛
+ * «جزئیات» همان ArticleDto کامل. کامپایلر جابه‌جایی اشتباه را می‌گیرد.
+ */
+export type ArticleSummaryDto = Omit<
+  ArticleDto,
+  'content' | 'processes' | 'galleryImages'
+>
 
 // ═══════════ Settings / Restaurant ═══════════
 

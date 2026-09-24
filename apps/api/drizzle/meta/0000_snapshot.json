@@ -1,5 +1,5 @@
 {
-  "id": "14df282c-ed9f-43a2-8d08-bf312b1a7502",
+  "id": "eabe9fb6-14d4-4e4a-bc41-c739ff852b7f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1611,6 +1611,21 @@
           "columns": [
             {
               "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "courier_deliveries_delivered_idx": {
+          "name": "courier_deliveries_delivered_idx",
+          "columns": [
+            {
+              "expression": "delivered_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3849,6 +3864,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "orders_queue_partial_idx": {
+          "name": "orders_queue_partial_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"orders\".\"status\" = 'PAID' and \"orders\".\"confirmed_by\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}

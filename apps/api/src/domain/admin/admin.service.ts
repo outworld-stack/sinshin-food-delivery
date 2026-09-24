@@ -16,6 +16,7 @@ import {
 import { asUserId, asCourierId, asAddressId, type UserId } from '#/domain/shared/brand'
 import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain/shared/charts'
 import { Err } from '#/domain/shared/errors'
+import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
 
 export interface AdminUserSort {
@@ -195,7 +196,7 @@ export class AdminService {
             ? await db
                 .select({
                     userId: walletTransactions.userId,
-                    balance: sql<number>`sum(case when ${walletTransactions.type} = 'DEPOSIT' then ${walletTransactions.amount} else -${walletTransactions.amount} end)::int`,
+                    balance: sql<number>`sum(${signedWalletAmount})::int`,
                 })
                 .from(walletTransactions)
                 .where(inArray(walletTransactions.userId, userIds))
@@ -270,7 +271,7 @@ export class AdminService {
         const [walletRow, spentRow, referralCount, deviceRows, orderRows, refRows, addressRows, eventRows] =
             await Promise.all([
                 db.select({
-                    balance: sql<number>`sum(case when ${walletTransactions.type} = 'DEPOSIT' then ${walletTransactions.amount} else -${walletTransactions.amount} end)::int`,
+                    balance: sql<number>`sum(${signedWalletAmount})::int`,
                 }).from(walletTransactions).where(eq(walletTransactions.userId, uid)).then((r) => r[0]?.balance ?? 0),
 
                 db.select({

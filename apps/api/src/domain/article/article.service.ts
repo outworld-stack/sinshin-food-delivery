@@ -32,6 +32,15 @@ export interface ArticleView {
     subCategoryName: string | null
 }
 
+/**
+ * round-17 — نمای «لیست»: بدون content/processes/galleryImages.
+ * قبلاً هر لیست (سایت و ادمین) متن کامل همه‌ی مقالات را از DB می‌کشید.
+ */
+export type ArticleSummaryView = Omit<
+    ArticleView,
+    'content' | 'processes' | 'galleryImages'
+>
+
 export interface ArticleCategoryView {
     id: string
     name: string
@@ -53,6 +62,11 @@ export interface ArticleInput {
 }
 
 type ArticleRow = typeof articles.$inferSelect
+/** ردیف سبک لیست — دقیقاً ستون‌هایی که joinedSummary انتخاب می‌کند */
+type ArticleSummaryRow = Pick<
+    ArticleRow,
+    'id' | 'title' | 'excerpt' | 'author' | 'profileImage' | 'categoryId' | 'subCategoryId' | 'views' | 'status' | 'createdAt'
+>
 type CategoryRow = typeof articleCategories.$inferSelect
 type SubRow = typeof articleSubCategories.$inferSelect
 
@@ -96,7 +110,7 @@ export class ArticleService {
         }))
     }
 
-    async listPublic(categorySlug?: string, subSlug?: string): Promise<ArticleView[]> {
+    async listPublic(categorySlug?: string, subSlug?: string): Promise<ArticleSummaryView[]> {
         const conds = [eq(articles.status, 'ACTIVE')]
         if (categorySlug && categorySlug !== 'all') {
             conds.push(eq(articleCategories.slug, categorySlug))
@@ -104,8 +118,8 @@ export class ArticleService {
         if (subSlug && subSlug !== 'all') {
             conds.push(eq(articleSubCategories.slug, subSlug))
         }
-        const rows = await this.joined().where(and(...conds)).orderBy(desc(articles.createdAt))
-        return rows.map(({ a, c, s }) => this.toView(a, c, s))
+        const rows = await this.joinedSummary().where(and(...conds)).orderBy(desc(articles.createdAt))
+        return rows.map(({ a, c, s }) => this.toSummary(a, c, s))
     }
 
     /** جزئیات عمومی — فقط ACTIVE + شمارش بازدید (سورت most-viewed فرانت) */
@@ -132,9 +146,9 @@ export class ArticleService {
 
     // ═══ ادمین: مقالات ═══
 
-    async listAdmin(): Promise<ArticleView[]> {
-        const rows = await this.joined().orderBy(desc(articles.createdAt))
-        return rows.map(({ a, c, s }) => this.toView(a, c, s))
+    async listAdmin(): Promise<ArticleSummaryView[]> {
+        const rows = await this.joinedSummary().orderBy(desc(articles.createdAt))
+        return rows.map(({ a, c, s }) => this.toSummary(a, c, s))
     }
 
     async adminDetail(id: string): Promise<ArticleView | null> {
@@ -305,10 +319,29 @@ export class ArticleService {
 
     // ── داخلی ──
 
-    /** select مشترک با join دسته/ساب‌دسته — برچسب‌ها برای تگ‌ها و فیلتر فرانت */
-    private joined() {
+    /**
+     * round-17 — همان join برای «لیست»‌ها، اما فقط با ستون‌های سبک:
+     * متن کامل (content)، مراحل (processes) و گالری هرگز از DB خوانده
+     * نمی‌شوند — این‌ها فقط در جزئیات خواسته می‌شوند.
+     */
+    private joinedSummary() {
         return this.deps.db
-            .select({ a: articles, c: articleCategories, s: articleSubCategories })
+            .select({
+                a: {
+                    id: articles.id,
+                    title: articles.title,
+                    excerpt: articles.excerpt,
+                    author: articles.author,
+                    profileImage: articles.profileImage,
+                    categoryId: articles.categoryId,
+                    subCategoryId: articles.subCategoryId,
+                    views: articles.views,
+                    status: articles.status,
+                    createdAt: articles.createdAt,
+                },
+                c: articleCategories,
+                s: articleSubCategories,
+            })
             .from(articles)
             .innerJoin(articleCategories, eq(articleCategories.id, articles.categoryId))
             .leftJoin(articleSubCategories, eq(articleSubCategories.id, articles.subCategoryId))
@@ -363,6 +396,26 @@ export class ArticleService {
             categoryId: a.categoryId,
             subCategoryId: a.subCategoryId,
             processes: a.processes ?? [],
+            views: a.views,
+            status: a.status,
+            publishedAt: a.createdAt.toISOString(),
+            categorySlug: c?.slug ?? null,
+            categoryName: c?.name ?? null,
+            subCategorySlug: s?.slug ?? null,
+            subCategoryName: s?.name ?? null,
+        }
+    }
+
+    /** round-17 — نگاشت لیست: همان toView برای فیلدهای سبک */
+    private toSummary(a: ArticleSummaryRow, c: CategoryRow | null, s: SubRow | null): ArticleSummaryView {
+        return {
+            id: a.id,
+            title: a.title,
+            excerpt: a.excerpt,
+            author: a.author,
+            profileImage: a.profileImage,
+            categoryId: a.categoryId,
+            subCategoryId: a.subCategoryId,
             views: a.views,
             status: a.status,
             publishedAt: a.createdAt.toISOString(),

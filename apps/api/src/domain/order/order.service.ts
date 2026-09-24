@@ -33,6 +33,7 @@ import {
 } from "#/domain/shared/brand";
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
+import { signedWalletAmount } from "#/domain/shared/wallet-sql";
 import { finalPriceOf } from "#/domain/menu/menu.service";
 import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.service";
 import type { SettingsService } from "#/domain/settings/settings.service";
@@ -90,7 +91,7 @@ export class OrderService {
 	async walletBalance(db: DbOrTx, userId: string): Promise<number> {
 		const rows = await db
 			.select({
-				balance: sql<number>`coalesce(sum(case when ${walletTransactions.type} = 'DEPOSIT' then ${walletTransactions.amount} else -${walletTransactions.amount} end), 0)::int`,
+				balance: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::int`,
 			})
 			.from(walletTransactions)
 			.where(eq(walletTransactions.userId, userId));

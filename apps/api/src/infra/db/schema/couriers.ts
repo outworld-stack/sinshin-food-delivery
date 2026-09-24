@@ -62,5 +62,7 @@ export const courierDeliveries = pgTable(
   (t) => [
     index('courier_deliveries_trip_idx').on(t.tripId),
     index('courier_deliveries_order_idx').on(t.orderId),
+    // round-17 — فیلتر بازه‌ی زمانی تحویل‌ها داخل SQL (لیست پیک‌ها)
+    index('courier_deliveries_delivered_idx').on(t.deliveredAt),
   ],
 )

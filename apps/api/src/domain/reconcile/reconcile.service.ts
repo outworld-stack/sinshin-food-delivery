@@ -187,15 +187,38 @@ export class ReconcileService {
 
     // ═══════════ R3: per-order wallet deduction mismatch ═══════════
 
+    /**
+     * round-17 — قبلاً برای «هر» سفارش موفقِ تاریخچه یک زیرکوئری همبسته
+     * روی wallet_transactions اجرا می‌شد (N+1 روی کل عمر دیتابیس).
+     * حالا: یک تجمیع group-by + LEFT JOIN — و کرانِ پنجره.
+     *
+     * چرا کران تاریخ اینجا «امن» است؟
+     *  • یافته‌ها در reconcile_findings با کلید (checkId, entityId)
+     *    upsert می‌شوند و برای همیشه می‌مانند — یافته‌ی قدیمی نیازی به
+     *    دوباره‌دیده‌شدن ندارد.
+     *  • هر دو طرف مقایسه بعد از settle تغییرناپذیرند: breakdown در
+     *    checkout نوشته می‌شود و ردیف WITHDRAW اتمیک با settle.
+     *  • یعنی مغایرت یا از لحظه‌ی settle وجود دارد یا هرگز — سفارشِ
+     *    داخل پنجره = تمام یافته‌های ممکنِ جدید.
+     * پنجره با RECONCILE_R3_WINDOW_DAYS قابل تنظیم است (الگوی
+     * RECONCILE_AUTO_*؛ پیش‌فرض ۱۲۰ روز).
+     */
     private async r3WalletPerOrder(): Promise<CheckResult> {
+        const since = new Date(Date.now() - this.r3WindowDays() * 24 * 60 * 60 * 1000)
         // برداشتِ سفارشی = type WITHDRAW + orderId — فقط این‌ها با breakdown مقایسه می‌شوند
         const rows = (await this.deps.db.execute(sql`
       select o.id, o.display_id,
              o.breakdown->>'walletDeduction' as promised,
-             (select coalesce(sum(w.amount), 0)::int from wallet_transactions w
-              where w.order_id = o.id and w.type = 'WITHDRAW') as actual
+             coalesce(w.actual, 0)::int as actual
       from orders o
+      left join (
+        select order_id, sum(amount)::int as actual
+        from wallet_transactions
+        where type = 'WITHDRAW' and order_id is not null
+        group by order_id
+      ) w on w.order_id = o.id
       where o.payment_status = 'SUCCESS'
+        and o.created_at > ${since}
     `)) as unknown as Array<{
             id: string; display_id: string; promised: string; actual: number
         }>
@@ -216,6 +239,13 @@ export class ReconcileService {
             }
         }
         return { checkId: 'R3', severity: 'critical', findings, wouldFix: 0 }
+    }
+
+    /** پنجره‌ی R3 از env — عدد صحیح >= ۱؛ مقدار خراب = پیش‌فرض ۱۲۰ */
+    private r3WindowDays(): number {
+        const raw = (Bun.env.RECONCILE_R3_WINDOW_DAYS ?? '').trim()
+        const n = Number(raw)
+        return raw !== '' && Number.isInteger(n) && n >= 1 ? n : 120
     }
 
     // ═══════════ R4: order موفق بدون هیچ ردیف payment ═══════════

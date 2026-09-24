@@ -1,6 +1,6 @@
 // src/server/articles.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
-import type { ArticleCategoryDto, ArticleDto } from '@sinshin/shared'
+import type { ArticleCategoryDto, ArticleDto, ArticleSummaryDto } from '@sinshin/shared'
 
 // ─── عمومی ───
 
@@ -8,9 +8,11 @@ export async function getArticleCategories(): Promise<ArticleCategoryDto[]> {
   return getJson<ArticleCategoryDto[]>('/articles/categories')
 }
 
+// round-17 — لیست‌ها ArticleSummaryDto برمی‌گردانند (بدون content/processes/گالری)؛
+// جزئیات همان ArticleDto کامل است.
 export async function getArticles(input: {
   data: { categorySlug?: string; subCategorySlug?: string }
-}): Promise<ArticleDto[]> {
+}): Promise<ArticleSummaryDto[]> {
   const params = new URLSearchParams()
   if (input.data.categorySlug && input.data.categorySlug !== 'all') {
     params.set('category', input.data.categorySlug)
@@ -19,7 +21,7 @@ export async function getArticles(input: {
     params.set('sub', input.data.subCategorySlug)
   }
   const qs = params.toString()
-  return getJson<ArticleDto[]>(`/articles${qs ? `?${qs}` : ''}`)
+  return getJson<ArticleSummaryDto[]>(`/articles${qs ? `?${qs}` : ''}`)
 }
 
 export async function getArticleById(input: {
@@ -30,8 +32,8 @@ export async function getArticleById(input: {
 
 // ─── ادمین ───
 
-export async function getAdminArticles(): Promise<ArticleDto[]> {
-  return authJson<ArticleDto[]>('/admin/articles', 'GET')
+export async function getAdminArticles(): Promise<ArticleSummaryDto[]> {
+  return authJson<ArticleSummaryDto[]>('/admin/articles', 'GET')
 }
 
 export async function createArticle(input: {

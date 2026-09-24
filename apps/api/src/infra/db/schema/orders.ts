@@ -12,6 +12,7 @@ import {
 	uuid,
 	varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type {
 	CampaignId,
 	CourierId,
@@ -139,6 +140,12 @@ export const orders = pgTable(
 		/** round-16 — سفارش‌های مشتری (myOrders/myOrdersLight/پروفایل):
 		 *  where user_id=… order by created_at desc — ایندکس تک‌ستونی user مجبور به sort کل ردیف‌های کاربر می‌کرد */
 		index("orders_user_created_idx").on(t.userId, t.createdAt),
+		/** round-17 — «صف» پنل زنده: PAID بدون تاییدکننده. ایندکس جزئی
+		 *  فقط ردیف‌های صف را نگه می‌دارد (همیشه کوچک و داغ) — شمارش
+		 *  صف (هر login/session) و شاخه‌ی PAID لیست زنده از آن تغذیه می‌کنند. */
+		index("orders_queue_partial_idx")
+			.on(t.createdAt)
+			.where(sql`${t.status} = 'PAID' and ${t.confirmedBy} is null`),
 	],
 );
 
