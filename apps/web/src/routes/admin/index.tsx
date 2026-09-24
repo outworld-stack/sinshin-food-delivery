@@ -8,6 +8,7 @@ import { AdminDashboardSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { ChartPanel } from '#/components/shared/ChartPanel'
 import { ReportsBox } from '#/components/admin/reports/ReportsBox'
+import { SystemStatusBox } from '#/components/admin/SystemStatusBox'
 import { adminStatsOptions } from '#/utils/queryOptions'
 import { Users, CheckCircle, Wallet, ShoppingBag } from 'reicon-react'
 
@@ -65,6 +66,9 @@ function AdminDashboard() {
           </div>
         ))}
       </div>
+
+      {/* round-18 — مانیتورینگ سیستم: نگاه سریع عملیاتی، قبل از تحلیل‌ها */}
+      <SystemStatusBox />
 
       {/* نمودار — پنل مشترک؛ stage-15: چارت‌ها سمت API ساخته می‌شوند
           (روزانه = ۶ ستونِ ۴ساعتهٔ امروز، هفتگی = شنبه تا جمعه، ...) */}

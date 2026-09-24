@@ -67,6 +67,8 @@ export const qk = {
 
   // --- پنل ادمین ---
   adminStats: ['admin-stats'] as const,
+  // round-18 — اسنپ‌شات مانیتورینگ سیستم (/health/metrics)
+  systemMetrics: ['system-metrics'] as const,
   subAdmins: ['sub-admins'] as const,
   adminReviews: ['admin-reviews'] as const,
   adminCoupons: ['admin-coupons'] as const,

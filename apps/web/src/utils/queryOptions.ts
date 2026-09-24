@@ -25,6 +25,7 @@ import {
 import { getGalleryImages, getAdminGalleryImages } from '#/server/gallery'
 import { getAboutContent } from '#/server/about'
 import { getCheckoutPreview, getRestaurantStatus } from '#/server/checkout'
+import { getSystemMetrics } from '#/server/system'
 import {
   getAdminStats,
   getAdmin2Options,
@@ -234,6 +235,14 @@ export const adminStatsOptions = queryOptions({
   queryKey: qk.adminStats,
   queryFn: () => getAdminStats(),
   staleTime: 30_000,
+})
+
+// round-18 — اسنپ‌شات مانیتورینگ سیستم؛ staleTime کوتاه چون سنجه‌های
+// پنجره‌ای (۱m/۵m) با گذر زمان بی‌معنا می‌شوند. رفرش خودکار ۳۰s در خود باکس.
+export const systemMetricsOptions = queryOptions({
+  queryKey: qk.systemMetrics,
+  queryFn: () => getSystemMetrics(),
+  staleTime: 15_000,
 })
 
 // کتگوری‌ها — بین فرم محصول/کوپن و فیلتر لیست‌ها مشترکه

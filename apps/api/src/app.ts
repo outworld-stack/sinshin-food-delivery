@@ -5,6 +5,8 @@ import type { AppConfig } from '#/infra/config/env'
 import type { Database } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
 import type { SseHub } from '#/infra/realtime/sse-hub'
+import type { MetricsService } from '#/infra/monitor/metrics'
+import type { JobRunRegistry } from '#/infra/monitor/job-registry'
 import type { AuthService } from '#/domain/auth/auth.service'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { DeviceService } from '#/domain/device/device.service'
@@ -71,6 +73,8 @@ export interface AppDeps {
   db: Database
   redis: RedisService
   sseHub: SseHub
+  metrics: MetricsService
+  jobRuns: JobRunRegistry
   auth: AuthService
   admin: AdminService
   sessions: SessionService
@@ -132,6 +136,10 @@ export const buildApp = (deps: AppDeps) => {
         uploads: deps.uploads,
         config: deps.config,
         startedAt: Date.now(),
+        sessions: deps.sessions,
+        metrics: deps.metrics,
+        jobRuns: deps.jobRuns,
+        sseHub: deps.sseHub,
       }),
     )
     .use(
@@ -209,7 +217,19 @@ export const buildApp = (deps: AppDeps) => {
 
   // round-16 — سقف بدنهٔ درخواست در سطح سوکت (پیش از بافر شدن کامل در حافظه):
   // آپلودها ۲MB هستند؛ ۸MB سقف سخاوتمندانه برای multipart + JSON های بزرگ
+  //
+  // round-18 — سنجه‌های HTTP: ثبت شروع در onRequest و پایان/وضعیت در
+  // onAfterResponse. دو نکته‌ای که با تست ران‌تایم تأیید شد:
+  //  • set.status در onAfterResponse همیشه normalize شده (پیش‌فرض ۲۰۰)
+  //  • پاسخِ مستقیمِ Response از onRequest (مثل geo-block) onAfterResponse
+  //    را کاملاً رد می‌کند — چنین درخواست‌هایی فقط از نظر شمارش غایبند،
+  //    نه هیچ شاخصی را خراب نمی‌کنند.
+  // هر دو هوک غیر-پرتاب‌اند — مانیتورینگ مسیر سرو‌دهی را زمین نمی‌زند.
   return new Elysia({ serve: { maxRequestBodySize: 8 * 1024 * 1024 } })
+    .onRequest(({ request }) => deps.metrics.observeRequest(request))
+    .onAfterResponse(({ request, set }) =>
+      deps.metrics.observeResponse(request, Number(set.status ?? 200)),
+    )
     .use(openapiPlugin(deps.config))
     .use(
       cors({

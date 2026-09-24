@@ -45,6 +45,8 @@ import { GalleryService } from '#/domain/gallery/gallery.service'
 import { PaymentTimeoutJob } from '#/workers/jobs/payment-timeout.job'
 import { RetentionJob } from '#/workers/jobs/retention.job'
 import { GeoService } from '#/domain/geo/geo.service'
+import { MetricsService } from '#/infra/monitor/metrics'
+import { JobRunRegistry } from '#/infra/monitor/job-registry'
 import { buildApp } from '#/app'
 
 const config = new AppConfig()
@@ -52,10 +54,12 @@ const config = new AppConfig()
 // ── infra — stashed; survives hot reloads ──
 const g = globalThis as {
   __sinshin_infra?: { database: Database; redis: RedisService }
+  __sinshin_monitor?: { metrics: MetricsService; jobRuns: JobRunRegistry }
   __sinshin_cron?: CronScheduler
   __sinshin_cron_registered?: boolean
   __sinshin_cron_started?: boolean
   __sinshin_signals?: boolean
+  __sinshin_metrics_started?: boolean
 }
 
 const infra = (g.__sinshin_infra ??= {
@@ -66,6 +70,14 @@ const infra = (g.__sinshin_infra ??= {
 })
 const { database, redis } = infra
 const db = database.db
+
+// round-18 — مانیتورینگ: همان نمونه بین hot-reload ها (شمارنده‌ها و تاریخچه‌ی
+// jobها از دست نمی‌روند؛ تایمر نمونه‌ی قبلی هم سرگردان نمی‌شود)
+let monitor = g.__sinshin_monitor
+if (!monitor) {
+  monitor = { metrics: new MetricsService(), jobRuns: new JobRunRegistry() }
+  g.__sinshin_monitor = monitor
+}
 const sseHub = new SseHub(redis)
 
 // ── domain services — fresh code on every reload, same pool ──
@@ -102,7 +114,7 @@ const gallery = new GalleryService({ db })
 const geo = new GeoService({ db, config, settings })
 
 // ── cron — registered once ──
-const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis))
+const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis, monitor.jobRuns))
 if (!g.__sinshin_cron_registered) {
   g.__sinshin_cron_registered = true
   scheduler.register(new CouponScanJob({ config, db, coupons }))
@@ -137,6 +149,7 @@ if (!g.__sinshin_signals) {
   const shutdown = async (signal: string) => {
     console.log(`[api] ${signal} received — shutting down`)
     scheduler.stop()
+    monitor.metrics.stop()
     try {
       app.stop()
     } catch {
@@ -165,6 +178,8 @@ const app = buildApp({
   db: database,
   redis,
   sseHub,
+  metrics: monitor.metrics,
+  jobRuns: monitor.jobRuns,
   auth,
   sessions,
   devices,
@@ -214,6 +229,12 @@ geo.warmup()
 const [dbUp, redisUp] = await Promise.all([database.connect(), redis.connect()])
 if (!dbUp) console.error('[boot] postgres unreachable — /api/health will report degraded')
 if (!redisUp) console.error('[boot] redis unreachable — OTP/locks/SSE bridge are down')
+
+// round-18 — نمونه‌گیر تاخیر حلقهٔ رویداد (idempotent بین hot-reload ها)
+if (!g.__sinshin_metrics_started) {
+  g.__sinshin_metrics_started = true
+  monitor.metrics.start()
+}
 
 if (!g.__sinshin_cron_started) {
   g.__sinshin_cron_started = true

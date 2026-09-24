@@ -91,6 +91,13 @@ export class SseHub {
     return this.channels.get(channel)?.size ?? 0
   }
 
+  /** round-18 — برای /health/metrics: حجم پره‌های فعال محلی */
+  stats(): { channels: number; subscribers: number } {
+    let subscribers = 0
+    for (const set of this.channels.values()) subscribers += set.size
+    return { channels: this.channels.size, subscribers }
+  }
+
   private fanout(channel: string, payload: SsePayload): void {
     const set = this.channels.get(channel)
     if (!set) return

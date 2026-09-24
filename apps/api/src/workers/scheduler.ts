@@ -1,4 +1,5 @@
 // src/workers/scheduler.ts
+import type { JobRunRecorder } from '#/infra/monitor/job-registry'
 import type { RedisService } from '#/infra/redis/redis'
 
 export interface DailyJob {
@@ -65,16 +66,26 @@ export class CronScheduler {
   private readonly intervalJobs: IntervalJob[] = []
   private intervalTimers: Array<ReturnType<typeof setInterval>> = []
 
-  constructor(private readonly redis: RedisService) { }
+  constructor(
+    private readonly redis: RedisService,
+    /** round-18 — ثبت آخرین اجرا برای /health/metrics */
+    private readonly recorder: JobRunRecorder,
+  ) { }
 
   register(job: DailyJob): void {
     this.jobs.push(job)
+    this.recorder.define({ name: job.name, kind: 'daily', schedule: job.time })
     console.log(`[cron] registered "${job.name}" at ${job.time} Asia/Tehran`)
   }
 
   /** phase-2 — ثبت job بازه‌ای؛ قبل از start() صدا شود */
   registerInterval(job: IntervalJob): void {
     this.intervalJobs.push(job)
+    this.recorder.define({
+      name: job.name,
+      kind: 'interval',
+      schedule: `every ${job.everySeconds}s`,
+    })
     console.log(`[cron] registered interval "${job.name}" every ${job.everySeconds}s`)
   }
 
@@ -197,10 +208,14 @@ export class CronScheduler {
     if (this.running.has(job.name)) return
     this.running.add(job.name)
     const t0 = performance.now()
+    this.recorder.begin(job.name)
     try {
       await job.run()
-      console.log(`[cron] "${job.name}" finished in ${(performance.now() - t0).toFixed(0)}ms`)
+      const durationMs = performance.now() - t0
+      this.recorder.end(job.name, true, durationMs)
+      console.log(`[cron] "${job.name}" finished in ${durationMs.toFixed(0)}ms`)
     } catch (err) {
+      this.recorder.end(job.name, false, performance.now() - t0, err)
       console.error(`[cron] "${job.name}" FAILED:`, err)
     } finally {
       this.running.delete(job.name)

@@ -700,3 +700,77 @@ export interface AdminStatsDto {
   recentOrders: { id: string; user: string; amount: number; status: string; date: Date }[]
   latestUsers: { id: UserId; phone: string; name: string; device: string; registeredAt: Date }[]
 }
+
+// ═══════════ round-18: مانیتورینگ — GET /api/health/metrics (ادمین اصلی) ═══════════
+// منبع واحد قرارداد: API سریال می‌کند، وب رندر می‌کند (هم‌الگوی بقیه‌ی Dtoها).
+
+/** فرآیند — لحظه‌ای، از memoryUsage + نمونه‌گیر تاخیر حلقهٔ رویداد */
+export interface ProcessMetricsDto {
+  rssMB: number
+  heapUsedMB: number
+  heapTotalMB: number
+  externalMB: number
+  /** میلین‌ثانیه — تاخیر صف‌شدن setImmediate؛ بالا = حلقهٔ رویداد بلاک است */
+  eventLoopLagMs: number
+}
+
+/** HTTP — شمارندهٔ سلسله‌مرحله‌ای + صدک‌های تاخیر پاسخ */
+export interface HttpMetricsDto {
+  totalRequests: number
+  /** فقط 5xx */
+  totalErrors: number
+  requestsLast1m: number
+  requestsLast5m: number
+  errorsLast1m: number
+  errorsLast5m: number
+  /** null = هنوز نمونه‌ای ثبت نشده */
+  latencyMs: { p50: number; p95: number; max: number } | null
+}
+
+/** وابستگی‌ها — همان سه چکِ /health به‌علاوهٔ اندازه‌گیری تاخیر */
+export interface DepsMetricsDto {
+  database: { ok: boolean; latencyMs: number }
+  redis: { ok: boolean; latencyMs: number }
+  uploads: {
+    ok: boolean
+    /** null = پوشه در دسترس نیست */
+    files: number | null
+    totalMB: number | null
+    /** به سقف شمارش رسید — مجموع واقعی کمی بیشتر است */
+    capped: boolean
+  }
+}
+
+export interface SseMetricsDto {
+  channels: number
+  subscribers: number
+}
+
+/** آخرین اجرای یک job زمان‌بندی‌شده — از JobRunRegistry */
+export interface JobRunDto {
+  name: string
+  kind: 'daily' | 'interval'
+  /** روزانه «HH:MM» (تهران) | بازه‌ای «every Ns» */
+  schedule: string
+  lastStartedAt: string | null
+  lastDurationMs: number | null
+  lastOk: boolean | null
+  lastError: string | null
+  runningNow: boolean
+  runCount: number
+  failureCount: number
+}
+
+export interface SystemMetricsDto {
+  status: 'ok' | 'degraded'
+  env: string
+  uptimeSeconds: number
+  /** ISO — لحظهٔ تولید اسنپ‌شات */
+  generatedAt: string
+  process: ProcessMetricsDto
+  http: HttpMetricsDto
+  deps: DepsMetricsDto
+  sse: SseMetricsDto
+  /** مرتب بر اساس نام */
+  jobs: JobRunDto[]
+}

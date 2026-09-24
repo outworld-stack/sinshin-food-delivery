@@ -7,6 +7,8 @@ const EXT_BY_TYPE: Record<string, string> = {
 }
 const MAX_BYTES = 2 * 1024 * 1024
 const NAME_RE = /^[a-f0-9-]{36}\.(png|webp)$/
+/** round-18 — سقف شمارش برای usage()؛ مسیر «فقط ادمین»، نه هر درخواست */
+const USAGE_MAX_FILES = 20_000
 
 export class UploadService {
   private readonly ready: Promise<void>
@@ -50,5 +52,38 @@ export class UploadService {
     if (!NAME_RE.test(name)) return null
     const f = Bun.file(`${this.dir}/${name}`)
     return (await f.exists()) ? f : null
+  }
+
+  /**
+   * round-18 — حجم دیسک پوشهٔ آپلود برای /health/metrics.
+   * پوشه تخت است؛ اسکن با سقف USAGE_MAX_FILES تا شمارش همیشه تمام‌شدنی
+   * باشد. null = پوشه از ابتدا آماده نشده. هرگز throw نمی‌کند.
+   */
+  async usage(): Promise<{
+    files: number
+    totalBytes: number
+    capped: boolean
+  } | null> {
+    if (this.dirError !== null) return null
+    try {
+      let files = 0
+      let totalBytes = 0
+      let capped = false
+      for await (const name of new Bun.Glob('*').scan({
+        cwd: this.dir,
+        onlyFiles: true,
+      })) {
+        if (files >= USAGE_MAX_FILES) {
+          capped = true
+          break
+        }
+        files++
+        totalBytes += Bun.file(`${this.dir}/${name}`).size
+      }
+      return { files, totalBytes, capped }
+    } catch {
+      // پوشه در لحظهٔ اسکن حذف/قفل شده — health عادی تصمیم می‌گیرد
+      return null
+    }
   }
 }
