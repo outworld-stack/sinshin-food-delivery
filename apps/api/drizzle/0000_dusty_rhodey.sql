@@ -517,6 +517,7 @@ CREATE INDEX "articles_created_idx" ON "articles" USING btree ("created_at");-->
 CREATE INDEX "audit_user_idx" ON "audit_logs" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "audit_created_idx" ON "audit_logs" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "audit_action_idx" ON "audit_logs" USING btree ("action");--> statement-breakpoint
+CREATE INDEX "audit_actor_created_idx" ON "audit_logs" USING btree ("actor_id","created_at");--> statement-breakpoint
 CREATE INDEX "conditions_coupon_idx" ON "coupon_conditions" USING btree ("coupon_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "grants_coupon_user_key" ON "coupon_grants" USING btree ("coupon_id","user_id");--> statement-breakpoint
 CREATE INDEX "grants_user_idx" ON "coupon_grants" USING btree ("user_id");--> statement-breakpoint
@@ -536,6 +537,7 @@ CREATE UNIQUE INDEX "delivery_zones_radius_key" ON "delivery_zones" USING btree 
 CREATE INDEX "delivery_zones_radius_idx" ON "delivery_zones" USING btree ("radius_km");--> statement-breakpoint
 CREATE INDEX "device_events_device_idx" ON "device_events" USING btree ("device_id","created_at");--> statement-breakpoint
 CREATE INDEX "device_events_event_idx" ON "device_events" USING btree ("event");--> statement-breakpoint
+CREATE INDEX "device_events_phone_created_idx" ON "device_events" USING btree ("phone","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "device_identities_key" ON "device_identities" USING btree ("device_id","phone");--> statement-breakpoint
 CREATE INDEX "device_identities_phone_idx" ON "device_identities" USING btree ("phone");--> statement-breakpoint
 CREATE UNIQUE INDEX "device_links_pair_key" ON "device_links" USING btree ("device_a","device_b");--> statement-breakpoint
@@ -574,6 +576,7 @@ CREATE INDEX "orders_confirmed_by_idx" ON "orders" USING btree ("confirmed_by");
 CREATE INDEX "orders_courier_idx" ON "orders" USING btree ("courier_id");--> statement-breakpoint
 CREATE INDEX "orders_queued_idx" ON "orders" USING btree ("queued_at");--> statement-breakpoint
 CREATE INDEX "orders_live_idx" ON "orders" USING btree ("status","delivery_type");--> statement-breakpoint
+CREATE INDEX "orders_user_created_idx" ON "orders" USING btree ("user_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "terms_version_key" ON "terms" USING btree ("version");--> statement-breakpoint
 CREATE INDEX "payments_order_idx" ON "payments" USING btree ("order_id");--> statement-breakpoint
 CREATE INDEX "payments_user_idx" ON "payments" USING btree ("user_id");--> statement-breakpoint
