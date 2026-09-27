@@ -179,7 +179,7 @@ export class LiveService {
 	/**
 	 * تایید سفارش — قلب پنل:
 	 *  - نکته‌ی دیده‌نشده → رد
-	 *  - PAID + داخل scope → CONFIRMED + مالکیت + پیک + صف چاپ
+	 *  - PAID + داخل scope → CONFIRMED + مالکیت + پیک (فقط DELIVERY) + صف چاپ
 	 *  - round-13: ادمین اصلی = scope کامل (سالن + بیرون‌بر)
 	 */
 	async confirmOrder(
@@ -217,7 +217,7 @@ export class LiveService {
 			return { success: false, message: "این سفارش قابل تایید نیست" };
 		}
 
-		let courierId: string | null = null;
+		let courierId: CourierId | null = null;
 		if (row.deliveryType === "DELIVERY" && input.courierId) {
 			const courier = await this.deps.db.query.couriers.findFirst({
 				where: eq(couriers.id, asCourierId(input.courierId)),
@@ -231,8 +231,16 @@ export class LiveService {
 			.set({
 				status: "CONFIRMED",
 				confirmedBy: adminUserId,
-				courierId: input.courierId ? asCourierId(input.courierId) : null,
-				courierSecurityEnabled: input.securityEnabled ?? false,
+				// round-26 — پیک فقط برای «ارسال پیک»: متغیرِ اعتبارسنجی‌شده‌ی
+				// بالا نوشته می‌شود (غیر DELIVERY همیشه null است)، نه input خام.
+				// قبلاً courierId خام ذخیره می‌شد → پیک روی سرو در محل /
+				// تحویل حضوری هم می‌نشست.
+				courierId,
+				// امنیت QR هم فقط برای سفارش پیک معنا دارد
+				courierSecurityEnabled:
+					row.deliveryType === "DELIVERY"
+						? (input.securityEnabled ?? false)
+						: false,
 				internalNote: input.courierNote?.slice(0, 300) ?? null,
 				// round-14 — انتخاب چاپ‌کننده: یادداشت روی فاکتور فروش (بیرون‌بر) چاپ شود؟
 				internalNotePrint:

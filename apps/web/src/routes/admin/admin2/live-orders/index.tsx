@@ -130,19 +130,22 @@ const Admin2Page = memo(function Admin2Page() {
           note={page.state.noteModalOrder.note}
           onClose={page.handleCloseNote}
           onConfirm={() => {
-            const orderId = page.state.noteModalOrder!.orderId
+            // round-26 — deliveryType از سفارشِ همان نکته حفظ می‌شود تا
+            // مودال تایید بداند پیک دارد یا نه
+            const noteOrder = page.state.noteModalOrder!
             page.handleCloseNote()
-            page.handleRequestConfirm(orderId, null, false)  // ⬅️ isConfirmed=false (هنوز PAID)
+            page.handleRequestConfirm(noteOrder.orderId, null, false, noteOrder.deliveryType)  // ⬅️ isConfirmed=false (هنوز PAID)
           }}
         />
       )}
 
-      {/* مودال تایید / تغییر پیک — courierId از کارت می‌آید */}
+      {/* مودال تایید / تغییر پیک — courierId و deliveryType از کارت می‌آید */}
       {page.state.confirmOrder && (
         <ConfirmOrderModal
           orderId={page.state.confirmOrder.orderId}
           courierId={page.state.confirmOrder.courierId}
           isReassign={page.state.confirmOrder.isReassign}  // ⬅️ پراپ صریح
+          deliveryType={page.state.confirmOrder.deliveryType}  // ⬅️ round-26
           onDone={page.handleConfirmDone}
           onCancel={page.handleCancelConfirm}
         />

@@ -7,6 +7,7 @@ import { Toggle } from '#/components/shared/Toggle'
 import {
 	confirmLiveOrder,
 	getStaffOrderInvoice,
+	type LiveOrder,
 	reassignCourier,
 } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
@@ -20,6 +21,8 @@ interface ConfirmOrderModalProps {
 	orderId: string
 	courierId: string | null
 	isReassign: boolean
+	/** round-26 — نوع تحویل سفارش: سلکت پیک و سوییچ QR فقط برای DELIVERY */
+	deliveryType: LiveOrder['deliveryType']
 	onDone: () => void
 	onCancel: () => void
 }
@@ -46,9 +49,13 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 	onDone,
 	onCancel,
 	isReassign,
+	deliveryType,
 }: ConfirmOrderModalProps) {
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
+	// round-26 — پیک فقط برای «ارسال پیک»؛ سرو در محل / تحویل حضوری
+	// نه سلکت پیک دارند، نه سوییچ امنیت QR
+	const isDelivery = deliveryType === 'DELIVERY'
 
 	const [form, setForm] = useState<ConfirmOrderForm>(() =>
 		initialForm(courierId),
@@ -139,15 +146,17 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 		} else {
 			confirmMutation.mutate({
 				orderId,
-				courierId: form.selected === MISC_OPTION ? null : form.selected,
+				// round-26 — پیک فقط برای DELIVERY — دفاع دوم کنار بک‌اند
+				courierId:
+					isDelivery && form.selected !== MISC_OPTION ? form.selected : null,
 				// round-14 — یادداشت اختیاری برای هر تاییدی (نه فقط متفرقه)؛
 				// اگر خالی بود، پرچم چاپ بی‌اثر است (سرور هم گارد دارد)
 				courierNote: form.miscNote.trim() || null,
 				notePrintOnInvoice: form.notePrintOnInvoice,
-				securityEnabled: form.securityEnabled,
+				securityEnabled: isDelivery && form.securityEnabled,
 			})
 		}
-	}, [isReassign, form, orderId, confirmMutation, reassignMutation])
+	}, [isReassign, isDelivery, form, orderId, confirmMutation, reassignMutation])
 
 	const hasNote = form.miscNote.trim().length > 0
 
@@ -175,30 +184,41 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 					</p>
 				)}
 
-				{/* سلکت‌باکس پیک */}
-				<div className="mb-4">
-					<label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
-						انتخاب پیک
-					</label>
-					<div className="relative">
-						<select
-							value={form.selected}
-							onChange={(e) => set({ selected: e.target.value })}
-							className="w-full appearance-none px-4 py-3 pl-10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm cursor-pointer"
-						>
-							<option value={MISC_OPTION}>متفرقه (تخصیص در محل)</option>
-							{(couriers ?? []).map((c) => (
-								<option key={c.id} value={c.id}>
-									{c.name} — {c.phone}
-								</option>
-							))}
-						</select>
-						<Bicycle
-							size={16}
-							className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-						/>
+				{/* round-26 — سلکت پیک فقط برای ارسال پیک؛ حضوری‌ها فقط چاپ */}
+				{isDelivery && (
+					<div className="mb-4">
+						<label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+							انتخاب پیک
+						</label>
+						<div className="relative">
+							<select
+								value={form.selected}
+								onChange={(e) => set({ selected: e.target.value })}
+								className="w-full appearance-none px-4 py-3 pl-10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm cursor-pointer"
+							>
+								<option value={MISC_OPTION}>متفرقه (تخصیص در محل)</option>
+								{(couriers ?? []).map((c) => (
+									<option key={c.id} value={c.id}>
+										{c.name} — {c.phone}
+									</option>
+								))}
+							</select>
+							<Bicycle
+								size={16}
+								className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+							/>
+						</div>
 					</div>
-				</div>
+				)}
+				{!isDelivery && (
+					<div className="mb-4 flex items-center gap-2 p-3.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
+						<span className="text-[13px] text-gray-500 dark:text-gray-400 font-DanaMedium">
+							{deliveryType === 'DINE_IN'
+								? 'سرو در محل — پیک و QR ندارد'
+								: 'تحویل حضوری — پیک و QR ندارد'}
+						</span>
+					</div>
+				)}
 
 				{/* round-14 — یادداشت تاییدکننده: همیشه (نه فقط متفرقه) + انتخاب چاپ در فاکتور بیرون‌بر */}
 				{!isReassign && (
@@ -249,8 +269,8 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 					</div>
 				)}
 
-				{/* سوئیچ امنیت QR — فقط تایید اولیه */}
-				{!isReassign && (
+				{/* سوئیچ امنیت QR — فقط تایید اولیه‌ی سفارش ارسال پیک — round-26 */}
+				{!isReassign && isDelivery && (
 					<div className="flex items-center justify-between p-4 rounded-xl border-2 border-gray-200 dark:border-[#3a151c] mb-5">
 						<div className="flex items-center gap-3">
 							<span className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">

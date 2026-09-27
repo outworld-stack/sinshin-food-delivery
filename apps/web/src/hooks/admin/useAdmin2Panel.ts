@@ -2,7 +2,7 @@
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import {
-  subAdminLogout, viewOrderNote,
+  subAdminLogout, viewOrderNote, type LiveOrder,
 } from '#/server/admin'
 import { useNavigate } from '@tanstack/react-router'
 import { onUnauthorized, getAccessToken } from '#/lib/auth-session'
@@ -13,15 +13,15 @@ import { useToastStore } from '#/stores/toastStore'
 
 // --- State ---
 interface Admin2State {
-  noteModalOrder: { orderId: string; note: string } | null
-  confirmOrder: { orderId: string; courierId: string | null; isReassign: boolean } | null
+  noteModalOrder: { orderId: string; note: string; deliveryType: LiveOrder['deliveryType'] } | null
+  confirmOrder: { orderId: string; courierId: string | null; isReassign: boolean; deliveryType: LiveOrder['deliveryType'] } | null
   soundEnabled: boolean
 }
 
 type Admin2Action =
-  | { type: 'OPEN_NOTE_MODAL'; payload: { orderId: string; note: string } }
+  | { type: 'OPEN_NOTE_MODAL'; payload: { orderId: string; note: string; deliveryType: LiveOrder['deliveryType'] } }
   | { type: 'CLOSE_NOTE_MODAL' }
-  | { type: 'SET_CONFIRM'; payload: { orderId: string; courierId: string | null; isReassign: boolean } }
+  | { type: 'SET_CONFIRM'; payload: { orderId: string; courierId: string | null; isReassign: boolean; deliveryType: LiveOrder['deliveryType'] } }
   | { type: 'CLEAR_CONFIRM' }
   | { type: 'TOGGLE_SOUND' }
 
@@ -178,23 +178,26 @@ export function useAdmin2Panel() {
   }, [session, logoutMutation])
 
   // --- نکته مشتری: میوتیشن + باز شدن مودال در onSuccess ---
+  // round-26 — deliveryType همراه سفارش می‌آید تا بعد از تیک نکته، مودال تایید
+  // بداند پیک دارد یا نه (سرو در محل / تحویل حضوری)
   const viewNoteMutation = useMutation({
-    mutationFn: (orderId: string) => viewOrderNote({ data: { orderId } }),
-    onSuccess: (res, orderId) => {
-      dispatch({ type: 'OPEN_NOTE_MODAL', payload: { orderId, note: res.note ?? '' } })
+    mutationFn: (input: { orderId: string; deliveryType: LiveOrder['deliveryType'] }) =>
+      viewOrderNote({ data: { orderId: input.orderId } }),
+    onSuccess: (res, input) => {
+      dispatch({ type: 'OPEN_NOTE_MODAL', payload: { orderId: input.orderId, note: res.note ?? '', deliveryType: input.deliveryType } })
       queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrders(adminId) })
     },
   })
 
-  const handleOpenNote = useCallback((orderId: string) => {
-    viewNoteMutation.mutate(orderId)
+  const handleOpenNote = useCallback((orderId: string, deliveryType: LiveOrder['deliveryType']) => {
+    viewNoteMutation.mutate({ orderId, deliveryType })
   }, [viewNoteMutation])
 
   const handleCloseNote = useCallback(() => dispatch({ type: 'CLOSE_NOTE_MODAL' }), [])
 
   // --- تایید / تغییر پیک ---
-  const handleRequestConfirm = useCallback((orderId: string, courierId: string | null, isReassign: boolean) => {
-    dispatch({ type: 'SET_CONFIRM', payload: { orderId, courierId, isReassign } })
+  const handleRequestConfirm = useCallback((orderId: string, courierId: string | null, isReassign: boolean, deliveryType: LiveOrder['deliveryType']) => {
+    dispatch({ type: 'SET_CONFIRM', payload: { orderId, courierId, isReassign, deliveryType } })
   }, [])
 
   const handleCancelConfirm = useCallback(() => dispatch({ type: 'CLEAR_CONFIRM' }), [])

@@ -9,8 +9,9 @@ import { StatusBadge } from '#/components/shared/StatusBadge'
 
 interface LiveOrderCardProps {
   order: LiveOrder
-  onRequestConfirm: (orderId: string, courierId: string | null, isReassign: boolean) => void  // ⬅️
-  onOpenNote: (orderId: string) => void
+  // round-26 — deliveryType همیشه همراه سفارش می‌آید تا مودال تایید بداند پیک دارد یا نه
+  onRequestConfirm: (orderId: string, courierId: string | null, isReassign: boolean, deliveryType: LiveOrder['deliveryType']) => void  // ⬅️
+  onOpenNote: (orderId: string, deliveryType: LiveOrder['deliveryType']) => void
 }
 
 
@@ -18,6 +19,8 @@ export const LiveOrderCard = memo(function LiveOrderCard({ order, onRequestConfi
   const hasUnseenNote = order.customerNote && !order.noteSeen
   const isConfirmed = order.status === 'CONFIRMED'
   const isOnTheWay = order.status === 'ON_THE_WAY'
+  // round-26 — پیک فقط برای «ارسال پیک»؛ سرو در محل و تحویل حضوری مسیر پیک ندارند
+  const isDelivery = order.deliveryType === 'DELIVERY'
 
   return (
     <div className={`border rounded-xl p-4 transition-all ${hasUnseenNote
@@ -93,7 +96,7 @@ export const LiveOrderCard = memo(function LiveOrderCard({ order, onRequestConfi
           {hasUnseenNote && (
             <button
               type="button"
-              onClick={() => onOpenNote(order.id)}
+              onClick={() => onOpenNote(order.id, order.deliveryType)}
               className="px-4 py-2 rounded-lg bg-orange-500 text-white text-xs font-DanaDemiBold hover:bg-orange-600 transition cursor-pointer flex items-center gap-1.5"
             >
               <Stickynote size={14} />
@@ -105,7 +108,7 @@ export const LiveOrderCard = memo(function LiveOrderCard({ order, onRequestConfi
           {order.status === 'PAID' && !hasUnseenNote && (
             <button
               type="button"
-              onClick={() => onRequestConfirm(order.id, null, false)}
+              onClick={() => onRequestConfirm(order.id, null, false, order.deliveryType)}
               className="px-4 py-2 rounded-lg bg-primary dark:bg-dark-primary text-white text-xs font-DanaDemiBold hover:opacity-90 transition cursor-pointer flex items-center gap-1.5"
             >
               <Printer size={14} />
@@ -113,11 +116,11 @@ export const LiveOrderCard = memo(function LiveOrderCard({ order, onRequestConfi
             </button>
           )}
 
-          {/* تغییر پیک — فقط CONFIRMED (قبل رسیدن) */}
-          {isConfirmed && (
+          {/* تغییر پیک — فقط CONFIRMED + فقط ارسال پیک (قبل رسیدن) — round-26 */}
+          {isConfirmed && isDelivery && (
             <button
               type="button"
-              onClick={() => onRequestConfirm(order.id, order.courierId, true)}
+              onClick={() => onRequestConfirm(order.id, order.courierId, true, order.deliveryType)}
               className="px-4 py-2 rounded-lg bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 text-xs font-DanaDemiBold hover:bg-yellow-500/20 transition cursor-pointer flex items-center gap-1.5"
               title="تا قبل رسیدن پیک به مغازه قابل تغییر است"
             >

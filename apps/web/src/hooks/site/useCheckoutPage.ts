@@ -62,7 +62,10 @@ function checkoutReducer(state: CheckoutState, action: CheckoutAction): Checkout
     case 'SET_COUPON_STATUS': return { ...state, couponStatus: action.payload }
     case 'SET_COUPON_DRAFT': return { ...state, couponDraft: action.payload }
     case 'COMMIT_COUPON': return { ...state, couponCode: state.couponDraft || null }
-    case 'RESET_COUPON': return { ...state, couponDraft: '', couponCode: null }
+    // round-26 — couponStatus هم برمی‌گردد به 'NONE': قبلاً فقط draft/code پاک
+    // می‌شد → رادیو روی «دارم» می‌ماند و چون applied هم false بود،
+    // isSubmitBlocked برای همیشه true می‌ماند (قفل ثبت سفارش تا رفرش)
+    case 'RESET_COUPON': return { ...state, couponStatus: 'NONE', couponDraft: '', couponCode: null }
     case 'TOGGLE_WALLET': return { ...state, useWallet: !state.useWallet }
     case 'SET_GATEWAY': return { ...state, selectedGateway: action.payload }
     case 'SET_CUSTOMER_NOTE': return { ...state, customerNote: action.payload.slice(0, 300) }

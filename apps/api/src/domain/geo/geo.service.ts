@@ -1,17 +1,28 @@
 // src/domain/geo/geo.service.ts
 /**
- * phase-fix — محدودیت دسترسی جغرافیایی «فقط ایران».
+ * round-26 — محدودیت دسترسی جغرافیایی «فقط ایران» با زنجیره‌ی منابع.
  *
- * منبع داده: فایل delegated رسمی RIPE (ناحیه‌ی ثبت ایران؛ روزی یک‌بار
- * به‌روز می‌شود، بدون کلید، بدون محدودیت نرخ) — بازه‌های IP ایران به‌صورت
- * محلی چک می‌شوند؛ یعنی صفر تماس خارجی به‌ازای هر درخواست در پیک.
+ * منبع داده (به‌ترتیب تلاش — شکست هر منبع فقط یعنی «منبع بعدی»):
+ *  ۱. ftp.ripe.net — فایل delegated رسمی RIPE (مثل قبل؛ روزی یک‌بار به‌روز،
+ *     بدون کلید، بدون محدودیت نرخ)
+ *  ۲. RIPEstat API — همان داده‌ی RIPE از هاست دیگر (JSON)
+ *  ۳. ipdeny.com — آینه‌ی مستقل (دو فایل v4/v6)
  *
- * سیاست‌ها:
+ * قبلاً تک‌منبعه با تایم‌اوت ۳۰s بود — یک اختلال نت یعنی خطای RIPE و
+ * بازه‌های خالی. حالا هر منبع ۱۰s تایم‌اوت دارد.
+ *
+ * کش دیسک — آخرین بازه‌های سالم در UPLOAD_DIR/.geo-ir-cache.json ذخیره
+ * می‌شود (در پروداکشن روی volume می‌ماند). بوت اول کش را می‌خواند (محلی
+ * و آنی — سپر از همان ثانیه‌ی اول روشن است) بعد از شبکه تازه می‌کند؛
+ * اگر هر سه منبع شکست بخورند و حافظه خالی باشد، همان کش بارگذاری می‌شود.
+ *
+ * سیاست‌ها (بدون تغییر):
  *  - کلید روشن/خاموش در settings (iran_only_access) — پیش‌فرض روشن.
  *    مقدار با کش ۱۵ ثانیه‌ای خوانده می‌شود (بدون کوئری DB در هر درخواست).
  *  - IP های داخلی/لوکال (Docker/Caddy/health) همیشه آزاد.
- *  - fail-open: اگر بازه‌ها هنوز لود نشده‌اند یا RIPE در دسترس نیست،
- *    درخواست عبور می‌کند (قطع دسترسی کل سایت ممنوع).
+ *  - fail-open: اگر هیچ منبعی و نه کشی چیزی نداشته باشیم، درخواست عبور
+ *    می‌کند (قطع دسترسی کل سایت ممنوع) — با این تفاوت که رسیدن به این
+ *    حالت حالا عملاً ناممکن شده (سه منبع + کش دیسک + حافظه).
  *  - GEO_BYPASS_IPS در env — عبور بی‌قید و شرط (ادمین با VPN).
  */
 import { eq } from 'drizzle-orm'
@@ -21,10 +32,11 @@ import { settings, SETTING_KEYS } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import type { SettingsService } from '#/domain/settings/settings.service'
 
-const RIPE_URL = 'https://ftp.ripe.net/pub/stats/ripencc/delegated-ripencc-extended-latest'
-const FETCH_TIMEOUT_MS = 30_000
+/** هر منبع ۱۰ ثانیه — بدترین حالتِ هر سه منبع ≈ ۳۰s (قبلاً ۳۰s فقط برای یکی) */
+const FETCH_TIMEOUT_MS = 10_000
 const RETRY_MS = 15 * 60_000
 const TOGGLE_TTL_MS = 15_000
+const CACHE_FILENAME = '.geo-ir-cache.json'
 
 // ── ابزارهای IP ──
 
@@ -142,10 +154,147 @@ function mergeV6(ranges: Array<[bigint, bigint]>): Array<[bigint, bigint]> {
   return out
 }
 
+// ── منابع داده (round-26) ──
+
+interface GeoRanges {
+  v4: Array<[number, number]>
+  v6: Array<[bigint, bigint]>
+}
+
+async function fetchText(url: string): Promise<string> {
+  const res = await Bun.fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+  if (!res.ok) throw new Error(`http ${res.status}`)
+  return res.text()
+}
+
+function cidrV4ToRange(cidr: string): [number, number] | null {
+  const [ip, bitsRaw] = cidr.trim().split('/')
+  if (!ip || bitsRaw === undefined) return null
+  const bits = Number(bitsRaw)
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return null
+  const lo = ipv4ToLong(ip)
+  if (lo === null) return null
+  return [lo, lo + 2 ** (32 - bits) - 1]
+}
+
+function cidrV6ToRange(cidr: string): [bigint, bigint] | null {
+  const [ip, bitsRaw] = cidr.trim().split('/')
+  if (!ip || bitsRaw === undefined) return null
+  const bits = Number(bitsRaw)
+  if (!Number.isInteger(bits) || bits < 0 || bits > 128) return null
+  const lo = ipv6ToBig(ip)
+  if (lo === null) return null
+  return [lo, lo + (1n << BigInt(128 - bits)) - 1n]
+}
+
+/** منبع ۱ — فایل delegated رسمی RIPE (فرمت extended؛ مثل قبل) */
+function parseRipeDelegated(text: string): GeoRanges {
+  // ستون پنجم برای ipv4 = تعداد آدرس، برای ipv6 = طول پیشوند
+  const v4: Array<[number, number]> = []
+  const v6: Array<[bigint, bigint]> = []
+  for (const line of text.split('\n')) {
+    if (!line || line.startsWith('#')) continue
+    const p = line.split('|')
+    if (p.length < 5 || p[1] !== 'IR') continue
+    const type = p[2] ?? ''
+    const start = p[3] ?? ''
+    const count = Number(p[4])
+    if (!Number.isFinite(count) || count <= 0) continue
+    if (type === 'ipv4') {
+      const lo = ipv4ToLong(start)
+      if (lo === null) continue
+      v4.push([lo, lo + count - 1])
+    } else if (type === 'ipv6' && count <= 128) {
+      const lo = ipv6ToBig(start)
+      if (lo === null) continue
+      v6.push([lo, lo + (1n << BigInt(128 - count)) - 1n])
+    }
+  }
+  return { v4, v6 }
+}
+
+/** منبع ۲ — RIPEstat: همان داده‌ی RIPE از هاست دیگر، JSON با پیشوندهای CIDR */
+function parseRipestat(raw: string): GeoRanges {
+  const json = JSON.parse(raw) as {
+    data?: { resources?: { ipv4?: unknown; ipv6?: unknown } }
+  }
+  const v4: Array<[number, number]> = []
+  const v6: Array<[bigint, bigint]> = []
+  if (Array.isArray(json.data?.resources?.ipv4)) {
+    for (const p of json.data.resources.ipv4) {
+      if (typeof p !== 'string') continue
+      const r = cidrV4ToRange(p)
+      if (r) v4.push(r)
+    }
+  }
+  if (Array.isArray(json.data?.resources?.ipv6)) {
+    for (const p of json.data.resources.ipv6) {
+      if (typeof p !== 'string') continue
+      const r = cidrV6ToRange(p)
+      if (r) v6.push(r)
+    }
+  }
+  return { v4, v6 }
+}
+
+/** فرمت zone فایل — هر خط یک CIDR (IPv4 و IPv6 هر دو پذیرفته می‌شود) */
+function parseZoneFile(text: string): GeoRanges {
+  const v4: Array<[number, number]> = []
+  const v6: Array<[bigint, bigint]> = []
+  for (const line of text.split('\n')) {
+    const cidr = line.trim()
+    if (!cidr || cidr.startsWith('#') || cidr.startsWith(';')) continue
+    if (cidr.includes(':')) {
+      const r = cidrV6ToRange(cidr)
+      if (r) v6.push(r)
+    } else {
+      const r = cidrV4ToRange(cidr)
+      if (r) v4.push(r)
+    }
+  }
+  return { v4, v6 }
+}
+
+/** منبع ۳ — ipdeny: v4 الزامی (ir.zone)، v6 در صورت موفقیت (ir.ipv6.zone) */
+async function loadIpdeny(): Promise<GeoRanges> {
+  const [v4Res, v6Res] = await Promise.allSettled([
+    fetchText('https://ipdeny.com/ipblocks/data/countries/ir.zone'),
+    fetchText('https://ipdeny.com/ipblocks/data/countries/ir.ipv6.zone'),
+  ])
+  if (v4Res.status === 'rejected') throw v4Res.reason
+  const out = parseZoneFile(v4Res.value)
+  if (v6Res.status === 'fulfilled') out.v6 = parseZoneFile(v6Res.value).v6
+  return out
+}
+
+const SOURCES: Array<{ name: string; load: () => Promise<GeoRanges> }> = [
+  {
+    name: 'ftp.ripe.net',
+    load: async () =>
+      parseRipeDelegated(
+        await fetchText(
+          'https://ftp.ripe.net/pub/stats/ripencc/delegated-ripencc-extended-latest',
+        ),
+      ),
+  },
+  {
+    name: 'ripestat',
+    load: async () =>
+      parseRipestat(
+        await fetchText(
+          'https://stat.ripe.net/data/country-resource-list/data.json?resource=ir&v4_format=prefix',
+        ),
+      ),
+  },
+  { name: 'ipdeny', load: loadIpdeny },
+]
+
 export interface GeoStatus {
   enabled: boolean
   rangesLoaded: boolean
   rangesLoadedAt: string | null
+  /** round-26 — آخرین منبعی که بازه‌ها را داده (برای curl /api/geo/status) */
+  source: string | null
   ipv4Prefixes: number
   ipv6Prefixes: number
   bypassIps: number
@@ -155,6 +304,7 @@ export class GeoService {
   private irV4: Array<[number, number]> = []
   private irV6: Array<[bigint, bigint]> = []
   private rangesLoadedAt = 0
+  private loadedFrom: string | null = null
   private loading: Promise<boolean> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private toggleCache: { value: boolean; at: number } | null = null
@@ -171,9 +321,15 @@ export class GeoService {
     this.bypass = new Set(deps.config.geoBypassIps)
   }
 
-  /** بوت — لود اولیه‌ی بازه‌ها (fail-open تا آماده شود) */
+  /**
+   * بوت — round-26: اول کش دیسک (محلی و آنی؛ اگر باشد سپر از همان
+   * ثانیه‌ی اول روشن است)، بعد تازه‌سازی از شبکه.
+   */
   warmup(): void {
-    void this.refresh()
+    void (async () => {
+      if (this.irV4.length === 0) await this.loadDiskCache('boot')
+      await this.refresh()
+    })()
   }
 
   /** تازه‌سازی بازه‌ها — تک‌پرواز؛ در شکست، ۱۵ دقیقه بعد دوباره */
@@ -193,44 +349,131 @@ export class GeoService {
   }
 
   private async fetchRanges(): Promise<boolean> {
+    for (let i = 0; i < SOURCES.length; i++) {
+      const src = SOURCES[i]!
+      try {
+        const { v4, v6 } = await src.load()
+        if (v4.length === 0) throw new Error('no IR ipv4 ranges parsed')
+        this.irV4 = mergeV4(v4)
+        this.irV6 = mergeV6(v6)
+        this.rangesLoadedAt = Date.now()
+        this.loadedFrom = src.name
+        this.warnedNoRanges = false
+        console.log(
+          `[geo] loaded from ${src.name} — ${this.irV4.length} ipv4 / ${this.irV6.length} ipv6 IR ranges`,
+        )
+        void this.writeCache(src.name)
+        return true
+      } catch (err) {
+        // شکست یک منبع فقط یعنی «منبع بعدی» — نه خطای نهایی
+        console.warn(
+          `[geo] source ${i + 1}/${SOURCES.length} (${src.name}) failed:`,
+          err instanceof Error ? err.message : err,
+        )
+      }
+    }
+
+    // هر سه منبع شکست خوردند — اگر حافظه هم خالی است، کش دیسک آخرین سپر است
+    if (this.irV4.length === 0 && (await this.loadDiskCache('network failed'))) {
+      return true
+    }
+    console.error(
+      '[geo] all sources failed — keeping current ranges (fail-open if empty) until retry in 15m',
+    )
+    return false
+  }
+
+  // ── کش دیسک (round-26) ──
+
+  private get cachePath(): string {
+    const dir = this.deps.config.uploadDir.replace(/\/+$/, '')
+    return `${dir}/${CACHE_FILENAME}`
+  }
+
+  /** ذخیره‌ی آخرین بازه‌های سالم — best-effort، هرگز throw نمی‌کند */
+  private async writeCache(source: string): Promise<void> {
+    const path = this.cachePath
     try {
-      // فرمت extended: ستون پنجم برای ipv4 = تعداد آدرس، برای ipv6 = طول پیشوند
-      const res = await Bun.fetch(RIPE_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
-      if (!res.ok) throw new Error(`ripe http ${res.status}`)
-      const text = await res.text()
+      await Bun.$`mkdir -p ${this.deps.config.uploadDir}`
+      const payload = JSON.stringify({
+        version: 1,
+        source,
+        savedAt: new Date().toISOString(),
+        v4: this.irV4,
+        // bigint در JSON ندارد → رشته
+        v6: this.irV6.map(([lo, hi]) => [lo.toString(), hi.toString()]),
+      })
+      // نوشتن اتمیک: اول tmp، بعد mv — خواننده‌ی هم‌زمان هرگز
+      // فایل نیمه‌نوشته نمی‌بیند
+      const tmp = `${path}.tmp`
+      await Bun.write(tmp, payload)
+      await Bun.$`mv ${tmp} ${path}`
+    } catch (err) {
+      console.warn(
+        '[geo] disk cache write skipped:',
+        err instanceof Error ? err.message : err,
+      )
+    }
+  }
+
+  /** بارگذاری کش — با اعتبارسنجی کامل؛ هر شکست = false (بی‌صدا) */
+  private async loadDiskCache(reason: string): Promise<boolean> {
+    const path = this.cachePath
+    try {
+      const f = Bun.file(path)
+      if (!(await f.exists())) return false
+      const raw = JSON.parse(await f.text()) as {
+        version?: unknown
+        source?: unknown
+        savedAt?: unknown
+        v4?: unknown
+        v6?: unknown
+      }
+      if (raw.version !== 1 || !Array.isArray(raw.v4) || raw.v4.length === 0) return false
 
       const v4: Array<[number, number]> = []
+      for (const r of raw.v4) {
+        if (
+          !Array.isArray(r) ||
+          r.length !== 2 ||
+          typeof r[0] !== 'number' ||
+          !Number.isInteger(r[0]) ||
+          typeof r[1] !== 'number' ||
+          !Number.isInteger(r[1]) ||
+          r[0] < 0 ||
+          r[1] < r[0]
+        ) {
+          return false
+        }
+        v4.push([r[0], r[1]])
+      }
+
       const v6: Array<[bigint, bigint]> = []
-      for (const line of text.split('\n')) {
-        if (!line || line.startsWith('#')) continue
-        const p = line.split('|')
-        if (p.length < 5 || p[1] !== 'IR') continue
-        const type = p[2] ?? ''
-        const start = p[3] ?? ''
-        const count = Number(p[4])
-        if (!Number.isFinite(count) || count <= 0) continue
-        if (type === 'ipv4') {
-          const lo = ipv4ToLong(start)
-          if (lo === null) continue
-          v4.push([lo, lo + count - 1])
-        } else if (type === 'ipv6' && count <= 128) {
-          const lo = ipv6ToBig(start)
-          if (lo === null) continue
-          v6.push([lo, lo + (1n << BigInt(128 - count)) - 1n])
+      if (Array.isArray(raw.v6)) {
+        for (const r of raw.v6) {
+          if (!Array.isArray(r) || r.length !== 2) return false
+          try {
+            v6.push([BigInt(r[0] as string | number | bigint), BigInt(r[1] as string | number | bigint)])
+          } catch {
+            return false
+          }
         }
       }
-      if (v4.length === 0) throw new Error('ripe: no IR ipv4 ranges parsed')
 
+      // دوباره merge — به هیچ دیسکی اعتماد نمی‌شود
       this.irV4 = mergeV4(v4)
       this.irV6 = mergeV6(v6)
-      this.rangesLoadedAt = Date.now()
+      this.rangesLoadedAt =
+        typeof raw.savedAt === 'string' && Number.isFinite(Date.parse(raw.savedAt))
+          ? Date.parse(raw.savedAt)
+          : Date.now()
+      this.loadedFrom = `${typeof raw.source === 'string' ? raw.source : '?'} (disk)`
       this.warnedNoRanges = false
       console.log(
-        `[geo] RIPE loaded — ${this.irV4.length} ipv4 / ${this.irV6.length} ipv6 IR ranges`,
+        `[geo] disk cache loaded (${reason}) — from ${typeof raw.source === 'string' ? raw.source : '?'} saved ${typeof raw.savedAt === 'string' ? raw.savedAt : '?'} — ${this.irV4.length} ipv4 / ${this.irV6.length} ipv6 IR ranges`,
       )
       return true
-    } catch (err) {
-      console.error('[geo] RIPE fetch failed (fail-open until loaded):', err)
+    } catch {
       return false
     }
   }
@@ -263,7 +506,9 @@ export class GeoService {
     if (this.irV4.length === 0) {
       if (!this.warnedNoRanges) {
         this.warnedNoRanges = true
-        console.warn('[geo] ranges not loaded yet — allowing (fail-open)')
+        console.warn(
+          '[geo] ranges not loaded (all sources + disk cache failed) — allowing (fail-open)',
+        )
       }
       return true
     }
@@ -289,6 +534,7 @@ export class GeoService {
       enabled: await this.iranOnlyEnabled(),
       rangesLoaded: this.irV4.length > 0,
       rangesLoadedAt: this.rangesLoadedAt > 0 ? new Date(this.rangesLoadedAt).toISOString() : null,
+      source: this.loadedFrom,
       ipv4Prefixes: this.irV4.length,
       ipv6Prefixes: this.irV6.length,
       bypassIps: this.bypass.size,
