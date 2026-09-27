@@ -112,7 +112,10 @@ function isPrivateIp(ip: string): boolean {
     if (b0 === 169 && b1 === 254) return true // link-local
     if (b0 === 172 && b1 >= 16 && b1 <= 31) return true // خصوصی
     if (b0 === 192 && b1 === 168) return true // خصوصی
-    if (b0 === 100 && b1 >= 64) return true // CGNAT داخلی (100.64/10)
+    // round-28 — CGNAT 100.64.0.0/10: نصفِ یک /8 عمومی بود که «داخلی» تلقی
+    // می‌شد (100.128–100.255 رنجِ routable عمومی است — هر کسی می‌تواند VPS بخرد).
+    // سقف b1 < 127 همان مرز واقعی /10 را می‌سازد.
+    if (b0 === 100 && b1 >= 64 && b1 < 128) return true // CGNAT داخلی (100.64/10)
     return false
   }
   // IPv6 — لوکال/unique-local + نگاشتِ IPv4 خصوصی

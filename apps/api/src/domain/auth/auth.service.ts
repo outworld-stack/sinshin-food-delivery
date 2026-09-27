@@ -64,16 +64,20 @@ export class AuthService {
     return this.deps.otp.send(phone)
   }
 
-  /** چکِ سبکِ قبل از ارسال کد — بدون هزینه‌ی پیامک */
+  /**
+   * چکِ سبکِ قبل از ارسال کد — بدون هزینه‌ی پیامک.
+   * round-28 — role حذف شد: این روت «قبل از احراز هویت» است و نقش را فاش
+   * می‌کرد (مهاجم شماره‌ی ادمین‌ها را شناسایی و هدف‌گیری می‌کرد). نقش فقط
+   * بعد از لاگین واقعی (verify → user.role) برمی‌گردد.
+   */
   async checkPhone(
     phone: string,
-  ): Promise<{ isNewUser: boolean; needsTerms: boolean; role: string | null }> {
+  ): Promise<{ isNewUser: boolean; needsTerms: boolean }> {
     const user = await this.deps.db.query.users.findFirst({ where: eq(users.phone, phone) })
-    if (!user) return { isNewUser: true, needsTerms: true, role: null }
+    if (!user) return { isNewUser: true, needsTerms: true }
     return {
       isNewUser: false,
       needsTerms: user.termsAcceptedAt === null,
-      role: user.role,
     }
   }
 

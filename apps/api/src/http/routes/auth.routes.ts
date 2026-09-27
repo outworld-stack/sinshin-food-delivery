@@ -129,7 +129,7 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
         if (!phone) throw Err.validation('شماره موبایل معتبر نیست.')
 
         const code = toEnglishDigits(body.code).replace(/\s+/g, '')
-        if (!/^\d{4}$/.test(code)) throw Err.validation('کد وارد شده معتبر نیست.')
+        if (!/^\d{6}$/.test(code)) throw Err.validation('کد وارد شده معتبر نیست.')
 
         const ip = clientIp(headers['x-forwarded-for']);
         const result = await deps.auth.loginWithOtp(
@@ -164,7 +164,8 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
         }),
         body: t.Object({
           phone: t.String(),
-          code: t.String({ minLength: 4, maxLength: 4 }),
+          // round-28 — ۶ رقم (قبلاً ۴؛ هم‌راستا با otp.service)
+          code: t.String({ minLength: 6, maxLength: 6 }),
           device: deviceSchema,
           refCode: t.Optional(t.Nullable(t.String({ maxLength: 20 }))),
           termsAccepted: t.Optional(t.Boolean()),

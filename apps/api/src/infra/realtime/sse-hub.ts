@@ -69,10 +69,12 @@ export class SseHub {
       s?.delete(subscriber)
       if (s && s.size === 0) {
         this.channels.delete(channel)
-        if (this.relayed.has(channel)) {
-          this.relayed.delete(channel)
-          this.redis.unsubscribe(`sse:${channel}`)
-        }
+        // round-28 — unsubscribe بی‌قید: قبلاً مشروط به relayed بود؛ اگر
+        // subscribe قبلاً در قطعی ردیس شکست خورده بود، relayed خالی است و
+        // مدخلِ سمت redis تا ابد می‌ماند (هر بازدید صفحه‌ی ردیابی سفارش در
+        // قطعی ردیس یک مدخل همیشگی می‌ساخت). unsubscribe خودش idempotent است.
+        this.relayed.delete(channel)
+        this.redis.unsubscribe(`sse:${channel}`)
       }
     }
   }

@@ -67,13 +67,13 @@ function CourierLoginPage() {
             <input
               type="text"
               dir="ltr"
-              maxLength={4}
+              maxLength={6}
               value={code}
               onChange={e => setCode(e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="کد ۴ رقمی"
+              placeholder="کد ۶ رقمی"
               className="w-full text-center text-2xl p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border-2 outline-none"
             />
-            <button onClick={handleVerify} disabled={loading || code.length !== 4} className="w-full py-3 rounded-xl bg-primary text-white font-bold disabled:opacity-50">
+            <button onClick={handleVerify} disabled={loading || code.length !== 6} className="w-full py-3 rounded-xl bg-primary text-white font-bold disabled:opacity-50">
               {loading ? '...' : 'تأیید'}
             </button>
           </>

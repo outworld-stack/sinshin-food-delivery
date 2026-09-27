@@ -29,7 +29,7 @@ export async function requestOtp(phone: string) {
   const r = data as RequestOtpResponse
   return {
     success: true as const,
-    message: 'کد ۴ رقمی ارسال شد.',
+    message: 'کد ۶ رقمی ارسال شد.',
     cooldownSeconds: r.cooldownSeconds,
     ...(r.devCode ? { devCode: r.devCode } : {}),
   }

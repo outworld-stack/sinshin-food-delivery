@@ -199,7 +199,7 @@ function LoginPage() {
   const handleCodeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, '')
     otpForm.setFieldValue('code', value)
-    if (value.length === 4) {
+    if (value.length === 6) {
       setTimeout(() => otpForm.handleSubmit(), 150)
     }
   }, [otpForm])
@@ -343,7 +343,7 @@ function LoginPage() {
                   name="code"
                   validators={{
                     onChange: ({ value }) => {
-                      if (!/^[0-9]{4}$/.test(value)) return 'کد باید ۴ رقم باشد.'
+                      if (!/^[0-9]{6}$/.test(value)) return 'کد باید ۶ رقم باشد.'
                       return undefined
                     }
                   }}
@@ -355,10 +355,10 @@ function LoginPage() {
                         type="text"
                         inputMode="numeric"
                         dir="ltr"
-                        maxLength={4}
+                        maxLength={6}
                         autoComplete="one-time-code"
                         className="w-full text-center text-2xl tracking-[0.5em] p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border-2 border-gray-200 dark:border-[#3a151c] focus:border-primary dark:focus:border-dark-primary outline-none transition text-gray-900 dark:text-[#f5e0e6]"
-                        placeholder="• • • •"
+                        placeholder="• • • • • •"
                         value={field.state.value}
                         onChange={handleCodeChange}
                         onKeyDown={handleCodeKeyDown}

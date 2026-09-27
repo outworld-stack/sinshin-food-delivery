@@ -90,7 +90,8 @@ const sessions = new SessionService({ db, config, tokens })
 const devices = new DeviceService({ db, config })
 const settings = new SettingsService({ db, config }) // round-13 — config برای مختصات env رستوران
 const menu = new MenuService({ db, redis })
-const cart = new CartService({ db, menu })
+// round-28 — سبد: batch از loadPricingBases مشترک؛ دیگر به menu نیاز ندارد
+const cart = new CartService({ db })
 const addresses = new AddressService({ db })
 const zones = new DeliveryZoneService({ db, settings })
 const coupons = new CouponService({ db })

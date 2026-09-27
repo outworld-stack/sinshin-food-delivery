@@ -1,10 +1,7 @@
 //src/domain/cart/cart.service.ts
-import { eq } from 'drizzle-orm'
-
 import type { Db } from '#/infra/db/client'
-import { products } from '#/infra/db/schema'
 import { asProductId } from '#/domain/shared/brand'
-import type { MenuService } from '#/domain/menu/menu.service'
+import { finalPriceOf, loadPricingBases } from '#/domain/menu/menu.service'
 
 export interface CartItemInput {
   productId: string
@@ -28,33 +25,49 @@ export interface CartItemDto {
  * قیمت‌گذاری سبد — سروری، عین قرارداد getCartDetails فرانت:
  *  - نامعتبرها skip می‌شوند (نه خطا)
  *  - originalPrice و finalPrice هر دو «قیمت مؤثر» — مطابق موک فرانت
+ *
+ * round-28 — batch: قبلاً به‌ازای هر آیتم ۳ کوئری متوالی زده می‌شد
+ * (effectivePrice + واکشی دوباره‌ی همان محصول) — سبد ۶ آیتمی یعنی ~۱۸
+ * رفت‌وبرگشت DB در یک درخواستِ عمومی. حالا کل سبد = ۲ کوئری، از همان
+ * loadPricingBases ای که checkout هم می‌خواند (DRY — menu.service).
  */
 export class CartService {
-  constructor(private readonly deps: { db: Db; menu: MenuService }) {}
+  constructor(private readonly deps: { db: Db }) {}
 
   async details(items: CartItemInput[]): Promise<{ items: CartItemDto[]; total: number }> {
+    const { productMap, sizesByProduct } = await loadPricingBases(this.deps.db, items)
+
     const out: CartItemDto[] = []
     let total = 0
 
     for (const item of items) {
-      const eff = await this.deps.menu.effectivePrice(item.productId, item.sizeId ?? null)
-      if (!eff) continue // نامعتبر → skip (قرارداد فرانت)
+      const product = productMap.get(asProductId(item.productId))
+      if (!product) continue // نامعتبر → skip (قرارداد فرانت)
 
-      const product = await this.deps.db.query.products.findFirst({
-        where: eq(products.id, asProductId(item.productId)),
-      })
-      if (!product) continue
+      // سیاستِ آسان‌گیرِ سبد (عین effectivePrice سابق): سایزِ انتخابی یا
+      // اولین سایز — چک‌اوت سخت‌گیر است و سایزِ حذف‌شده را خطا می‌دهد
+      let price = finalPriceOf(product)
+      let sizeName: string | null = null
+      if (product.sizesEnabled) {
+        const sizes = sizesByProduct.get(product.id) ?? []
+        if (sizes.length > 0) {
+          const size =
+            (item.sizeId ? sizes.find((s) => s.id === item.sizeId) : undefined) ?? sizes[0]!
+          price = size.price
+          sizeName = size.name
+        }
+      }
 
-      const lineTotal = eff.price * item.quantity
+      const lineTotal = price * item.quantity
       total += lineTotal
       out.push({
         id: product.id,
         sizeId: item.sizeId ?? null,
-        sizeName: eff.sizeName,
+        sizeName,
         name: product.name,
         profileImage: product.profileImage,
-        originalPrice: eff.price,
-        finalPrice: eff.price,
+        originalPrice: price,
+        finalPrice: price,
         quantity: item.quantity,
         lineTotal,
       })

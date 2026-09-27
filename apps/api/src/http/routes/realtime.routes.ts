@@ -24,6 +24,21 @@ const CHANNEL_RE =
 const HEARTBEAT_MS = 15_000
 const MAX_QUEUE = 128 // سقف صفِ هر اتصال — بک‌پرشر: بیشتر نشود، قدیمی‌ترین می‌افتد
 
+// ── round-28 — سقف تعداد اتصال SSE ──
+// auth لازم است ولی auth سقفِ «تعداد» نیست: هر کاربر لاگین‌شده می‌توانست
+// هزاران اتصال هم‌زمان باز کند (هر کدام تایمر + صف + سوکت) و بدون حتی یک
+// exception منابع را تخلیه کند. سقف per-user سوءاستفاده را می‌بندد و سقف
+// global محافظت حافظه‌ی کل پروسه است.
+const MAX_STREAMS_PER_USER = 5
+const MAX_STREAMS_TOTAL = 500
+
+// مانند index.ts — شمارنده‌ها بین hot-reload ها روی globalThis زنده می‌مانند
+// تا شمارش سرگردان نشود (اتصال‌های قدیمی closure خودشان را کم می‌کنند)
+const capsGlobal = globalThis as {
+  __sinshin_sse_caps?: { byUser: Map<string, number>; total: number }
+}
+const caps = (capsGlobal.__sinshin_sse_caps ??= { byUser: new Map(), total: 0 })
+
 export interface RealtimeDeps {
   hub: SseHub
   sessions: SessionService
@@ -77,6 +92,17 @@ export const realtimeRoutes = (deps: RealtimeDeps) =>
         if (!CHANNEL_RE.test(channel)) throw Err.forbidden('کانال مجاز نیست.')
         await authorizeChannel(deps, channel, user)
 
+        // ── round-28 — سقف اتصال (بعد از authorize، قبل از باز کردن استریم) ──
+        const userStreams = caps.byUser.get(user.id) ?? 0
+        if (userStreams >= MAX_STREAMS_PER_USER || caps.total >= MAX_STREAMS_TOTAL) {
+          throw Err.rateLimited(
+            'تعداد اتصال‌های زنده‌ی شما زیاد است؛ تب‌های اضافه را ببندید.',
+            60,
+          )
+        }
+        caps.byUser.set(user.id, userStreams + 1)
+        caps.total += 1
+
         set.headers['content-type'] = 'text/event-stream'
         set.headers['cache-control'] = 'no-cache'
         set.headers['x-accel-buffering'] = 'no'
@@ -128,6 +154,11 @@ export const realtimeRoutes = (deps: RealtimeDeps) =>
           unsubscribe = null
           if (heartbeat) clearInterval(heartbeat)
           heartbeat = null
+          // round-28 — سقف اتصال: جای این اتصال آزاد شود
+          caps.total -= 1
+          const n = (caps.byUser.get(user.id) ?? 1) - 1
+          if (n <= 0) caps.byUser.delete(user.id)
+          else caps.byUser.set(user.id, n)
         }
 
         // قطع شدن کلاینت (Bun سیگنال abort می‌دهد) → cleanup
@@ -160,7 +191,7 @@ export const realtimeRoutes = (deps: RealtimeDeps) =>
         detail: {
           summary: 'SSE live stream',
           description:
-            'Auth via Bearer header or ?token=. Channel authorization: demo:* = any user; orders:new = admins only; orders:{id} = admins or the order owner. Pull-based stream (backpressure-safe, bounded queue), 15s heartbeat.',
+            'Auth via Bearer header or ?token=. Channel authorization: demo:* = any user; orders:new = admins only; orders:{id} = admins or the order owner. Pull-based stream (backpressure-safe, bounded queue), 15s heartbeat. Connection caps: 5 per user, 500 total (round-28).',
         },
       },
     )

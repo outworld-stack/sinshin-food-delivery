@@ -55,7 +55,8 @@ export class CourierService {
       throw Err.rateLimited('سقف درخواست کد پیک در این ساعت پر شده است.', 3600)
     }
 
-    const code = randomOtpCode(4)
+    // round-28 — ۶ رقم + منطق اتمیک، هم‌راستا با OtpService اصلی
+    const code = randomOtpCode(6)
     await this.deps.redis.set(K.code(phone), sha256(`${code}:${phone}`), { ex: 120 })
     await this.deps.redis.set(K.cd(phone), '1', { ex: cooldown })
     await this.deps.redis.incr(K.hour(phone))
@@ -84,16 +85,17 @@ export class CourierService {
     const stored = await this.deps.redis.get(K.code(phone))
     if (!stored) throw Err.validation('کدی برای این شماره صادر نشده یا منقضی شده است.')
 
-    // phase-1: سقف تلاش — کد ۴ رقمی با TTL ۱۲۰s و بدون سقف، brute-force می‌شد
-    const attempts = Number((await this.deps.redis.get(K.attempts(phone))) ?? 0)
-    if (attempts >= COURIER_OTP_MAX_ATTEMPTS) {
+    // round-28 — شمارنده اتمیک (INCR اول، بعد سقف) — هم‌الگوی OtpService:
+    // N درخواست موازی دیگر همه attempts=0 نمی‌بینند
+    const attempts = await this.deps.redis.incr(K.attempts(phone))
+    if (attempts === 1) await this.deps.redis.expire(K.attempts(phone), 120)
+    if (attempts > COURIER_OTP_MAX_ATTEMPTS) {
       await this.deps.redis.del(K.code(phone))
       throw Err.rateLimited('تلاش‌های ناموفق زیاد است؛ کد جدید بگیرید.', 60)
     }
 
     if (!safeEqual(stored, sha256(`${code}:${phone}`))) {
-      await this.deps.redis.incr(K.attempts(phone))
-      await this.deps.redis.expire(K.attempts(phone), 120)
+      // شمارش همین‌جا بالا رفته (INCR اول) — فقط خطا
       throw Err.validation('کد وارد شده صحیح نیست.')
     }
 

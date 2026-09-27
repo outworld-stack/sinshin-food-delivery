@@ -27,7 +27,20 @@ export class Database {
   readonly db: Db
 
   constructor(url: string, opts: DatabaseOptions = {}) {
-    this.client = new SQL(url, { max: opts.max ?? 10 })
+    // round-28 — تایم‌اوت‌های کوئری روی «هر اتصالِ» pool:
+    // بدون این‌ها، یک قفل/کندی پستگرس (بکاپ روزانه، autovacuum سنگین، قفل
+    // FOR UPDATE) کوئری‌ها را بی‌نهایت معطل نگه می‌دارد؛ ۱۰ اتصالِ pool پر
+    // می‌شود و «همه‌ی» روت‌ها از جمله /api/health بدون پاسخ می‌مانند (نه
+    // ۵۰۳، نه کرش — فقط سکوت). با تایم‌اوت، همان کوئری خطا (۵۰۰) می‌شود و
+    // اتصال آزاد می‌ماند — هم‌قرارداد بقیه‌ی سیستم: degrade، نه deadlock.
+    this.client = new SQL(url, {
+      max: opts.max ?? 10,
+      connection: {
+        statement_timeout: '15s',
+        lock_timeout: '10s',
+        idle_in_transaction_session_timeout: '60s',
+      },
+    })
     this.db = drizzle(this.client, { schema })
   }
 
@@ -51,6 +64,9 @@ export class Database {
   }
 
   async close(): Promise<void> {
-    await this.client.close()
+    // round-28 — timeout (ثانیه): کوئری گیرکرده نتواند shutdown را تا ابد
+    // معطل کند؛ وگرنه compose بعد از grace-period به SIGKILL می‌رسد و لاگ
+    // آخرین لحظه گم می‌شود
+    await this.client.close({ timeout: 10 })
   }
 }

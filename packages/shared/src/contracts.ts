@@ -24,10 +24,11 @@ export interface AuthUser {
   lastLoginAt: Date | null
 }
 
+/** round-28 — role حذف شد: چکِ قبل از احراز هویت نباید نقش کاربر را فاش کند؛
+ *  نقش فقط در پاسخ verify (VerifyOtpResponse.user.role) برمی‌گردد. */
 export interface CheckPhoneResponse {
   isNewUser: boolean
   needsTerms: boolean
-  role: string | null
 }
 
 export interface RequestOtpResponse {

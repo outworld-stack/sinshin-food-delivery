@@ -11,8 +11,6 @@ import {
 	orderItems,
 	orders,
 	payments,
-	productSizes,
-	products,
 	referralProfits,
 	users,
 	walletTransactions,
@@ -34,7 +32,7 @@ import {
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
 import { signedWalletAmount } from "#/domain/shared/wallet-sql";
-import { finalPriceOf } from "#/domain/menu/menu.service";
+import { finalPriceOf, loadPricingBases } from "#/domain/menu/menu.service";
 import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.service";
 import type { SettingsService } from "#/domain/settings/settings.service";
 import type { OrderBreakdown } from "#/infra/db/schema";
@@ -153,7 +151,7 @@ export class OrderService {
 			// stage-10: بسته‌بندی per-product — جمع (هزینه بسته‌بندی محصول × تعداد)
 			// فقط برای DELIVERY و PICKUP؛ DINE_IN (سرو در محل) بسته‌بندی ندارد.
 			let packagingTotal = 0;
-			const { productMap, sizesByProduct } = await this.loadPricingBases(
+			const { productMap, sizesByProduct } = await loadPricingBases(
 				tx,
 				input.items,
 			);
@@ -444,7 +442,7 @@ export class OrderService {
 		let foodTotal = 0;
 		// stage-10: بسته‌بندی per-product — همان جمعِ checkout
 		let packagingTotal = 0;
-		const { productMap, sizesByProduct } = await this.loadPricingBases(
+		const { productMap, sizesByProduct } = await loadPricingBases(
 			db,
 			input.items,
 		);
@@ -1009,45 +1007,9 @@ export class OrderService {
 
 	// ── داخلی ──
 
-	/**
-	 * perf-fix (کار-۲): پایه‌های قیمت‌گذاری — batch.
-	 * قبلاً checkout/preview به‌ازای هر آیتم، محصول و سایزهایش را جدا می‌خواندند
-	 * (تا ۲N کوئری). الان: ۱ کوئری محصولات (unique) + ۱ کوئری همه‌ی سایزها.
-	 * ترتیب سایزها (sortOrder صعودی) مثل قبل حفظ می‌شود.
-	 */
-	private async loadPricingBases(
-		db: DbOrTx,
-		items: { productId: string }[],
-	): Promise<{
-		productMap: Map<ProductId, typeof products.$inferSelect>;
-		sizesByProduct: Map<ProductId, (typeof productSizes.$inferSelect)[]>;
-	}> {
-		const ids = [...new Set(items.map((i) => asProductId(i.productId)))];
-		const rows = ids.length
-			? await db.select().from(products).where(inArray(products.id, ids))
-			: [];
-		const productMap = new Map(rows.map((p) => [p.id, p]));
-
-		const sizedIds = rows.filter((p) => p.sizesEnabled).map((p) => p.id);
-		const sizeRows = sizedIds.length
-			? await db
-					.select()
-					.from(productSizes)
-					.where(inArray(productSizes.productId, sizedIds))
-					.orderBy(productSizes.sortOrder)
-			: [];
-		const sizesByProduct = new Map<
-			ProductId,
-			(typeof productSizes.$inferSelect)[]
-		>();
-		for (const s of sizeRows) {
-			const list = sizesByProduct.get(s.productId) ?? [];
-			list.push(s);
-			sizesByProduct.set(s.productId, list);
-		}
-		return { productMap, sizesByProduct };
-	}
-
+	// round-28 — loadPricingBases به menu.service منتقل شد (صادرشده؛
+	// مشترک بین checkout/preview و سبد خرید — DRY). سیاست انتخاب سایز
+	// همین‌جا مانده چون چک‌اوت سخت‌گیر است (سایز حذف‌شده = خطا).
 	private async mapRows(rows: OrderRow[]) {
 		if (rows.length === 0) return [];
 		const ids = rows.map((r) => r.id);

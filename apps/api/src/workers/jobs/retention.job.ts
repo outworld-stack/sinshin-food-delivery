@@ -98,6 +98,22 @@ export class RetentionJob implements DailyJob {
           )
         `,
       },
+      {
+        // round-28 — نامزدهای nudge کوپن: coupon-scan شبانه پرش می‌کند
+        // (unique per user/coupon/day) و تا حالا هیچ مسیر پاک‌سازی نداشت →
+        // رشد بی‌سقف (حداقل ~۷۳k ردیف/سال؛ با چند کوپن خیلی بیشتر).
+        // ۹۰ روز برای عیب‌یابی/گزارش کافی است؛ nudges_pending_idx روی
+        // scan_date هست و پاک‌سازی با آن ایندکس می‌خوابد.
+        label: 'coupon_nudges',
+        stmt: sql`
+          delete from coupon_nudges
+          where id in (
+            select id from coupon_nudges
+            where scan_date < current_date - 90
+            limit ${BATCH}
+          )
+        `,
+      },
     ]
 
     for (const t of targets) {

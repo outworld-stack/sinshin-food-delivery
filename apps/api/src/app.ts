@@ -108,30 +108,45 @@ export interface AppDeps {
 }
 
 export const buildApp = (deps: AppDeps) => {
+  // ── دروازه‌ی جغرافیایی «فقط ایران» — round-28 ──
+  // یک پیاده‌سازی برای «کل» سطح حمله، سوار روی نمونه‌ی بیرونی: قبلاً فقط
+  // نمونه‌ی /api گیت داشت → /uploads/:name و POST /api/uploads و /swagger
+  // بیرون دروازه بودند. حالا هر مسیری که به این پروسه می‌رسد از همین
+  // یک گیت رد می‌شود (DRY — نه دو هوک موازی با هم‌پوشانی).
+  //
+  // سئو-۱ — معافیت کرالر، آینه‌ی همان منطق دروازه‌ی SSR (geoGate.ts):
+  // کرالرهایی که صفحه را رندر می‌کنند (مثل Googlebot WRS) درخواست‌های
+  // /api را با IP خودشان (غیرایرانی) می‌فرستند؛ بدون این معافیت، محتوای
+  // رندرشده‌شان ۴۰۳ می‌شد. اما معافیت فقط برای «خواندنِ محتوای قابل
+  // ایندکس» (GET/HEAD) است — متدهای نوشتن (OTP/چک‌اوت/آپلود) و استریم
+  // زنده‌ی SSE هیچ‌وقت معاف نیستند: جعل User-Agent دیگر سپر را دور نمی‌زند.
+  // (تماس‌های SSR وب با API از IP خصوصی‌اند و از قبل عبور می‌کنند.)
+  const geoGate = async (request: Request): Promise<Response | undefined> => {
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      if (
+        isTrustedCrawlerUserAgent(request.headers.get('user-agent')) &&
+        !new URL(request.url).pathname.startsWith('/api/realtime')
+      ) {
+        return // محتوای عمومی — رندر کرالر آزاد
+      }
+    }
+    const ip = clientIp(request.headers.get('x-forwarded-for'))
+    if (ip && (await deps.geo.shouldBlock(ip))) {
+      // phase-fix: 404 گیج‌کننده بود → 403 + پیام روشن برای کاربر ایرانیِ VPN-دار
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 'GEO_BLOCKED',
+            message: 'لطفاً اگر از ایران هستید، لطفاً VPN خودتان را خاموش کنید و صفحه را رفرش کنید.',
+          },
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      )
+    }
+    return
+  }
+
   const api = new Elysia({ prefix: '/api' })
-    .onRequest(async ({ request }) => {
-      // سئو-۱ — معافیت کرالرها، آینه‌ی همان منطق دروازه‌ی SSR (geoGate.ts):
-      // کرالرهایی که صفحه را رندر می‌کنند (مثل Googlebot WRS) درخواست‌های
-      // /api را با IP خودشان (غیرایرانی) می‌فرستند؛ بدون این معافیت، محتوای
-      // رندرشده‌شان ۴۰۳ می‌شد. سیاست «فقط ایران» برای کاربران واقعی تغییر نمی‌کند.
-      // (تماس‌های SSR وب با API از IP خصوصی‌اند و از قبل عبور می‌کردند.)
-      if (isTrustedCrawlerUserAgent(request.headers.get('user-agent'))) {
-        return
-      }
-      const ip = clientIp(request.headers.get('x-forwarded-for'))
-      if (ip && (await deps.geo.shouldBlock(ip))) {
-        // phase-fix: 404 گیج‌کننده بود → 403 + پیام روشن برای کاربر ایرانیِ VPN-دار
-        return new Response(
-          JSON.stringify({
-            error: {
-              code: 'GEO_BLOCKED',
-              message: 'لطفاً اگر از ایران هستید، لطفاً VPN خودتان را خاموش کنید و صفحه را رفرش کنید.',
-            },
-          }),
-          { status: 403, headers: { 'content-type': 'application/json' } },
-        )
-      }
-    })
     .use(
       healthRoutes({
         db: deps.db,
@@ -230,7 +245,14 @@ export const buildApp = (deps: AppDeps) => {
   //    نه هیچ شاخصی را خراب نمی‌کنند.
   // هر دو هوک غیر-پرتاب‌اند — مانیتورینگ مسیر سرو‌دهی را زمین نمی‌زند.
   return new Elysia({ serve: { maxRequestBodySize: 8 * 1024 * 1024 } })
-    .onRequest(({ request }) => deps.metrics.observeRequest(request))
+    .onRequest(async ({ request }) => {
+      // metrics اول (همه‌چیز شمرده شود)، بعد دروازه‌ی ژئو — پاسخ مستقیم از
+      // onRequest روی onAfterResponse می‌پرد (مستند round-18)؛ ترتیب همین است.
+      // return الزامی است: بدون آن Responseِ بلاک دور ریخته می‌شود و گیت
+      // no-op می‌شود (اشکالی که تست زنده‌ی round-28 گرفت).
+      deps.metrics.observeRequest(request)
+      return await geoGate(request)
+    })
     .onAfterResponse(({ request, set }) =>
       deps.metrics.observeResponse(request, Number(set.status ?? 200)),
     )

@@ -1,7 +1,7 @@
 //src/domain/menu/menu.service.ts
 import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
+import type { Db, DbOrTx } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
 import {
   categories,
@@ -44,6 +44,51 @@ export interface ProductDto {
 
 export function finalPriceOf(p: { originalPrice: number; discountPercentage: number }): number {
   return Math.round(p.originalPrice * (1 - p.discountPercentage / 100))
+}
+
+export type ProductRow = typeof products.$inferSelect
+export type ProductSizeRow = typeof productSizes.$inferSelect
+
+/** پایه‌های قیمت‌گذاری batch — خروجی loadPricingBases */
+export interface PricingBases {
+  productMap: Map<ProductId, ProductRow>
+  sizesByProduct: Map<ProductId, ProductSizeRow[]>
+}
+
+/**
+ * perf-fix (کار-۲) + round-28 — پایه‌های قیمت‌گذاری batch:
+ * ۱ کوئری محصولات (یکتا) + ۱ کوئری همه‌ی سایزها — به‌جای ۲-۳ کوئری به‌ازای
+ * هر آیتم. checkout/preview (داخل tx خودش را می‌دهد) و سبد خرید (بدون tx)
+ * هر دو از همین یک پیاده‌سازی می‌خوانند — DRY. ترتیب sortOrder صعودی مثل
+ * قبل حفظ می‌شود. «سیاستِ انتخاب» سایز نزد مصرف‌کننده می‌ماند چون دوگانه
+ * است: سبد آسان‌گیر (fallback اولین سایز) و چک‌اوت سخت‌گیر (خطا روی سایز
+ * حذف‌شده) — ادغامشان با پرچم، کد را کثیف می‌کرد.
+ */
+export async function loadPricingBases(
+  db: DbOrTx,
+  items: readonly { productId: string }[],
+): Promise<PricingBases> {
+  const ids = [...new Set(items.map((i) => asProductId(i.productId)))]
+  const rows = ids.length
+    ? await db.select().from(products).where(inArray(products.id, ids))
+    : []
+  const productMap = new Map(rows.map((p) => [p.id, p]))
+
+  const sizedIds = rows.filter((p) => p.sizesEnabled).map((p) => p.id)
+  const sizeRows = sizedIds.length
+    ? await db
+        .select()
+        .from(productSizes)
+        .where(inArray(productSizes.productId, sizedIds))
+        .orderBy(productSizes.sortOrder)
+    : []
+  const sizesByProduct = new Map<ProductId, ProductSizeRow[]>()
+  for (const s of sizeRows) {
+    const list = sizesByProduct.get(s.productId) ?? []
+    list.push(s)
+    sizesByProduct.set(s.productId, list)
+  }
+  return { productMap, sizesByProduct }
 }
 
 /**
@@ -205,32 +250,9 @@ export class MenuService {
     )
   }
 
-  // ── قیمت‌گذاری — عین getEffectivePrice فرانت ──
-
-  /** سایز مؤثر: sizesEnabled → سایزِ انتخابی یا اولین؛ وگرنه null */
-  async effectivePrice(
-    productId: string,
-    sizeId?: string | null,
-  ): Promise<{ price: number; sizeName: string | null } | null> {
-    const p = await this.deps.db.query.products.findFirst({
-      where: eq(products.id, asProductId(productId)),
-    })
-    if (!p) return null
-
-    if (p.sizesEnabled) {
-      const sizes = await this.deps.db
-        .select()
-        .from(productSizes)
-        .where(eq(productSizes.productId, p.id))
-        .orderBy(asc(productSizes.sortOrder))
-      if (sizes.length > 0) {
-        const chosen = sizeId ? sizes.find((s) => s.id === sizeId) : undefined
-        const size = chosen ?? sizes[0]!
-        return { price: size.price, sizeName: size.name }
-      }
-    }
-    return { price: finalPriceOf(p), sizeName: null }
-  }
+  // ── قیمت‌گذاری ──
+  // round-28 — effectivePrice تک‌محصولی حذف شد؛ تنها مصرف‌کننده‌اش (سبد)
+  // حالا از loadPricingBases مشترک با checkout می‌خواند (بالای فایل).
 
   // ── ادمین: Main ها ──
 

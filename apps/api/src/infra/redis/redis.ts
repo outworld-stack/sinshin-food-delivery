@@ -147,6 +147,11 @@ export class RedisService {
       this.startResubscribeLoop()
       return true
     } catch (err) {
+      // round-28 — مسیر شکست هم پاک کند: وگرنه کانال‌هایی که در قطعی ردیس
+      // subscribe شان شکست خورده برای همیشه در subHandlers می‌مانند و
+      // حلقه‌ی resub هر ۶۰ ثانیه برایشان تلاش می‌کند (نشتی بی‌سقف).
+      // گاردِ «همان هندلر» برای race با subscribe دوباره‌ی موازی.
+      if (this.subHandlers.get(channel) === handler) this.subHandlers.delete(channel)
       console.error(`[redis] subscribe(${channel}) failed:`, err)
       return false
     } finally {

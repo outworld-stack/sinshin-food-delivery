@@ -36,7 +36,6 @@ export interface LiveOrderView {
 	courierArrivedAt: Date | null;
 	courierSecurityEnabled: boolean;
 	internalNote: string | null;
-	breakdown: OrderRow["breakdown"];
 	createdAt: Date;
 }
 
@@ -482,7 +481,6 @@ export class LiveService {
 				courierArrivedAt: o.courierArrivedAt,
 				courierSecurityEnabled: o.courierSecurityEnabled,
 				internalNote: o.internalNote,
-				breakdown: o.breakdown,
 				createdAt: o.createdAt,
 			};
 		});
