@@ -58,6 +58,9 @@ const ORDERS_PER_PAGE = 20
 // هر خطا → بازگشت بی‌درنگ به پول تطبیقی قبلی + تلاش دوبارهٔ SSE پس از ۶۰s.
 const SSE_SAFETY_POLL_MS = 60_000
 const SSE_RETRY_MS = 60_000
+// round-29 — توکن احراز ممکن است کمی دیرتر از سشن برسد (هیدریشن);
+// قبل از تسلیم‌شدن به پولِ آرام، چند بار با فاصله‌ی کوتاه دوباره می‌خواهیم
+const SSE_TOKEN_WAIT_MS = 5_000
 const SSE_EVENTS = ['order-created', 'order-updated', 'order-confirmed'] as const
 
 // --- هوک ---
@@ -116,7 +119,18 @@ export function useAdmin2Panel() {
     const connect = () => {
       if (disposed) return
       const token = getAccessToken()
-      if (!token) return // لاگین نیست/توکن در دسترس نیست → پول تطبیقی کافی است
+      if (!token) {
+        // round-29 — قبلاً اینجا return خالی بود: اگر توکن در لحظه‌ی connect آماده
+        // نبود، SSE بدون هیچ retry برای همیشه خاموش می‌ماند (فقط پول ۲.۵/۱۰s می‌ماند).
+        // حالا: تلاش مجدد کوتاه‌مدت تا توکن برسد؛ cleanup تایمر را می‌بندد.
+        if (!retryTimer) {
+          retryTimer = setTimeout(() => {
+            retryTimer = null
+            connect()
+          }, SSE_TOKEN_WAIT_MS)
+        }
+        return
+      }
       es = new EventSource(
         `${apiBase()}/realtime/stream?channel=orders:new&token=${encodeURIComponent(token)}`,
       )
@@ -147,15 +161,27 @@ export function useAdmin2Panel() {
   }, [session?.isAdmin2LoggedIn, refetchLive])
 
   // دینگ سفارش جدید
+  // round-29 — قبلاً شرط prevCountRef.current > 0 یعنی پنلِ خالی هرگز برای
+  // «اولین» سفارش دینگ/توست نمی‌زد. حالا فقط اولین لودِ داده بی‌صدا baseline
+  // می‌شود (چه خالی چه پُر) و هر رشد بعدی — حتی از صفر — اعلان می‌دهد.
   const prevCountRef = useRef(0)
+  const firstLoadRef = useRef(true)
   const orders = liveData?.orders ?? []
   useEffect(() => {
-    if (orders.length > prevCountRef.current && prevCountRef.current > 0) {
+    if (firstLoadRef.current) {
+      // اولین پاسخ موفق → فقط baseline؛ دینگِ لود اولیه نمی‌خواهیم
+      if (liveData !== undefined) {
+        firstLoadRef.current = false
+        prevCountRef.current = orders.length
+      }
+      return
+    }
+    if (orders.length > prevCountRef.current) {
       if (state.soundEnabled) playDing()
       showToast('🔔 سفارش جدید ثبت شد!')
     }
     prevCountRef.current = orders.length
-  }, [orders.length, state.soundEnabled, showToast])
+  }, [liveData, orders.length, state.soundEnabled, showToast])
 
   // --- لاگ‌اوت: revoke سرور + پاک‌سازی کامل (phase-3) ---
   // subAdminLogout → POST /auth/logout (برای admin2 سشن + لاگ فعالیت هم بسته می‌شود)

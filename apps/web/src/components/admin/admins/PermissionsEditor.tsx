@@ -13,7 +13,8 @@ interface PermissionsEditorProps {
 }
 
 // لیبل‌ها — ثابت بیرون کامپوننت
-// فقط PERMISSION_LABELS — دو تا جدید (بقیه فایل بدون تغییر):
+// round-29 — ①canToggleTemporaryClose اضافه شد (قبلاً در UI غایب بود ولی ستون/گارد بک‌اند از round-13 موجود بود)
+// ②scope (hall/takeaway) بخش جداگانه‌ی «حوزه» شد — پایین‌تر
 const PERMISSION_LABELS: { key: keyof SubAdminPermissions; label: string }[] = [
   { key: 'productsRead', label: 'مشاهده محصولات' },
   { key: 'productsWrite', label: 'افزودن/ویرایش محصولات' },
@@ -24,6 +25,7 @@ const PERMISSION_LABELS: { key: keyof SubAdminPermissions; label: string }[] = [
   { key: 'mainCategoriesRead', label: 'مشاهده دسته‌های اصلی' },
   { key: 'mainCategoriesWrite', label: 'مدیریت دسته‌های اصلی' },
   { key: 'orderDetailsRead', label: 'مشاهده ریز فاکتور سفارش' },
+  { key: 'canToggleTemporaryClose', label: 'اعلام بسته/باز موقت رستوران' },
 ]
 // ویرایش دسترسی‌های ادمین۲ — توسط ادمین اصلی
 export const PermissionsEditor = memo(function PermissionsEditor({ admin }: PermissionsEditorProps) {
@@ -51,6 +53,17 @@ export const PermissionsEditor = memo(function PermissionsEditor({ admin }: Perm
     setPerms(prev => ({ ...prev, [key]: !prev[key] }))
   }, [])
 
+  // round-29 — toggle حوزه: حداقل یکی باید فعال بماند؛ ادمین۲ بدون scope هیچ سفارشی نمی‌بیند
+  // (گارد بیرون از updater — updater باید pure بماند؛ setState حین render ممنوع)
+  const handleScopeToggle = useCallback((key: 'hall' | 'takeaway') => {
+    const other = key === 'hall' ? 'takeaway' : 'hall'
+    if (perms[key] && !perms[other]) {
+      showToast('حداقل یک حوزه باید فعال بماند', 'error')
+      return
+    }
+    setPerms(prev => ({ ...prev, [key]: !prev[key] }))
+  }, [perms, showToast])
+
   const handleSave = useCallback(() => {
     mutation.mutate({ id: admin.userId, permissions: perms })
   }, [admin.userId, perms, mutation])
@@ -64,6 +77,28 @@ export const PermissionsEditor = memo(function PermissionsEditor({ admin }: Perm
       <p className="text-xs text-gray-400 font-DanaMedium mb-6">
         دسترسی‌های این ادمین سطح ۲ — تغییرات فوراً پس از ذخیره اعمال می‌شوند
       </p>
+
+      {/* round-29 — حوزه (scope): تعیین اینکه این ادمین۲ سفارشات کدام حوزه را در پنل زنده می‌بیند.
+          قبلاً هیچ راهی برای تغییرش وجود نداشت (روت، کلیدهای اشتباه می‌پذیرفت) */}
+      <div className="mb-6 p-4 rounded-2xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c]">
+        <p className="text-xs font-DanaDemiBold text-gray-600 dark:text-gray-300 mb-3">
+          حوزه‌ی سفارشات (پنل زنده)
+        </p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#2a1015]">
+            <span className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300">سفارشات سالن (سرو در محل)</span>
+            <Toggle isOn={perms.hall ?? false} onToggle={() => handleScopeToggle('hall')} />
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#2a1015]">
+            <span className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300">سفارشات بیرون‌بر (ارسال + تحویل حضوری)</span>
+            <Toggle isOn={perms.takeaway ?? false} onToggle={() => handleScopeToggle('takeaway')} />
+          </div>
+        </div>
+        <p className="text-[11px] text-gray-400 font-DanaMedium leading-relaxed mt-3">
+          حداقل یک حوزه باید فعال بماند — ادمین سطح ۲ فقط سفارشات حوزه‌های فعال خود را در پنل زنده می‌بیند و تایید می‌کند.
+        </p>
+      </div>
+
       <div className="space-y-3">
         {PERMISSION_LABELS.map(({ key, label }) => (
           <div key={key} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e]">

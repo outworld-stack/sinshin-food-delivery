@@ -45,13 +45,19 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     .post(
       '/temporary-close',
       async ({ user, body }) => {
-        await deps.admin2.setTemporaryClose(user.id, user.role, body.closed, body.reason)
+        await deps.admin2.setTemporaryClose(
+          user.id,
+          user.role,
+          body.closed,
+          body.reason,
+          body.reopenTime ?? null,
+        )
         // round-13 — ممیزی برای هر دو نقش (قبلاً ادمین اصلی هیچ ردی نداشت)
         await deps.audit.log({
           actorId: user.id,
           action: body.closed ? 'TEMP_CLOSE' : 'TEMP_OPEN',
           entity: 'settings',
-          metadata: { closed: body.closed, reason: body.reason },
+          metadata: { closed: body.closed, reason: body.reason, reopenTime: body.reopenTime ?? null },
         })
         return { success: true }
       },
@@ -60,11 +66,13 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           closed: t.Boolean(),
           /** round-13 — علت برای بستن «و» باز کردن اجباری است (به مشتری در چک‌اوت نمایش داده می‌شود) */
           reason: t.String({ minLength: 3, maxLength: 120 }),
+          /** round-29 — زمان باز شدن مجدد (اختیاری؛ فقط هنگام بستن معنا دارد) — در چک‌اوت به‌جای ساعت کاری اصلی نمایش داده می‌شود */
+          reopenTime: t.Optional(t.String({ maxLength: 40 })),
         }),
         detail: {
           summary: 'Temporary close/open — reason REQUIRED (shown to customers)',
           description:
-            'Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Reason (3-120 chars) is required for BOTH closing and opening; customers see it in the checkout order-summary box. Same rules as schedule-close (orders queue), but level-2 login stays allowed.',
+            'Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Reason (3-120 chars) is required for BOTH closing and opening; customers see it in the checkout order-summary box. reopenTime (optional, closing only) replaces the scheduled next-open time shown to customers while temporarily closed. Same rules as schedule-close (orders queue), but level-2 login stays allowed.',
         },
       },
     )

@@ -61,19 +61,23 @@ export class SettingsService {
     isOpen: boolean
     temporarilyClosed: boolean
     temporaryCloseReason: string | null
+    /** round-29 — زمان باز شدن مجددِ بسته‌ی موقت ('' = ثبت نشده)؛ جدا از nextOpenTime ساعتی */
+    temporaryReopenTime: string
     nextOpenTime: string
     anyClosed: boolean
   }> {
-    const [open, tempClosed, reason, nextOpenTime] = await Promise.all([
+    const [open, tempClosed, reason, tempReopen, nextOpenTime] = await Promise.all([
       this.get<boolean>(SETTING_KEYS.restaurantOpen, true),
       this.get<boolean>(SETTING_KEYS.temporarilyClosed, false),
       this.get<string>(SETTING_KEYS.temporaryCloseReason, ''),
+      this.get<string>(SETTING_KEYS.temporaryReopenTime, ''),
       this.get<string>(SETTING_KEYS.nextOpenTime, '۱۱:۰۰ صبح'),
     ])
     return {
       isOpen: open,
       temporarilyClosed: tempClosed,
       temporaryCloseReason: tempClosed ? reason || 'بسته موقت' : null,
+      temporaryReopenTime: tempClosed ? tempReopen : '',
       nextOpenTime,
       anyClosed: !open || tempClosed,
     }

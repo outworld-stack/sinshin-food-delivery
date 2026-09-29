@@ -13,9 +13,14 @@ import type { RestaurantStatus, CheckoutPreviewData } from '#/types/site/checkou
 export async function getRestaurantStatus(): Promise<RestaurantStatus> {
   const s = await getJson<RestaurantStatusDto>('/orders/restaurant-status')
   // round-13 — علت بسته‌شدن موقت برای نمایش در باکس خلاصه سفارش
+  // round-29 — بسته‌ی موقت: زمانِ باز شدن مجددِ موقت (اگر ثبت شده) بر ساعتِ کاری
+  // اصلی مقدم است؛ قبلاً چک‌اوت در بسته‌شدن موقت هم ساعت اصلی را نشان می‌داد.
   return {
     isOpen: s.isOpen && !s.temporarilyClosed,
-    nextOpenTime: s.nextOpenTime,
+    nextOpenTime:
+      s.temporarilyClosed && s.temporaryReopenTime
+        ? s.temporaryReopenTime
+        : s.nextOpenTime,
     closeReason: s.temporarilyClosed ? s.temporaryCloseReason : null,
   }
 }

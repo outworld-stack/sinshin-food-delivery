@@ -11,7 +11,7 @@ import { settingsRestaurantStatusOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { Toggle } from '#/components/shared/Toggle'
-import { StopwatchOff, StopwatchPlay, Discover2 } from 'reicon-react'
+import { StopwatchOff, StopwatchPlay, Discover2, Clock } from 'reicon-react'
 
 interface TemporaryCloseCardProps {
   /** فقط کسی که پرمیشن دارد کارت را می‌بیند (ادمین اصلی/ادمین۲ مجاز) */
@@ -30,15 +30,19 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
   // مودال علت — برای هر دو جهت (بستن و باز کردن) اجباری
   const [pendingClosed, setPendingClosed] = useState<boolean | null>(null)
   const [reason, setReason] = useState('')
+  // round-29 — زمان باز شدن مجدد (اختیاری، فقط هنگام بستن) — جدا از ساعت کاری اصلی
+  const [reopenTime, setReopenTime] = useState('')
 
   const mutation = useMutation({
-    mutationFn: (input: { closed: boolean; reason: string }) => setTemporaryClose({ data: input }),
+    mutationFn: (input: { closed: boolean; reason: string; reopenTime?: string }) =>
+      setTemporaryClose({ data: input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.settingsRestaurantStatus })
       // چک‌اوت همیشه وضعیت تازه ببیند
       queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
       setPendingClosed(null)
       setReason('')
+      setReopenTime('')
       showToast('وضعیت موقت رستوران ثبت شد')
     },
     onError: (err) => {
@@ -51,11 +55,14 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
     // جهت مخالف فعلی — با کادر علت
     setPendingClosed(!status.temporarilyClosed)
     setReason('')
+    // round-29 — پیش‌پرکردن زمان باز شدن با مقدار ثبت‌شده‌ی فعلی (ویرایش راحت)
+    setReopenTime(!status.temporarilyClosed ? (status.temporaryReopenTime ?? '') : '')
   }, [status])
 
   const handleCancel = useCallback(() => {
     setPendingClosed(null)
     setReason('')
+    setReopenTime('')
   }, [])
 
   const handleConfirm = useCallback(() => {
@@ -65,8 +72,14 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
       showToast('علت را بنویسید (حداقل ۳ نویسه)', 'error')
       return
     }
-    mutation.mutate({ closed: pendingClosed, reason: trimmed })
-  }, [pendingClosed, reason, mutation, showToast])
+    const trimmedTime = reopenTime.trim()
+    mutation.mutate({
+      closed: pendingClosed,
+      reason: trimmed,
+      // فقط هنگام بستن معنا دارد؛ هنگام باز شدن پاک می‌شود
+      reopenTime: pendingClosed && trimmedTime ? trimmedTime : undefined,
+    })
+  }, [pendingClosed, reason, reopenTime, mutation, showToast])
 
   if (!visible) return null
 
@@ -105,6 +118,17 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
         </div>
       )}
 
+      {/* round-29 — زمان باز شدن مجددِ ثبت‌شده (جدا از ساعت کاری اصلی) */}
+      {temporarilyClosed && status?.temporaryReopenTime && (
+        <div className="mt-4 p-3 rounded-xl bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 flex items-center gap-2">
+          <Clock size={16} className="text-orange-500 shrink-0" />
+          <p className="text-xs text-orange-600 dark:text-orange-400 font-DanaMedium">
+            <span className="font-DanaDemiBold">باز شدن مجدد (موافق اعلام شده): </span>
+            {status.temporaryReopenTime}
+          </p>
+        </div>
+      )}
+
       <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2">
         <Discover2 size={16} className="text-amber-500 shrink-0 mt-0.5" />
         <p className="text-xs text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
@@ -138,6 +162,26 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
             <p className="text-[10px] text-gray-400 mt-1 font-DanaMedium">
               {reason.length}/۱۲۰ نویسه — حداقل ۳ نویسه
             </p>
+
+            {/* round-29 — زمان باز شدن مجدد: فقط هنگام بستن؛ به مشتری در چک‌اوت به‌جای
+                ساعت کاری اصلی نمایش داده می‌شود */}
+            {pendingClosed && (
+              <div className="mt-4">
+                <label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+                  ساعت باز شدن مجدد (اختیاری — به مشتریان نمایش داده می‌شود)
+                </label>
+                <input
+                  type="text"
+                  value={reopenTime}
+                  onChange={(e) => setReopenTime(e.target.value.slice(0, 40))}
+                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm"
+                  placeholder='مثلاً: ۱۹:۰۰'
+                />
+                <p className="text-[10px] text-gray-400 mt-1 font-DanaMedium leading-relaxed">
+                  اگر خالی بماند، مشتری ساعت کاری اصلی رستوران را می‌بیند.
+                </p>
+              </div>
+            )}
             <div className="flex gap-3 mt-4">
               <button
                 type="button"

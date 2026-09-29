@@ -99,8 +99,12 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
         body: t.Object({
-          scopeHall: t.Optional(t.Boolean()),
-          scopeTakeaway: t.Optional(t.Boolean()),
+          /** round-29 — کلیدهای قرارداد مشترک (SubAdminPermissionsDto): hall/takeaway؛
+           * قبلاً روت فقط scopeHall/scopeTakeaway می‌پذیرفت ولی وب hall/takeaway
+           * می‌فرستاد و Elysia کلیدهای ناشناس را بی‌صدا حذف می‌کرد → scope از پنل
+           * هرگز قابل ویرایش نبود. سرویس به ستون‌های دیتابیس map می‌کند. */
+          hall: t.Optional(t.Boolean()),
+          takeaway: t.Optional(t.Boolean()),
           productsRead: t.Optional(t.Boolean()),
           productsWrite: t.Optional(t.Boolean()),
           usersRead: t.Optional(t.Boolean()),

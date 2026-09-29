@@ -13,7 +13,7 @@ export function Toast() {
   return (
     <div
       onClick={hideToast}
-      className={`fixed top-6 left-1/2 -translate-x-1/2 z-100 transition-all duration-300 cursor-pointer ${
+      className={`fixed top-6 left-1/2 -translate-x-1/2 z-200 transition-all duration-300 cursor-pointer ${
         isVisible
           ? 'opacity-100 translate-y-0'
           : 'opacity-0 -translate-y-4 pointer-events-none'

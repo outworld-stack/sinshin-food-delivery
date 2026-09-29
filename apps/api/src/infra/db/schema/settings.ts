@@ -22,6 +22,8 @@ export const SETTING_KEYS = {
   /** موقت — نوع ۲ */
   temporarilyClosed: 'temporarily_closed', // boolean
   temporaryCloseReason: 'temporary_close_reason', // string — نمایش به کاربر
+  /** round-29 — زمان باز شدن مجددِ بسته‌ی موقت (مثلاً «۱۹:۰۰») — جدا از next_open_time ساعتی */
+  temporaryReopenTime: 'temporary_reopen_time', // string
   /** ردیابی زنده پیک */
   liveTrackingEnabled: 'live_tracking_enabled', // boolean
   /** مختصات مبدأ ارسال */

@@ -8,8 +8,9 @@
 // round-12: ①حضوری‌ها «پیک هنوز تخصیص نیافته»/باکس اسکن پیک نمی‌بینند
 // ②QR واقعی به‌جای لینک متنی
 // round-16: ③باکس چاپ فاکتور حذف شد (درخواست کاربر) — چاپ فقط از پنل زنده/مودال تایید
+// round-29: ④جدول اقلام سفارش + ⑤بازگشت ریز فاکتور + آدرس تحویل — round-28 حذف
+// breakdown از LiveOrderView باعث شد orderDetail هم آن را از دست بدهد و صفحه خالی بماند
 
-import type { OrderBreakdown } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { QRCodeSVG } from 'qrcode.react'
@@ -23,7 +24,7 @@ import { usePermissions } from '#/hooks/admin/usePermissions'
 import { useHydrated } from '#/hooks/useHydrated'
 import { ensureAuthHydrated, useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
-import { formatDate, formatPrice } from '#/utils/format'
+import { faNum, formatDate, formatPrice } from '#/utils/format'
 import { adminOrderDetailsOptions } from '#/utils/queryOptions'
 
 const OrderDetailPage = memo(function OrderDetailPage() {
@@ -226,6 +227,16 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 										</p>
 									</div>
 								)}
+
+							{/* round-29 — آدرس تحویل (اسنپ‌شات لحظه‌ی ثبت سفارش) */}
+							{order.address && (
+								<div>
+									<p className="text-xs text-gray-400 font-DanaMedium mb-1">آدرس تحویل</p>
+									<p className="text-sm text-gray-700 dark:text-gray-300 font-DanaMedium leading-relaxed">
+										{order.address}
+									</p>
+								</div>
+							)}
 							</>
 						) : (
 							<div className="flex items-center gap-3 p-4 rounded-xl bg-green-50 dark:bg-green-500/10">
@@ -240,10 +251,45 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 				</div>
 			</div>
 
+			{/* round-29 — اقلام سفارش: نام/سایز/تعداد/قیمت واحد (همان قرارداد فاکتور چاپی) */}
+			{hydrated && order.items.length > 0 && (
+				<div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+					<h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-6 pb-4 border-b border-gray-100 dark:border-white/5">
+						اقلام سفارش
+					</h2>
+					<div className="overflow-x-auto">
+						<table className="w-full text-sm">
+							<thead>
+								<tr className="text-xs text-gray-400 font-DanaMedium border-b border-gray-100 dark:border-white/5">
+									<th className="text-right py-3 font-DanaMedium">محصول</th>
+									<th className="text-center py-3 font-DanaMedium">سایز</th>
+									<th className="text-center py-3 font-DanaMedium">تعداد</th>
+									<th className="text-left py-3 font-DanaMedium">قیمت واحد</th>
+								</tr>
+							</thead>
+							<tbody>
+								{order.items.map((it, i) => (
+									<tr
+										key={i}
+										className="border-b border-gray-50 dark:border-white/5 last:border-0"
+									>
+										<td className="py-3 text-right font-DanaMedium text-gray-800 dark:text-white">{it.name}</td>
+										<td className="py-3 text-center text-gray-500 dark:text-gray-400">{it.sizeName ?? '—'}</td>
+										<td className="py-3 text-center text-gray-600 dark:text-gray-300">{faNum(it.quantity)}</td>
+										<td className="py-3 text-left text-gray-600 dark:text-gray-300" dir="rtl">{formatPrice(it.price)} تومان</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			)}
+
 			{/* ⬅ ریز مبلغ فاکتور — ادمین اصلی همیشه / ادمین۲ با پرمیشن (بعد از هیدریشن — بدون mismatch) */}
+			{/* round-29 — breakdown حالا از orderDetail می‌آید (LiveOrderDetailDto) — بدون cast */}
 			{hydrated && order.breakdown && canSeeBreakdown && (
 				<OrderBreakdownCard
-					breakdown={order.breakdown as OrderBreakdown}
+					breakdown={order.breakdown}
 					title="جزئیات مبلغ سفارش"
 				/>
 			)}

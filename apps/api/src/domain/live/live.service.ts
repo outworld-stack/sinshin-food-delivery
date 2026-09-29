@@ -5,6 +5,7 @@ import type { Db } from "#/infra/db/client";
 import {
 	admin2Profiles,
 	couriers,
+	orderItems,
 	orders,
 	users,
 	type OrderRow,
@@ -339,7 +340,12 @@ export class LiveService {
 			.where(eq(couriers.isActive, true));
 	}
 
-	/** جزئیات سفارش — نقش‌محور: ادمین۲ فقط سفارش خودش/صف */
+	/**
+	 * جزئیات سفارش — نقش‌محور: ادمین۲ فقط سفارش خودش/صف.
+	 * round-29 — اقلام + ریز فاکتور + آدرس برگشت؛ قبلاً فقط LiveOrderView بود و
+	 * بعد از حذف breakdown از لیست زنده (round-28) صفحه‌ی جزئیات ریز فاکتور نداشت؛
+	 * لیست اقلام را هم هرگز نداشت. شکل اقلام/breakdown همان قرارداد invoiceForStaff است.
+	 */
 	async orderDetail(
 		viewerUserId: string,
 		viewerRole: string,
@@ -356,7 +362,23 @@ export class LiveService {
 			await this.assertViewable(viewerUserId, row);
 		}
 
-		return (await this.toViews([{ o: row, buyer }]))[0]!;
+		const items = await this.deps.db
+			.select()
+			.from(orderItems)
+			.where(eq(orderItems.orderId, row.id));
+
+		const base = (await this.toViews([{ o: row, buyer }]))[0]!;
+		return {
+			...base,
+			address: row.addressSnapshot,
+			items: items.map((i) => ({
+				name: i.name,
+				sizeName: i.sizeName,
+				quantity: i.quantity,
+				price: i.unitPrice,
+			})),
+			breakdown: row.breakdown,
+		};
 	}
 
 	// ── داخلی ──

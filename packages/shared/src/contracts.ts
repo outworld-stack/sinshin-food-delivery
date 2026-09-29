@@ -391,6 +391,8 @@ export interface RestaurantStatusDto {
   isOpen: boolean
   temporarilyClosed: boolean
   temporaryCloseReason: string | null
+  /** round-29 — زمان باز شدن مجددِ بسته‌ی موقت ('' = ثبت نشده) — جدا از nextOpenTime ساعتی */
+  temporaryReopenTime: string
   nextOpenTime: string
   anyClosed: boolean
 }
@@ -652,6 +654,17 @@ export interface LiveOrderDto {
   courierArrivedAt: Date | null
   courierSecurityEnabled: boolean
   internalNote: string | null
+}
+
+/**
+ * round-29 — جزئیات کامل سفارش برای صفحه‌ی /admin/orders/$orderId
+ * (GET /live/orders/:id). breakdown از LiveOrderDto حذف شد (round-28 آن را از
+ * لیست زنده برداشت؛ لیست داغ نیازی به آن ندارد) و به همین DTO جزئیات آمد.
+ * items/breakdown همان قرارداد invoiceForStaff است.
+ */
+export interface LiveOrderDetailDto extends LiveOrderDto {
+  address: string | null
+  items: { name: string; sizeName: string | null; quantity: number; price: number }[]
   breakdown: OrderBreakdown
 }
 

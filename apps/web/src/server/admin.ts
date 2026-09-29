@@ -11,6 +11,7 @@ import type {
 	CourierDetailDto,
 	CourierOptionDto,
 	LiveOrderDto,
+	LiveOrderDetailDto,
 	LiveOrdersDataDto,
 	OrderBreakdown,
 	SubAdminPermissionsDto,
@@ -219,8 +220,8 @@ export async function getCourierOptions(): Promise<
 
 export async function getOrderDetailsByRole(input: {
 	data: { orderId: string; adminId?: string }
-}): Promise<LiveOrderDto | null> {
-	return authJson<LiveOrderDto | null>(
+}): Promise<LiveOrderDetailDto | null> {
+	return authJson<LiveOrderDetailDto | null>(
 		`/live/orders/${input.data.orderId}`,
 		'GET',
 	)
@@ -312,6 +313,9 @@ export async function addSubAdmin(input: {
 	phone: string
 	firstName: string
 	lastName: string
+	/** round-29 — scope انتخابی در فرم؛ قبلاً همیشه 'takeaway' هاردکد بود و ادمین۲ جدید
+	 * هرگز سفارشات سالن (DINE_IN) را نمی‌دید */
+	scope: 'hall' | 'takeaway' | 'both'
 }): Promise<{ success: boolean; message?: string }> {
 	return authJson<{ success: boolean; message?: string }>(
 		'/admin/admins',
@@ -320,7 +324,7 @@ export async function addSubAdmin(input: {
 			phone: input.phone,
 			firstName: input.firstName,
 			lastName: input.lastName,
-			scope: 'takeaway',
+			scope: input.scope,
 		},
 	)
 }
@@ -459,6 +463,8 @@ export interface RestaurantFullStatus {
 	isOpen: boolean
 	temporarilyClosed: boolean
 	temporaryCloseReason: string | null
+	/** round-29 — زمان باز شدن مجددِ بسته‌ی موقت ('' = ثبت نشده) */
+	temporaryReopenTime: string
 	nextOpenTime: string
 	anyClosed: boolean
 }
@@ -471,7 +477,7 @@ export async function getRestaurantStatusFull(): Promise<RestaurantFullStatus> {
 }
 
 export async function setTemporaryClose(input: {
-	data: { closed: boolean; reason: string }
+	data: { closed: boolean; reason: string; reopenTime?: string }
 }): Promise<{ success: boolean }> {
 	await authJson<unknown>('/admin/settings/temporary-close', 'POST', input.data)
 	return { success: true }

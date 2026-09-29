@@ -105,113 +105,115 @@ const SettingsContent = memo(function SettingsContent() {
   )
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    // round-29 — قبلاً max-w-2xl تک‌ستونه بود: در نمایشگرهای بزرگ (۱۹۲۰px) حدود
+    // ۳۵-۴۰٪ عرض خالی می‌ماند. حالا دوسطونه در lg+ با عرض کامل (max-w-6xl).
+    <div className="space-y-6 max-w-6xl">
       <div>
         <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">تنظیمات</h1>
         <p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium">مدیریت وضعیت سیستم</p>
       </div>
 
-      {/* ⬅ ناحیه‌های ارسال — مشترک بین ادمین اصلی و ادمین۲ */}
-      <DeliveryZonesManager />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {/* ⬅ ناحیه‌های ارسال — مشترک بین ادمین اصلی و ادمین۲ */}
+        <DeliveryZonesManager />
 
-      {/* round-13 — بسته/باز موقت با علت: ادمین اصلی همیشه + ادمین۲ با پرمیشن */}
-      <TemporaryCloseCard visible={isMainAdmin || permissions.canToggleTemporaryClose === true} />
+        {/* round-13 — بسته/باز موقت با علت: ادمین اصلی همیشه + ادمین₂ با پرمیشن */}
+        <TemporaryCloseCard visible={isMainAdmin || permissions.canToggleTemporaryClose === true} />
 
-      {isMainAdmin && (
-        <>
-          {/* آیتم ۱۸: ردیابی زنده پیک */}
-          <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="w-11 h-11 rounded-xl bg-blue-100 dark:bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                  <Pin size={22} />
-                </span>
-                <div>
-                  <p className="font-DanaDemiBold text-gray-800 dark:text-white">نمایش آنلاین مسیر پیک</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed max-w-xs">
-                    با فعال‌سازی، مشتریان می‌توانند مسیر زنده پیک را در صفحه سفارش خود ببینند.
-                  </p>
+        {isMainAdmin && (
+          <>
+            {/* آیتم ۱۸: ردیابی زنده پیک */}
+            <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="w-11 h-11 rounded-xl bg-blue-100 dark:bg-blue-500/10 text-blue-500 flex items-center justify-center">
+                    <Pin size={22} />
+                  </span>
+                  <div>
+                    <p className="font-DanaDemiBold text-gray-800 dark:text-white">نمایش آنلاین مسیر پیک</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed max-w-xs">
+                      با فعال‌سازی، مشتریان می‌توانند مسیر زنده پیک را در صفحه سفارش خود ببینند.
+                    </p>
+                  </div>
                 </div>
+                <Toggle isOn={tracking ?? false} onToggle={handleTrackingToggle} />
               </div>
-              <Toggle isOn={tracking ?? false} onToggle={handleTrackingToggle} />
+              <div className="mt-4 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-start gap-2">
+                <Discover2 size={16} className="text-blue-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-blue-600 dark:text-blue-400 font-DanaMedium">
+                  پیش‌فرض غیرفعال است و فقط برای سفارشات بعد از فعال‌سازی اعمال می‌شود.
+                </p>
+              </div>
             </div>
-            <div className="mt-4 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-start gap-2">
-              <Discover2 size={16} className="text-blue-500 shrink-0 mt-0.5" />
-              <p className="text-xs text-blue-600 dark:text-blue-400 font-DanaMedium">
-                پیش‌فرض غیرفعال است و فقط برای سفارشات بعد از فعال‌سازی اعمال می‌شود.
-              </p>
-            </div>
-          </div>
 
-          {/* آیتم ۲۲: باز/بسته بودن رستوران */}
-          <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className={`w-11 h-11 rounded-xl flex items-center justify-center ${restaurant?.isOpen
-                  ? 'bg-green-100 dark:bg-green-500/10 text-green-500'
-                  : 'bg-red-100 dark:bg-red-500/10 text-red-500'
-                  }`}>
-                  <Store size={22} />
-                </span>
-                <div>
-                  <p className="font-DanaDemiBold text-gray-800 dark:text-white">
-                    {restaurant?.isOpen ? 'رستوران باز است' : 'رستوران بسته است'}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xs">
-                    در حالت بسته، مشتری می‌تواند سفارش دهد اما ارسال بعد از باز شدن انجام می‌شود.
-                  </p>
+            {/* آیتم ۲۲: باز/بسته بودن رستوران */}
+            <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className={`w-11 h-11 rounded-xl flex items-center justify-center ${restaurant?.isOpen
+                    ? 'bg-green-100 dark:bg-green-500/10 text-green-500'
+                    : 'bg-red-100 dark:bg-red-500/10 text-red-500'
+                    }`}>
+                    <Store size={22} />
+                  </span>
+                  <div>
+                    <p className="font-DanaDemiBold text-gray-800 dark:text-white">
+                      {restaurant?.isOpen ? 'رستوران باز است' : 'رستوران بسته است'}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xs">
+                      در حالت بسته، مشتری می‌تواند سفارش دهد اما ارسال بعد از باز شدن انجام می‌شود.
+                    </p>
+                  </div>
                 </div>
+                <Toggle isOn={restaurant?.isOpen ?? true} onToggle={handleRestaurantToggle} />
               </div>
-              <Toggle isOn={restaurant?.isOpen ?? true} onToggle={handleRestaurantToggle} />
-            </div>
 
-            {!restaurant?.isOpen && (
-              <div className="mt-4">
-                <label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
-                  ساعت باز شدن بعدی (به مشتریان نمایش داده می‌شود)
-                </label>
-                <input
-                  type="text"
-                  value={nextOpenTime}
-                  onChange={handleTimeChange}
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm"
-                  placeholder="مثلاً: ۱۱:۰۰ صبح"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* phase-fix: محدودیت دسترسی فقط ایران */}
-          <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className={`w-11 h-11 rounded-xl flex items-center justify-center ${iranOnly === false
-                  ? 'bg-amber-100 dark:bg-amber-500/10 text-amber-500'
-                  : 'bg-green-100 dark:bg-green-500/10 text-green-500'
-                  }`}>
-                  <Shield size={22} />
-                </span>
-                <div>
-                  <p className="font-DanaDemiBold text-gray-800 dark:text-white">دسترسی فقط از ایران</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed max-w-xs">
-                    وقتی روشن است، بازدید از IP های خارج از ایران با صفحه‌ای که پیدا نشد (404) مواجه می‌شود.
-                  </p>
+              {!restaurant?.isOpen && (
+                <div className="mt-4">
+                  <label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+                    ساعت باز شدن بعدی (به مشتریان نمایش داده می‌شود)
+                  </label>
+                  <input
+                    type="text"
+                    value={nextOpenTime}
+                    onChange={handleTimeChange}
+                    className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm"
+                    placeholder="مثلاً: ۱۱:۰۰ صبح"
+                  />
                 </div>
-              </div>
-              <Toggle isOn={iranOnly ?? true} onToggle={handleIranOnlyToggle} />
+              )}
             </div>
-            <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2">
-              <Discover2 size={16} className="text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
-                اگر خودتان از خارج از ایران یا با VPN وارد می‌شوید، قبل از فعال‌سازی، IP خود را در متغیر
-                محیطی عبور قرار دهید وگرنه از پنل خارج می‌شوید. پیش‌فرض این گزینه روشن است.
-              </p>
-            </div>
-          </div>
 
-          {/* مدیریت محتوای سایت */}
-          <div className="space-y-6">
-            <div>
+            {/* phase-fix: محدودیت دسترسی فقط ایران */}
+            <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className={`w-11 h-11 rounded-xl flex items-center justify-center ${iranOnly === false
+                    ? 'bg-amber-100 dark:bg-amber-500/10 text-amber-500'
+                    : 'bg-green-100 dark:bg-green-500/10 text-green-500'
+                    }`}>
+                    <Shield size={22} />
+                  </span>
+                  <div>
+                    <p className="font-DanaDemiBold text-gray-800 dark:text-white">دسترسی فقط از ایران</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed max-w-xs">
+                      وقتی روشن است، بازدید از IP های خارج از ایران با صفحه‌ای که پیدا نشد (404) مواجه می‌شود.
+                    </p>
+                  </div>
+                </div>
+                <Toggle isOn={iranOnly ?? true} onToggle={handleIranOnlyToggle} />
+              </div>
+              <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2">
+                <Discover2 size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
+                  اگر خودتان از خارج از ایران یا با VPN وارد می‌شوید، قبل از فعال‌سازی، IP خود را در متغیر
+                  محیطی عبور قرار دهید وگرنه از پنل خارج می‌شوید. پیش‌فرض این گزینه روشن است.
+                </p>
+              </div>
+            </div>
+
+            {/* مدیریت محتوای سایت — round-29: هدر تمام‌عرض؛ فرم‌ها آیتم‌های مستقل گرید */}
+            <div className="lg:col-span-2">
               <h2 className="font-MorabbaBold text-2xl text-gray-800 dark:text-white">مدیریت محتوای سایت</h2>
               <p className="text-gray-500 dark:text-gray-400 mt-1 font-DanaMedium text-sm">
                 ویرایش صفحات «درباره ما» و «گالری» — تغییرات بلافاصله روی سایت اعمال می‌شود.
@@ -219,7 +221,7 @@ const SettingsContent = memo(function SettingsContent() {
             </div>
 
             {content.isLoading ? (
-              <div className="h-48 rounded-2xl bg-gray-200 dark:bg-[#2a1015] animate-pulse" />
+              <div className="lg:col-span-2 h-48 rounded-2xl bg-gray-200 dark:bg-[#2a1015] animate-pulse" />
             ) : (
               <>
                 {content.about && (
@@ -239,12 +241,12 @@ const SettingsContent = memo(function SettingsContent() {
                 />
               </>
             )}
-          </div>
 
-          {/* قوانین سایت — نسخه‌دار (هر ذخیره = نسخه جدید) */}
-          <TermsEditor />
-        </>
-      )}
+            {/* قوانین سایت — نسخه‌دار (هر ذخیره = نسخه جدید) */}
+            <TermsEditor />
+          </>
+        )}
+      </div>
     </div>
   )
 })

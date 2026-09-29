@@ -15,10 +15,19 @@ interface AddAdminForm {
   firstName: string
   lastName: string
   phone: string
+  /** round-29 — scope انتخابی؛ قبلاً همیشه takeaway هاردکد بود */
+  scope: 'hall' | 'takeaway' | 'both'
   error: string
 }
 
-const EMPTY_FORM: AddAdminForm = { firstName: '', lastName: '', phone: '', error: '' }
+const EMPTY_FORM: AddAdminForm = { firstName: '', lastName: '', phone: '', scope: 'both', error: '' }
+
+// round-29 — گزینه‌های حوزه برای ادمین۲ جدید
+const SCOPE_OPTIONS: { value: AddAdminForm['scope']; label: string; hint: string }[] = [
+  { value: 'hall', label: 'سالن', hint: 'فقط سرو در محل' },
+  { value: 'both', label: 'هر دو', hint: 'همه‌ی سفارشات' },
+  { value: 'takeaway', label: 'بیرون‌بر', hint: 'ارسال + تحویل حضوری' },
+]
 
 export const AddAdminModal = memo(function AddAdminModal({ onClose }: AddAdminModalProps) {
   const queryClient = useQueryClient()
@@ -30,7 +39,7 @@ export const AddAdminModal = memo(function AddAdminModal({ onClose }: AddAdminMo
   }, [])
 
   const mutation = useMutation({
-    mutationFn: (data: { phone: string; firstName: string; lastName: string }) => addSubAdmin(data),
+    mutationFn: (data: { phone: string; firstName: string; lastName: string; scope: AddAdminForm['scope'] }) => addSubAdmin(data),
     onSuccess: (res) => {
       if (!res.success) {
         set({ error: res.message ?? 'خطا' })
@@ -53,7 +62,7 @@ export const AddAdminModal = memo(function AddAdminModal({ onClose }: AddAdminMo
     if (!form.lastName.trim()) { set({ error: 'نام خانوادگی الزامی است' }); return }
     if (!/^09[0-9]{9}$/.test(form.phone)) { set({ error: 'فرمت شماره صحیح نیست (09xxxxxxxxx)' }); return }
     set({ error: '' })
-    mutation.mutate({ phone: form.phone, firstName: form.firstName.trim(), lastName: form.lastName.trim() })
+    mutation.mutate({ phone: form.phone, firstName: form.firstName.trim(), lastName: form.lastName.trim(), scope: form.scope })
   }, [form, set, mutation])
 
   return (
@@ -96,6 +105,31 @@ export const AddAdminModal = memo(function AddAdminModal({ onClose }: AddAdminMo
               className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-center"
               placeholder="09xxxxxxxxx"
             />
+          </div>
+          {/* round-29 — انتخاب حوزه: تعیین می‌کند ادمین۲ جدید کدام سفارشات را در پنل زنده ببیند */}
+          <div>
+            <label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">حوزه‌ی سفارشات</label>
+            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="حوزه‌ی سفارشات">
+              {SCOPE_OPTIONS.map(({ value, label, hint }) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.scope === value}
+                  onClick={() => set({ scope: value })}
+                  className={`p-3 rounded-xl border text-center transition cursor-pointer ${form.scope === value
+                    ? 'border-primary dark:border-dark-primary bg-primary/5 dark:bg-dark-primary/10'
+                    : 'border-gray-200 dark:border-[#3a151c] bg-gray-50 dark:bg-[#1a0a0e] hover:border-gray-300 dark:hover:border-[#4a1a24]'
+                    }`}
+                >
+                  <span className={`block text-sm font-DanaDemiBold ${form.scope === value ? 'text-primary dark:text-dark-primary' : 'text-gray-700 dark:text-gray-300'}`}>{label}</span>
+                  <span className="block text-[10px] text-gray-400 font-DanaMedium mt-1">{hint}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-400 font-DanaMedium mt-2 leading-relaxed">
+              بعداً هم از صفحه‌ی جزئیات همین ادمین قابل تغییر است.
+            </p>
           </div>
           {form.error && <p className="text-red-500 text-sm text-center">{form.error}</p>}
           <div className="flex gap-3">

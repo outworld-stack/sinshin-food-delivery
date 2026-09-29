@@ -8,6 +8,7 @@ import {
     admin2Sessions,
     orders,
     users,
+    SETTING_KEYS,
     type UserRow,
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
@@ -333,9 +334,19 @@ export class Admin2Service {
         perms: Partial<Admin2Permissions>,
     ): Promise<void> {
         const uid = asUserId(adminUserId)
+        // round-29 — کلیدهای قرارداد (hall/takeaway) → ستون‌های دیتابیس
+        // (scopeHall/scopeTakeaway). قبلاً spread مستقیم یعنی کلیدهای قرارداد به
+        // کوئری نمی‌رسیدند و scope از پنل قابل ویرایش نبود.
+        const { hall, takeaway, ...rest } = perms
+        const patch: Partial<typeof admin2Profiles.$inferInsert> = {
+            ...rest,
+            updatedAt: new Date(),
+        }
+        if (hall !== undefined) patch.scopeHall = hall
+        if (takeaway !== undefined) patch.scopeTakeaway = takeaway
         await this.deps.db
             .update(admin2Profiles)
-            .set({ ...perms, updatedAt: new Date() })
+            .set(patch)
             .where(eq(admin2Profiles.userId, uid))
         // round-16 — کش پروفایل همان لحظه بی‌اعتبار
         this.invalidateProfileCache(adminUserId)
@@ -359,28 +370,40 @@ export class Admin2Service {
      * اعلام بسته/باز موقت — ادمین اصلی یا ادمین۲ با permission.
      * round-13: علت برای «هر دو» جهت اجباری است (بسته و باز)؛ با باز شدن،
      * علت ذخیره‌شده پاک می‌شود تا متن کهنه به مشتری نشت نکند.
+     * round-29: reopenTime — زمان باز شدن مجددِ بسته‌ی موقت (جدا از ساعتِ کاری
+     * اصلی)؛ فقط هنگام بستن معنا دارد و با باز شدن پاک می‌شود (هم‌الگوی علت).
      */
     async setTemporaryClose(
         actorUserId: string,
         actorRole: string,
         closed: boolean,
         reason?: string | null,
+        reopenTime?: string | null,
     ): Promise<void> {
         const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
         if (actorRole === 'admin2' && !(p?.canToggleTemporaryClose)) {
             throw Err.forbidden('اجازه‌ی اعلام وضعیت موقت را ندارید.')
         }
-        await this.deps.settings.set('temporarily_closed', closed)
+        await this.deps.settings.set(SETTING_KEYS.temporarilyClosed, closed)
         await this.deps.settings.set(
-            'temporary_close_reason',
+            SETTING_KEYS.temporaryCloseReason,
             closed ? (reason ?? '').slice(0, 120) : '',
+        )
+        await this.deps.settings.set(
+            SETTING_KEYS.temporaryReopenTime,
+            closed ? (reopenTime ?? '').trim().slice(0, 40) : '',
         )
         if (actorRole === 'admin2') {
             await this.log(
                 actorUserId,
                 closed ? 'TEMP_CLOSE' : 'TEMP_OPEN',
                 null,
-                reason ? { reason } : {},
+                reason
+                    ? {
+                            reason,
+                            ...(closed && reopenTime ? { reopenTime } : {}),
+                        }
+                    : {},
             )
         }
     }
