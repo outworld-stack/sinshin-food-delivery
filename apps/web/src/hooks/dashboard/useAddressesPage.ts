@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { deleteUserAddress } from '#/server/user'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
+import { useI18n } from '#/i18n'
 
 // --- State ---
 interface AddressesState {
@@ -43,6 +44,7 @@ export function useAddressesPage() {
   const [state, dispatch] = useReducer(addressesReducer, initialAddressesState)
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
+  const { t } = useI18n()
 
   const handleOpenEdit = useCallback((id: string) => dispatch({ type: 'OPEN_EDIT', payload: id }), [])
 
@@ -51,7 +53,7 @@ export function useAddressesPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteUserAddress(id), onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.userProfile })
-      showToast('آدرس حذف شد')
+      showToast(t['dash.addresses.deletedToast'])
       dispatch({ type: 'CLOSE_DELETE' })
     },
   })

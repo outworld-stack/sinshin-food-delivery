@@ -2,6 +2,7 @@
 import { memo, useCallback, useState } from 'react'
 import { Check, MessageSquare } from 'reicon-react'
 import type { UserOrderItem as OrderItem } from '@sinshin/shared'
+import { useI18n } from '#/i18n'
 
 interface FeedbackBoxProps {
   items: OrderItem[]
@@ -14,6 +15,7 @@ interface FeedbackBoxProps {
 export const FeedbackBox = memo(function FeedbackBox({
   items, reviewedProductIds, isSubmitting, onSubmit,
 }: FeedbackBoxProps) {
+  const { t, fmt } = useI18n()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [text, setText] = useState('')
 
@@ -41,12 +43,12 @@ export const FeedbackBox = memo(function FeedbackBox({
     return (
       <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
         <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-6 pb-4 border-b border-gray-100 dark:border-white/5">
-          بازخورد شما
+          {t['dash.feedback.title']}
         </h2>
         <div className="flex items-center gap-2 text-green-500">
           <Check size={20} />
           <p className="font-DanaMedium text-sm">
-            برای تمام محصولات این سفارش نظر ثبت شد. پس از بررسی، در صفحه‌ی محصول نمایش داده می‌شود.
+            {t['dash.feedback.allDone']}
           </p>
         </div>
       </div>
@@ -57,10 +59,10 @@ export const FeedbackBox = memo(function FeedbackBox({
     <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
       <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-4 flex items-center gap-2">
         <MessageSquare size={20} className="text-primary dark:text-dark-primary" />
-        نظر شما درباره این سفارش
+        {t['dash.feedback.formTitle']}
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-4">
-        برای هر محصول می‌توانید یک نظر ثبت کنید — نظرها پس از بررسی در صفحه‌ی همان محصول نمایش داده می‌شوند.
+        {t['dash.feedback.formDesc']}
       </p>
 
       {/* انتخاب محصول */}
@@ -96,11 +98,11 @@ export const FeedbackBox = memo(function FeedbackBox({
             onChange={handleText}
             maxLength={500}
             className="w-full h-32 px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white resize-none font-DanaMedium"
-            placeholder="تجربه‌تان از این محصول را با ما و دیگر مشتریان به اشتراک بگذارید..."
+            placeholder={t['dash.feedback.placeholder']}
           />
           <div className="flex items-center justify-between mt-2 mb-4">
             <span className="text-xs text-gray-400 font-DanaMedium">
-              {text.length.toLocaleString('fa-IR')}/۵۰۰
+              {fmt.num(text.length)}/{fmt.num(500)}
             </span>
           </div>
           <button
@@ -109,11 +111,11 @@ export const FeedbackBox = memo(function FeedbackBox({
             disabled={isSubmitting || !text.trim()}
             className="px-6 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50"
           >
-            {isSubmitting ? 'در حال ارسال...' : 'ارسال نظر'}
+            {isSubmitting ? t['dash.feedback.sending'] : t['dash.feedback.submit']}
           </button>
         </>
       ) : (
-        <p className="text-sm text-gray-400 font-DanaMedium">محصول قابل نظردادن باقی نمانده است.</p>
+        <p className="text-sm text-gray-400 font-DanaMedium">{t['dash.feedback.nothingLeft']}</p>
       )}
     </div>
   )

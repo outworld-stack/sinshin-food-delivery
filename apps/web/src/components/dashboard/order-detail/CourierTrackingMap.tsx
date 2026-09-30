@@ -1,6 +1,7 @@
 // src/components/dashboard/order-detail/CourierTrackingMap.tsx
 import { memo } from 'react'
 import { Bicycle, Pin } from 'reicon-react'
+import { useI18n } from '#/i18n'
 
 interface CourierTrackingMapProps {
   status: string
@@ -12,13 +13,14 @@ interface CourierTrackingMapProps {
 export const CourierTrackingMap = memo(function CourierTrackingMap({
   status, courierLocation, customerLocation,
 }: CourierTrackingMapProps) {
+  const { t } = useI18n()
   if (status !== 'ON_THE_WAY') {
     return (
       <div className="h-80 flex flex-col items-center justify-center bg-gray-50 dark:bg-[#1a0a0e] rounded-xl border border-dashed border-gray-300 dark:border-white/5">
         <span className="w-16 h-16 rounded-full bg-gray-200 dark:bg-[#2a1015] flex items-center justify-center text-gray-400 mb-4">
           <Bicycle size={32} />
         </span>
-        <p className="font-DanaMedium text-gray-400 dark:text-gray-500">منتظر تخصیص پیک...</p>
+        <p className="font-DanaMedium text-gray-400 dark:text-gray-500">{t['dash.orderDetail.waitingCourier']}</p>
       </div>
     )
   }

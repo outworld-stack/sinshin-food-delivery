@@ -5,11 +5,13 @@ import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { confirmOrderDelivery, submitOrderFeedback } from '#/server/user'
 import { qk } from '#/utils/queryKeys'
+import { useI18n } from '#/i18n'
 
 // --- هوک: تایید تحویل + ارسال نظر (نظر به‌ازای هر محصول) ---
 export function useOrderDetailPage(orderId: string) {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
+  const { t, apiError } = useI18n()
   const setActiveOrderId = useAuthStore((s) => s.setActiveOrderId)
 
   // آیتم ۱۶: تایید تحویل
@@ -19,7 +21,7 @@ export function useOrderDetailPage(orderId: string) {
       queryClient.invalidateQueries({ queryKey: qk.orderDetails(orderId) })
       queryClient.invalidateQueries({ queryKey: qk.userProfile })
       setActiveOrderId(null)
-      showToast('تحویل سفارش ثبت شد')
+      showToast(t['dash.orders.deliverToast'])
     },
   })
 
@@ -28,11 +30,11 @@ export function useOrderDetailPage(orderId: string) {
     mutationFn: (data: { productId: string; feedback: string }) =>
       submitOrderFeedback({ data: { orderId, ...data } }),
     onSuccess: (res) => {
-      if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
+      if (!res.success) { showToast(apiError(res.message ?? t['common.error']), 'error'); return }
       queryClient.invalidateQueries({ queryKey: qk.orderReviewed(orderId) })
       // پریفکس — بازخورد سفارش به نظرات محصول تبدیل می‌شه → همه‌ی product-reviews رفرش
       queryClient.invalidateQueries({ queryKey: qk.productReviewsPrefix })
-      showToast('از اینکه نظرتان را با ما به اشتراک گذاشتید ممنونیم')
+      showToast(t['dash.feedback.thanksToast'])
     },
   })
 

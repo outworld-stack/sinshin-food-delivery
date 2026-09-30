@@ -10,12 +10,14 @@ import { AddressFormModal } from '#/components/dashboard/addresses/AddressFormMo
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { DashboardAddressesSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { useI18n } from '#/i18n'
 import { Plus } from 'reicon-react'
 
 
 const AddressesPage = memo(function AddressesPage() {
   // کار-۶: این صفحه فقط آدرس‌ها را می‌خواهد — پروفایل سبک (آدرس‌ها داخلش هستند)
   const { data: user, isLoading } = useQuery(userProfileLightOptions)
+  const { t } = useI18n()
 
   const page = useAddressesPage()
 
@@ -35,8 +37,8 @@ const AddressesPage = memo(function AddressesPage() {
     <div className="max-w-3xl">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-2">آدرس‌های من</h1>
-          <p className="text-gray-500 dark:text-gray-400 font-DanaMedium">آدرس‌های خود را برای تحویل سفارشات مدیریت کنید.</p>
+          <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-2">{t['dash.nav.addresses']}</h1>
+          <p className="text-gray-500 dark:text-gray-400 font-DanaMedium">{t['dash.addresses.subtitle']}</p>
         </div>
         <button
           type="button"
@@ -44,7 +46,7 @@ const AddressesPage = memo(function AddressesPage() {
           className="px-5 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-2 shrink-0"
         >
           <Plus size={16} />
-          آدرس جدید
+          {t['dash.addresses.newAddress']}
         </button>
       </div>
 
@@ -61,13 +63,13 @@ const AddressesPage = memo(function AddressesPage() {
         </div>
       ) : (
         <div className="text-center py-16 px-4 bg-gray-50 dark:bg-[#1a0a0e] rounded-2xl border border-dashed border-gray-300 dark:border-white/5">
-          <p className="text-gray-400 dark:text-gray-500 font-DanaMedium mb-4">شما هنوز آدرسی ثبت نکرده‌اید.</p>
+          <p className="text-gray-400 dark:text-gray-500 font-DanaMedium mb-4">{t['dash.addresses.empty']}</p>
           <button
             type="button"
             onClick={page.handleOpenNew}
             className="px-6 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium hover:opacity-90 transition cursor-pointer"
           >
-            ثبت اولین آدرس
+            {t['dash.addresses.addFirst']}
           </button>
         </div>
       )}
@@ -83,8 +85,8 @@ const AddressesPage = memo(function AddressesPage() {
       {/* مودال حذف */}
       <ConfirmModal
         isOpen={page.state.isDeleteModalOpen}
-        title="حذف آدرس"
-        message="آیا از حذف این آدرس مطمئن هستید؟"
+        title={t['dash.addresses.deleteTitle']}
+        message={t['dash.addresses.deleteConfirm']}
         onConfirm={page.handleConfirmDelete}
         onCancel={page.handleCloseDelete}
       />

@@ -31,6 +31,7 @@ import {
         formatTime,
 } from '#/utils/format'
 import { ar } from './ar'
+import { arApiErrorMessage } from './apiErrors'
 import { type Dict, fa } from './fa'
 
 export type Lang = 'fa' | 'ar'
@@ -54,6 +55,21 @@ export function readLangCookie(): Lang | null {
 function writeLangCookie(lang: Lang): void {
         // biome-ignore lint/suspicious/noDocumentCookie: همان الگوی themeStore موجود — Cookie Store API هنوز در همه‌ی مرورگرهای هدف نیست
         document.cookie = `${LANG_COOKIE}=${lang}; path=/; max-age=31536000; samesite=lax`
+}
+
+// ── خطای API چندزبانه (رارد ۳۳) ──
+
+/** متن خطا از هر شکلی که پرتاب می‌شود — Error، رشته، یا { message } */
+function errTextOf(err: unknown, fallback: string): string {
+        if (typeof err === 'string' && err) return err
+        const m = (err as { message?: unknown } | null | undefined)?.message
+        if (typeof m === 'string' && m) return m
+        return fallback
+}
+
+function errCodeOf(err: unknown): string | undefined {
+        const c = (err as { code?: unknown } | null | undefined)?.code
+        return typeof c === 'string' ? c : undefined
 }
 
 // ── فرمترهای چندزبانه ──
@@ -139,6 +155,9 @@ interface I18nValue {
         t: Dict
         fmt: Fmt
         setLang: (next: Lang) => void
+        /** رارد ۳۳ — پیام خطای API به زبان کاربر: عربی از نقشه‌ی apiErrors،
+         *  فارسی همان پیام سرور (رفتار صفر-تغییر). fallback وقتی err متنی ندارد. */
+        apiError: (err: unknown, fallback?: string) => string
 }
 
 const I18nContext = createContext<I18nValue | null>(null)
@@ -156,6 +175,7 @@ const I18N_FALLBACK: I18nValue = {
         setLang: () => {
                 /* خارج از سایت، تغییر زبان معنا ندارد — noop */
         },
+        apiError: (err, fallback) => errTextOf(err, fallback ?? 'خطا'),
 }
 
 /**
@@ -187,7 +207,18 @@ export function I18nProvider({
         }, [])
 
         const value = useMemo<I18nValue>(
-                () => ({ lang, t: DICTS[lang], fmt: makeFmt(lang), setLang }),
+                () => ({
+                        lang,
+                        t: DICTS[lang],
+                        fmt: makeFmt(lang),
+                        setLang,
+                        apiError: (err, fallback) => {
+                                const msg = errTextOf(err, fallback ?? DICTS[lang]['common.error'])
+                                return lang === 'ar'
+                                        ? arApiErrorMessage(errCodeOf(err), msg)
+                                        : msg
+                        },
+                }),
                 [lang, setLang],
         )
 

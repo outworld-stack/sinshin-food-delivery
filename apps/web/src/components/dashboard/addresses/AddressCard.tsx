@@ -1,6 +1,7 @@
 // src/components/dashboard/addresses/AddressCard.tsx
 import { memo, useCallback } from 'react'
 import { Pin, Pen, Trash2 } from 'reicon-react'
+import { useI18n } from '#/i18n'
 
 interface AddressItem {
   id: string
@@ -18,6 +19,7 @@ interface AddressCardProps {
 
 // کارت آدرس — آیتم‌های لیست (state ID پاس می‌شه، نه شیء — پراپ پایدار برای memo)
 export const AddressCard = memo(function AddressCard({ addr, onEdit, onDelete }: AddressCardProps) {
+  const { t } = useI18n()
   // هندلرها با id پایدار — memo واقعاً کار می‌کنه چون onEdit/onDelete از هوک useCallback شدن
   const handleEdit = useCallback(() => onEdit(addr.id), [onEdit, addr.id])
   const handleDelete = useCallback(() => onDelete(addr.id), [onDelete, addr.id])
@@ -31,7 +33,7 @@ export const AddressCard = memo(function AddressCard({ addr, onEdit, onDelete }:
         <div>
           <p className="font-DanaDemiBold text-gray-800 dark:text-white text-lg mb-1">{addr.title}</p>
           <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium leading-relaxed">{addr.address}</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 font-DanaMedium">مختصات: {addr.lat.toFixed(4)}, {addr.lng.toFixed(4)}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 font-DanaMedium">{t['dash.addresses.coords']} {addr.lat.toFixed(4)}, {addr.lng.toFixed(4)}</p>
         </div>
       </div>
 
@@ -41,7 +43,7 @@ export const AddressCard = memo(function AddressCard({ addr, onEdit, onDelete }:
           type="button"
           onClick={handleEdit}
           className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#1a0a0e] transition cursor-pointer"
-          aria-label="ویرایش"
+          aria-label={t['common.edit']}
         >
           <Pen size={18} />
         </button>
@@ -49,7 +51,7 @@ export const AddressCard = memo(function AddressCard({ addr, onEdit, onDelete }:
           type="button"
           onClick={handleDelete}
           className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer"
-          aria-label="حذف"
+          aria-label={t['common.delete']}
         >
           <Trash2 size={18} />
         </button>

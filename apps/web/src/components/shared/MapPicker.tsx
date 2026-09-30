@@ -1,5 +1,6 @@
 // src/components/shared/MapPicker.tsx
 import { memo, useRef, useEffect, useState } from 'react'
+import { useI18nSafe } from '#/i18n'
 
 interface MapPickerProps {
   /** مختصات انتخاب‌شده (تهی = هنوز انتخاب نشده) */
@@ -19,6 +20,8 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
   value: { lat: number; lng: number } | null
   onChangeRef: React.RefObject<(coords: { lat: number; lng: number }) => void>
 }) {
+  // رارد ۳۳ — دوزبانه با useI18nSafe: ادمین (بدون Provider) همان فارسیِ قبل
+  const { t } = useI18nSafe()
   // درفت محلی — تا پاک‌کردن/تایپ جزئی وسط کار، مقدار والد را نلرزاند
   const [latDraft, setLatDraft] = useState(value ? String(value.lat) : '')
   const [lngDraft, setLngDraft] = useState(value ? String(value.lng) : '')
@@ -43,14 +46,14 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
   return (
     <div className="space-y-3">
       <div className="text-sm text-gray-600 dark:text-gray-300 bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 rounded-xl p-4 leading-relaxed">
-        کلید نقشه‌ی نشان تنظیم نشده — می‌توانید مختصات را دستی وارد کنید، یا{' '}
+        {t['map.noKeyWarning']}{' '}
         <code dir="ltr">VITE_NESHAN_API_KEY</code> را در <code dir="ltr">apps/web/.env</code> بگذار
         (ثبت‌نام: platform.neshan.org)
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-DanaMedium text-gray-500 dark:text-gray-400 mb-1">
-            عرض جغرافیایی (lat)
+            {t['map.lat']}
           </label>
           <input
             type="number"
@@ -70,7 +73,7 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
         </div>
         <div>
           <label className="block text-xs font-DanaMedium text-gray-500 dark:text-gray-400 mb-1">
-            طول جغرافیایی (lng)
+            {t['map.lng']}
           </label>
           <input
             type="number"
@@ -143,6 +146,7 @@ function pinColor(): string {
 }
 
 export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerProps) {
+  const { t } = useI18nSafe()
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<{ setTarget(t: unknown): void } | null>(null)
   const markerRef = useRef<{ setPosition(p: number[] | null): void } | null>(null)
@@ -215,7 +219,7 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
 
   return (
     <div>
-      <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">انتخاب موقعیت روی نقشه</label>
+      <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">{t['map.pickLocation']}</label>
       {/* z-0 → زمینه stacking محلی؛ z-index های داخلی OpenLayers به مودال نشت نمی‌کنند */}
       <div
         ref={containerRef}

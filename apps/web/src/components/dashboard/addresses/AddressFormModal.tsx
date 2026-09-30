@@ -5,6 +5,7 @@ import { addUserAddress, updateUserAddress } from '#/server/user'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { MapPicker } from '#/components/shared/MapPicker'
+import { useI18n } from '#/i18n'
 import { X } from 'reicon-react'
 
 interface AddressItem {
@@ -23,6 +24,7 @@ interface AddressFormModalProps {
 export const AddressFormModal = memo(function AddressFormModal({ editing, onClose }: AddressFormModalProps) {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
+  const { t } = useI18n()
 
   const [title, setTitle] = useState('')
   const [addressText, setAddressText] = useState('')
@@ -52,7 +54,7 @@ export const AddressFormModal = memo(function AddressFormModal({ editing, onClos
     onSuccess: () => {
       // ⬅ NEW: کلید از فکتوری مرکزی — هم‌hash با کوئری پروفایل در ۸ مصرف‌کننده
       queryClient.invalidateQueries({ queryKey: qk.userProfile })
-      showToast(editing ? 'آدرس با موفقیت ویرایش شد' : 'آدرس جدید با موفقیت اضافه شد')
+      showToast(editing ? t['dash.addresses.editedToast'] : t['dash.addresses.addedToast'])
       onClose()
     },
   })
@@ -61,9 +63,9 @@ export const AddressFormModal = memo(function AddressFormModal({ editing, onClos
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault()
-    if (!coords) { showToast('لطفاً موقعیت را روی نقشه انتخاب کنید', 'error'); return }
+    if (!coords) { showToast(t['dash.addresses.pickLocationError'], 'error'); return }
     mutation.mutate({ id: editing?.id, title, address: addressText, lat: coords.lat, lng: coords.lng })
-  }, [coords, editing, title, addressText, mutation, showToast])
+  }, [coords, editing, title, addressText, mutation, showToast, t])
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
@@ -72,7 +74,7 @@ export const AddressFormModal = memo(function AddressFormModal({ editing, onClos
 
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white">
-            {editing ? 'ویرایش آدرس' : 'افزودن آدرس جدید'}
+            {editing ? t['dash.addresses.editTitle'] : t['dash.addresses.addTitle']}
           </h3>
           <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer p-1">
             <X size={24} />
@@ -86,31 +88,31 @@ export const AddressFormModal = memo(function AddressFormModal({ editing, onClos
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">عنوان</label>
+            <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">{t['dash.addresses.titleLabel']}</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
               className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white"
-              placeholder="مثلاً: خانه، محل کار"
+              placeholder={t['dash.addresses.titlePlaceholder']}
             />
           </div>
           <div>
-            <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">آدرس دقیق</label>
+            <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">{t['dash.addresses.addressLabel']}</label>
             <textarea
               value={addressText}
               onChange={(e) => setAddressText(e.target.value)}
               required
               className="w-full h-24 px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white resize-none"
-              placeholder="خیابان، کوچه، پلاک و..."
+              placeholder={t['dash.addresses.addressPlaceholder']}
             ></textarea>
           </div>
 
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer">انصراف</button>
+            <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer">{t['common.cancel']}</button>
             <button type="submit" disabled={mutation.isPending} className="flex-1 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50">
-              {mutation.isPending ? 'در حال ذخیره...' : 'ذخیره'}
+              {mutation.isPending ? t['common.saving'] : t['common.save']}
             </button>
           </div>
         </form>

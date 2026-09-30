@@ -5,13 +5,17 @@
 // قبلاً currentPage/sortBy در useState بودند:
 //   ✗ رفرش = برگشت به صفحه ۱ و سورت پیش‌فرض
 //   ✗ «گران‌ترین‌ها، صفحه ۲» قابل اشتراک‌گذاری نبود
+//
+// رارد ۳۳ — دوزبانه: رشته‌ها از t، اعداد/تاریخ از fmt؛ توست خطای API از
+// apiError (نقشه‌ی رارد ۳۳ — فارسی همان پیام سرور، عربی از نقشه).
+
 import { createFileRoute, Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useMemo } from 'react'
 import { z } from 'zod'
 import { userProfileOptions } from '#/utils/queryOptions'
 import { pageField } from '#/utils/searchSchema'
-import { formatPrice, formatDate } from '#/utils/format'
+import { tpl, useI18n } from '#/i18n'
 import { Pagination } from '#/components/Pagination'
 import { DashboardOrdersSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
@@ -36,6 +40,7 @@ const OrdersPage = memo(function OrdersPage() {
   const navigate = useNavigate({ from: '/dashboard/orders/' })
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
+  const { t, fmt, apiError } = useI18n()
 
   // پروفایل — staleTime از فکتوری (۶۰s)؛ loader همین کلید را روی هاور پر کرده
   const { data: user, isLoading } = useQuery(userProfileOptions)
@@ -47,10 +52,10 @@ const OrdersPage = memo(function OrdersPage() {
     mutationFn: (orderId: string) => confirmOrderDelivery({ data: { orderId } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.userProfile })
-      showToast('تحویل سفارش ثبت شد')
+      showToast(t['dash.orders.deliverToast'])
     },
     onError: (err) => {
-      showToast(err instanceof Error ? err.message : 'ثبت تحویل ناموفق بود', 'error')
+      showToast(apiError(err, t['dash.orders.deliverFailed']), 'error')
     },
   })
 
@@ -88,8 +93,8 @@ const OrdersPage = memo(function OrdersPage() {
 
   return (
     <div className="max-w-6xl">
-      <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-2">سفارشات من</h1>
-      <p className="text-gray-500 dark:text-gray-400 mb-8 font-DanaMedium">مشاهده و پیگیری تمامی سفارشات شما</p>
+      <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-2">{t['dash.nav.orders']}</h1>
+      <p className="text-gray-500 dark:text-gray-400 mb-8 font-DanaMedium">{t['dash.orders.subtitle']}</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -100,8 +105,8 @@ const OrdersPage = memo(function OrdersPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white dark:bg-[#2a1015] p-5 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-1">تعداد سفارشات</p>
-                <p className="font-MorabbaBold text-2xl text-gray-800 dark:text-white">{totalOrders.toLocaleString('fa-IR')}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-1">{t['dash.orders.count']}</p>
+                <p className="font-MorabbaBold text-2xl text-gray-800 dark:text-white">{fmt.num(totalOrders)}</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-primary/10 dark:bg-dark-primary/10 flex items-center justify-center text-primary dark:text-dark-primary">
                 <ShoppingBag size={20} />
@@ -109,8 +114,8 @@ const OrdersPage = memo(function OrdersPage() {
             </div>
             <div className="bg-white dark:bg-[#2a1015] p-5 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-1">مجموع پرداخت‌ها</p>
-                <p className="font-MorabbaBold text-2xl text-primary dark:text-dark-primary">{formatPrice(totalSpent)} <span className="text-sm">ت</span></p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-1">{t['dash.orders.totalSpent']}</p>
+                <p className="font-MorabbaBold text-2xl text-primary dark:text-dark-primary">{fmt.price(totalSpent)} <span className="text-sm">{t['common.tomanShort']}</span></p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-500/10 flex items-center justify-center text-green-500">
                 <Wallet size={20} />
@@ -121,16 +126,16 @@ const OrdersPage = memo(function OrdersPage() {
           {/* باکس لیست سفارشات با فیلتر */}
           <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 pb-4 border-b border-gray-100 dark:border-white/5 gap-4">
-              <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white">تاریخچه سفارشات</h2>
+              <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white">{t['dash.orders.history']}</h2>
               <select
                 value={search.sort}
                 onChange={(e) => handleSortChange(e.target.value as DashboardOrdersSort)}
                 className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer"
               >
-                <option value="newest">جدیدترین</option>
-                <option value="oldest">قدیمی‌ترین</option>
-                <option value="expensive">گران‌ترین</option>
-                <option value="cheap">ارزان‌ترین</option>
+                <option value="newest">{t['dash.orders.sort.newest']}</option>
+                <option value="oldest">{t['dash.orders.sort.oldest']}</option>
+                <option value="expensive">{t['dash.orders.sort.expensive']}</option>
+                <option value="cheap">{t['dash.orders.sort.cheap']}</option>
               </select>
             </div>
 
@@ -154,19 +159,19 @@ const OrdersPage = memo(function OrdersPage() {
                           <ShoppingBag size={24} />
                         </div>
                         <div>
-                          <p className="font-DanaDemiBold text-gray-800 dark:text-white">سفارش شماره {order.id}</p>
-                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{formatDate(order.date)} • {order.itemCount} کالا</p>
+                          <p className="font-DanaDemiBold text-gray-800 dark:text-white">{tpl(t['dash.orderNumber'], { n: order.id })}</p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{fmt.date(order.date)} • {tpl(t['dash.itemCount'], { n: fmt.num(order.itemCount) })}</p>
                         </div>
                       </Link>
 
                       <div className="flex items-center justify-between md:justify-end gap-6">
                         <div className="text-right">
-                          <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">وضعیت</p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">{t['dash.orders.status']}</p>
                           <StatusBadge status={order.paymentStatus === 'FAILED' ? 'PAYMENT_FAILED' : order.status} />
                         </div>
                         <div className="text-left">
-                          <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">مبلغ</p>
-                          <p className="font-DanaDemiBold text-gray-900 dark:text-white">{formatPrice(order.totalAmount)} ت</p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">{t['dash.col.amount']}</p>
+                          <p className="font-DanaDemiBold text-gray-900 dark:text-white">{fmt.price(order.totalAmount)} {t['common.tomanShort']}</p>
                         </div>
                       </div>
 
@@ -180,8 +185,8 @@ const OrdersPage = memo(function OrdersPage() {
                         >
                           <Check size={18} />
                           {deliverMutation.isPending && deliverMutation.variables === order.id
-                            ? 'در حال ثبت...'
-                            : 'تحویل گرفتم'}
+                            ? t['dash.orders.submitting']
+                            : t['dash.orders.confirmDelivery']}
                         </button>
                       )}
                     </div>
@@ -190,7 +195,7 @@ const OrdersPage = memo(function OrdersPage() {
               </div>
             ) : (
               <div className="text-center py-16 bg-gray-50 dark:bg-[#1a0a0e] rounded-xl border border-dashed border-gray-300 dark:border-white/5">
-                <p className="text-gray-400 dark:text-gray-500 font-DanaMedium">شما تاکنون سفارشی ثبت نکرده‌اید</p>
+                <p className="text-gray-400 dark:text-gray-500 font-DanaMedium">{t['dash.orders.empty']}</p>
               </div>
             )}
 
@@ -208,20 +213,20 @@ const OrdersPage = memo(function OrdersPage() {
         {/* ستون سمت چپ: باکس سود معرف */}
         <div className="lg:col-span-1">
           <div className="sticky top-6 bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-            <h2 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-4">سود همکاری در فروش</h2>
+            <h2 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-4">{t['dash.orders.referralProfitTitle']}</h2>
             {user.referrerCode ? (
               <div className="p-4 rounded-xl bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20">
-                <p className="text-sm text-gray-600 dark:text-gray-300 font-DanaMedium mb-2">مجموع سودی که با سفارش‌های شما به معرفتان رسیده است:</p>
-                <p className="font-MorabbaBold text-2xl text-green-600 dark:text-green-400">{formatPrice(user.totalReferralProfit)} <span className="text-sm font-DanaMedium">تومان</span></p>
+                <p className="text-sm text-gray-600 dark:text-gray-300 font-DanaMedium mb-2">{t['dash.orders.referralProfitDesc']}</p>
+                <p className="font-MorabbaBold text-2xl text-green-600 dark:text-green-400">{fmt.price(user.totalReferralProfit)} <span className="text-sm font-DanaMedium">{t['common.toman']}</span></p>
                 <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-500/20">
                   {/* اصلاح کلمه بلاابهام: "کد معرف شما" یعنی نفر بالایی */}
-                  <p className="text-xs text-gray-500 dark:text-gray-400">کد معرف شما:</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{t['dash.orders.yourReferrerCode']}</p>
                   <p className="font-DanaDemiBold text-gray-800 dark:text-white tracking-wider mt-1" dir="ltr">{user.referrerCode}</p>
                 </div>
               </div>
             ) : (
               <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-dashed border-gray-300 dark:border-white/5 text-center">
-                <p className="text-sm text-gray-400 dark:text-gray-500 font-DanaMedium">شما معرفی‌ای نداشته‌اید.</p>
+                <p className="text-sm text-gray-400 dark:text-gray-500 font-DanaMedium">{t['dash.common.noReferrer']}</p>
               </div>
             )}
           </div>

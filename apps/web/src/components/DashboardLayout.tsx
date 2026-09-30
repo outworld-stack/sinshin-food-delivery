@@ -12,11 +12,13 @@ import { useRealLogout } from '#/hooks/shared/useRealLogout'
 import { DashboardLayoutSkeleton } from '#/components/LoadingSkeletons'
 import { User, Cart, Wallet, Pin, Discover2, Logout4, Menu, Package, X } from 'reicon-react'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
+import { useI18n } from '#/i18n'
 
 export function DashboardLayout() {
   const hydrated = useHydrated()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const navigate = useNavigate()
+  const { t } = useI18n()
   const activeOrderId = useAuthStore((state) => state.activeOrderId)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
@@ -43,11 +45,11 @@ export function DashboardLayout() {
   useActiveOrder(user?.allOrders)
 
   const menuItems: NavItem[] = [
-    { to: '/dashboard', label: 'پروفایل من', icon: <User size={20} />, exact: true },
-    { to: '/dashboard/orders', label: 'سفارشات من', icon: <Cart size={20} /> },
-    { to: '/dashboard/wallet', label: 'کیف پول', icon: <Wallet size={20} /> },
-    { to: '/dashboard/addresses', label: 'آدرس‌های من', icon: <Pin size={20} /> },
-    { to: '/dashboard/info', label: 'اطلاعات کاربری', icon: <Discover2 size={20} /> },
+    { to: '/dashboard', label: t['dash.nav.profile'], icon: <User size={20} />, exact: true },
+    { to: '/dashboard/orders', label: t['dash.nav.orders'], icon: <Cart size={20} /> },
+    { to: '/dashboard/wallet', label: t['dash.nav.wallet'], icon: <Wallet size={20} /> },
+    { to: '/dashboard/addresses', label: t['dash.nav.addresses'], icon: <Pin size={20} /> },
+    { to: '/dashboard/info', label: t['dash.nav.info'], icon: <Discover2 size={20} /> },
   ]
 
   return (
@@ -85,7 +87,7 @@ export function DashboardLayout() {
               className="mt-auto flex items-center gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors font-DanaMedium cursor-pointer"
             >
               <Logout4 size={20} />
-              خروج از حساب
+              {t['dash.logout']}
             </button>
           </aside>
 
@@ -98,7 +100,7 @@ export function DashboardLayout() {
                   to="/dashboard/orders/$orderId"
                   params={{ orderId: activeOrderId }}
                   className="relative flex items-center justify-center p-2 text-sm rounded-lg bg-green-50 dark:bg-green-500/10 text-green-500 hover:bg-green-100 dark:hover:bg-green-500/20 transition shadow-sm border border-green-200 dark:border-green-500/20"
-                  title="پیگیری سفارش"
+                  title={t['header.trackOrder']}
                 >
                   <Package size={20} />
                   <span className="absolute -top-1 -left-1 flex h-3 w-3">
@@ -154,7 +156,7 @@ export function DashboardLayout() {
                 className="mt-auto flex items-center gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors font-DanaMedium cursor-pointer"
               >
                 <Logout4 size={20} />
-                خروج از حساب
+                {t['dash.logout']}
               </button>
             </div>
           </div>

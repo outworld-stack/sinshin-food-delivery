@@ -274,6 +274,227 @@ export const fa = {
         'terms.scrollHint': 'برای فعال شدن چک‌باکس قوانین، متن را تا انتهای همین صفحه اسکرول کنید',
         'terms.version': 'نسخه',
         'terms.updated': 'به‌روزرسانی',
+
+        // ═══════════════════════════════════════════════════════════
+        // رارد ۳۳ — پنل کاربر (داشبورد) + کامپوننت‌های مشترک + صفحه‌بندی
+        // ═══════════════════════════════════════════════════════════
+
+        // ── عمومی (رارد ۳۳) ──
+        'common.save': 'ذخیره',
+        'common.saving': 'در حال ذخیره...',
+        'common.error': 'خطا',
+        'common.edit': 'ویرایش',
+        'common.delete': 'حذف',
+
+        // ── ناوبری داشبورد (رارد ۳۳) ──
+        'dash.nav.profile': 'پروفایل من',
+        'dash.nav.orders': 'سفارشات من',
+        'dash.nav.wallet': 'کیف پول',
+        'dash.nav.addresses': 'آدرس‌های من',
+        'dash.nav.info': 'اطلاعات کاربری',
+        'dash.logout': 'خروج از حساب',
+
+        // ── ستون‌های مشترک جدول‌ها (رارد ۳۳) ──
+        'dash.col.order': 'سفارش',
+        'dash.col.address': 'آدرس',
+        'dash.col.courier': 'پیک',
+        'dash.col.amount': 'مبلغ',
+        'dash.col.id': 'شناسه',
+        'dash.col.orders': 'سفارشات',
+        'dash.col.totalSpent': 'مجموع خرید',
+        'dash.col.profit': 'سود شما',
+
+        // ── رشته‌های مشترک داشبورد (رارد ۳۳) ──
+        'dash.itemCount': '{n} کالا',
+        'dash.orderNumber': 'سفارش شماره {n}',
+        'dash.delivery.pickup': 'بیرون‌بر (تحویل حضوری)',
+        'dash.delivery.dineIn': 'سرو در سالن',
+        'dash.common.noReferrer': 'شما معرفی‌ای نداشته‌اید.',
+
+        // ── خانه‌ی داشبورد (رارد ۳۳) ──
+        'dash.home.welcome': 'خوش آمدید، {n} 👋',
+        'dash.home.walletBalance': 'موجودی کیف پول',
+        'dash.home.phone': 'شماره موبایل',
+        'dash.home.recentOrders': 'سفارش‌های اخیر',
+        'dash.home.noOrders': 'شما هنوز سفارشی ثبت نکرده‌اید.',
+        'dash.home.startShopping': 'شروع خرید',
+        'dash.home.inviteFriends': 'دعوت دوستان',
+        'dash.home.inviteDesc':
+                'با ارسال این لینک به دوستانتان، هر بار که آن‌ها سفارشی ثبت کنند، درصدی از مبلغ سفارش آن‌ها در کیف پول شما شارژ می‌شود!',
+        'dash.home.printQr': 'پرینت QR کد',
+        'dash.home.yourInviteLink': 'لینک دعوت شما',
+        'dash.home.copyLink': 'کپی لینک',
+        'dash.home.linkCopied': 'لینک دعوت کپی شد!',
+        'dash.home.myReferrals': 'زیرمجموعه‌های من',
+        'dash.home.referralsHint': '۳ نفر آخر از زیرمجموعه‌های شما که اقدام به خرید کرده‌اند',
+        'dash.home.noReferralPurchases': 'تا کنون هیچ‌یک از زیرمجموعه‌های شما خریدی نکرده‌اند.',
+        'dash.home.printReferralText': 'کد معرف شما ، با احترام و عشق ، سین شین',
+
+        // ── سفارشات من (رارد ۳۳) ──
+        'dash.orders.subtitle': 'مشاهده و پیگیری تمامی سفارشات شما',
+        'dash.orders.count': 'تعداد سفارشات',
+        'dash.orders.totalSpent': 'مجموع پرداخت‌ها',
+        'dash.orders.history': 'تاریخچه سفارشات',
+        'dash.orders.sort.newest': 'جدیدترین',
+        'dash.orders.sort.oldest': 'قدیمی‌ترین',
+        'dash.orders.sort.expensive': 'گران‌ترین',
+        'dash.orders.sort.cheap': 'ارزان‌ترین',
+        'dash.orders.status': 'وضعیت',
+        'dash.orders.confirmDelivery': 'تحویل گرفتم',
+        'dash.orders.submitting': 'در حال ثبت...',
+        'dash.orders.empty': 'شما تاکنون سفارشی ثبت نکرده‌اید',
+        'dash.orders.referralProfitTitle': 'سود همکاری در فروش',
+        'dash.orders.referralProfitDesc': 'مجموع سودی که با سفارش‌های شما به معرفتان رسیده است:',
+        'dash.orders.yourReferrerCode': 'کد معرف شما:',
+        'dash.orders.deliverToast': 'تحویل سفارش ثبت شد',
+        'dash.orders.deliverFailed': 'ثبت تحویل ناموفق بود',
+
+        // ── جزئیات سفارش (رارد ۳۳) ──
+        'dash.orderDetail.backToOrders': 'بازگشت به سفارشات',
+        'dash.orderDetail.courierRoute': 'مسیر حرکت پیک',
+        'dash.orderDetail.details': 'جزئیات سفارش',
+        'dash.orderDetail.breakdownTitle': 'ریز مبلغ سفارش',
+        'dash.orderDetail.yourNote': 'یادداشت شما: ',
+        'dash.orderDetail.deliveryInfo': 'اطلاعات تحویل',
+        'dash.orderDetail.pickupNotice':
+                'سفارش شما از نوع تحویل حضوری است. با مراجعه به محل سین شین سفارش خود را تحویل بگیرید.',
+        'dash.orderDetail.deliveryAddress': 'آدرس تحویل',
+        'dash.orderDetail.searchingCourier': 'در حال جستجوی پیک برای ارسال سفارش شما هستیم...',
+        'dash.orderDetail.yourCourier': 'پیک سفارش شما',
+        'dash.orderDetail.callCourier': 'تماس با پیک',
+        'dash.orderDetail.deliveringCourier': 'پیک تحویل‌دهنده:',
+        'dash.orderDetail.waitingCourier': 'منتظر تخصیص پیک...',
+        'dash.orderDetail.referralProfit': 'سود معرف',
+        'dash.orderDetail.referralProfitDesc': 'سودی که از این سفارش به معرف شما رسیده است:',
+        'dash.orderDetail.referralProfitNote':
+                'این مبلغ صرفاً از بخش پرداخت آنلاین این سفارش محاسبه شده است.',
+
+        // ── بازخورد/نظر (رارد ۳۳) ──
+        'dash.feedback.title': 'بازخورد شما',
+        'dash.feedback.allDone':
+                'برای تمام محصولات این سفارش نظر ثبت شد. پس از بررسی، در صفحه‌ی محصول نمایش داده می‌شود.',
+        'dash.feedback.formTitle': 'نظر شما درباره این سفارش',
+        'dash.feedback.formDesc':
+                'برای هر محصول می‌توانید یک نظر ثبت کنید — نظرها پس از بررسی در صفحه‌ی همان محصول نمایش داده می‌شوند.',
+        'dash.feedback.placeholder': 'تجربه‌تان از این محصول را با ما و دیگر مشتریان به اشتراک بگذارید...',
+        'dash.feedback.sending': 'در حال ارسال...',
+        'dash.feedback.submit': 'ارسال نظر',
+        'dash.feedback.nothingLeft': 'محصول قابل نظردادن باقی نمانده است.',
+        'dash.feedback.thanksToast': 'از اینکه نظرتان را با ما به اشتراک گذاشتید ممنونیم',
+
+        // ── آدرس‌ها (رارد ۳۳) ──
+        'dash.addresses.subtitle': 'آدرس‌های خود را برای تحویل سفارشات مدیریت کنید.',
+        'dash.addresses.newAddress': 'آدرس جدید',
+        'dash.addresses.empty': 'شما هنوز آدرسی ثبت نکرده‌اید.',
+        'dash.addresses.addFirst': 'ثبت اولین آدرس',
+        'dash.addresses.deleteTitle': 'حذف آدرس',
+        'dash.addresses.deleteConfirm': 'آیا از حذف این آدرس مطمئن هستید؟',
+        'dash.addresses.coords': 'مختصات:',
+        'dash.addresses.editTitle': 'ویرایش آدرس',
+        'dash.addresses.addTitle': 'افزودن آدرس جدید',
+        'dash.addresses.editedToast': 'آدرس با موفقیت ویرایش شد',
+        'dash.addresses.addedToast': 'آدرس جدید با موفقیت اضافه شد',
+        'dash.addresses.deletedToast': 'آدرس حذف شد',
+        'dash.addresses.pickLocationError': 'لطفاً موقعیت را روی نقشه انتخاب کنید',
+        'dash.addresses.titleLabel': 'عنوان',
+        'dash.addresses.titlePlaceholder': 'مثلاً: خانه، محل کار',
+        'dash.addresses.addressLabel': 'آدرس دقیق',
+        'dash.addresses.addressPlaceholder': 'خیابان، کوچه، پلاک و...',
+
+        // ── اطلاعات کاربری (رارد ۳۳) ──
+        'dash.info.userPrefix': 'کاربر {n}',
+        'dash.info.firstName': 'نام',
+        'dash.info.firstNamePlaceholder': 'مثال: علی',
+        'dash.info.lastName': 'نام خانوادگی',
+        'dash.info.lastNamePlaceholder': 'مثال: رضایی',
+        'dash.info.email': 'ایمیل',
+        'dash.info.saveChanges': 'ذخیره تغییرات',
+        'dash.info.savedToast': 'اطلاعات شما با موفقیت ذخیره شد',
+        'dash.info.devicesTitle': 'دستگاه‌های متصل',
+        'dash.info.devicesDesc':
+                'بر اساس قوانین امنیتی سین‌شین، هر دستگاه فقط می‌تواند با یک شماره موبایل ثبت‌نام کند و امکان ثبت‌نام با شماره جدید روی همین دستگاه وجود ندارد.',
+        'dash.info.lastActive': 'آخرین فعالیت:',
+        'dash.info.currentDevice': 'دستگاه فعلی',
+
+        // ── کیف پول (رارد ۳۳) ──
+        'dash.wallet.title': 'کیف پول من',
+        'dash.wallet.subtitle': 'مدیریت موجودی و تراکنش‌های مالی',
+        'dash.wallet.currentBalance': 'موجودی فعلی شما',
+        'dash.wallet.chargeNote':
+                'کیف پول سین‌شین فقط از طریق سود معرفی دوستان شارژ می‌شود و امکان افزایش آن از درگاه پرداخت وجود ندارد.',
+        'dash.wallet.totalInviteProfit': 'سود کلی از دعوت',
+        'dash.wallet.referralsCount': 'تعداد زیرمجموعه‌ها',
+        'dash.wallet.recentTxs': 'تراکنش‌های اخیر',
+        'dash.wallet.noTxs': 'تراکنشی یافت نشد.',
+        'dash.wallet.noReferrals': 'کسی با کد شما ثبت‌نام نکرده است.',
+        'dash.wallet.sort.newest': 'جدیدترین',
+        'dash.wallet.sort.oldest': 'قدیمی‌ترین',
+        'dash.wallet.sort.highest': 'بیشترین مبلغ',
+        'dash.wallet.sort.lowest': 'کمترین مبلغ',
+        'dash.wallet.sort.income': 'ورودی (درآمد)',
+        'dash.wallet.sort.expense': 'خروجی (هزینه)',
+
+        // ── ثبت معرف (رارد ۳۳) ──
+        'dash.referral.scanButton': 'اسکن کد معرف',
+        'dash.referral.codeAria': 'کد معرف',
+        'dash.referral.submitAria': 'ثبت کد معرف',
+        'dash.referral.desc':
+                'QR کد معرف دوستتان را اسکن کنید یا کد را دستی وارد کنید — از لحظه‌ی ثبت، درصدی از مبلغ سفارش‌های او در کیف پول شما شارژ می‌شود. ثبت معرف فقط یک‌بار امکان‌پذیر است.',
+        'dash.referral.applying': 'در حال ثبت معرف...',
+        'dash.referral.appliedToast': 'معرف شما ثبت شد: {n}',
+        'dash.referral.applyFailed': 'ثبت معرف ناموفق بود',
+        'dash.referral.qrNotFound': 'کد معرف در این QR پیدا نشد',
+        'dash.referral.invalidCode': 'کد معرف معتبر نیست',
+        'dash.referral.scanHint':
+                'کد QR معرف را از صفحه‌ی «دعوت دوستان» دوستتان جلوی دوربین بگیرید؛ اگر دوربین در دسترس نبود، عکس کد را بارگذاری کنید.',
+
+        // ── صفحه‌بندی (رارد ۳۳) ──
+        'pagination.showing': 'نمایش',
+        'pagination.to': 'تا',
+        'pagination.of': 'از',
+        'pagination.items': 'مورد',
+        'pagination.itemCount': '{n} مورد',
+
+        // ── ریز مبلغ فاکتور (رارد ۳۳) ──
+        'bd.defaultTitle': 'ریز مبلغ فاکتور',
+        'bd.free': 'رایگان',
+        'bd.paidOnline': 'پرداخت آنلاین:',
+
+        // ── وضعیت سفارش — دید مشتری (رارد ۳۳) ──
+        'status.PENDING_PAYMENT': 'در انتظار پرداخت',
+        'status.PAID': 'پرداخت شده',
+        'status.CONFIRMED': 'تایید شد',
+        'status.ON_THE_WAY': 'در مسیر',
+        'status.DELIVERED': 'تحویل شد',
+        'status.PAYMENT_FAILED': 'پرداخت ناموفق',
+        'status.unknown': 'نامشخص',
+
+        // ── fallback روت (رارد ۳۳) ──
+        'rf.errorTitle': 'خطایی رخ داد!',
+        'rf.errorUnknown': 'خطای ناشناخته',
+        'rf.errorDesc': 'مشکلی در بارگذاری این صفحه پیش آمد. لطفاً دوباره تلاش کنید.',
+        'rf.home': 'صفحه اصلی',
+        'rf.notFoundCode': '۴۰۴',
+        'rf.notFoundTitle': 'صفحه مورد نظر پیدا نشد!',
+        'rf.notFoundDesc': 'ممکن است این صفحه حذف شده یا آدرس اشتباه باشد.',
+        'rf.goProducts': 'رفتن به محصولات',
+        'rf.loading': 'در حال بارگذاری',
+
+        // ── اسکنر QR (رارد ۳۳) ──
+        'qr.starting': 'در حال راه‌اندازی دوربین...',
+        'qr.cameraDenied':
+                'دسترسی به دوربین رد شد — از تنظیمات مرورگر اجازهٔ دوربین را روشن کنید یا عکس کد را بارگذاری کنید.',
+        'qr.cameraNotFound': 'دوربینی یافت نشد — می‌توانید عکس کد را بارگذاری کنید.',
+        'qr.cameraFailed': 'راه‌اندازی دوربین ممکن نشد — عکس کد را بارگذاری کنید.',
+        'qr.uploadPhoto': 'بارگذاری عکس کد',
+        'qr.fileNoCode': 'کدی در این عکس پیدا نشد — عکس واضح‌تری از کد بگیرید.',
+        'qr.fileReadError': 'خواندن عکس ممکن نشد.',
+
+        // ── نقشه (رارد ۳۳) ──
+        'map.pickLocation': 'انتخاب موقعیت روی نقشه',
+        'map.noKeyWarning': 'کلید نقشه‌ی نشان تنظیم نشده — می‌توانید مختصات را دستی وارد کنید، یا',
+        'map.lat': 'عرض جغرافیایی (lat)',
+        'map.lng': 'طول جغرافیایی (lng)',
 } as const
 
 /** کلیدها از fa؛ مقادیر گسترده به string تا ar بتواند مقدار خودش را بگذارد */

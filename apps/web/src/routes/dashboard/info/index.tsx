@@ -9,10 +9,12 @@ import { ProfileForm } from '#/components/dashboard/info/ProfileForm'
 import { DevicesSection } from '#/components/dashboard/info/DevicesSection'
 import { UserInfoSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { tpl, useI18n } from '#/i18n'
 
 
 const UserInfoPage = memo(function UserInfoPage() {
   const { data: user, isLoading } = useQuery(userProfileOptions)
+  const { t } = useI18n()
 
   const page = useUserInfoPage(
     user ? {
@@ -28,8 +30,8 @@ const UserInfoPage = memo(function UserInfoPage() {
   return (
     <div className="max-w-3xl space-y-8">
       <div>
-        <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">اطلاعات کاربری</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium">کاربر {user.phone}</p>
+        <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">{t['dash.nav.info']}</h1>
+        <p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium">{tpl(t['dash.info.userPrefix'], { n: user.phone })}</p>
       </div>
 
       <ProfileForm

@@ -1,5 +1,6 @@
 // src/components/Pagination.tsx
 import type { PaginationProps } from '#/types/shared/ui'
+import { tpl, useI18nSafe } from '#/i18n'
 // آیکون‌های فلش (اگه ارور دادن، با اسم‌های مشابه تو پکیجت عوض کن)
 import { AnglesRight , ChevronRight, ChevronLeft, AnglesLeft } from 'reicon-react'
 
@@ -24,6 +25,9 @@ function getSmartPages(currentPage: number, totalPages: number): (number | strin
 }
 
 export function Pagination({ currentPage, totalPages, itemsPerPage, totalItems, onPageChange, onItemsPerPageChange, pageSizeOptions = [5, 10, 20, 50] }: PaginationProps) {
+  // رارد ۳۳ — دوزبانه با useI18nSafe: مصرف‌کنندگان ادمین (بدون Provider)
+  // همان فارسی/ارقام فارسی قبل را می‌بینند؛ داشبورد و سایت دوزبانه.
+  const { t, fmt } = useI18nSafe()
   if (totalPages <= 1 && !onItemsPerPageChange) return null;
 
   const pages = getSmartPages(currentPage, totalPages);
@@ -35,7 +39,7 @@ export function Pagination({ currentPage, totalPages, itemsPerPage, totalItems, 
       {totalItems && itemsPerPage && (
         <div className="flex items-center gap-2 w-full lg:w-auto justify-center lg:justify-start">
           <span className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium whitespace-nowrap">
-            نمایش {startItem.toLocaleString('fa-IR')} تا {endItem.toLocaleString('fa-IR')} از {totalItems.toLocaleString('fa-IR')} مورد
+            {t['pagination.showing']} {fmt.num(startItem)} {t['pagination.to']} {fmt.num(endItem)} {t['pagination.of']} {fmt.num(totalItems)} {t['pagination.items']}
           </span>
           {onItemsPerPageChange && (
             <select 
@@ -44,7 +48,7 @@ export function Pagination({ currentPage, totalPages, itemsPerPage, totalItems, 
               className="px-1.5 py-1 rounded-lg bg-gray-100 dark:bg-[#1a0a0e] border border-gray-200 dark:border-white/10 text-xs text-gray-600 dark:text-gray-300 outline-none cursor-pointer"
             >
               {pageSizeOptions.map(num => (
-                <option key={num} value={num}>{num.toLocaleString('fa-IR')} مورد</option>
+                <option key={num} value={num}>{tpl(t['pagination.itemCount'], { n: fmt.num(num) })}</option>
               ))}
             </select>
           )}
@@ -74,7 +78,7 @@ export function Pagination({ currentPage, totalPages, itemsPerPage, totalItems, 
                     : 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c]'
                 }`}
               >
-                {(page as number).toLocaleString('fa-IR')}
+                {fmt.num(page as number)}
               </button>
             );
           })}

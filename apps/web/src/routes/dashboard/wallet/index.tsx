@@ -10,6 +10,7 @@ import { ReferralsList } from '#/components/dashboard/wallet/ReferralsList'
 import { TransactionsList } from '#/components/dashboard/wallet/TransactionsList'
 import { WalletSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { useI18n } from '#/i18n'
 
 
 export const Route = createFileRoute('/dashboard/wallet/')({
@@ -45,6 +46,7 @@ function WalletPage() {
   // پروفایل کلاینت‌محور — staleTime از فکتوری (۶۰s)؛
   // loader همین کلید را هنگام هاور پر کرده
   const { data: user, isLoading } = useQuery(userProfileOptions)
+  const { t } = useI18n()
 
   const page = useWalletPage(
     user?.walletTransactions ?? [],
@@ -57,8 +59,8 @@ function WalletPage() {
 
   return (
     <div className="max-w-6xl">
-      <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-2">کیف پول من</h1>
-      <p className="text-gray-500 dark:text-gray-400 mb-8 font-DanaMedium">مدیریت موجودی و تراکنش‌های مالی</p>
+      <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-2">{t['dash.wallet.title']}</h1>
+      <p className="text-gray-500 dark:text-gray-400 mb-8 font-DanaMedium">{t['dash.wallet.subtitle']}</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ستون راست: کارت موجودی (آیتم ۱۲: بدون شارژ) */}

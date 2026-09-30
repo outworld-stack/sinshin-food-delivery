@@ -5,6 +5,7 @@ import { DashboardLayout } from '#/components/DashboardLayout'
 import { DashboardLayoutSkeleton } from '#/components/LoadingSkeletons'
 import { useAuthStore, ensureAuthHydrated } from '#/stores/authStore'
 import { ensureSession, hasSession } from '#/lib/auth-session'
+import { I18nProvider } from '#/i18n'
 
 export const Route = createFileRoute('/dashboard')({
   ssr: false,
@@ -22,5 +23,16 @@ export const Route = createFileRoute('/dashboard')({
       throw redirect({ to: '/login', search: { redirect: location.href } })
     }
   },
-  component: DashboardLayout,
+  // رارد ۳۳ — پنل کاربر دوزبانه شد: Provider در ریشه‌ی همین لایوت می‌نشیند
+  // (الگوی لندینگ/ورود از رارد ۳۱ و سایت از رارد ۳۲). زبان از beforeLoad
+  // ریشه می‌آید (کوکی sinshin-lang)؛ ادمین/ادمین₂/پیک Provider ندارند و
+  // فارسیِ خالص می‌مانند — همان تصمیم ۱ کاربر.
+  component: function DashboardShell() {
+    const { lang } = Route.useRouteContext()
+    return (
+      <I18nProvider initialLang={lang ?? 'fa'}>
+        <DashboardLayout />
+      </I18nProvider>
+    )
+  },
 })

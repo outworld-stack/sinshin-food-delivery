@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { updateUserProfile } from '#/server/user'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
+import { useI18n } from '#/i18n'
 
 // --- State: فرم پروفایل + پرچم ویرایش ---
 interface UserInfoState {
@@ -40,6 +41,7 @@ export function useUserInfoPage(profile: {
   const [state, dispatch] = useReducer(userInfoReducer, initialUserInfoState)
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
+  const { t } = useI18n()
 
   // سینک از سرور فقط وقتی کاربر دست نزده — ویرایش‌ها امن می‌مونن
   useEffect(() => {
@@ -64,7 +66,7 @@ export function useUserInfoPage(profile: {
       updateUserProfile(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.userProfile })
-      showToast('اطلاعات شما با موفقیت ذخیره شد')
+      showToast(t['dash.info.savedToast'])
       dispatch({ type: 'MARK_SAVED' })   // ⬅ بعد ذخیره، اجازه‌ی سینک مجدد با داده‌ی تازه
     },
   })

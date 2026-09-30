@@ -2,7 +2,7 @@
 import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ArrowDown, ArrowUp } from 'reicon-react'
-import { formatPrice, formatDate } from '#/utils/format'
+import { useI18n } from '#/i18n'
 import type { TransactionRowData } from '#/types/dashboard/wallet'
 
 interface TransactionRowProps {
@@ -10,6 +10,7 @@ interface TransactionRowProps {
 }
 
 export const TransactionRow = memo(function TransactionRow({ tx }: TransactionRowProps) {
+  const { t, fmt } = useI18n()
   const isDeposit = tx.type === 'DEPOSIT'
 
   // محتوا — تراکنش سفارش‌دار → لینک به سفارش
@@ -24,7 +25,7 @@ export const TransactionRow = memo(function TransactionRow({ tx }: TransactionRo
       </span>
       <div>
         <p className="font-DanaMedium text-gray-800 dark:text-white text-sm">{tx.description}</p>
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{formatDate(tx.date)}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{fmt.date(tx.date)}</p>
       </div>
     </>
   )
@@ -42,7 +43,7 @@ export const TransactionRow = memo(function TransactionRow({ tx }: TransactionRo
       )}
 
       <span className={`font-DanaDemiBold ${isDeposit ? 'text-green-500' : 'text-red-500'}`}>
-        {isDeposit ? '+ ' : '- '}{formatPrice(tx.amount)} ت
+        {isDeposit ? '+ ' : '- '}{fmt.price(tx.amount)} {t['common.tomanShort']}
       </span>
     </div>
   )

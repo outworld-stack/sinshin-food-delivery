@@ -1,5 +1,6 @@
 // src/components/shared/StatusBadge.tsx
 import { memo } from 'react'
+import { useI18nSafe } from '#/i18n'
 
 // منبع واحد وضعیت‌های سفارش — همه‌جا فقط از همین خونده شه
 // نکته: «لغو» دیگه وجود نداره — تنها پایان ناموفق، «پرداخت ناموفق»ئه (تصمیم پرسش ۴)
@@ -67,10 +68,27 @@ export const StatusBadge = memo(function StatusBadge({
   perspective = 'user',
   size = 'md',
 }: StatusBadgeProps) {
+  const { lang, t } = useI18nSafe()
   const entry = ORDER_STATUS_CONFIG[status as OrderStatusKey]
   // وضعیت ناشناخته → خنثی؛ دیگه وانمودِ «پرداخت شده» نمی‌شه
-  const label = entry ? entry[perspective] : 'نامشخص'
+  let label = entry ? entry[perspective] : 'نامشخص'
   const color = entry?.color ?? 'bg-gray-100 text-gray-500 dark:bg-gray-500/10 dark:text-gray-500'
+
+  // رارد ۳۳ — دیدِ مشتری در حالت عربی: دیکشنری. بقیه‌ی حالت‌ها (ادمین/پیک —
+  // بدون Provider، یا دید ادمین) همان فارسی‌ی قبل را می‌بینند؛ پنل ادمین
+  // Provider ندارد و useI18nSafe فارسی برمی‌گرداند → رفتار صفر-تغییر.
+  if (lang === 'ar' && perspective === 'user') {
+    const AR_USER: Record<OrderStatusKey, string> = {
+      PENDING_PAYMENT: t['status.PENDING_PAYMENT'],
+      PAID: t['status.PAID'],
+      CONFIRMED: t['status.CONFIRMED'],
+      ON_THE_WAY: t['status.ON_THE_WAY'],
+      DELIVERED: t['status.DELIVERED'],
+      PAYMENT_FAILED: t['status.PAYMENT_FAILED'],
+      CANCELED: t['status.PAYMENT_FAILED'], // داده‌های موک — نمایش همان «فشل الدفع»
+    }
+    label = AR_USER[status as OrderStatusKey] ?? t['status.unknown']
+  }
 
   const sizeCls = size === 'sm'
     ? 'text-[10px] font-DanaDemiBold px-2 py-0.5'

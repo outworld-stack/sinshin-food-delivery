@@ -1,5 +1,6 @@
 // src/components/dashboard/info/ProfileForm.tsx
 import { memo, useCallback } from 'react'
+import { useI18n } from '#/i18n'
 
 interface ProfileFormProps {
   phone: string
@@ -12,6 +13,7 @@ interface ProfileFormProps {
 export const ProfileForm = memo(function ProfileForm({
   phone, state, isPending, onFieldChange, onSubmit,
 }: ProfileFormProps) {
+  const { t } = useI18n()
   const handleFirst = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onFieldChange('firstName', e.target.value), [onFieldChange])
   const handleLast = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onFieldChange('lastName', e.target.value), [onFieldChange])
   const handleEmail = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onFieldChange('email', e.target.value), [onFieldChange])
@@ -27,23 +29,23 @@ export const ProfileForm = memo(function ProfileForm({
     >
       {/* موبایل — قفل (تغییرپذیر نیست) */}
       <div>
-        <label className={labelCls}>شماره موبایل</label>
+        <label className={labelCls}>{t['dash.home.phone']}</label>
         <input type="tel" value={phone} disabled className="w-full px-4 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-gray-500 dark:text-gray-500 cursor-not-allowed outline-none" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <label className={labelCls}>نام</label>
-          <input type="text" value={state.firstName} onChange={handleFirst} className={inputCls} placeholder="مثال: علی" />
+          <label className={labelCls}>{t['dash.info.firstName']}</label>
+          <input type="text" value={state.firstName} onChange={handleFirst} className={inputCls} placeholder={t['dash.info.firstNamePlaceholder']} />
         </div>
         <div>
-          <label className={labelCls}>نام خانوادگی</label>
-          <input type="text" value={state.lastName} onChange={handleLast} className={inputCls} placeholder="مثال: رضایی" />
+          <label className={labelCls}>{t['dash.info.lastName']}</label>
+          <input type="text" value={state.lastName} onChange={handleLast} className={inputCls} placeholder={t['dash.info.lastNamePlaceholder']} />
         </div>
       </div>
 
       <div>
-        <label className={labelCls}>ایمیل</label>
+        <label className={labelCls}>{t['dash.info.email']}</label>
         <input type="email" value={state.email} onChange={handleEmail} className={inputCls} placeholder="example@email.com" dir="ltr" />
       </div>
 
@@ -52,7 +54,7 @@ export const ProfileForm = memo(function ProfileForm({
         disabled={isPending}
         className="px-8 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition shadow-sm disabled:opacity-50 cursor-pointer"
       >
-        {isPending ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
+        {isPending ? t['common.saving'] : t['dash.info.saveChanges']}
       </button>
     </form>
   )
