@@ -1,6 +1,10 @@
 // src/components/admin/settings/DeliveryZonesManager.tsx
 // round-13 — ① آیکون ویرایش کنار حذف هر ردیف (ویرایش شعاع + هزینه)
 //             ② نمایش مبدأ محاسبه‌ی فاصله (مختصات رستوران از env/تنظیمات)
+// round-30 — min-w-0 روی اینپوت‌های flex (افزودن + ویرایش): بدون آن مرورگر عرض
+//             ذاتی input را حداقل می‌گیرد و در کارت نیم‌عرضِ گرید تنظیمات،
+//             دکمه‌ی «افزودن ناحیه» از کادر بیرون می‌زد؛ حالا اینپوت‌ها جمع
+//             می‌شوند و همه‌چیز داخل کارت می‌ماند.
 import { memo, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { addDeliveryZone, removeDeliveryZone, updateDeliveryZone } from '#/server/deliveryZones'
@@ -150,7 +154,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
                           placeholder="شعاع (کیلومتر)"
                           min="0.5"
                           step="0.5"
-                          className="flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-primary text-sm outline-none"
+                          className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-primary text-sm outline-none"
                         />
                         <input
                           type="number"
@@ -158,7 +162,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
                           onChange={(e) => setEditing(prev => prev ? { ...prev, fee: e.target.value } : prev)}
                           placeholder="هزینه (تومان)"
                           min="0"
-                          className="flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-primary text-sm outline-none"
+                          className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-primary text-sm outline-none"
                         />
                       </div>
                       <div className="flex gap-2">
@@ -232,14 +236,14 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
             )}
           </div>
 
-          {/* فرم افزودن */}
+          {/* فرم افزودن — round-30: min-w-0 تا اینپوت‌ها زیر عرض ذاتی جمع شوند و دکمه داخل کادر بماند */}
           <div className="mt-6 pt-4 border-t border-gray-100 dark:border-white/5 flex flex-col sm:flex-row gap-3">
             <input
               type="number"
               value={radiusInput}
               onChange={(e) => setRadiusInput(e.target.value)}
               placeholder="شعاع (کیلومتر) — مثلا 5"
-              className="flex-1 px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
+              className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
               min="0.5"
               step="0.5"
             />
@@ -248,7 +252,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
               value={feeInput}
               onChange={(e) => setFeeInput(e.target.value)}
               placeholder="هزینه (تومان) — مثلا 35000"
-              className="flex-1 px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
+              className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
               min="0"
             />
             <button
