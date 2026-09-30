@@ -8,9 +8,11 @@ import { GalleryLightbox } from '#/components/site/gallery/GalleryLightbox'
 import { GalleryPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { SITE_URL } from '#/lib/site'
+import { useI18n } from '#/i18n'
 
 const GalleryPage = memo(function GalleryPage() {
   const page = useGalleryPage()
+  const { t } = useI18n()
 
   // چیدمان: اولین wide عکس + بقیه — مشابه اصل کارفرما (۴+۸ بعد ۳×۳)
   const layout = useMemo(() => {
@@ -34,10 +36,10 @@ const GalleryPage = memo(function GalleryPage() {
         <div className="grid gap-2.5 lg:pb-16 pb-10">
           {/* سئو-۷: عنوان صفحه — از h2 به h1 ارتقا (تنها h1 صفحه) */}
           <h1 className="w-full text-center text-gray-900 dark:text-white text-4xl font-DanaDemiBold leading-normal">
-            سین شین ما
+            {t['gallery.title']}
           </h1>
           <div className="w-full text-center text-gray-600 dark:text-gray-400 text-lg font-DanaMedium leading-8">
-            با محیطی آرام آرامش چشیدن طعم غذای لذیذ ما را تجربه کنید
+            {t['gallery.subtitle']}
           </div>
         </div>
 

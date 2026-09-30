@@ -11,10 +11,12 @@ import { ProductsGrid } from '#/components/site/products/ProductsGrid'
 import { ProductsPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { SITE_URL } from '#/lib/site'
+import { useI18n } from '#/i18n'
 
 
 const ProductsPage = memo(function ProductsPage() {
   const page = useProductsPage()
+  const { t } = useI18n()
 
   if (page.isLoading) {
     return <ProductsPageSkeleton />
@@ -24,7 +26,7 @@ const ProductsPage = memo(function ProductsPage() {
     <div className="py-6 overflow-x-hidden">
       {/* سئو-۷: h1 صفحه — قبل از هر چیز، برای کرالر و وضوح کاربر */}
       <h1 className="font-DanaDemiBold text-2xl sm:text-3xl text-gray-900 dark:text-white mb-6">
-        منوی محصولات سین‌شین
+        {t['products.title']}
       </h1>
 
       {/* نوار تب موبایل: اینجا نیست — MainLayout رندرش می‌کنه */}

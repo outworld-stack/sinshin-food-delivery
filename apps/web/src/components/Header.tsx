@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Brand } from '#/components/Brand'
 import { ThemeToggle } from '#/components/ThemeToggle'
+import { LangSwitcher } from '#/components/LangSwitcher'
 import { useCartStore } from '#/stores/cartStore'
 import { useAuthStore } from '#/stores/authStore'
 import {
@@ -14,6 +15,7 @@ import { Cart, User, Package, Shield, Bell } from 'reicon-react'
 import { useHydrated } from '#/hooks/useHydrated'
 import { HeaderSkeleton } from '#/components/LoadingSkeletons'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
+import { useI18n } from '#/i18n'
 
 // round-14 — موبایل فیکس (گوشی‌های سامسونگ):
 //  • آیکون‌ها/پدینگ‌ها/گپ‌ها در سایز کوچک جمع‌وجورتر (آیکون 18px، p-2)
@@ -21,12 +23,15 @@ import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
 //    آیکون‌ها shrink-0 می‌مانند — با وجود هر ۵ آیکون (تم + پنل ادمین +
 //    سفارش فعال سبز + سبد + پروفایل) در عرض 360px هم به‌هم‌ریختگی نیست
 //  • ارتفاع موبایل 64px (قبلاً 80px) — فضای تنفسی برای ردیف فشرده
+// رارد ۳۲ — دوزبانه: متن‌ها/aria از دیکشنری + سوییچر زبان (جفت در دسکتاپ،
+//   تک‌دکمه در موبایل — تصمیم ۳) کنار آیکون تم.
 export const Header = memo(function Header() {
 	const hydrated = useHydrated()
 	const totalItems = useCartStore((state) => state.getTotalItems())
 	const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 	const role = useAuthStore((state) => state.role)
 	const activeOrderId = useAuthStore((state) => state.activeOrderId)
+	const { t, fmt } = useI18n()
 
 	// Main فعال‌ها — فکتوری مرکزی (کلید یکسان با MainLayout و /products)
 	const { data: activeMains } = useQuery(activeMainCategoriesOptions)
@@ -76,14 +81,22 @@ export const Header = memo(function Header() {
 					<div className="flex items-center justify-end gap-1.5 sm:gap-3 md:gap-4 shrink-0">
 						<ThemeToggle />
 
+						{/* رارد ۳۲ — سوییچر زبان: جفت «فا/ع» در دسکتاپ، تک‌دکمه در موبایل (تصمیم ۳) */}
+						<div className="hidden md:flex">
+							<LangSwitcher />
+						</div>
+						<div className="md:hidden">
+							<LangSwitcher variant="single" />
+						</div>
+
 						{/* پنل‌ها + پیگیری سفارش + پروفایل — فقط isAuthenticated */}
 						{isAuthenticated && (
 							<>
 								{role === 'admin' && (
 									<Link
 										to="/admin"
-										aria-label="پنل مدیریت"
-										title="پنل مدیریت"
+										aria-label={t['header.adminPanel']}
+										title={t['header.adminPanel']}
 										className="p-2 sm:p-2.5 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary hover:bg-primary/20 transition font-DanaMedium shadow-sm"
 									>
 										<Shield size={20} className={ico} />
@@ -92,8 +105,8 @@ export const Header = memo(function Header() {
 								{role === 'admin2' && (
 									<Link
 										to="/admin/admin2/live-orders"
-										aria-label="پنل سفارشات"
-										title="پنل سفارشات"
+										aria-label={t['header.ordersPanel']}
+										title={t['header.ordersPanel']}
 										className="p-2 sm:p-2.5 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary hover:bg-primary/20 transition font-DanaMedium shadow-sm"
 									>
 										<Bell size={20} className={ico} />
@@ -104,8 +117,8 @@ export const Header = memo(function Header() {
 									<Link
 										to="/dashboard/orders/$orderId"
 										params={{ orderId: activeOrderId }}
-										aria-label="پیگیری سفارش"
-										title="پیگیری سفارش"
+										aria-label={t['header.trackOrder']}
+										title={t['header.trackOrder']}
 										className="relative flex items-center justify-center p-2 sm:p-2.5 text-sm rounded-lg bg-green-50 dark:bg-green-500/10 text-green-500 hover:bg-green-100 dark:hover:bg-green-500/20 transition font-DanaMedium shadow-sm border border-green-200 dark:border-green-500/20"
 									>
 										<Package
@@ -124,7 +137,7 @@ export const Header = memo(function Header() {
 						{/* ⬇️ سبد — همیشه، بدون هیچ شرطی */}
 						<Link
 							to="/cart"
-							aria-label="سبد خرید"
+							aria-label={t['header.cart']}
 							className="relative flex items-center gap-1.5 sm:gap-2 px-2.5 py-2 sm:px-5 sm:py-2.5 text-sm rounded-lg bg-gray-100 dark:bg-[#2a1015] text-primary dark:text-dark-primary hover:bg-gray-200 dark:hover:bg-[#3a151c] transition font-DanaMedium shadow-sm border border-gray-200 dark:border-white/10"
 						>
 							<Cart
@@ -133,21 +146,21 @@ export const Header = memo(function Header() {
 							/>
 							{totalItems > 0 && (
 								<span className="absolute -top-1.5 -left-1.5 sm:-top-2 sm:-left-2 bg-primary dark:bg-dark-primary text-white text-[10px] sm:text-xs w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded-full font-DanaDemiBold shadow-md">
-									{totalItems.toLocaleString('fa-IR')}
+									{fmt.num(totalItems)}
 								</span>
 							)}
-							<span className="hidden sm:inline">سبد خرید</span>
+							<span className="hidden sm:inline">{t['header.cart']}</span>
 						</Link>
 
 						{/* پروفایل — لاگین → داشبورد / مهمان → ورود */}
 						<Link
 							to={isAuthenticated ? '/dashboard' : '/login'}
-							aria-label={isAuthenticated ? 'پروفایل' : 'ورود / ثبت‌نام'}
+							aria-label={isAuthenticated ? t['header.profile'] : t['header.auth']}
 							className="flex items-center gap-2 p-2 sm:px-5 sm:py-2.5 text-sm rounded-xl bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition font-DanaMedium shadow-sm"
 						>
 							<User size={20} className={ico} />
 							<span className="hidden sm:inline">
-								{isAuthenticated ? 'پروفایل' : 'ورود / ثبت‌نام'}
+								{isAuthenticated ? t['header.profile'] : t['header.auth']}
 							</span>
 						</Link>
 					</div>

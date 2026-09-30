@@ -5,6 +5,7 @@ import { useSearch, useNavigate } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { activeMainCategoriesOptions, productsByMainOptions } from '#/utils/queryOptions'
 import type { MainCategory, Category, Product } from '#/server/products'
+import { useI18n } from '#/i18n'
 
 // --- تایپ‌ها ---
 export const SORT_KEYS = ['newest', 'most-viewed', 'best-selling', 'fastest-prep', 'expensive', 'cheap'] as const
@@ -73,13 +74,23 @@ function sortProducts(products: Product[], sortBy: SortKey): Product[] {
 }
 
 // --- گزینه‌های سورت (صادرشده — فیلترهای دسکتاپ/موبایل import می‌کنن) ---
-export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-  { key: 'newest', label: 'جدیدترین' },
-  { key: 'most-viewed', label: 'پربازدیدترین' },
-  { key: 'best-selling', label: 'پرفروش‌ترین' },
-  { key: 'fastest-prep', label: 'سریع‌ترین آماده‌سازی' },
-  { key: 'expensive', label: 'گران‌ترین' },
-  { key: 'cheap', label: 'ارزان‌ترین' },
+// رارد ۳۲ — برچسب‌ها به labelKey تبدیل شدند؛ کامپوننت‌ها t[option.labelKey]
+// رندر می‌کنند تا با تعویض زبان همان لحظه عربی شوند (کلید ثابت است).
+export type ProductsSortLabelKey =
+  | 'products.sort.newest'
+  | 'products.sort.mostViewed'
+  | 'products.sort.bestSelling'
+  | 'products.sort.fastestPrep'
+  | 'products.sort.expensive'
+  | 'products.sort.cheap'
+
+export const SORT_OPTIONS: { key: SortKey; labelKey: ProductsSortLabelKey }[] = [
+  { key: 'newest', labelKey: 'products.sort.newest' },
+  { key: 'most-viewed', labelKey: 'products.sort.mostViewed' },
+  { key: 'best-selling', labelKey: 'products.sort.bestSelling' },
+  { key: 'fastest-prep', labelKey: 'products.sort.fastestPrep' },
+  { key: 'expensive', labelKey: 'products.sort.expensive' },
+  { key: 'cheap', labelKey: 'products.sort.cheap' },
 ]
 
 // --- هوک ---
@@ -87,6 +98,7 @@ export function useProductsPage() {
   const [state, dispatch] = useReducer(productsReducer, initialState)
   const search = useSearch({ from: '/products/' })
   const navigate = useNavigate()
+  const { t } = useI18n()
 
   // ⬅ سورت اعمال‌شده = URL — رفرش/بک/اشتراک‌گذاری حفظش می‌کنه
   const sortBy: SortKey = search.sort ?? DEFAULT_SORT
@@ -173,14 +185,14 @@ export function useProductsPage() {
 
   // آیتم‌های اسکرولر
   const scrollerItems = useMemo(() => [
-    { id: 'all', label: 'همه', isActive: activeCategory === 'all', onClick: () => handleCategoryClick('all') },
+    { id: 'all', label: t['common.all'], isActive: activeCategory === 'all', onClick: () => handleCategoryClick('all') },
     ...tabCategories.map((cat: Category) => ({
       id: cat.id,
       label: cat.name,
       isActive: activeCategory === cat.slug,
       onClick: () => handleCategoryClick(cat.slug),
     })),
-  ], [tabCategories, activeCategory, handleCategoryClick])
+  ], [tabCategories, activeCategory, handleCategoryClick, t])
 
   return {
     // shape قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن

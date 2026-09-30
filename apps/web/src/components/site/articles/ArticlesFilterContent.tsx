@@ -1,6 +1,7 @@
 // src/components/site/articles/ArticlesFilterContent.tsx
 import { memo, useCallback } from 'react'
 import type { SortBy } from '#/hooks/site/useArticlesPage'
+import { useI18n } from '#/i18n'
 
 interface SubCategoryOption {
   id: string
@@ -19,9 +20,10 @@ interface ArticlesFilterContentProps {
   onApply: () => void
 }
 
-const SORT_OPTIONS: { key: SortBy; label: string }[] = [
-  { key: 'newest', label: 'جدیدترین' },
-  { key: 'most-viewed', label: 'پربازدیدترین' },
+// رارد ۳۲ — برچسب سورت از labelKey دیکشنری؛ کلید سورت ثابت است
+const SORT_OPTIONS: { key: SortBy; labelKey: 'articles.sort.newest' | 'articles.sort.mostViewed' }[] = [
+  { key: 'newest', labelKey: 'articles.sort.newest' },
+  { key: 'most-viewed', labelKey: 'articles.sort.mostViewed' },
 ]
 
 // محتوای فیلتر — مشترک دسکتاپ/مودال موبایل (DRY)
@@ -30,6 +32,7 @@ export const ArticlesFilterContent = memo(function ArticlesFilterContent({
   isMobileModal = false,
   onTempSub, onTempSort, onApply,
 }: ArticlesFilterContentProps) {
+  const { t } = useI18n()
 
   const handleSort = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     onTempSort(e.target.value as SortBy)
@@ -44,10 +47,10 @@ export const ArticlesFilterContent = memo(function ArticlesFilterContent({
       {/* ساب‌کتگوری */}
       {hasSubCategories && (
         <div className="space-y-2">
-          <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-3">دسته‌بندی دقیق‌تر:</h3>
+          <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-3">{t['articles.subFilter']}</h3>
           <label className={optionCls}>
             <input type="radio" name="subCat" checked={tempSubCategory === 'all'} onChange={() => onTempSub('all')} className={inputCls} />
-            <span className="font-DanaMedium text-gray-600 dark:text-gray-300">همه موارد</span>
+            <span className="font-DanaMedium text-gray-600 dark:text-gray-300">{t['common.allItems']}</span>
           </label>
           {subCategories.map(sub => (
             <label key={sub.id} className={optionCls}>
@@ -60,12 +63,12 @@ export const ArticlesFilterContent = memo(function ArticlesFilterContent({
 
       {/* مرتب‌سازی */}
       <div className={`space-y-2 ${hasSubCategories ? 'pt-4 border-t border-gray-100 dark:border-white/5' : ''}`}>
-        <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-3">مرتب‌سازی بر اساس:</h3>
+        <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-3">{t['articles.sortBy']}</h3>
         {SORT_OPTIONS.map(option => (
           <label key={option.key} className={optionCls}>
             <input type="radio" name="sortBy" checked={tempSortBy === option.key} onChange={handleSort} className={inputCls} />
             <span className={`font-DanaMedium ${tempSortBy === option.key ? 'text-primary dark:text-dark-primary' : 'text-gray-600 dark:text-gray-300'}`}>
-              {option.label}
+              {t[option.labelKey]}
             </span>
           </label>
         ))}
@@ -74,7 +77,7 @@ export const ArticlesFilterContent = memo(function ArticlesFilterContent({
       {/* دکمه اعمال — فقط در مودال موبایل (دسکتاپ سایدبار persistente) */}
       {isMobileModal && (
         <button type="button" onClick={onApply} className="w-full mt-6 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium hover:opacity-90 transition cursor-pointer">
-          اعمال فیلترها
+          {t['articles.applyFilters']}
         </button>
       )}
     </div>

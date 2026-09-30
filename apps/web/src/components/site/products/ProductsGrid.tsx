@@ -3,6 +3,7 @@ import { memo } from 'react'
 import { ProductCard } from '#/components/ProductCard'
 import { EmptyState } from '#/components/EmptyState'
 import type { Product } from '#/server/products'
+import { useI18n } from '#/i18n'
 
 interface ProductsGridProps {
   products: Product[]
@@ -11,11 +12,13 @@ interface ProductsGridProps {
 }
 
 export const ProductsGrid = memo(function ProductsGrid({ products, hasMore, onLoadMore }: ProductsGridProps) {
+  const { t } = useI18n()
+
   if (products.length === 0) {
     return (
       <EmptyState
-        title="محصولی در این دسته یافت نشد"
-        description="در حال حاضر محصولی برای این دسته‌بندی موجود نیست."
+        title={t['products.emptyTitle']}
+        description={t['products.emptyDesc']}
       />
     )
   }
@@ -35,7 +38,7 @@ export const ProductsGrid = memo(function ProductsGrid({ products, hasMore, onLo
             onClick={onLoadMore}
             className="px-8 py-3 rounded-xl bg-gray-100 dark:bg-[#2a1015] text-gray-700 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer border border-gray-200 dark:border-white/10"
           >
-            مشاهده محصولات بیشتر
+            {t['products.loadMore']}
           </button>
         </div>
       )}

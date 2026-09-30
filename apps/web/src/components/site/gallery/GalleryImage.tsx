@@ -2,6 +2,7 @@
 import { memo, useCallback } from 'react'
 import type { GalleryImage as GalleryImageType } from '#/types/site/gallery'
 import { isRealImageUrl } from '#/utils/image'
+import { useI18n } from '#/i18n'
 
 interface GalleryImageProps {
 	image: GalleryImageType
@@ -13,6 +14,7 @@ export const GalleryImage = memo(function GalleryImage({
 	image,
 	onOpen,
 }: GalleryImageProps) {
+	const { t } = useI18n()
 	const handleClick = useCallback(() => {
 		onOpen(image.src, image.alt)
 	}, [onOpen, image.src, image.alt])
@@ -25,7 +27,7 @@ export const GalleryImage = memo(function GalleryImage({
 			type="button"
 			onClick={handleClick}
 			className="group relative w-full h-69.25 md:h-101 rounded-3xl overflow-hidden cursor-pointer bg-gray-100 dark:bg-[#1a0a0e]"
-			aria-label={`بزرگ‌نمایی: ${image.alt}`}
+			aria-label={`${t['gallery.zoom']}: ${image.alt}`}
 		>
 			{isReal ? (
 				<img

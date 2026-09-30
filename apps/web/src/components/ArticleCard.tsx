@@ -1,13 +1,18 @@
 // src/components/ArticleCard.tsx
 import { Link } from '@tanstack/react-router';
 import type { ArticleCardProps } from '#/types/shared/ui';
+import { useI18n } from '#/i18n';
 
+// رارد ۳۲ — تاریخ کارت دوزبانه: ارقام/ماه از locale زبان فعال (fa-IR / ar-EG)
 export function ArticleCard({ article }: ArticleCardProps) {
-  // استخراج روز، ماه و سال شمسی برای نمایش به سبک سین‌شین
+  const { lang } = useI18n()
+  const locale = lang === 'ar' ? 'ar-EG' : 'fa-IR'
+
+  // استخراج روز، ماه و سال برای نمایش به سبک سین‌شین
   const dateObj = new Date(article.publishedAt);
-  const day = dateObj.toLocaleDateString('fa-IR', { day: 'numeric' });
-  const month = dateObj.toLocaleDateString('fa-IR', { month: 'long' });
-  const year = dateObj.toLocaleDateString('fa-IR', { year: 'numeric' });
+  const day = dateObj.toLocaleDateString(locale, { day: 'numeric' });
+  const month = dateObj.toLocaleDateString(locale, { month: 'long' });
+  const year = dateObj.toLocaleDateString(locale, { year: 'numeric' });
 
   return (
     <div className="flex h-fit gap-x-2.5 sm:block p-2.5 md:pb-2 bg-gray-50 dark:bg-[#2a1015]/50 border border-gray-300 dark:border-[#3a151c] hover:shadow-md hover:shadow-gray-200/50 dark:hover:shadow-black/20 rounded-2xl transition-shadow duration-300">

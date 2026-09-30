@@ -4,13 +4,16 @@ import { EffectCards, Keyboard, Mousewheel, Pagination } from 'swiper/modules'
 import { Swiper, SwiperSlide } from 'swiper/react'
 import type { GalleryProps } from '#/types/shared/ui'
 import { isRealImageUrl } from '#/utils/image'
+import { useI18n, tpl } from '#/i18n'
 
 // استایل‌های خود Swiper
 import 'swiper/css'
 import 'swiper/css/effect-cards'
 import 'swiper/css/pagination'
 
+// رارد ۳۲ — alt دوزبانه («تصویر {n} گالری» با ارقام زبان فعال)
 export function Gallery({ images }: GalleryProps) {
+	const { t, fmt } = useI18n()
 	if (!images || images.length === 0) return null
 
 	return (
@@ -45,7 +48,7 @@ export function Gallery({ images }: GalleryProps) {
 						{isRealImageUrl(src) ? (
 							<img
 								src={src}
-								alt={`تصویر ${index + 1} گالری`}
+								alt={tpl(t['gallery.alt'], { n: fmt.num(index + 1) })}
 								loading="lazy"
 								decoding="async"
 								className="absolute inset-0 w-full h-full object-cover"

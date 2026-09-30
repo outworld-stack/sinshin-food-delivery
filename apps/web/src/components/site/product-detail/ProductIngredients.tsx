@@ -1,17 +1,19 @@
 // src/components/site/product-detail/ProductIngredients.tsx
 import { memo } from 'react'
+import { useI18n } from '#/i18n'
 
 interface ProductIngredientsProps {
   ingredients: string[]
 }
 
 export const ProductIngredients = memo(function ProductIngredients({ ingredients }: ProductIngredientsProps) {
+  const { t } = useI18n()
   if (ingredients.length === 0) return null
 
   return (
     <div className="mt-8 bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-300 dark:border-[#3a151c] shadow-sm">
       <h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-4 pb-4 border-b border-gray-100 dark:border-white/5">
-        محتویات محصول
+        {t['pdetail.ingredients']}
       </h3>
       <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {ingredients.map((ing) => (

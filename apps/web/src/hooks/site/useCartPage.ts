@@ -2,6 +2,7 @@
 import { useReducer, useCallback } from 'react'
 import { useCartStore } from '#/stores/cartStore'
 import { useToastStore } from '#/stores/toastStore'
+import { useI18n } from '#/i18n'
 
 interface CartPageState {
   isClearModalOpen: boolean
@@ -25,6 +26,7 @@ function cartPageReducer(state: CartPageState, action: CartPageAction): CartPage
 
 export function useCartPage() {
   const [state, dispatch] = useReducer(cartPageReducer, initialState)
+  const { t } = useI18n()
 
   const items = useCartStore((s) => s.items)
   const updateQuantity = useCartStore((s) => s.updateQuantity)
@@ -38,8 +40,8 @@ export function useCartPage() {
   const handleConfirmClear = useCallback(() => {
     clearCart()
     dispatch({ type: 'CONFIRM_CLEAR' })
-    showToast('سبد خرید خالی شد')
-  }, [clearCart, showToast])
+    showToast(t['cart.clearedToast'])
+  }, [clearCart, showToast, t])
 
   // هندلرها با کلید ردیف (محصول + سایز)
   const handleIncrement = useCallback((key: string, quantity: number) => {
@@ -53,8 +55,8 @@ export function useCartPage() {
 
   const handleRemove = useCallback((key: string) => {
     removeItem(key)
-    showToast('محصول از سبد حذف شد')
-  }, [removeItem, showToast])
+    showToast(t['cart.removedToast'])
+  }, [removeItem, showToast, t])
 
   return {
     state, items,

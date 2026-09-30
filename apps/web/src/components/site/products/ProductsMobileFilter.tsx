@@ -3,6 +3,7 @@ import { memo } from 'react'
 import { BottomSheet } from '#/components/shared/BottomSheet'
 import { SORT_OPTIONS, type SortKey } from '#/hooks/site/useProductsPage'
 import { SliderHorizontal } from 'reicon-react'
+import { useI18n } from '#/i18n'
 
 interface ProductsMobileFilterProps {
   isOpen: boolean
@@ -16,6 +17,8 @@ interface ProductsMobileFilterProps {
 export const ProductsMobileFilter = memo(function ProductsMobileFilter({
   isOpen, tempSortBy, onOpen, onClose, onApply, onTempSortChange,
 }: ProductsMobileFilterProps) {
+  const { t } = useI18n()
+
   return (
     <>
       {/* تریگر موبایل */}
@@ -25,15 +28,15 @@ export const ProductsMobileFilter = memo(function ProductsMobileFilter({
           onClick={onOpen}
           className="w-full flex items-center justify-between px-5 py-3 rounded-xl bg-white dark:bg-[#2a1015] text-gray-800 dark:text-white font-DanaMedium border border-gray-200 dark:border-[#3a151c] shadow-sm cursor-pointer"
         >
-          <span>فیلتر و مرتب‌سازی</span>
+          <span>{t['products.filterSort']}</span>
           <SliderHorizontal size={24} />
         </button>
       </div>
 
       {/* شیت پایین — نسخه مشترک (Escape + قفل اسکرول داره) */}
-      <BottomSheet isOpen={isOpen} onClose={onClose} title="فیلتر و مرتب‌سازی" hideOnDesktop="md:hidden">
+      <BottomSheet isOpen={isOpen} onClose={onClose} title={t['products.filterSort']} hideOnDesktop="md:hidden">
         <div className="space-y-4">
-          <h3 className="font-DanaDemiBold text-base text-gray-800 dark:text-white">مرتب‌سازی بر اساس:</h3>
+          <h3 className="font-DanaDemiBold text-base text-gray-800 dark:text-white">{t['products.sortBy']}</h3>
           <div className="flex flex-col gap-2">
             {SORT_OPTIONS.map((option) => (
               <label key={option.key} className="flex items-center gap-3 cursor-pointer p-3 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 transition">
@@ -45,7 +48,7 @@ export const ProductsMobileFilter = memo(function ProductsMobileFilter({
                   className="w-4 h-4 accent-primary dark:accent-dark-primary"
                 />
                 <span className={`font-DanaMedium ${tempSortBy === option.key ? 'text-primary dark:text-dark-primary' : 'text-gray-600 dark:text-gray-300'}`}>
-                  {option.label}
+                  {t[option.labelKey]}
                 </span>
               </label>
             ))}
@@ -56,7 +59,7 @@ export const ProductsMobileFilter = memo(function ProductsMobileFilter({
             onClick={onApply}
             className="w-full mt-6 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium cursor-pointer"
           >
-            اعمال فیلتر
+            {t['products.applyFilters']}
           </button>
         </div>
       </BottomSheet>

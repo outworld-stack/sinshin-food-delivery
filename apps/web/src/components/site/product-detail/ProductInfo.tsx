@@ -2,22 +2,26 @@
 import { memo } from 'react'
 import { Clock } from 'reicon-react'
 import type { Product } from '#/server/products'
+import { useI18n, tpl } from '#/i18n'
 
 interface ProductInfoProps {
   product: Product
 }
 
 // فقط با تغییر محصول رندر می‌شه
+// رارد ۳۲ — «آماده‌سازی در {n} دقیقه» با ارقام زبان فعال
 export const ProductInfo = memo(function ProductInfo({ product }: ProductInfoProps) {
+  const { t, fmt } = useI18n()
+
   return (
     <div className="flex flex-col">
       <div className="flex items-center gap-3 mb-4">
         <span className="px-3 py-1 rounded-full bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary text-xs font-DanaDemiBold">
-          {product.categoryName || 'دسته‌بندی'}
+          {product.categoryName || t['pdetail.category']}
         </span>
         <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 font-DanaMedium">
           <Clock size={14} />
-          آماده‌سازی در {product.prepTime} دقیقه
+          {tpl(t['pdetail.prepTime'], { n: fmt.num(product.prepTime) })}
         </span>
       </div>
 

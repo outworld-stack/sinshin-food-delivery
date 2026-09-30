@@ -13,10 +13,12 @@ import { RouteError } from '#/components/shared/RouteFallbacks'
 import { SITE_URL } from '#/lib/site'
 import { Filter } from 'reicon-react'
 import { BottomSheet } from '#/components/shared/BottomSheet'
+import { useI18n } from '#/i18n'
 
 
 const ArticlesPage = memo(function ArticlesPage() {
   const page = useArticlesPage()
+  const { t } = useI18n()
 
   // تریگر موبایل — هندلر پایدار
   const handleOpenMobileFilter = useCallback(() => page.handleOpenFilter(), [page.handleOpenFilter])
@@ -25,7 +27,7 @@ const ArticlesPage = memo(function ArticlesPage() {
     <div className="py-6">
       {/* سئو-۷: h1 صفحه — مقالات ایندکس‌شونده‌اند و ساختار عنوان لازم دارند */}
       <h1 className="font-DanaDemiBold text-2xl sm:text-3xl text-gray-900 dark:text-white mb-6">
-        مقالات سین‌شین
+        {t['articles.title']}
       </h1>
 
       {/* تریگر فیلتر موبایل */}
@@ -35,7 +37,7 @@ const ArticlesPage = memo(function ArticlesPage() {
           onClick={handleOpenMobileFilter}
           className="w-full flex items-center justify-between px-5 py-3 rounded-xl bg-white dark:bg-[#2a1015] text-gray-800 dark:text-white font-DanaMedium border border-gray-200 dark:border-[#3a151c] shadow-sm cursor-pointer"
         >
-          <span>فیلتر و مرتب‌سازی</span>
+          <span>{t['articles.filterSort']}</span>
           <Filter size={24} />
         </button>
       </div>
@@ -76,8 +78,8 @@ const ArticlesPage = memo(function ArticlesPage() {
               ))
             ) : (
               <EmptyState
-                title="مقاله‌ای یافت نشد"
-                description="در حال حاضر مقاله‌ای در این دسته‌بندی وجود ندارد."
+                title={t['articles.emptyTitle']}
+                description={t['articles.emptyDesc']}
               />
             )}
           </div>
@@ -90,7 +92,7 @@ const ArticlesPage = memo(function ArticlesPage() {
                 onClick={page.handleLoadMore}
                 className="px-8 py-3 rounded-xl bg-gray-100 dark:bg-[#2a1015] text-gray-700 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer border border-gray-200 dark:border-white/10"
               >
-                مشاهده مقالات بیشتر
+                {t['articles.loadMore']}
               </button>
             </div>
           )}
@@ -98,7 +100,7 @@ const ArticlesPage = memo(function ArticlesPage() {
       </div>
 
       {/* مودال فیلتر موبایل */}
-      <BottomSheet isOpen={page.state.isFilterOpen} onClose={page.handleCloseFilter} title="فیلترهای مقالات">
+      <BottomSheet isOpen={page.state.isFilterOpen} onClose={page.handleCloseFilter} title={t['articles.filtersTitle']}>
         <ArticlesFilterContent
           hasSubCategories={page.hasSubCategories}
           subCategories={page.subCategories}

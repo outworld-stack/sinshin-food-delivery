@@ -3,17 +3,20 @@ import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Brand } from '#/components/Brand'
 import { Instagram, Phone, Pin, Clock } from 'reicon-react'
+import { useI18n, tpl } from '#/i18n'
 
 // لینک‌های ثابت بیرون کامپوننت → بدون ری‌رندر مجدد در هر رندر
-const ABOUT_LINKS: { label: string; to: string }[] = [
-	// درباره ما و گالری هنوز صفحه ندارن، بعدا به لینک تبدیل می‌شن
-	{ label: 'درباره ما', to: '/about' },
-	{ label: 'گالری', to: '/gallery' },
-	{ label: 'مقالات', to: '/articles' },
+// (رارد ۳۲ — برچسب‌ها از دیکشنری می‌آیند؛ مسیرها ثابت‌اند)
+const ABOUT_LINKS: { key: 'footer.about' | 'footer.gallery' | 'footer.articles'; to: string }[] = [
+	{ key: 'footer.about', to: '/about' },
+	{ key: 'footer.gallery', to: '/gallery' },
+	{ key: 'footer.articles', to: '/articles' },
 ] as const
 
 // فوتر کاملا استاتیک → memo برای جلوگیری از هر ری‌رندر
 export const Footer = memo(function Footer() {
+	const { t, fmt } = useI18n()
+
 	return (
 		<footer className="bg-white dark:bg-[#1a0a0e] border-t border-gray-200 dark:border-white/10">
 			{/* نوار بالایی فوتر */}
@@ -23,8 +26,7 @@ export const Footer = memo(function Footer() {
 					<div className="flex flex-col items-center sm:items-start gap-5">
 						<Brand textSize="text-xl" />
 						<p className="text-sm text-gray-500 dark:text-gray-400 font-DanaRegular leading-relaxed text-center sm:text-right">
-							فودپارک سین شین؛ تجربه‌ای متفاوت از سفارش آنلاین غذا. طعم زندگی، درِ
-							خانه شما، در سریع‌ترین زمان ممکن.
+							{t['footer.brandDesc']}
 						</p>
 					</div>
 
@@ -34,21 +36,21 @@ export const Footer = memo(function Footer() {
 							className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-5 relative pb-2
                            after:absolute after:right-0 after:bottom-0 after:w-10 after:h-0.5 after:bg-primary dark:after:bg-dark-primary"
 						>
-							درباره ما
+							{t['footer.about']}
 						</h3>
 						<ul className="space-y-3">
 							{ABOUT_LINKS.map((item) => (
-								<li key={item.label}>
+								<li key={item.key}>
 									{item.to ? (
 										<Link
 											to={item.to}
 											className="text-sm text-gray-500 dark:text-gray-400 hover:text-primary dark:hover:text-dark-primary transition font-DanaMedium"
 										>
-											{item.label}
+											{t[item.key]}
 										</Link>
 									) : (
 										<span className="text-sm text-gray-400 dark:text-gray-500 font-DanaMedium select-none">
-											{item.label}
+											{t[item.key]}
 										</span>
 									)}
 								</li>
@@ -62,7 +64,7 @@ export const Footer = memo(function Footer() {
 							className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-5 relative pb-2
                            after:absolute after:right-0 after:bottom-0 after:w-10 after:h-0.5 after:bg-primary dark:after:bg-dark-primary"
 						>
-							تماس با ما
+							{t['footer.contact']}
 						</h3>
 						{/* round-14 — موبایل: w-fit کل بلوک تماس را هم‌عرضِ widest آیتم می‌کند؛
                 والد (items-center) بلوک را وسط می‌چیند و آیکون‌های همهٔ ردیف‌ها
@@ -73,7 +75,7 @@ export const Footer = memo(function Footer() {
 									<Pin size={16} />
 								</span>
 								<h2 className="text-sm font-MorabbaMedium bg-linear-to-l from-sky-500  to-emerald-500 bg-clip-text text-transparent ">
-									بندرانزلی ، کیلومتر یک پاسداران
+									{t['footer.address']}
 								</h2>
 							</li>
 							<li className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">
@@ -89,7 +91,7 @@ export const Footer = memo(function Footer() {
 							<li className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">
 								<a
 									href="https://www.instagram.com/sinshin_foodpark"
-									aria-label="اینستاگرام"
+									aria-label={t['footer.instagram']}
 									className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0 hover:opacity-80 transition"
 								>
 									<Instagram size={20} />
@@ -100,7 +102,7 @@ export const Footer = memo(function Footer() {
 								<span className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
 									<Clock size={16} />
 								</span>
-								<span>هر روز ۱۱ صبح تا ۱۲ شب</span>
+								<span>{t['footer.hours']}</span>
 							</li>
 						</ul>
 					</div>
@@ -111,10 +113,10 @@ export const Footer = memo(function Footer() {
 			<div className="border-t border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-[#150910]">
 				<div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
 					<p className="text-xs text-gray-400 dark:text-gray-500 font-DanaRegular">
-						© {new Date().getFullYear()} سین شین — تمامی حقوق محفوظ است
+						{tpl(t['footer.rights'], { n: fmt.num(new Date().getFullYear()) })}
 					</p>
 					<p className="text-xs text-gray-400 dark:text-gray-500 font-DanaRegular">
-						طراحی و توسعه با ❤️ در سین شین
+						{t['footer.madeWith']}
 					</p>
 				</div>
 			</div>

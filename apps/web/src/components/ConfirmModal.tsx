@@ -1,5 +1,7 @@
 // src/components/ConfirmModal.tsx
 
+import { useI18nSafe } from '#/i18n'
+
 interface ConfirmModalProps {
   isOpen: boolean;
   title: string;
@@ -8,7 +10,10 @@ interface ConfirmModalProps {
   onCancel: () => void;
 }
 
+// رارد ۳۲ — دوزبانه با useI18nSafe: ۱۴ مصرف‌کننده‌ی ادمین (خارج Provider)
+// همان فارسیِ قبلی را می‌بینند؛ مصرف‌کنندگان سایت دوزبانه.
 export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }: ConfirmModalProps) {
+  const { t } = useI18nSafe();
   if (!isOpen) return null;
 
   return (
@@ -21,8 +26,8 @@ export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }: Co
         <h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white">{title}</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
         <div className="flex gap-3 pt-2">
-          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium cursor-pointer hover:bg-gray-200 dark:hover:bg-[#3a151c] transition">انصراف</button>
-          <button onClick={onConfirm} className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-DanaDemiBold cursor-pointer hover:bg-red-600 transition">بله</button>
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium cursor-pointer hover:bg-gray-200 dark:hover:bg-[#3a151c] transition">{t['common.cancel']}</button>
+          <button onClick={onConfirm} className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-DanaDemiBold cursor-pointer hover:bg-red-600 transition">{t['common.yes']}</button>
         </div>
       </div>
     </div>

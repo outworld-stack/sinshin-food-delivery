@@ -8,6 +8,7 @@ import { checkoutPreviewOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { processCheckout, mockPay } from '#/server/checkout'
 import { PENDING_CHECKOUT_KEY } from '#/types/site/checkout'
+import { useI18n, tpl } from '#/i18n'
 import type {
   CheckoutCalculation,
   CheckoutSubmitPayload,
@@ -84,6 +85,8 @@ export function useCheckoutPage(deps: {
   const queryClient = useQueryClient()
   const setActiveOrderId = useAuthStore((s) => s.setActiveOrderId)
   const showToast = useToastStore((s) => s.showToast)
+  // رارد ۳۲ — توست‌ها/خطاهای دوزبانه؛ پیام‌های سرور تا رارد ۳۳ فارسی می‌مانند
+  const { t, fmt } = useI18n()
 
 
   // phase-fix: fallback برای مرورگرهای قدیمی (iOS < 15.4 / WebView ناامن) —
@@ -121,11 +124,13 @@ export function useCheckoutPage(deps: {
     if (!code || !c || announcedCoupon.current === code) return
     announcedCoupon.current = code
     if (c.valid) {
-      showToast(`کد تخفیف اعمال شد (${ c.discount.toLocaleString('fa-IR') } تومان)`)
+      showToast(tpl(t['checkout.couponApplied'], {
+        n: `${fmt.num(c.discount)} ${t['common.toman']}`,
+      }))
     } else {
-      showToast(c.message ?? 'کد تخفیف نامعتبر است', 'error')
+      showToast(c.message ?? t['checkout.couponInvalid'], 'error')
     }
-  }, [previewData?.coupon, state.couponCode, showToast])
+  }, [previewData?.coupon, state.couponCode, showToast, t, fmt])
 
   // خطای preview → کاربر بداند چرا ثبت قفل است
   useEffect(() => {
@@ -133,11 +138,11 @@ export function useCheckoutPage(deps: {
       showToast(
         previewError instanceof Error
           ? previewError.message
-          : 'خطا در محاسبه‌ی قیمت — دوباره تلاش کنید',
+          : t['checkout.priceError'],
         'error',
       )
     }
-  }, [isPreviewError, previewError, showToast])
+  }, [isPreviewError, previewError, showToast, t])
 
   // محاسبات — همه از breakdown سرور
   const calc = useMemo<CheckoutCalculation>(() => {
@@ -187,11 +192,11 @@ export function useCheckoutPage(deps: {
   // phase-3: اعمال = commit کد → preview با کد رفرش می‌شود → نتیجه از سرور
   const handleApplyCoupon = useCallback(() => {
     if (!state.couponDraft) {
-      showToast('لطفاً کد تخفیف را وارد کنید', 'error')
+      showToast(t['checkout.enterCoupon'], 'error')
       return
     }
     dispatch({ type: 'COMMIT_COUPON' })
-  }, [state.couponDraft, showToast])
+  }, [state.couponDraft, showToast, t])
   const handleToggleWallet = useCallback(() => dispatch({ type: 'TOGGLE_WALLET' }), [])
   const handleGatewayChange = useCallback((id: string) => dispatch({ type: 'SET_GATEWAY', payload: id }), [])
   const handleCustomerNoteChange = useCallback((v: string) => dispatch({ type: 'SET_CUSTOMER_NOTE', payload: v }), [])
@@ -208,7 +213,7 @@ export function useCheckoutPage(deps: {
       if (res.orderCompleted && res.orderId) {
         sessionStorage.setItem(PENDING_CHECKOUT_KEY, res.orderId)
         setActiveOrderId(res.orderId)
-        showToast('سفارش شما ثبت شد!')
+        showToast(t['checkout.orderPlaced'])
         navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
         return
       }
@@ -221,16 +226,16 @@ export function useCheckoutPage(deps: {
             if (payResult.paymentStatus === 'SUCCESS') {
               sessionStorage.setItem(PENDING_CHECKOUT_KEY, payResult.orderDisplayId)
               setActiveOrderId(payResult.orderDisplayId)
-              showToast('پرداخت موفق — سفارش ثبت شد')
+              showToast(t['checkout.paySuccess'])
               navigate({ to: '/dashboard/orders/$orderId', params: { orderId: payResult.orderDisplayId } })
             } else {
               // شکست قطعی → کلید تازه؛ سبد «پاک نشده» — کاربر دوباره می‌زند
               idempotencyKey.current = newIdempotencyKey()
-              showToast('پرداخت ناموفق — سفارش لغو شد؛ سبد شما حفظ شده است', 'error')
+              showToast(t['checkout.payFailed'], 'error')
             }
           } catch (err) {
             idempotencyKey.current = newIdempotencyKey()
-            showToast(err instanceof Error ? err.message : 'خطا در پرداخت', 'error')
+            showToast(err instanceof Error ? err.message : t['checkout.payError'], 'error')
           }
           return
         }
@@ -243,21 +248,21 @@ export function useCheckoutPage(deps: {
         return
       }
 
-      showToast('پردازش سفارش ناموفق بود', 'error')
+      showToast(t['checkout.orderProcessFail'], 'error')
     },
     // onError عمداً کلید را عوض «نمی‌کند»: خطای شبکه → retry با همان کلید
     // امن است (اگر سفارش ساخته شده باشد، پاسخ کش‌شده برمی‌گردد)
-    onError: (err) => showToast(err.message || 'خطا در پردازش سفارش', 'error'),
+    onError: (err) => showToast(err.message || t['checkout.orderProcessError'], 'error'),
   })
 
   const handleFinalSubmit = useCallback(() => {
     if (state.deliveryType === 'DELIVERY' && !state.selectedAddressId) {
-      showToast('لطفاً آدرس تحویل را انتخاب کنید', 'error')
+      showToast(t['checkout.pickAddress'], 'error')
       return
     }
     if (isSubmitBlocked) {
-      if (isPreviewError) showToast('ابتدا خطای قیمت‌گذاری را برطرف کنید', 'error')
-      else showToast('ابتدا کد تخفیف را اعمال یا حذف کنید', 'error')
+      if (isPreviewError) showToast(t['checkout.fixPriceError'], 'error')
+      else showToast(t['checkout.applyOrRemoveCoupon'], 'error')
       return
     }
     const payload: CheckoutSubmitPayload = {
@@ -270,7 +275,7 @@ export function useCheckoutPage(deps: {
       gatewayId: isGatewayDisabled ? null : state.selectedGateway,
     }
     checkoutMutation.mutate(payload)
-  }, [state, items, isSubmitBlocked, isGatewayDisabled, couponApplied, isPreviewError, showToast, checkoutMutation])
+  }, [state, items, isSubmitBlocked, isGatewayDisabled, couponApplied, isPreviewError, showToast, checkoutMutation, t])
 
   return {
     state, calc, previewData, isDetailsLoading, isPreviewError,

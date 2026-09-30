@@ -3,6 +3,7 @@ import { memo } from 'react'
 import { X } from 'reicon-react'
 import { cartItemKey } from '#/stores/cartStore'
 import { CartItemRow } from './CartItemRow'
+import { useI18n } from '#/i18n'
 
 interface CartItemRowData {
 	id: string
@@ -33,6 +34,7 @@ interface CartItemsListProps {
 	onRemove: (key: string) => void
 }
 
+// رارد ۳۲ — متن‌های ردیف ناموجود از دیکشنری + تعداد با فرمتر زبان‌آگاه
 export const CartItemsList = memo(function CartItemsList({
 	items,
 	unavailableItems,
@@ -40,6 +42,8 @@ export const CartItemsList = memo(function CartItemsList({
 	onDecrement,
 	onRemove,
 }: CartItemsListProps) {
+	const { t, fmt } = useI18n()
+
 	return (
 		<div className="lg:col-span-2 space-y-4">
 			{unavailableItems.map((item) => (
@@ -49,19 +53,18 @@ export const CartItemsList = memo(function CartItemsList({
 				>
 					<div className="flex flex-col gap-1">
 						<p className="font-DanaDemiBold text-sm text-orange-600 dark:text-orange-400">
-							محصولی در سبد شما موجود نیست
+							{t['cart.unavailable']}
 						</p>
 						<p className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium leading-relaxed">
-							این محصول حذف شده یا موقتاً غیرفعال است و قابل سفارش نیست — از سبد
-							خارجش کنید.
-							{item.quantity > 1 && ` (${item.quantity} عدد)`}
+							{t['cart.unavailableHint']}
+							{item.quantity > 1 && ` (${fmt.num(item.quantity)} ${t['common.pcs']})`}
 						</p>
 					</div>
 					<button
 						type="button"
 						onClick={() => onRemove(item.key)}
 						className="p-2.5 rounded-xl bg-orange-500 text-white hover:bg-orange-600 transition cursor-pointer shrink-0"
-						aria-label="حذف محصول ناموجود از سبد"
+						aria-label={t['cart.removeUnavailable']}
 					>
 						<X size={18} />
 					</button>

@@ -5,9 +5,10 @@
 //     • سرو در محل سین‌شین (DINE_IN) — بدون هزینه بسته‌بندی
 //     • تحویل گرفتن از سین‌شین (PICKUP / بیرون‌بر) — با هزینه بسته‌بندی
 // هزینه بسته‌بندی per-product است و از breakdown سرور می‌آید.
+// رارد ۳۲ — متن‌ها از دیکشنری؛ قیمت‌ها با فرمتر زبان‌آگاه.
 import { memo } from 'react'
 import type { DeliveryType } from '#/types/site/checkout'
-import { formatPrice } from '#/utils/format'
+import { useI18n, tpl } from '#/i18n'
 
 interface DeliveryTypeSelectorProps {
 	deliveryType: DeliveryType
@@ -22,12 +23,13 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 	packagingFee,
 	onChange,
 }: DeliveryTypeSelectorProps) {
+	const { t, fmt } = useI18n()
 	const isInPerson = deliveryType === 'PICKUP' || deliveryType === 'DINE_IN'
 
 	return (
 		<div className="bg-white dark:bg-[#2a1015] p-4 sm:p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
 			<h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-6">
-				نوع تحویل سفارش
+				{t['checkout.deliveryTitle']}
 			</h2>
 			<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 				{/* ── ۱. ارسال با پیک ── */}
@@ -47,10 +49,12 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 					/>
 					<div>
 						<p className="font-DanaDemiBold text-gray-800 dark:text-white">
-							ارسال با پیک
+							{t['checkout.courier']}
 						</p>
 						<p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-							{formatPrice(deliveryFee)} تومان + هزینه بسته‌بندی
+							{tpl(t['checkout.courierFee'], {
+								n: `${fmt.price(deliveryFee)} ${t['common.toman']}`,
+							})}
 						</p>
 					</div>
 				</label>
@@ -72,10 +76,10 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 					/>
 					<div>
 						<p className="font-DanaDemiBold text-gray-800 dark:text-white">
-							تحویل حضوری
+							{t['checkout.inPerson']}
 						</p>
 						<p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-							سرو در محل یا بیرون‌بر
+							{t['checkout.inPersonSub']}
 						</p>
 					</div>
 				</label>
@@ -85,7 +89,7 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 			{isInPerson && (
 				<div className="mt-4 mr-3 sm:mr-5 border-r-2 border-primary/30 dark:border-dark-primary/30 pr-3 sm:pr-5 pt-1">
 					<p className="text-xs text-gray-400 font-DanaMedium mb-3">
-						حالت تحویل حضوری را انتخاب کنید:
+						{t['checkout.chooseInPerson']}
 					</p>
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 						{/* سرو در محل — بدون بسته‌بندی */}
@@ -105,10 +109,10 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 							/>
 							<div>
 								<p className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-									سرو در محل سین‌شین
+									{t['checkout.dineIn']}
 								</p>
 								<p className="text-xs text-green-600 dark:text-green-400 mt-1">
-									بدون هزینه بسته‌بندی
+									{t['checkout.dineInFree']}
 								</p>
 							</div>
 						</label>
@@ -130,12 +134,14 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 							/>
 							<div>
 								<p className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-									تحویل گرفتن از سین‌شین (بیرون‌بر)
+									{t['checkout.pickup']}
 								</p>
 								<p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
 									{packagingFee > 0
-										? `با ${formatPrice(packagingFee)} تومان هزینه بسته‌بندی`
-										: 'با هزینه بسته‌بندی'}
+										? tpl(t['checkout.pickupFee'], {
+												n: `${fmt.price(packagingFee)} ${t['common.toman']}`,
+											})
+										: t['checkout.pickupFeeGeneric']}
 								</p>
 							</div>
 						</label>

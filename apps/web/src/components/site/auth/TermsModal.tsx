@@ -3,7 +3,7 @@ import { memo, useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { termsContentOptions } from '#/utils/queryOptions'
 import type { TermsSection } from '#/server/terms'
-import { formatDate, faNum } from '#/utils/format'
+import { useI18n } from '#/i18n'
 import { X, Check } from 'reicon-react'
 
 interface TermsModalProps {
@@ -14,7 +14,9 @@ interface TermsModalProps {
 
 // مدال قوانین — متن از سرور (نسخه‌دار و قابل ویرایش)
 // چک‌باکس قوانین تا اسکرول تا انتها فعال نمی‌شود
+// رارد ۳۲ — متن‌های مدال از دیکشنری؛ محتوای قوانین از سرور (داده = رارد ۳۴)
 export const TermsModal = memo(function TermsModal({ isOpen, onClose, onReadComplete }: TermsModalProps) {
+  const { t, fmt } = useI18n()
   const [hasRead, setHasRead] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -48,8 +50,8 @@ export const TermsModal = memo(function TermsModal({ isOpen, onClose, onReadComp
 
         {/* هدر */}
         <div className="flex items-center justify-between p-5 border-b border-gray-100 dark:border-white/5 shrink-0">
-          <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white">قوانین و شرایط سین‌شین</h3>
-          <button type="button" onClick={onClose} className="text-gray-500 cursor-pointer p-1" aria-label="بستن">
+          <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white">{t['terms.title']}</h3>
+          <button type="button" onClick={onClose} className="text-gray-500 cursor-pointer p-1" aria-label={t['common.close']}>
             <X size={22} />
           </button>
         </div>
@@ -89,7 +91,7 @@ export const TermsModal = memo(function TermsModal({ isOpen, onClose, onReadComp
               ))}
               {terms && (
                 <p className="text-[10px] text-gray-400 text-center pt-2">
-                  نسخه {faNum(terms.version)} — به‌روزرسانی: {formatDate(terms.updatedAt)}
+                  {t['terms.version']} {fmt.num(terms.version)} — {t['terms.updated']}: {fmt.date(terms.updatedAt)}
                 </p>
               )}
             </>
@@ -105,11 +107,11 @@ export const TermsModal = memo(function TermsModal({ isOpen, onClose, onReadComp
               className="w-full py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-2"
             >
               <Check size={18} />
-              خواندم — بازگشت
+              {t['terms.readDone']}
             </button>
           ) : (
             <p className="text-xs text-orange-500 font-DanaMedium text-center leading-relaxed">
-              برای فعال شدن چک‌باکس قوانین، متن را تا انتهای همین صفحه اسکرول کنید
+              {t['terms.scrollHint']}
             </p>
           )}
         </div>

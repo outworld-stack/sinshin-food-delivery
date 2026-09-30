@@ -1,6 +1,7 @@
 // src/components/site/checkout/CustomerNoteBox.tsx
 import { memo, useCallback } from 'react'
 import { MessageSquare } from 'reicon-react'
+import { useI18n } from '#/i18n'
 
 interface CustomerNoteBoxProps {
   value: string
@@ -8,6 +9,7 @@ interface CustomerNoteBoxProps {
 }
 
 export const CustomerNoteBox = memo(function CustomerNoteBox({ value, onChange }: CustomerNoteBoxProps) {
+  const { t, fmt } = useI18n()
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     onChange(e.target.value) // برش ۳۰۰ کاراکتری داخل reducer
   }, [onChange])
@@ -17,19 +19,19 @@ export const CustomerNoteBox = memo(function CustomerNoteBox({ value, onChange }
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white flex items-center gap-2">
           <MessageSquare size={20} className="text-primary dark:text-dark-primary" />
-          نظرات مشتری
+          {t['checkout.noteTitle']}
         </h2>
-        <span className="text-xs text-gray-400 font-DanaMedium">{value.length.toLocaleString('fa-IR')}/۳۰۰</span>
+        <span className="text-xs text-gray-400 font-DanaMedium">{fmt.num(value.length)}/{fmt.num(300)}</span>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium mb-3">
-        اگر نکته‌ای برای سفارش دارید بنویسید؛ مثلاً: «اگر پیک رسید کمی صبر کند، ممکن است دیر برسیم.»
+        {t['checkout.noteHint']}
       </p>
       <textarea
         value={value}
         onChange={handleChange}
         maxLength={300}
         className="w-full h-24 px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white resize-none font-DanaMedium"
-        placeholder="یادداشت شما برای این سفارش..."
+        placeholder={t['checkout.notePlaceholder']}
       />
     </div>
   )

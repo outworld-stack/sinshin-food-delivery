@@ -5,10 +5,12 @@ import { memo } from 'react'
 import { aboutContentOptions } from '#/utils/queryOptions'
 import { AboutPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { useI18n } from '#/i18n'
 
 const AboutPage = memo(function AboutPage() {
   // فکتوری مرکزی — کلید/staleTime یکدست با بقیه‌ی سایت
   const { data: content } = useQuery(aboutContentOptions)
+  const { t } = useI18n()
 
   if (!content) return <AboutPageSkeleton />
 
@@ -19,7 +21,7 @@ const AboutPage = memo(function AboutPage() {
         {/* HERO — داستان برند */}
         <section className="flex flex-col md:flex-row items-start gap-8 mb-24">
           <div className="w-full md:w-2/5 shrink-0">
-            <div className={`h-69.25 md:h-101 w-full rounded-3xl bg-linear-to-br ${content.heroGradient}`} role="img" aria-label="محیط رستوران سین‌شین" />
+            <div className={`h-69.25 md:h-101 w-full rounded-3xl bg-linear-to-br ${content.heroGradient}`} role="img" aria-label={t['about.heroAlt']} />
           </div>
           <div className="w-full flex items-center">
             <div className="w-full">

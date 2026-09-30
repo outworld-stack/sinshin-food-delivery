@@ -1,7 +1,7 @@
 // src/components/site/product-detail/ProductPriceBox.tsx
 import { memo } from 'react'
 import { Cart } from 'reicon-react'
-import { formatPrice } from '#/utils/format'
+import { useI18n } from '#/i18n'
 
 interface ProductPriceBoxProps {
   totalPrice: number
@@ -16,20 +16,22 @@ interface ProductPriceBoxProps {
 export const ProductPriceBox = memo(function ProductPriceBox({
   totalPrice, originalTotal, hasDiscount, quantity, onIncrement, onDecrement, onAddToCart,
 }: ProductPriceBoxProps) {
+  const { t, fmt } = useI18n()
+
   return (
     <div className="hidden lg:flex mt-auto p-6 bg-white dark:bg-[#2a1015] rounded-2xl border border-gray-300 dark:border-[#3a151c] shadow-sm flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="flex flex-col">
           {hasDiscount && (
             <span className="text-sm text-gray-400 line-through font-DanaMedium">
-              {formatPrice(originalTotal)} تومان
+              {fmt.price(originalTotal)} {t['common.toman']}
             </span>
           )}
           <div className="flex items-baseline gap-1">
             <span className="font-MorabbaBold text-3xl text-primary dark:text-dark-primary">
-              {formatPrice(totalPrice)}
+              {fmt.price(totalPrice)}
             </span>
-            <span className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">تومان</span>
+            <span className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium">{t['common.toman']}</span>
           </div>
         </div>
 
@@ -43,7 +45,7 @@ export const ProductPriceBox = memo(function ProductPriceBox({
             +
           </button>
           <span className="font-DanaDemiBold text-xl text-gray-800 dark:text-white w-8 text-center">
-            {quantity.toLocaleString('fa-IR')}
+            {fmt.num(quantity)}
           </span>
           <button
             type="button"
@@ -61,7 +63,7 @@ export const ProductPriceBox = memo(function ProductPriceBox({
         className="w-full py-4 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-lg hover:opacity-90 transition shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30 flex items-center justify-center gap-2 cursor-pointer"
       >
         <Cart size={24} />
-        افزودن به سبد خرید
+        {t['pdetail.addToCart']}
       </button>
     </div>
   )

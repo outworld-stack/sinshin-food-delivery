@@ -16,6 +16,7 @@ import { useBack } from '#/hooks/useBack'
 import { ProductSizeSelector } from '#/components/site/product-detail/ProductSizeSelector'
 import { asProductId } from '@sinshin/shared'
 import { SITE_URL, DEFAULT_OG_IMAGE, absoluteUrl, jsonLdScript } from '#/lib/site'
+import { useI18n } from '#/i18n'
 
 export const Route = createFileRoute('/products/$productId')({
   component: ProductDetailPage,
@@ -66,6 +67,7 @@ function ProductDetailPage() {
   const product = Route.useLoaderData()
   const back = useBack('/products')
   const page = useProductPage(product)
+  const { t } = useI18n()
 
   const galleryImages = product.galleryImages?.length
     ? product.galleryImages
@@ -128,7 +130,7 @@ function ProductDetailPage() {
         className="flex items-center cursor-pointer gap-2 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-dark-primary transition mb-8 font-DanaMedium w-fit"
       >
         <ChevronRight size={20} />
-        بازگشت
+        {t['common.back']}
       </button>
 
       <div className="flex flex-col lg:flex-row gap-8 lg:gap-12">

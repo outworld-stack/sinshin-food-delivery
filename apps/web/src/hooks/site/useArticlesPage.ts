@@ -3,6 +3,7 @@ import { useReducer, useCallback, useMemo } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { articleCategoriesOptions, articlesOptions } from '#/utils/queryOptions'
+import { useI18n } from '#/i18n'
 
 // --- State: فقط UI — سورتِ اعمال‌شده از URL میاد ---
 export type SortBy = 'newest' | 'most-viewed'
@@ -53,6 +54,7 @@ export function useArticlesPage() {
   const [state, dispatch] = useReducer(articlesReducer, initialState)
   const navigate = useNavigate()
   const search = useSearch({ from: '/articles/' })
+  const { t } = useI18n()
 
   // از URL — منبع حقیقت
   const category: string = search.category ?? 'all'
@@ -121,14 +123,14 @@ export function useArticlesPage() {
 
   // آیتم‌های اسکرولر
   const scrollerItems = useMemo(() => [
-    { id: 'all', label: 'همه', isActive: category === 'all', onClick: () => handleCategoryClick('all') },
+    { id: 'all', label: t['common.all'], isActive: category === 'all', onClick: () => handleCategoryClick('all') },
     ...(categories ?? []).map(cat => ({
       id: cat.id,
       label: cat.name,
       isActive: category === cat.slug,
       onClick: () => handleCategoryClick(cat.slug),
     })),
-  ], [categories, category, handleCategoryClick])
+  ], [categories, category, handleCategoryClick, t])
 
   return {
     // shape قبلی حفظ شده — appliedSortBy هم مثل قبل داخل state

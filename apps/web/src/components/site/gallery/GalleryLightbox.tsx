@@ -2,6 +2,7 @@
 import { memo, useCallback, useEffect } from 'react'
 import { X } from 'reicon-react'
 import { isRealImageUrl } from '#/utils/image'
+import { useI18n } from '#/i18n'
 
 interface GalleryLightboxProps {
 	src: string | null
@@ -15,6 +16,7 @@ export const GalleryLightbox = memo(function GalleryLightbox({
 	alt,
 	onClose,
 }: GalleryLightboxProps) {
+	const { t } = useI18n()
 	const handleBackdropClick = useCallback(
 		(e: React.MouseEvent<HTMLDivElement>) => {
 			if (e.target === e.currentTarget) onClose()
@@ -42,7 +44,7 @@ export const GalleryLightbox = memo(function GalleryLightbox({
 				type="button"
 				onClick={onClose}
 				className="absolute top-4 left-4 p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition cursor-pointer"
-				aria-label="بستن"
+				aria-label={t['common.close']}
 			>
 				<X size={28} />
 			</button>

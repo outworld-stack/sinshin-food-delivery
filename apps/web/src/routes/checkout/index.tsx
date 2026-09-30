@@ -17,6 +17,7 @@ import { CustomerNoteBox } from '#/components/site/checkout/CustomerNoteBox'
 import { OrderSummary } from '#/components/site/checkout/OrderSummary'
 import { CheckoutPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { useI18n } from '#/i18n'
 
 export const Route = createFileRoute('/checkout/')({
   component: CheckoutPage,
@@ -41,6 +42,7 @@ function CheckoutPage() {
   // خودِ وضعیت — loaderData مستقیم دیتای query است
   const restaurantStatus = Route.useLoaderData()
   const hasHydrated = useHydrated()
+  const { t } = useI18n()
 
   const items = useCartStore((s) => s.items)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -66,9 +68,9 @@ function CheckoutPage() {
   if (hasHydrated && !isAuthenticated) {
     return (
       <div className="py-20 text-center px-4">
-        <h1 className="font-MorabbaBold text-2xl text-gray-800 dark:text-white mb-4">برای ادامه خرید باید وارد شوید</h1>
+        <h1 className="font-MorabbaBold text-2xl text-gray-800 dark:text-white mb-4">{t['checkout.loginRequired']}</h1>
         <Link to="/login" className="inline-block px-8 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium cursor-pointer">
-          ورود / ثبت‌نام
+          {t['header.auth']}
         </Link>
       </div>
     )
@@ -82,7 +84,7 @@ function CheckoutPage() {
 
   return (
     <div className="py-10 px-4">
-      <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-8">تسویه حساب</h1>
+      <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-8">{t['checkout.title']}</h1>
 
       {/* آیتم ۲۲: اطلاع بسته بودن رستوران */}
       <div className="mb-6">

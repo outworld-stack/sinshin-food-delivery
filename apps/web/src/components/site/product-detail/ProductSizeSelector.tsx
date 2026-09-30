@@ -1,7 +1,7 @@
 // src/components/site/product-detail/ProductSizeSelector.tsx
 import { memo } from 'react'
-import { formatPrice } from '#/utils/format'
 import type { ProductSize } from '#/server/products'
+import { useI18n } from '#/i18n'
 
 interface ProductSizeSelectorProps {
   sizes: ProductSize[]
@@ -12,11 +12,12 @@ interface ProductSizeSelectorProps {
 export const ProductSizeSelector = memo(function ProductSizeSelector({
   sizes, selectedSizeId, onSelect,
 }: ProductSizeSelectorProps) {
+  const { t, fmt } = useI18n()
   if (sizes.length === 0) return null
 
   return (
     <div className="mb-6">
-      <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-2">انتخاب سایز:</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-2">{t['pdetail.sizeSelect']}</p>
       <div className="flex flex-wrap gap-2">
         {sizes.map(size => {
           const isSelected = size.id === selectedSizeId
@@ -33,7 +34,7 @@ export const ProductSizeSelector = memo(function ProductSizeSelector({
             >
               {size.name}
               <span className={`text-[11px] font-DanaMedium ${isSelected ? 'text-white/80' : 'text-gray-400'}`}>
-                {formatPrice(size.price)} ت
+                {fmt.price(size.price)} {t['common.tomanShort']}
               </span>
             </button>
           )

@@ -3,6 +3,7 @@ import { useReducer, useCallback } from 'react'
 import { useCartStore } from '#/stores/cartStore'
 import { useToastStore } from '#/stores/toastStore'
 import type { Product, ProductSize } from '#/server/products'
+import { useI18n, tpl } from '#/i18n'
 
 interface ProductPageState {
   quantity: number
@@ -34,6 +35,7 @@ export function useProductPage(product: Product) {
   const [state, dispatch] = useReducer(productPageReducer, initialState)
   const addItem = useCartStore((s) => s.addItem)
   const showToast = useToastStore((s) => s.showToast)
+  const { t } = useI18n()
 
   // --- سایزبندی ---
   const hasSizes = product.sizesEnabled && product.sizes.length > 0
@@ -59,8 +61,10 @@ export function useProductPage(product: Product) {
 
   const handleAddToCart = useCallback(() => {
     addItem(product.id, state.quantity, selectedSizeId)
-    showToast(`${product.name}${selectedSize ? ` (${selectedSize.name})` : ''} به سبد اضافه شد!`)
-  }, [addItem, showToast, product.id, product.name, state.quantity, selectedSizeId, selectedSize])
+    showToast(tpl(t['pdetail.addedToast'], {
+      n: `${product.name}${selectedSize ? ` (${selectedSize.name})` : ''}`,
+    }))
+  }, [addItem, showToast, product.id, product.name, state.quantity, selectedSizeId, selectedSize, t])
 
   return {
     quantity: state.quantity,
