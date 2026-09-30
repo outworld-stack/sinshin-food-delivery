@@ -3,6 +3,10 @@
 //   لایه ۱: clientId ماندگار (localStorage + cookie + sessionStorage — evercookie-lite)
 //   لایه ۲: هش‌های canvas/webgl/audio/fonts + سیگنال‌های خام
 // خروجی دقیقاً قرارداد device در POST /api/auth/otp/verify است.
+// رارد ۳۱ — label حالا نام و نسخه‌ی مرورگر را هم دارد (خواسته‌ی کاربر:
+// «هنگام سنجش دیوایس، مرورگرش را هم بسنجه») — فقط نمایشی، صفر تغییر API.
+
+import { browserLabel } from '#/lib/browserSupport'
 
 const DID_KEY = 'sinshin_did'
 
@@ -178,6 +182,9 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
     connection?: { effectiveType?: string }
   }
   const platform = nav.userAgentData?.platform ?? nav.platform ?? 'unknown'
+  // رارد ۳۱ — «Windows · 1920x1080 · Chrome 141» به‌جای «Windows · 1920x1080»؛
+  // ادمین در فهرست دستگاه‌های کاربر می‌بیند کاربر با چه مرورگری آمده
+  const browser = browserLabel(navigator.userAgent)
 
   return {
     clientId: getClientId(),
@@ -193,6 +200,6 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
     deviceMemory: nav.deviceMemory ?? null,
     touch: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
     networkType: nav.connection?.effectiveType ?? null,
-    label: `${platform} · ${screen.width}x${screen.height}`,
+    label: browser ? `${platform} · ${screen.width}x${screen.height} · ${browser}` : `${platform} · ${screen.width}x${screen.height}`,
   }
 }

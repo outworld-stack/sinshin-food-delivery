@@ -9,10 +9,15 @@ import { useEffect } from 'react'
 import { captureRefFromUrl } from '#/utils/referralCapture'
 import { PwaRegister } from '#/pwa/register-sw'
 import { SITE_URL, DEFAULT_OG_IMAGE, jsonLdScript } from '#/lib/site'
+import type { Lang } from '#/i18n'
 
 
 interface MyRouterContext {
   queryClient: QueryClient
+  /** رارد ۳۱ — زبان فعال از کوکی sinshin-lang؛ قبل از لود ریشه (همیشه set می‌شود) */
+  lang?: Lang
+  /** رارد ۳۱ — فقط لندینگ: رأی بنر مرورگر قدیمی (سرور: UA درخواست) */
+  oldBrowser?: boolean
 }
 
 // سئو-۴: JSON-LD سطح سایت — WebSite + Restaurant (rich results)
@@ -51,6 +56,17 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
         throw redirect({ to: '/geo-blocked', replace: true })
       }
     }
+    // رارد ۳۱ — زبان فعال از کوکی (سمت سرور از هدر درخواست) تا متن‌های SSR
+    // از همان بایت اول عربی/فارسیِ درست رندر شوند. مسیرهای ادمین/پیک این
+    // مقدار را نادیده می‌گیرند — Provider فقط در لایه‌های ترجمه‌شونده است.
+    let lang: Lang = 'fa'
+    if (import.meta.env.SSR) {
+      const { getRequest } = await import('@tanstack/react-start/server')
+      const cookie = getRequest()?.headers.get('cookie') ?? ''
+      const m = /(?:^|;\s*)sinshin-lang=(fa|ar)(?:;|$)/.exec(cookie)
+      if (m) lang = m[1] as Lang
+    }
+    return { lang }
   },
   head: () => ({
     meta: [
@@ -93,6 +109,10 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 function RootDocument({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     captureRefFromUrl()
+    // رارد ۳۱ — علامت «اپ بالا آمد» برای نگهبانِ بنر مرورگر قدیمی:
+    // اگر باندل مدرن در موتور قدیمی کرش کند، این خط هرگز اجرا نمی‌شود و
+    // اسکریپت ES5 در head بعد از ۶ ثانیه بنر را روشن می‌کند.
+    ;(window as unknown as { __sinshinBooted?: boolean }).__sinshinBooted = true
     // استورها سطح ماژول زنده شدن — اینجا کلاس تم و theme-color سینک می‌شن.
     // pwa-۴: theme-color هم با «تم دستی» هم‌گام می‌شود (نه فقط سیستم‌عامل) —
     // نوار مرورگر/وضعیت اپ نصب‌شده در دارک‌مود هم‌رنگِ اپ می‌ماند.
@@ -112,6 +132,16 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <head>
         <script
           dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('sinshin-theme');if(t&&t.indexOf('"isDark":true')!==-1)document.documentElement.classList.add('dark')}catch(e){}` }}
+        />
+        {/* رارد ۳۱ — سنجش مرورگر قدیمی، کاملاً ES5 و مستقل از باندل اپ:
+            ① پیش‌رنگ: lang سند از کوکی، قبل از اولین پینت (ادمین/پیک همیشه fa)
+            ② canary: اگر مرورگر oklch یا سینتکس مدرن JS را نفهمد → بنر لندینگ
+            ③ watchdog: اگر تا ۶ ثانیه اپ بالا نیامده بود «و» canary خراب بود → بنر
+            ④ دکمه‌ی بستن: کوکی ۳۰ روزه — بدون هیچ وابستگی به React/Tailwind.
+            کلاً encapsulated در try/catch — هرگز صفحه را نمی‌شکند. */}
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: اسکریپت ES5 سنجش مرورگر قدیمی — ثابت و بدون ورودی کاربر
+          dangerouslySetInnerHTML={{ __html: `try{var pl=location.pathname;if(pl.indexOf('/admin')!==0&&pl.indexOf('/courier')!==0){var lm=/(?:^|;\\s*)sinshin-lang=(fa|ar)(?:;|$)/.exec(document.cookie);if(lm)document.documentElement.lang=lm[1]}}catch(e){}try{if(location.pathname==='/'){var dismissed=document.cookie.indexOf('sinshin-obs=1')!==-1;var bad=false;try{bad=!window.CSS||!CSS.supports||!CSS.supports('color','oklch(50% 0 0)')}catch(e){bad=true}if(!bad){try{new Function('({a:1})?.a')}catch(e){bad=true}}var reveal=function(){try{var b=document.getElementById('old-browser-banner');if(b)b.style.display='block'}catch(e){}};var dismiss=function(){try{document.getElementById('old-browser-banner').style.display='none'}catch(e){}try{document.cookie='sinshin-obs=1; path=/; max-age=2592000; samesite=lax'}catch(e){}};var arm=function(){if(bad&&!dismissed)reveal();if(bad&&!dismissed){setTimeout(function(){if(!window.__sinshinBooted)reveal()},6000)}var c=document.getElementById('old-browser-close');if(c)c.onclick=dismiss};if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',arm)}else{arm()}}}catch(e){}` }}
         />
         <HeadContent />
         {/* سئو-۴: داده‌ی ساختاریافته‌ی سایت — Google آن را در head یا body می‌پذیرد */}

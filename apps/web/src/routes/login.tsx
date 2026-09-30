@@ -9,13 +9,14 @@ import { collectDeviceSignals } from '#/utils/deviceFingerprint'
 import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { getStoredRef, clearStoredRef } from '#/utils/referralCapture'
-import { faNum } from '#/utils/format'
+import { I18nProvider, useI18n, tpl } from '#/i18n'
 import { TermsModal } from '#/components/site/auth/TermsModal'
+import { LangSwitcher } from '#/components/LangSwitcher'
 import { ChevronRight, Gift } from 'reicon-react'
 
 export const Route = createFileRoute('/login')({
   validateSearch: z.object({ redirect: z.string().optional() }),
-  component: LoginPage,
+  component: LoginRoute,
   // سئو-۲: صفحه‌ی ورود ارزش ایندکس ندارد و محتوایش برای گوگل نویز است.
   // (در robots.txt عمداً Disallow نشده تا گوگل بتواند این noindex را ببیند.)
   head: () => ({
@@ -26,12 +27,25 @@ export const Route = createFileRoute('/login')({
   }),
 })
 
+// رارد ۳۱ — Provider در ریشه‌ی همین صفحه (نه ریشه‌ی اپ): ترجمه فقط به
+// لایه‌های سایت/پنل کاربر می‌رسد؛ ادمین و پیک هرگز Provider نمی‌بینند.
+function LoginRoute() {
+  const { lang } = Route.useRouteContext()
+  return (
+    <I18nProvider initialLang={lang ?? 'fa'}>
+      <LoginPage />
+    </I18nProvider>
+  )
+}
+
 function LoginPage() {
   const navigate = useNavigate()
-  const router = useRouter()         
-  const search = Route.useSearch()   
+  const router = useRouter()
+  const search = Route.useSearch()
   const login = useAuthStore((s) => s.login)
   const showToast = useToastStore((s) => s.showToast)
+  // رارد ۳۱ — دیکشنری دوزبانه + فرمترهای عدد/تاریخ زبان‌آگاه
+  const { t, fmt } = useI18n()
 
   const [step, setStep] = useState<'phone' | 'otp'>('phone')
   const [phone, setPhone] = useState('')
@@ -52,8 +66,8 @@ function LoginPage() {
 
   useEffect(() => {
     if (resendIn <= 0) return
-    const t = setTimeout(() => setResendIn(v => v - 1), 1000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setResendIn(v => v - 1), 1000)
+    return () => clearTimeout(timer)
   }, [resendIn]);
 
   // --- میوتیشن‌ها: هر مرحله‌ی لاگین یک میوتیشن مستقل ---
@@ -155,7 +169,7 @@ function LoginPage() {
         } else if (role === 'admin2') {
           login(true, 'admin2', result.user.id)
           if (result.queueCount && result.queueCount > 0) {
-            showToast(`${result.queueCount} سفارش در صفِ حوزه‌ی شما به شما تحویل شد`)
+            showToast(tpl(t['login.queueToast'], { n: fmt.num(result.queueCount) }))
           }
           if (search.redirect) router.history.push(search.redirect)
           else navigate({ to: '/admin/admin2/live-orders', replace: true })
@@ -163,7 +177,7 @@ function LoginPage() {
           login(true, 'user')
           if (result.isNewUser) {
             clearStoredRef()
-            showToast('ثبت‌نام شما با موفقیت انجام شد! خوش آمدید 🎉')
+            showToast(t['login.welcomeToast'])
           }
           if (search.redirect) router.history.push(search.redirect)
           else navigate({ to: '/products', replace: true })
@@ -180,12 +194,12 @@ function LoginPage() {
     try {
       await sendOtpMutation.mutateAsync(phone)
       otpForm.setFieldValue('code', '')
-      showToast('کد جدید ارسال شد')
+      showToast(t['login.newCodeToast'])
       codeInputRef.current?.focus()
     } catch {
       // serverError
     }
-  }, [loading, phone, otpForm, showToast, sendOtpMutation])
+  }, [loading, phone, otpForm, showToast, sendOtpMutation, t])
 
   useEffect(() => {
     if (step === 'phone') phoneInputRef.current?.focus()
@@ -213,6 +227,9 @@ function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#1a0a0e] p-4">
+      {/* سوییچر زبان — گوشه‌ی چپ‌بالا؛ کارت وسط صفحه است و تداخلی ندارد */}
+      <LangSwitcher className="fixed top-6 left-6 z-50" />
+
       <div className="w-full max-w-md">
 
         <button
@@ -221,7 +238,7 @@ function LoginPage() {
           className="flex items-center gap-2 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-dark-primary transition font-DanaMedium mb-4 cursor-pointer w-fit"
         >
           <ChevronRight size={20} />
-          بازگشت
+          {t['login.back']}
         </button>
 
         <div className="bg-white dark:bg-[#2a1015] p-8 rounded-2xl shadow-xl border border-gray-100 dark:border-[#3a151c]">
@@ -229,15 +246,15 @@ function LoginPage() {
           {step === 'phone' ? (
             <div>
               <h1 className="font-MorabbaBold text-2xl text-gray-900 dark:text-[#f5e0e6] mb-6 text-center">
-                ورود / ثبت‌نام
+                {t['login.title']}
               </h1>
               <form onSubmit={(e) => { e.preventDefault(); phoneForm.handleSubmit() }} className="space-y-6">
                 <phoneForm.Field
                   name="phone"
                   validators={{
                     onChange: ({ value }) => {
-                      if (!value) return 'شماره موبایل الزامی است.'
-                      if (!/^09[0-9]{9}$/.test(value)) return 'فرمت شماره صحیح نیست (09xxxxxxxxx)'
+                      if (!value) return t['login.phoneRequired']
+                      if (!/^09[0-9]{9}$/.test(value)) return t['login.phoneFormat']
                       return undefined
                     }
                   }}
@@ -255,7 +272,7 @@ function LoginPage() {
                         onChange={handlePhoneInput}
                       />
                       <p className="text-xs text-gray-400 text-center mt-3 font-DanaRegular">
-                        در ورود شماره تلفن دقت کنید، چون قابل تغییر نیست.
+                        {t['login.phoneHint']}
                       </p>
                       {field.state.meta.errors.length > 0 && (
                         <p className="text-red-500 text-sm mt-2 text-center">{field.state.meta.errors[0]}</p>
@@ -270,7 +287,7 @@ function LoginPage() {
                     {refCode && (
                       <div className="flex items-center gap-2 p-3 rounded-xl bg-primary/5 dark:bg-dark-primary/5 border border-primary/20 dark:border-dark-primary/20 text-sm text-primary dark:text-dark-primary font-DanaMedium">
                         <Gift size={16} className="shrink-0" />
-                        <span>شما با کد معرف <span className="font-DanaDemiBold" dir="ltr">{refCode}</span> دعوت شده‌اید</span>
+                        <span>{t['login.refInvited']} <span className="font-DanaDemiBold" dir="ltr">{refCode}</span> {t['login.refInvitedSuffix']}</span>
                       </div>
                     )}
                     <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] space-y-3">
@@ -286,7 +303,7 @@ function LoginPage() {
                           className="w-4 h-4 mt-0.5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0 disabled:cursor-not-allowed"
                         />
                         <span className="text-xs text-gray-600 dark:text-gray-300 font-DanaMedium leading-relaxed">
-                          <span className="font-DanaDemiBold">قوانین و شرایط سین‌شین</span> را خواندم و می‌پذیرم.
+                          <span className="font-DanaDemiBold">{t['login.termsLabel']}</span> {t['login.termsRest']}
                         </span>
                       </label>
 
@@ -296,11 +313,11 @@ function LoginPage() {
                           onClick={() => setTermsModalOpen(true)}
                           className="w-full py-2.5 rounded-xl bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary text-xs font-DanaDemiBold hover:bg-primary/20 dark:hover:bg-dark-primary/20 transition cursor-pointer"
                         >
-                          مشاهده قوانین — تا انتهای متن اسکرول کنید
+                          {t['login.viewTerms']}
                         </button>
                       ) : (
                         <p className="text-[10px] text-green-500 font-DanaMedium">
-                          قوانین مطالعه شد — می‌توانید تیک بزنید
+                          {t['login.termsReadOk']}
                         </p>
                       )}
                     </div>
@@ -309,7 +326,7 @@ function LoginPage() {
 
                 {serverError && <p className="text-red-500 text-center text-sm">{serverError}</p>}
                 {needsTerms && !serverError && (
-                  <p className="text-red-500 text-center text-sm">برای دریافت کد تأیید، ابتدا قوانین را مطالعه و بپذیرید.</p>
+                  <p className="text-red-500 text-center text-sm">{t['login.termsRequired']}</p>
                 )}
 
                 <button
@@ -317,24 +334,24 @@ function LoginPage() {
                   disabled={loading || (isNewUser && !termsAccepted)}
                   className="w-full py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-MorabbaMedium hover:opacity-90 transition disabled:opacity-50 cursor-pointer"
                 >
-                  {loading ? 'در حال بررسی...' : 'دریافت کد تایید'}
+                  {loading ? t['login.checking'] : t['login.sendCode']}
                 </button>
               </form>
             </div>
           ) : (
             <div>
               <h1 className="font-MorabbaBold text-2xl text-gray-900 dark:text-[#f5e0e6] mb-2 text-center">
-                کد تایید را وارد کنید
+                {t['login.otpTitle']}
               </h1>
               <p className="text-gray-500 dark:text-gray-400 text-center text-sm mb-6">
-                کد ارسال شده به <span dir="ltr">{phone}</span>
+                {t['login.otpSentTo']} <span dir="ltr">{phone}</span>
               </p>
 
               {/* بنر معرف — کاربر جدید (قوانین در مرحله قبل پذیرفته شده) */}
               {isNewUser && refCode && (
                 <div className="flex items-center gap-2 p-3 mb-5 rounded-xl bg-primary/5 dark:bg-dark-primary/5 border border-primary/20 dark:border-dark-primary/20 text-sm text-primary dark:text-dark-primary font-DanaMedium">
                   <Gift size={16} className="shrink-0" />
-                  <span>ثبت‌نام با کد معرف <span className="font-DanaDemiBold" dir="ltr">{refCode}</span></span>
+                  <span>{t['login.refSignup']} <span className="font-DanaDemiBold" dir="ltr">{refCode}</span></span>
                 </div>
               )}
 
@@ -343,7 +360,7 @@ function LoginPage() {
                   name="code"
                   validators={{
                     onChange: ({ value }) => {
-                      if (!/^[0-9]{6}$/.test(value)) return 'کد باید ۶ رقم باشد.'
+                      if (!/^[0-9]{6}$/.test(value)) return t['login.codeRule']
                       return undefined
                     }
                   }}
@@ -377,13 +394,13 @@ function LoginPage() {
                   disabled={loading}
                   className="w-full py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-MorabbaMedium hover:opacity-90 transition disabled:opacity-50 cursor-pointer"
                 >
-                  {loading ? 'در حال بررسی...' : (isNewUser ? 'ثبت‌نام و ورود' : 'تایید و ورود')}
+                  {loading ? t['login.checking'] : (isNewUser ? t['login.signup'] : t['login.verify'])}
                 </button>
 
                 <div className="text-center">
                   {resendIn > 0 ? (
                     <p className="text-xs text-gray-400 font-DanaMedium">
-                      ارسال مجدد کد تا {faNum(resendIn)} ثانیه دیگر
+                      {tpl(t['login.resendIn'], { n: fmt.num(resendIn) })}
                     </p>
                   ) : (
                     <button
@@ -392,7 +409,7 @@ function LoginPage() {
                       disabled={loading}
                       className="text-xs text-primary dark:text-dark-primary hover:underline cursor-pointer font-DanaMedium disabled:opacity-50"
                     >
-                      ارسال مجدد کد
+                      {t['login.resend']}
                     </button>
                   )}
                 </div>
@@ -402,7 +419,7 @@ function LoginPage() {
                   onClick={() => { setStep('phone'); resetMutationErrors() }}
                   className="w-full text-gray-500 dark:text-gray-400 text-sm hover:text-primary dark:hover:text-dark-primary transition cursor-pointer"
                 >
-                  تغییر شماره موبایل
+                  {t['login.changePhone']}
                 </button>
               </form>
             </div>
