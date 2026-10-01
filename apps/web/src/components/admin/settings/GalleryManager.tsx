@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 35 از 49
+// مسیر مقصد: apps/web/src/components/admin/settings/GalleryManager.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/settings/GalleryManager.tsx
 import { memo, useState, useCallback } from 'react'
 import { ConfirmModal } from '#/components/ConfirmModal'
@@ -22,6 +29,8 @@ export const GalleryManager = memo(function GalleryManager({
 }: GalleryManagerProps) {
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [newAlt, setNewAlt] = useState('')
+  // round-34 — متن جایگزین عربی تصویر جدید
+  const [newAltAr, setNewAltAr] = useState('')
   const [newSpan, setNewSpan] = useState<GallerySpan>('normal')
   const [newImage, setNewImage] = useState('')
   // ریست آپلودر بعد از افزودن — key تغییر می‌کند و پیش‌نمایش پاک می‌شود
@@ -35,13 +44,15 @@ export const GalleryManager = memo(function GalleryManager({
     e.preventDefault()
     const alt = newAlt.trim()
     if (!alt || !newImage) return // عکس و alt هر دو اجباری
-    onAdd({ src: newImage, alt, span: newSpan })
+    // round-34 — altAr اختیاری (خالی = fallback فارسی)
+    onAdd({ src: newImage, alt, altAr: newAltAr.trim() || null, span: newSpan })
     setNewAlt('')
+    setNewAltAr('')
     setNewSpan('normal')
     setNewImage('')
     setUploaderKey((k) => k + 1)
     setIsAddOpen(false)
-  }, [newAlt, newImage, newSpan, onAdd])
+  }, [newAlt, newAltAr, newImage, newSpan, onAdd])
 
   const handleToggleActive = useCallback(
     (id: string, isActive: boolean) => onPatch(id, { isActive }),
@@ -79,6 +90,11 @@ export const GalleryManager = memo(function GalleryManager({
             <label className="block">
               <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن جایگزین (alt)</span>
               <input value={newAlt} onChange={handleNewAlt} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary" placeholder="مثلاً: فضای رستوران سین‌شین" />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن جایگزین عربی (اختیاری)</span>
+              {/* round-34 — alt عربی تصویر جدید */}
+              <input value={newAltAr} onChange={(e) => setNewAltAr(e.target.value)} dir="rtl" maxLength={200} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary" placeholder="خالی = همان متن فارسی" />
             </label>
             <label className="block">
               <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">چیدمان</span>

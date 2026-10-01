@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 23 از 49
+// مسیر مقصد: packages/shared/src/contracts.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // packages/shared/src/contracts.ts
 // قراردادهای API — منبع واحد حقیقت برای هر دو اپ
 // همه‌ی ID ها برنددار — mirror دقیق schema بک‌اند
@@ -57,6 +64,8 @@ export interface ApiError {
 export interface MainCategory {
   id: MainCategoryId
   name: string
+  /** round-34 — نام عربی (NULL = fallback فارسی)؛ فقط ادمین پر می‌کند */
+  nameAr?: string | null
   slug: string
   isActive: boolean
   isDefault: boolean
@@ -67,15 +76,21 @@ export interface Category {
   id: CategoryId
   mainCategoryId: MainCategoryId
   name: string
+  /** round-34 — نام عربی (NULL = fallback فارسی) */
+  nameAr?: string | null
   slug: string
   hasSizes: boolean
   sizeNames?: string[] | null
+  /** round-34 — قالب نام سایزها به عربی (موازی با sizeNames) */
+  sizeNamesAr?: string[] | null
 }
 
 export interface ProductSize {
   id: SizeId
   name: string
   price: number
+  /** round-34 — نام عربی سایز (فقط پاسخ ادمین؛ NULL = fallback فارسی) */
+  nameAr?: string | null
 }
 
 export interface Product {
@@ -98,6 +113,12 @@ export interface Product {
   views: number
   sales: number
   status: string
+  /** ═══ round-34 — لایه محتوای دوزبانه (فقط پاسخ ادمین پر می‌کند) ═══ */
+  nameAr?: string | null
+  descriptionAr?: string | null
+  ingredientsAr?: string[] | null
+  /** پرچم «ترجمه خودکار» — رارد ۳۵ (مترجم آفلاین) true می‌گذارد؛ ذخیره‌ی دستی ادمین false */
+  arAuto?: boolean
 }
 
 export interface MainData {
@@ -344,12 +365,16 @@ export interface CouponDto {
 export interface ArticleSubCategoryDto {
   id: string
   name: string
+  /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = fallback فارسی) */
+  nameAr?: string | null
   slug: string
 }
 
 export interface ArticleCategoryDto {
   id: string
   name: string
+  /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = fallback فارسی) */
+  nameAr?: string | null
   slug: string
   hasSubCategories: boolean
   subCategories?: ArticleSubCategoryDto[]
@@ -373,6 +398,12 @@ export interface ArticleDto {
   categoryName?: string
   subCategorySlug?: string
   subCategoryName?: string
+  /** ═══ round-34 — لایه محتوای دوزبانه (فقط پاسخ ادمین پر می‌کند) ═══ */
+  titleAr?: string | null
+  excerptAr?: string | null
+  contentAr?: string | null
+  processesAr?: { title: string; items: string[] }[] | null
+  arAuto?: boolean
 }
 
 /**
@@ -442,6 +473,10 @@ export interface GalleryImageDto {
   id: string
   src: string
   alt: string
+  /** round-34 — متن جایگزین عربی (NULL = fallback فارسی) */
+  altAr?: string | null
+  /** پرچم «ترجمه خودکار» — رارد ۳۵ */
+  arAuto?: boolean
   span: 'wide' | 'normal'
   sortOrder: number
   isActive: boolean
@@ -456,6 +491,10 @@ export interface TermsSection {
 
 export interface TermsContentDto {
   sections: TermsSection[]
+  /** round-34 — بندهای عربی (NULL = fallback فارسی)؛ ساختار موازی sections */
+  sectionsAr?: TermsSection[] | null
+  /** پرچم «ترجمه خودکار» — رارد ۳۵ */
+  arAuto?: boolean
   version: number
   updatedAt: string
 }
@@ -470,6 +509,13 @@ export interface AboutContentDto {
   teamTitle: string
   teamGradient: string
   teamAlt: string
+  /** ═══ round-34 — لایه محتوای دوزبانه (گرادیانت‌ها ترجمه نمی‌شوند) ═══ */
+  heroTitleAr?: string | null
+  heroTextAr?: string | null
+  teamTitleAr?: string | null
+  teamAltAr?: string | null
+  /** پرچم «ترجمه خودکار» — رارد ۳۵ */
+  arAuto?: boolean
   updatedAt: string
 }
 

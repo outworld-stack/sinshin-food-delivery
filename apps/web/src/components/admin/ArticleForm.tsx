@@ -1,8 +1,16 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 30 از 49
+// مسیر مقصد: apps/web/src/components/admin/ArticleForm.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/ArticleForm.tsx
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { articleCategoriesOptions } from '#/utils/queryOptions'
 import { ImageField } from '#/components/shared/ImageField'
+import { ArField } from '#/components/admin/ArField'
 import { Link } from '@tanstack/react-router'
 import { useToastStore } from '#/stores/toastStore'
 import type { ArticleFormProps, ArticleFormData } from '#/types/forms'
@@ -21,7 +29,12 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     galleryImages: [],
     categoryId: '',
     subCategoryId: null,
-    processes: []
+    processes: [],
+    // round-34 — فیلدهای عربی (خالی = fallback فارسی)
+    titleAr: '',
+    excerptAr: '',
+    contentAr: '',
+    processesAr: [],
   })
   const [processInput, setProcessInput] = useState({ title: '', item: '' })
 
@@ -37,7 +50,12 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         galleryImages: initialData.galleryImages || [],
         categoryId: initialData.categoryId || '',
         subCategoryId: initialData.subCategoryId || null,
-        processes: initialData.processes?.map((p) => ({ title: p.title, items: p.items || [] })) || []
+        processes: initialData.processes?.map((p) => ({ title: p.title, items: p.items || [] })) || [],
+        // round-34 — مقادیر عربی ذخیره‌شده (روندها: موازی با ایندکس processes)
+        titleAr: initialData.titleAr || '',
+        excerptAr: initialData.excerptAr || '',
+        contentAr: initialData.contentAr || '',
+        processesAr: initialData.processesAr?.map((p) => ({ title: p.title || '', items: p.items || [] })) || [],
       })
     }
   }, [initialData])
@@ -58,14 +76,39 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
       newProcesses[existingProcessIndex].items.push(processInput.item)
       setFormData(prev => ({ ...prev, processes: newProcesses }))
     } else {
-      setFormData(prev => ({ ...prev, processes: [...(prev.processes || []), { title: processInput.title, items: [processInput.item] }] }))
+      // round-34 — روندهای عربی موازی با ایندکس حفظ می‌شوند (ورودی خالی = fallback فارسی)
+      setFormData(prev => ({
+        ...prev,
+        processes: [...(prev.processes || []), { title: processInput.title, items: [processInput.item] }],
+        processesAr: [...(prev.processesAr || []), { title: '', items: [] }],
+      }))
     }
 
     setProcessInput({ title: '', item: '' })
   }
 
   const removeProcess = (index: number) => {
-    setFormData(prev => ({ ...prev, processes: prev.processes?.filter((_, i) => i !== index) || [] }))
+    // round-34 — حذف هر دو نسخه (فارسی + عربی) با هم — ایندکس‌ها هم‌راستا می‌مانند
+    setFormData(prev => ({
+      ...prev,
+      processes: prev.processes?.filter((_, i) => i !== index) || [],
+      processesAr: prev.processesAr?.filter((_, i) => i !== index) || [],
+    }))
+  }
+
+  // round-34 — ویرایش روند عربیِ ایندکس n (هر خط textarea = یک گام)
+  const updateProcessAr = (index: number, patch: Partial<{ title: string; itemsText: string }>) => {
+    setFormData(prev => {
+      const next = [...(prev.processesAr || [])]
+      const cur = next[index] ?? { title: '', items: [] }
+      next[index] = {
+        title: patch.title !== undefined ? patch.title : cur.title,
+        items: patch.itemsText !== undefined
+          ? patch.itemsText.split('\n').map(l => l.trim()).filter(Boolean)
+          : cur.items,
+      }
+      return { ...prev, processesAr: next }
+    })
   }
 
 
@@ -125,10 +168,43 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         <textarea name="excerpt" value={formData.excerpt} onChange={handleChange} rows={2} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none resize-none"></textarea>
       </div>
 
+      {/* round-34 — عنوان و خلاصه عربی */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <ArField
+          label="عنوان مقاله"
+          value={formData.titleAr}
+          onChange={(v) => setFormData(prev => ({ ...prev, titleAr: v }))}
+          arAuto={initialData?.arAuto}
+          faReference={formData.title}
+          maxLength={160}
+        />
+        <ArField
+          label="خلاصه مقاله"
+          value={formData.excerptAr}
+          onChange={(v) => setFormData(prev => ({ ...prev, excerptAr: v }))}
+          arAuto={initialData?.arAuto}
+          faReference={formData.excerpt}
+          multiline
+          rows={2}
+          maxLength={1000}
+        />
+      </div>
+
       <div>
         <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن کامل مقاله</label>
         <textarea name="content" value={formData.content} onChange={handleChange} rows={6} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none resize-none"></textarea>
       </div>
+
+      {/* round-34 — متن کامل عربی (fallback: خالی = همان فارسی در حالت عربی) */}
+      <ArField
+        label="متن کامل مقاله"
+        value={formData.contentAr}
+        onChange={(v) => setFormData(prev => ({ ...prev, contentAr: v }))}
+        arAuto={initialData?.arAuto}
+        faReference={formData.content.slice(0, 160) + (formData.content.length > 160 ? '…' : '')}
+        multiline
+        rows={6}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* بخش عکس پروفایل */}
@@ -157,19 +233,44 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-4">روندهای مقاله</h3>
 
         <div className="space-y-3 mb-4">
-          {formData.processes?.map((proc, i) => (
-            <div key={i} className="p-3 rounded-lg bg-gray-50 dark:bg-[#1a0a0e]">
-              <div className="flex items-center justify-between mb-2">
-                <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">{proc.title}</p>
-                <button type="button" onClick={() => removeProcess(i)} className="text-red-400 text-xs hover:bg-red-50 dark:hover:bg-red-500/10 p-1 rounded cursor-pointer">حذف روند</button>
+          {formData.processes?.map((proc, i) => {
+            const procAr = formData.processesAr?.[i] ?? { title: '', items: [] }
+            return (
+              <div key={i} className="p-3 rounded-lg bg-gray-50 dark:bg-[#1a0a0e]">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">{proc.title}</p>
+                  <button type="button" onClick={() => removeProcess(i)} className="text-red-400 text-xs hover:bg-red-50 dark:hover:bg-red-500/10 p-1 rounded cursor-pointer">حذف روند</button>
+                </div>
+                <ul className="list-disc pr-5 space-y-1">
+                  {proc.items.map((item, idx) => (
+                    <li key={idx} className="text-xs text-gray-600 dark:text-gray-400">{item}</li>
+                  ))}
+                </ul>
+                {/* round-34 — ترجمه‌ی عربی همین روند (عنوان + هر خط = یک گام) */}
+                <div className="mt-3 pt-3 border-t border-dashed border-gray-200 dark:border-white/10 space-y-2">
+                  <p className="text-[11px] text-gray-400 font-DanaMedium">
+                    عربی این روند <span className="text-gray-300">(خالی = همان فارسی)</span>
+                  </p>
+                  <input
+                    value={procAr.title}
+                    onChange={(e) => updateProcessAr(i, { title: e.target.value })}
+                    dir="rtl"
+                    placeholder={`عنوان عربی (فارسی: ${proc.title})`}
+                    maxLength={120}
+                    className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary"
+                  />
+                  <textarea
+                    value={procAr.items.join('\n')}
+                    onChange={(e) => updateProcessAr(i, { itemsText: e.target.value })}
+                    dir="rtl"
+                    rows={Math.min(6, Math.max(2, proc.items.length))}
+                    placeholder={'هر خط = معرب یک گام از همین روند...'}
+                    className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary resize-y"
+                  />
+                </div>
               </div>
-              <ul className="list-disc pr-5 space-y-1">
-                {proc.items.map((item, idx) => (
-                  <li key={idx} className="text-xs text-gray-600 dark:text-gray-400">{item}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="flex flex-col gap-2 p-4 rounded-lg border border-dashed border-gray-300 dark:border-[#3a151c]">

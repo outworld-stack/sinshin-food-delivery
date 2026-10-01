@@ -1,7 +1,15 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 44 از 49
+// مسیر مقصد: apps/web/src/server/products.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/server/products.ts — منوی عمومی + سبد + پنل ادمین — همه از API واقعی
 // phase-3: مرگ products-admin-mock — ویرایش‌ها دیگر با ری‌استارت نمی‌پرند
 
 import { getJson, postJson, authJson } from '#/lib/api-fetch'
+import type { ProductFormData } from '#/types/forms'
 import type {
   ProductId,
   SizeId,
@@ -108,11 +116,13 @@ export async function getAdminMainCategories(): Promise<MainCategory[]> {
 }
 
 export async function createMainCategory(input: {
-  data: { name: string; slug: string }
+  data: { name: string; slug: string; nameAr?: string | null }
 }): Promise<AdminMutationResult> {
   return authJson<AdminMutationResult>('/admin/menu/mains', 'POST', {
     name: input.data.name,
     slug: input.data.slug,
+    // round-34 — نام عربی ('' → null = fallback فارسی)
+    nameAr: input.data.nameAr?.trim() || null,
   })
 }
 
@@ -147,24 +157,45 @@ export async function deleteMainCategory(input: {
 // ── دسته‌ها ──
 
 export async function createCategory(input: {
-  data: { name: string; mainCategoryId: string; hasSizes?: boolean; sizeNames?: string[] }
+  data: {
+    name: string
+    mainCategoryId: string
+    hasSizes?: boolean
+    sizeNames?: string[]
+    /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
+    nameAr?: string | null
+    sizeNamesAr?: string[] | null
+  }
 }): Promise<AdminMutationResult> {
   return authJson<AdminMutationResult>('/admin/menu/categories', 'POST', {
     name: input.data.name,
     mainCategoryId: input.data.mainCategoryId,
     hasSizes: input.data.hasSizes ?? false,
     sizeNames: input.data.sizeNames ?? [],
+    nameAr: input.data.nameAr?.trim() || null,
+    sizeNamesAr: input.data.sizeNamesAr ?? null,
   })
 }
 
 export async function updateCategory(input: {
-  data: { id: string; name: string; mainCategoryId: string; hasSizes?: boolean; sizeNames?: string[] }
+  data: {
+    id: string
+    name: string
+    mainCategoryId: string
+    hasSizes?: boolean
+    sizeNames?: string[]
+    /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
+    nameAr?: string | null
+    sizeNamesAr?: string[] | null
+  }
 }): Promise<AdminMutationResult> {
   await authJson<unknown>(`/admin/menu/categories/${input.data.id}`, 'PATCH', {
     name: input.data.name,
     mainCategoryId: input.data.mainCategoryId,
     hasSizes: input.data.hasSizes ?? false,
     sizeNames: input.data.sizeNames ?? [],
+    nameAr: input.data.nameAr?.trim() || null,
+    sizeNamesAr: input.data.sizeNamesAr ?? null,
   })
   return { success: true }
 }
@@ -176,6 +207,28 @@ export async function deleteCategory(input: {
 }
 
 // ── محصولات ──
+
+/** round-34 — متن چندخطی → آرایه (خطوط خالی حذف؛ مثل ادیتور قوانین) */
+function parseLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+}
+
+/** round-34 — payload عربیِ مشترک create/update ('' → null = حذف ترجمه = fallback فارسی) */
+function productArPayload(data: ProductFormData) {
+  return {
+    nameAr: data.nameAr.trim() || null,
+    descriptionAr: data.descriptionAr.trim() || null,
+    ingredientsAr: parseLines(data.ingredientsArText),
+    sizes: data.sizes.map((s) => ({
+      name: s.name,
+      nameAr: s.nameAr.trim() || null,
+      price: s.price,
+    })),
+  }
+}
 
 export async function getAdminProducts(input: {
   data: { page: number; limit: number; search?: string; status?: string; categoryId?: string }
@@ -203,21 +256,9 @@ export async function getAdminProductDetails(input: {
 }
 
 export async function createAdminProduct(input: {
-  data: {
-    name: string
-    description: string
-    originalPrice: number
-    discountPercentage: number
-    prepTime: number
-    packagingCost?: number
-    categoryId: string
-    profileImage?: string
-    galleryImages?: string[]
-    sizesEnabled?: boolean
-    sizes?: { name: string; price: number }[]
-    ingredients?: string[]
-  }
+  data: ProductFormData
 }): Promise<{ success: boolean; id?: string; message?: string }> {
+  const ar = productArPayload(input.data)
   return authJson<{ success: boolean; id?: string; message?: string }>('/admin/menu/products', 'POST', {
     name: input.data.name,
     description: input.data.description,
@@ -229,27 +270,15 @@ export async function createAdminProduct(input: {
     profileImage: input.data.profileImage || null, // '' → null
     galleryImages: input.data.galleryImages ?? [],
     sizesEnabled: input.data.sizesEnabled ?? false,
-    sizes: input.data.sizes ?? [],
     ingredients: input.data.ingredients ?? [],
+    ...ar,
   })
 }
 
 export async function updateAdminProduct(input: {
-  data: {
-    id: string
-    name: string
-    description: string
-    originalPrice: number
-    discountPercentage: number
-    prepTime: number
-    packagingCost?: number
-    profileImage?: string
-    galleryImages?: string[]
-    sizesEnabled?: boolean
-    sizes?: { name: string; price: number }[]
-    ingredients?: string[]
-  }
+  data: ProductFormData & { id?: string }
 }): Promise<{ success: boolean }> {
+  const ar = productArPayload(input.data)
   await authJson<unknown>(`/admin/menu/products/${input.data.id}`, 'PATCH', {
     name: input.data.name,
     description: input.data.description,
@@ -260,8 +289,8 @@ export async function updateAdminProduct(input: {
     profileImage: input.data.profileImage || null,
     galleryImages: input.data.galleryImages ?? [],
     sizesEnabled: input.data.sizesEnabled ?? false,
-    sizes: input.data.sizes ?? [],
     ingredients: input.data.ingredients ?? [],
+    ...ar,
   })
   return { success: true }
 }

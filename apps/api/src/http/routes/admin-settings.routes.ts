@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 21 از 49
+// مسیر مقصد: apps/api/src/http/routes/admin-settings.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/http/routes/admin-settings.routes.ts
 import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
@@ -51,13 +58,20 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           body.closed,
           body.reason,
           body.reopenTime ?? null,
+          // round-34 — علت عربی (اختیاری؛ خالی = همان فارسی در حالت عربی چک‌اوت)
+          body.reasonAr ?? null,
         )
         // round-13 — ممیزی برای هر دو نقش (قبلاً ادمین اصلی هیچ ردی نداشت)
         await deps.audit.log({
           actorId: user.id,
           action: body.closed ? 'TEMP_CLOSE' : 'TEMP_OPEN',
           entity: 'settings',
-          metadata: { closed: body.closed, reason: body.reason, reopenTime: body.reopenTime ?? null },
+          metadata: {
+            closed: body.closed,
+            reason: body.reason,
+            reopenTime: body.reopenTime ?? null,
+            reasonAr: body.reasonAr ?? null,
+          },
         })
         return { success: true }
       },
@@ -68,11 +82,13 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           reason: t.String({ minLength: 3, maxLength: 120 }),
           /** round-29 — زمان باز شدن مجدد (اختیاری؛ فقط هنگام بستن معنا دارد) — در چک‌اوت به‌جای ساعت کاری اصلی نمایش داده می‌شود */
           reopenTime: t.Optional(t.String({ maxLength: 40 })),
+          /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = fallback فارسی) */
+          reasonAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
         }),
         detail: {
           summary: 'Temporary close/open — reason REQUIRED (shown to customers)',
           description:
-            'Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Reason (3-120 chars) is required for BOTH closing and opening; customers see it in the checkout order-summary box. reopenTime (optional, closing only) replaces the scheduled next-open time shown to customers while temporarily closed. Same rules as schedule-close (orders queue), but level-2 login stays allowed.',
+            'Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Reason (3-120 chars) is required for BOTH closing and opening; customers see it in the checkout order-summary box. reopenTime (optional, closing only) replaces the scheduled next-open time shown to customers while temporarily closed. Same rules as schedule-close (orders queue), but level-2 login stays allowed. round-34: reasonAr is the Arabic reason shown when x-sinshin-lang: ar.',
         },
       },
     )

@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 38 از 49
+// مسیر مقصد: apps/web/src/components/admin/settings/TermsEditor.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/settings/TermsEditor.tsx
 import { memo, useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -13,6 +20,9 @@ import { formatDate, faNum } from '#/utils/format'
 interface TermsFormSection {
     title: string
     itemsText: string
+    /** round-34 — عنوان عربی + بندهای عربی (هر خط = یک بند؛ خالی = fallback فارسی) */
+    titleAr: string
+    itemsTextAr: string
 }
 
 // ادیتور قوانین — فقط ادمین اصلی (تنظیمات) — هر ذخیره = نسخه جدید
@@ -30,7 +40,14 @@ export const TermsEditor = memo(function TermsEditor() {
     // هیدرات — فقط تا وقتی ادمین دست نزده (الگوی isDirty — ویرایش‌ها پاک نمی‌شوند)
     useEffect(() => {
         if (terms && !isDirty) {
-            setSections(terms.sections.map(s => ({ title: s.title, itemsText: s.items.join('\n') })))
+            // round-34 — sectionsAr خام از سرور؛ ساختار موازی با sections (جفت با ایندکس)
+            const ar = terms.sectionsAr ?? []
+            setSections(terms.sections.map((s, i) => ({
+                title: s.title,
+                itemsText: s.items.join('\n'),
+                titleAr: ar[i]?.title ?? '',
+                itemsTextAr: (ar[i]?.items ?? []).join('\n'),
+            })))
         }
     }, [terms, isDirty])
 
@@ -44,9 +61,15 @@ export const TermsEditor = memo(function TermsEditor() {
         setSections(prev => prev.map((s, i) => i === index ? { ...s, itemsText: value } : s))
     }, [])
 
+    // round-34 — ویرایش قسمت عربی بخش n
+    const handleArChange = useCallback((index: number, patch: Partial<{ titleAr: string; itemsTextAr: string }>) => {
+        setIsDirty(true)
+        setSections(prev => prev.map((s, i) => i === index ? { ...s, ...patch } : s))
+    }, [])
+
     const addSection = useCallback(() => {
         setIsDirty(true)
-        setSections(prev => [...prev, { title: '', itemsText: '' }])
+        setSections(prev => [...prev, { title: '', itemsText: '', titleAr: '', itemsTextAr: '' }])
     }, [])
 
     const removeSection = useCallback((index: number) => {
@@ -55,7 +78,11 @@ export const TermsEditor = memo(function TermsEditor() {
     }, [])
 
     const saveMut = useMutation({
-        mutationFn: (data: { role: 'user' | 'admin' | 'admin2'; sections: { title: string; items: string[] }[] }) => updateTerms(data),
+        mutationFn: (data: {
+            role: 'user' | 'admin' | 'admin2'
+            sections: { title: string; items: string[] }[]
+            sectionsAr?: { title: string; items: string[] }[] | null
+        }) => updateTerms(data),
         onSuccess: (res) => {
             queryClient.invalidateQueries({ queryKey: qk.termsContent })
             setIsDirty(false)   // اجازه‌ی سینک مجدد با داده‌ی تازه
@@ -76,7 +103,15 @@ export const TermsEditor = memo(function TermsEditor() {
         if (parsed.some(s => s.items.length === 0)) { showToast('هر بخش حداقل یک بند (یک خط) لازم دارد', 'error'); return }
         if (!role) { showToast('نشست شما منقضی شده است. دوباره وارد شوید.', 'error'); return }
 
-        saveMut.mutate({ role, sections: parsed })
+        // round-34 — بندهای عربی موازی با ایندکس (بدون filter — هم‌ترازی با sections
+        // حیاتی است؛ بخش بدون ترجمه سمت سرور per-section به فارسی برمی‌گردد)
+        const parsedAr = sections.map(s => ({
+            title: s.titleAr.trim(),
+            items: s.itemsTextAr.split('\n').map(l => l.trim()).filter(Boolean),
+        }))
+        const hasAnyAr = parsedAr.some(s => s.title !== '' || s.items.length > 0)
+
+        saveMut.mutate({ role, sections: parsed, sectionsAr: hasAnyAr ? parsedAr : null })
     }, [sections, role, saveMut, showToast])
 
     const inputCls = 'px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary'
@@ -133,6 +168,28 @@ export const TermsEditor = memo(function TermsEditor() {
                                     placeholder="هر خط = یک بند قوانین..."
                                     className={`w-full ${inputCls} resize-y font-DanaMedium`}
                                 />
+                                {/* round-34 — ترجمه‌ی عربی همین بخش (خالی = fallback فارسی) */}
+                                <div className="pt-3 border-t border-dashed border-gray-200 dark:border-white/10 space-y-2">
+                                    <p className="text-[11px] text-gray-400 font-DanaMedium">
+                                        عربی این بخش <span className="text-gray-300">(خالی = همان فارسی)</span>
+                                    </p>
+                                    <input
+                                        value={section.titleAr}
+                                        onChange={(e) => handleArChange(index, { titleAr: e.target.value })}
+                                        dir="rtl"
+                                        maxLength={200}
+                                        placeholder={`عنوان عربی (فارسی: ${section.title || '—'})`}
+                                        className={`w-full ${inputCls}`}
+                                    />
+                                    <textarea
+                                        value={section.itemsTextAr}
+                                        onChange={(e) => handleArChange(index, { itemsTextAr: e.target.value })}
+                                        dir="rtl"
+                                        rows={5}
+                                        placeholder="هر خط = معرب همان بند فارسی بالا..."
+                                        className={`w-full ${inputCls} resize-y font-DanaMedium`}
+                                    />
+                                </div>
                             </div>
                         ))}
                         {sections.length === 0 && (

@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 32 از 49
+// مسیر مقصد: apps/web/src/components/admin/products/CategoryManager.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/products/CategoryManager.tsx
 import { memo, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -6,6 +13,7 @@ import { adminMainCategoriesOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { ConfirmModal } from '#/components/ConfirmModal'
+import { ArField } from '#/components/admin/ArField'
 import { Toggle } from '#/components/shared/Toggle'
 import { Pen, Trash2, X } from 'reicon-react'
 
@@ -14,9 +22,13 @@ interface CategoryFormState {
   isModalOpen: boolean
   editingId: string | null
   name: string
+  /** round-34 — نام عربی دسته */
+  nameAr: string
   mainCategoryId: string
   hasSizes: boolean
   sizeTags: string[]
+  /** round-34 — قالب نام سایزهای عربی (موازی با sizeTags) */
+  sizeTagsAr: string[]
   sizeInput: string
   confirmDeleteId: string | null
 }
@@ -25,9 +37,11 @@ const EMPTY_FORM: CategoryFormState = {
   isModalOpen: false,
   editingId: null,
   name: '',
+  nameAr: '',
   mainCategoryId: '',
   hasSizes: false,
   sizeTags: [],
+  sizeTagsAr: [],
   sizeInput: '',
   confirmDeleteId: null,
 }
@@ -49,7 +63,14 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
   const { data: allMains } = useQuery(adminMainCategoriesOptions)
 
   const createMut = useMutation({
-    mutationFn: (data: { name: string; mainCategoryId: string; hasSizes: boolean; sizeNames: string[] }) => createCategory({ data }),
+    mutationFn: (data: {
+      name: string
+      nameAr?: string | null
+      mainCategoryId: string
+      hasSizes: boolean
+      sizeNames: string[]
+      sizeNamesAr?: string[] | null
+    }) => createCategory({ data }),
     onSuccess: (res) => {
       if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
       queryClient.invalidateQueries({ queryKey: qk.categories })
@@ -59,7 +80,15 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
   })
 
   const updateMut = useMutation({
-    mutationFn: (data: { id: string; name: string; mainCategoryId: string; hasSizes: boolean; sizeNames: string[] }) => updateCategory({ data }),
+    mutationFn: (data: {
+      id: string
+      name: string
+      nameAr?: string | null
+      mainCategoryId: string
+      hasSizes: boolean
+      sizeNames: string[]
+      sizeNamesAr?: string[] | null
+    }) => updateCategory({ data }),
     onSuccess: (res) => {
       if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
       queryClient.invalidateQueries({ queryKey: qk.categories })
@@ -87,13 +116,15 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
         isModalOpen: true,
         editingId: cat.id,
         name: cat.name,
+        nameAr: cat.nameAr ?? '',
         mainCategoryId: cat.mainCategoryId,
         hasSizes: cat.hasSizes,
         sizeTags: cat.sizeNames ?? [],
+        sizeTagsAr: cat.sizeNamesAr ?? [],
         sizeInput: '',
       })
     } else {
-      set({ isModalOpen: true, editingId: null, name: '', mainCategoryId: '', hasSizes: false, sizeTags: [], sizeInput: '' })
+      set({ isModalOpen: true, editingId: null, name: '', nameAr: '', mainCategoryId: '', hasSizes: false, sizeTags: [], sizeTagsAr: [], sizeInput: '' })
     }
   }, [set])
 
@@ -104,18 +135,37 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
     if (e.key === 'Enter' && form.sizeInput.trim()) {
       e.preventDefault()
       const tag = form.sizeInput.trim()
-      if (!form.sizeTags.includes(tag)) set({ sizeTags: [...form.sizeTags, tag], sizeInput: '' })
+      if (!form.sizeTags.includes(tag)) set({ sizeTags: [...form.sizeTags, tag], sizeTagsAr: [...form.sizeTagsAr, ''], sizeInput: '' })
     }
-  }, [form.sizeInput, form.sizeTags, set])
+  }, [form.sizeInput, form.sizeTags, form.sizeTagsAr, set])
 
   const removeSizeTag = useCallback((tag: string) => {
-    set({ sizeTags: form.sizeTags.filter(t => t !== tag) })
-  }, [form.sizeTags, set])
+    const idx = form.sizeTags.indexOf(tag)
+    set({
+      sizeTags: form.sizeTags.filter(t => t !== tag),
+      // round-34 — جفت عربی هم‌ایندکس حذف می‌شود
+      sizeTagsAr: idx === -1 ? form.sizeTagsAr : form.sizeTagsAr.filter((_, i) => i !== idx),
+    })
+  }, [form.sizeTags, form.sizeTagsAr, set])
+
+  // round-34 — ویرایش نام عربی سایزِ ایندکس n (کنار همان چیپ)
+  const setSizeTagAr = useCallback((index: number, value: string) => {
+    set({ sizeTagsAr: form.sizeTagsAr.map((t, i) => (i === index ? value : t)) })
+  }, [form.sizeTagsAr, set])
 
   const handleSave = useCallback(() => {
     if (!form.name.trim()) { showToast('لطفا نام دسته را وارد کنید', 'error'); return }
     if (!form.mainCategoryId) { showToast('دسته اصلی را انتخاب کنید', 'error'); return }
-    const payload = { name: form.name.trim(), mainCategoryId: form.mainCategoryId, hasSizes: form.hasSizes, sizeNames: form.sizeTags }
+    // round-34 — آرایه‌ی عربی موازی با sizeNames؛ سرور جفت خالی را نادیده می‌گیرد (fallback)
+    const sizeNamesAr = form.sizeTagsAr.map(s => s.trim())
+    const payload = {
+      name: form.name.trim(),
+      nameAr: form.nameAr.trim() || null,
+      mainCategoryId: form.mainCategoryId,
+      hasSizes: form.hasSizes,
+      sizeNames: form.sizeTags,
+      sizeNamesAr,
+    }
     if (form.editingId) updateMut.mutate({ id: form.editingId, ...payload })
     else createMut.mutate(payload)
   }, [form, showToast, updateMut, createMut])
@@ -166,6 +216,15 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
               <input value={form.name} onChange={(e) => set({ name: e.target.value })} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" />
             </div>
 
+            {/* round-34 — نام عربی دسته (خالی = fallback فارسی) */}
+            <ArField
+              label="نام دسته"
+              value={form.nameAr}
+              onChange={(v) => set({ nameAr: v })}
+              faReference={form.name}
+              maxLength={60}
+            />
+
             <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-[#1a0a0e]">
               <span className="text-sm text-gray-700 dark:text-gray-300">فعال کردن سایز بندی (مثلا پیتزا)</span>
               <Toggle isOn={form.hasSizes} onToggle={() => set({ hasSizes: !form.hasSizes })} />
@@ -181,13 +240,24 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
                   placeholder="مثلا: کوچک"
                   className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
                 />
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {form.sizeTags.map(tag => (
-                    <div key={tag} className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary dark:bg-dark-primary/10 dark:text-dark-primary text-xs">
-                      {tag}
-                      <button type="button" onClick={() => removeSizeTag(tag)} className="hover:opacity-70 cursor-pointer">
-                        <X size={12} />
-                      </button>
+                <div className="space-y-2 mt-3">
+                  {form.sizeTags.map((tag, i) => (
+                    <div key={tag} className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary dark:bg-dark-primary/10 dark:text-dark-primary text-xs shrink-0">
+                        {tag}
+                        <button type="button" onClick={() => removeSizeTag(tag)} className="hover:opacity-70 cursor-pointer">
+                          <X size={12} />
+                        </button>
+                      </div>
+                      {/* round-34 — نام عربی همین سایز */}
+                      <input
+                        value={form.sizeTagsAr[i] ?? ''}
+                        onChange={(e) => setSizeTagAr(i, e.target.value)}
+                        dir="rtl"
+                        placeholder="نام عربی (اختیاری)"
+                        maxLength={40}
+                        className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-xs outline-none"
+                      />
                     </div>
                   ))}
                 </div>

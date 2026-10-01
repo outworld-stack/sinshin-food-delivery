@@ -1,12 +1,22 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 36 از 49
+// مسیر مقصد: apps/web/src/components/admin/settings/GalleryImageRow.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/settings/GalleryImageRow.tsx
 import { memo, useCallback, useState } from 'react'
 import { FileUploader } from '#/components/FileUploader'
 import { Toggle } from '#/components/shared/Toggle'
+import { arBadgeOf } from '#/components/admin/ArField'
 import type { GalleryImage, GallerySpan } from '#/types/site/gallery'
 import { isRealImageUrl } from '#/utils/image'
 
 export interface GalleryImageEditFields {
 	alt: string
+	/** round-34 — متن جایگزین عربی ('' = حذف ترجمه = fallback فارسی) */
+	altAr: string
 	span: GallerySpan
 	src: string
 }
@@ -25,6 +35,24 @@ interface GalleryImageRowProps {
 const btnCls =
 	'px-3 py-1.5 rounded-lg text-xs font-DanaMedium transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
 
+/** round-34 — بج کوچک وضعیت ترجمه (همان منطق ArField، سایز ردیفی) */
+function ArRowBadge({ value, arAuto }: { value: string; arAuto?: boolean }) {
+	const badge = arBadgeOf(value, arAuto)
+	const cls =
+		badge === 'manual'
+			? 'bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+			: badge === 'auto'
+				? 'bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400'
+				: 'bg-zinc-100 dark:bg-zinc-500/10 text-zinc-500 dark:text-zinc-400'
+	const label = badge === 'manual' ? 'دستی' : badge === 'auto' ? 'خودکار' : 'ندارد'
+	return (
+		<span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-DanaDemiBold ${cls}`}>
+			<span aria-hidden>ع</span>
+			{label}
+		</span>
+	)
+}
+
 export const GalleryImageRow = memo(function GalleryImageRow({
 	image,
 	canMoveUp,
@@ -37,22 +65,25 @@ export const GalleryImageRow = memo(function GalleryImageRow({
 }: GalleryImageRowProps) {
 	const [isEditing, setIsEditing] = useState(false)
 	const [alt, setAlt] = useState(image.alt)
+	// round-34 — متن جایگزین عربی
+	const [altAr, setAltAr] = useState(image.altAr ?? '')
 	const [span, setSpan] = useState<GallerySpan>(image.span)
 	const [src, setSrc] = useState(image.src)
 
 	const startEdit = useCallback(() => {
 		setAlt(image.alt)
+		setAltAr(image.altAr ?? '')
 		setSpan(image.span)
 		setSrc(image.src)
 		setIsEditing(true)
-	}, [image.alt, image.span, image.src])
+	}, [image.alt, image.altAr, image.span, image.src])
 
 	const cancelEdit = useCallback(() => setIsEditing(false), [])
 
 	const handleSave = useCallback(() => {
-		onSave(image.id, { alt: alt.trim(), span, src })
+		onSave(image.id, { alt: alt.trim(), altAr: altAr.trim(), span, src })
 		setIsEditing(false)
-	}, [image.id, alt, span, src, onSave])
+	}, [image.id, alt, altAr, span, src, onSave])
 
 	return (
 		<li className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
@@ -102,15 +133,31 @@ export const GalleryImageRow = memo(function GalleryImageRow({
 								<option value="normal">معمولی</option>
 							</select>
 						</div>
+						{/* round-34 — متن جایگزین عربی + بج وضعیت */}
+						<div className="flex items-center gap-2">
+							<input
+								value={altAr}
+								onChange={(e) => setAltAr(e.target.value)}
+								dir="rtl"
+								maxLength={200}
+								className="flex-1 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary"
+								placeholder="متن جایگزین عربی (خالی = همان فارسی)"
+							/>
+							<ArRowBadge value={altAr} arAuto={image.arAuto} />
+						</div>
 					</div>
 				) : (
 					<>
 						<p className="font-DanaMedium text-sm text-gray-800 dark:text-white truncate">
 							{image.alt}
 						</p>
-						<p className="text-xs text-gray-500 dark:text-gray-400">
+						<p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 flex-wrap">
 							{image.span === 'wide' ? 'چیدمان عریض' : 'چیدمان معمولی'} · ترتیب:{' '}
 							{image.sortOrder}
+							{/* round-34 — نشانِ وضعیت عربی در حالت نمایش */}
+							{(image.altAr ?? '') !== '' && (
+								<ArRowBadge value={image.altAr ?? ''} arAuto={image.arAuto} />
+							)}
 						</p>
 					</>
 				)}

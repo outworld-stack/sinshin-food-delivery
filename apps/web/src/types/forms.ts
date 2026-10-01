@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 41 از 49
+// مسیر مقصد: apps/web/src/types/forms.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/types/forms.ts
 
 // فیلدهای الزامی — فرم‌ها همیشه مقدار اولیه‌ی کامل می‌سازن؛
@@ -17,6 +24,13 @@ export interface ArticleFormData {
   // مسیرها موقع ارسال با ?? null نرمال می‌کنن (اسکیمای سرور null می‌خواد)
   subCategoryId?: string | null;
   processes: { title: string, items: string[] }[];
+  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = fallback فارسی) ═══
+  titleAr: string;
+  excerptAr: string;
+  contentAr: string;
+  processesAr: { title: string, items: string[] }[];
+  /** پرچم «ترجمه‌ی خودکار» رکورد (بج فرم — رارد ۳۵) */
+  arAuto?: boolean;
 }
 
 export interface ArticleFormProps {
@@ -38,7 +52,12 @@ export interface ProductFormData {
   galleryImages: string[];
   sizesEnabled: boolean;
   ingredients: string[];
-  sizes: { name: string, price: number }[];
+  sizes: { name: string, nameAr: string, price: number }[];
+  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = fallback فارسی) ═══
+  nameAr: string;
+  descriptionAr: string;
+  /** هر خط = یک ماده اولیه (مثل ادیتور قوانین) — خالی = fallback فارسی */
+  ingredientsArText: string;
 }
 
 export interface ProductFormProps {

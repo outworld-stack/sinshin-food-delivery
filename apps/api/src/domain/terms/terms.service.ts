@@ -1,8 +1,16 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 12 از 49
+// مسیر مقصد: apps/api/src/domain/terms/terms.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/terms/terms.service.ts
 import { desc, eq } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import { terms } from '#/infra/db/schema'
+import type { Lang } from '#/domain/shared/lang'
 
 export interface TermsSection {
   title: string
@@ -11,6 +19,10 @@ export interface TermsSection {
 
 export interface TermsContent {
   sections: TermsSection[]
+  /** round-34 — بندهای عربی خام (برای فرم دوزبانه ادمین؛ NULL = fallback فارسی) */
+  sectionsAr?: TermsSection[] | null
+  /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ */
+  arAuto?: boolean
   version: number
   updatedAt: Date
 }
@@ -20,7 +32,7 @@ export class TermsService {
   constructor(private readonly deps: { db: Db }) { }
 
   /** آخرین نسخه — برای مودال لاگین */
-  async latest(): Promise<TermsContent> {
+  async latest(lang: Lang = 'fa'): Promise<TermsContent> {
     const row = await this.deps.db
       .select()
       .from(terms)
@@ -28,30 +40,55 @@ export class TermsService {
       .limit(1)
       .then((r) => r[0])
     if (!row) {
-      return { sections: [], version: 0, updatedAt: new Date() }
+      return { sections: [], sectionsAr: null, arAuto: false, version: 0, updatedAt: new Date() }
     }
+    // round-34 — بندهای عربی: ساختار موازی sections؛ هم‌ترازی با ایندکس حیاتی است —
+    // بخشِ بدون ترجمه‌ی عربی per-section به همان فارسی برمی‌گردد (COALESCE per-item)
+    const sections =
+      lang === 'ar' && row.sectionsAr && row.sectionsAr.length > 0
+        ? row.sections.map((s, i) => {
+            const a = row.sectionsAr?.[i]
+            return a && (a.title.trim() !== '' || a.items.length > 0) ? a : s
+          })
+        : row.sections
     return {
-      sections: row.sections,
+      sections,
+      sectionsAr: row.sectionsAr ?? null,
+      arAuto: row.arAuto,
       version: row.version,
       updatedAt: row.createdAt,
     }
   }
 
   /** نسخه‌ی خاص — برای ثبت لحظه‌ی پذیرش در auth */
-  async byVersion(version: number): Promise<TermsContent | null> {
+  async byVersion(version: number, lang: Lang = 'fa'): Promise<TermsContent | null> {
     const row = await this.deps.db.query.terms.findFirst({
       where: eq(terms.version, version),
     })
     if (!row) return null
+    // round-34 — همان COALESCE per-section نسخه‌ی خاص (ارجاع تاریخی)
+    const sections =
+      lang === 'ar' && row.sectionsAr && row.sectionsAr.length > 0
+        ? row.sections.map((s, i) => {
+            const a = row.sectionsAr?.[i]
+            return a && (a.title.trim() !== '' || a.items.length > 0) ? a : s
+          })
+        : row.sections
     return {
-      sections: row.sections,
+      sections,
+      sectionsAr: row.sectionsAr ?? null,
+      arAuto: row.arAuto,
       version: row.version,
       updatedAt: row.createdAt,
     }
   }
 
   /** ذخیره — هر ذخیره = نسخه جدید (ادمین اصلی) */
-  async update(sections: TermsSection[]): Promise<{ version: number }> {
+  async update(
+    sections: TermsSection[],
+    /** round-34 — بندهای عربی (اختیاری؛ ساختار موازی؛ خالی = NULL = fallback فارسی) */
+    sectionsAr?: TermsSection[] | null,
+  ): Promise<{ version: number }> {
     if (sections.length === 0) {
       throw new Error('حداقل یک بخش لازم است')
     }
@@ -63,6 +100,9 @@ export class TermsService {
     await this.deps.db.insert(terms).values({
       version: newVersion,
       sections,
+      // round-34 — ذخیره‌ی دستی: پرچم «خودکار» خاموش؛ آرایه‌ی خالی → NULL
+      sectionsAr: sectionsAr && sectionsAr.length > 0 ? sectionsAr : null,
+      arAuto: false,
     })
     return { version: newVersion }
   }

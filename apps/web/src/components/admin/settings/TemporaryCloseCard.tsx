@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 39 از 49
+// مسیر مقصد: apps/web/src/components/admin/settings/TemporaryCloseCard.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/settings/TemporaryCloseCard.tsx
 // round-13 — باز/بسته کردن موقت رستوران با «علت اجباری»:
 //  • ادمین اصلی: همیشه
@@ -30,11 +37,13 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
   // مودال علت — برای هر دو جهت (بستن و باز کردن) اجباری
   const [pendingClosed, setPendingClosed] = useState<boolean | null>(null)
   const [reason, setReason] = useState('')
+  // round-34 — علت عربی (اختیاری؛ فقط هنگام بستن معنا دارد؛ خالی = همان فارسی)
+  const [reasonAr, setReasonAr] = useState('')
   // round-29 — زمان باز شدن مجدد (اختیاری، فقط هنگام بستن) — جدا از ساعت کاری اصلی
   const [reopenTime, setReopenTime] = useState('')
 
   const mutation = useMutation({
-    mutationFn: (input: { closed: boolean; reason: string; reopenTime?: string }) =>
+    mutationFn: (input: { closed: boolean; reason: string; reopenTime?: string; reasonAr?: string | null }) =>
       setTemporaryClose({ data: input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.settingsRestaurantStatus })
@@ -42,6 +51,7 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
       queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
       setPendingClosed(null)
       setReason('')
+      setReasonAr('')
       setReopenTime('')
       showToast('وضعیت موقت رستوران ثبت شد')
     },
@@ -55,6 +65,7 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
     // جهت مخالف فعلی — با کادر علت
     setPendingClosed(!status.temporarilyClosed)
     setReason('')
+    setReasonAr('')
     // round-29 — پیش‌پرکردن زمان باز شدن با مقدار ثبت‌شده‌ی فعلی (ویرایش راحت)
     setReopenTime(!status.temporarilyClosed ? (status.temporaryReopenTime ?? '') : '')
   }, [status])
@@ -62,6 +73,7 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
   const handleCancel = useCallback(() => {
     setPendingClosed(null)
     setReason('')
+    setReasonAr('')
     setReopenTime('')
   }, [])
 
@@ -73,13 +85,16 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
       return
     }
     const trimmedTime = reopenTime.trim()
+    const trimmedAr = reasonAr.trim()
     mutation.mutate({
       closed: pendingClosed,
       reason: trimmed,
+      // round-34 — علت عربی فقط هنگام بستن ارسال می‌شود؛ باز شدن کلید را پاک می‌کند
+      reasonAr: pendingClosed && trimmedAr ? trimmedAr : undefined,
       // فقط هنگام بستن معنا دارد؛ هنگام باز شدن پاک می‌شود
       reopenTime: pendingClosed && trimmedTime ? trimmedTime : undefined,
     })
-  }, [pendingClosed, reason, reopenTime, mutation, showToast])
+  }, [pendingClosed, reason, reasonAr, reopenTime, mutation, showToast])
 
   if (!visible) return null
 
@@ -180,6 +195,24 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
                 <p className="text-[10px] text-gray-400 mt-1 font-DanaMedium leading-relaxed">
                   اگر خالی بماند، مشتری ساعت کاری اصلی رستوران را می‌بیند.
                 </p>
+              </div>
+            )}
+
+            {/* round-34 — علت عربی: فقط هنگام بستن؛ مشتری عربی‌زبان در چک‌اوت این را می‌بیند */}
+            {pendingClosed && (
+              <div className="mt-4">
+                <label htmlFor="temp-close-reason-ar" className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+                  علت به عربی <span className="text-gray-400">(اختیاری — نمایش در حالت عربی سایت)</span>
+                </label>
+                <textarea
+                  id="temp-close-reason-ar"
+                  value={reasonAr}
+                  onChange={(e) => setReasonAr(e.target.value.slice(0, 120))}
+                  rows={2}
+                  dir="rtl"
+                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm resize-none font-DanaMedium"
+                  placeholder="خالی = نمایش همان علت فارسی به مشتری عربی‌زبان"
+                />
               </div>
             )}
             <div className="flex gap-3 mt-4">

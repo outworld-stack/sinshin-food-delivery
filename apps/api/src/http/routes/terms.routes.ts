@@ -1,9 +1,17 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 19 از 49
+// مسیر مقصد: apps/api/src/http/routes/terms.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/http/routes/terms.routes.ts
 import { Elysia, t } from 'elysia'
 
 import type { SessionService } from '#/domain/auth/session.service'
 import type { TermsService } from '#/domain/terms/terms.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { langFromHeaders } from '#/domain/shared/lang'
 
 export interface TermsRoutesDeps {
   sessions: SessionService
@@ -13,15 +21,15 @@ export interface TermsRoutesDeps {
 export const termsRoutes = (deps: TermsRoutesDeps) => {
   // ── عمومی — مودال لاگین ──
   const publicRoutes = new Elysia({ prefix: '/terms', tags: ['Terms'] })
-    .get('/', () => deps.termsService.latest(), {
+    .get('/', ({ headers }) => deps.termsService.latest(langFromHeaders(headers)), {
       detail: {
         summary: 'Latest terms version (public)',
-        description: 'For the login modal. Acceptance is snapshotted per-version at signup.',
+        description: 'For the login modal. Acceptance is snapshotted per-version at signup. round-34: x-sinshin-lang: ar returns sectionsAr when present.',
       },
     })
     .get(
       '/:version',
-      ({ params }) => deps.termsService.byVersion(Number(params.version)),
+      ({ params, headers }) => deps.termsService.byVersion(Number(params.version), langFromHeaders(headers)),
       {
         params: t.Object({ version: t.Numeric() }),
         detail: { summary: 'Terms by version (public, for reference)' },
@@ -32,11 +40,11 @@ export const termsRoutes = (deps: TermsRoutesDeps) => {
   const adminRoutes = new Elysia({ prefix: '/admin/terms', tags: ['Admin / Terms'] })
     .use(requireAdmin(deps.sessions))
     .get('/', () => deps.termsService.latest(), {
-      detail: { summary: 'Latest terms (admin editor)' },
+      detail: { summary: 'Latest terms (admin editor) — includes raw sectionsAr for the bilingual form' },
     })
     .post(
       '/',
-      ({ body }) => deps.termsService.update(body.sections),
+      ({ body }) => deps.termsService.update(body.sections, body.sectionsAr),
       {
         body: t.Object({
         sections: t.Array(
@@ -45,6 +53,13 @@ export const termsRoutes = (deps: TermsRoutesDeps) => {
             items: t.Array(t.String({ maxLength: 1000 })),
           }),
         ),
+        // round-34 — بندهای عربی (اختیاری؛ ساختار موازی؛ خالی = fallback فارسی)
+        sectionsAr: t.Optional(t.Nullable(t.Array(
+          t.Object({
+            title: t.String({ maxLength: 200 }),
+            items: t.Array(t.String({ maxLength: 1000 })),
+          }),
+        ))),
         }),
         detail: {
           summary: 'Save terms — each save creates a new version',

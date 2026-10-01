@@ -1,7 +1,15 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 9 از 49
+// مسیر مقصد: apps/api/src/domain/cart/cart.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/cart/cart.service.ts
 import type { Db } from '#/infra/db/client'
 import { asProductId } from '#/domain/shared/brand'
 import { finalPriceOf, loadPricingBases } from '#/domain/menu/menu.service'
+import { pickAr, type Lang } from '#/domain/shared/lang'
 
 export interface CartItemInput {
   productId: string
@@ -34,7 +42,11 @@ export interface CartItemDto {
 export class CartService {
   constructor(private readonly deps: { db: Db }) {}
 
-  async details(items: CartItemInput[]): Promise<{ items: CartItemDto[]; total: number }> {
+  /** round-34 — lang: نام محصول/سایز در سبد هم COALESCE(ar, fa) می‌شود */
+  async details(
+    items: CartItemInput[],
+    lang: Lang = 'fa',
+  ): Promise<{ items: CartItemDto[]; total: number }> {
     const { productMap, sizesByProduct } = await loadPricingBases(this.deps.db, items)
 
     const out: CartItemDto[] = []
@@ -54,7 +66,7 @@ export class CartService {
           const size =
             (item.sizeId ? sizes.find((s) => s.id === item.sizeId) : undefined) ?? sizes[0]!
           price = size.price
-          sizeName = size.name
+          sizeName = pickAr(lang, size.nameAr, size.name)
         }
       }
 
@@ -64,7 +76,7 @@ export class CartService {
         id: product.id,
         sizeId: item.sizeId ?? null,
         sizeName,
-        name: product.name,
+        name: pickAr(lang, product.nameAr, product.name),
         profileImage: product.profileImage,
         originalPrice: price,
         finalPrice: price,

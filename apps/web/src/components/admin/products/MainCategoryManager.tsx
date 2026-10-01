@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 33 از 49
+// مسیر مقصد: apps/web/src/components/admin/products/MainCategoryManager.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/products/MainCategoryManager.tsx
 import { memo, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11,21 +18,24 @@ import {
 import { adminMainCategoriesOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { ConfirmModal } from '#/components/ConfirmModal'
+import { ArField } from '#/components/admin/ArField'
 import { useToastStore } from '#/stores/toastStore'
 import { Toggle } from '#/components/shared/Toggle'
 import { Can } from '#/components/shared/PermissionGate'
 import { Plus, ChevronUp, ChevronDown, Trash2, X, Star } from 'reicon-react'
 
-// --- مودال ساخت (بدون تغییر) ---
+// --- مودال ساخت ---
 const AddMainModal = memo(function AddMainModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
   const [name, setName] = useState('')
+  // round-34 — نام عربی (اختیاری؛ خالی = fallback فارسی)
+  const [nameAr, setNameAr] = useState('')
   const [slug, setSlug] = useState('')
   const [error, setError] = useState('')
 
   const mutation = useMutation({
-    mutationFn: (data: { name: string; slug: string }) => createMainCategory({ data }),
+    mutationFn: (data: { name: string; nameAr?: string | null; slug: string }) => createMainCategory({ data }),
     onSuccess: (res) => {
       if (!res.success) { setError(res.message ?? 'خطا'); return }
       queryClient.invalidateQueries({ queryKey: qk.adminMainCategories })
@@ -40,8 +50,8 @@ const AddMainModal = memo(function AddMainModal({ onClose }: { onClose: () => vo
     if (!name.trim()) { setError('نام الزامی است'); return }
     if (!slug.trim()) { setError('slug الزامی است (مثلا: restaurant)'); return }
     setError('')
-    mutation.mutate({ name: name.trim(), slug: slug.trim() })
-  }, [name, slug, mutation])
+    mutation.mutate({ name: name.trim(), nameAr: nameAr.trim() || null, slug: slug.trim() })
+  }, [name, nameAr, slug, mutation])
 
   const handleSlug = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
@@ -68,6 +78,14 @@ const AddMainModal = memo(function AddMainModal({ onClose }: { onClose: () => vo
               placeholder="مثلاً: کافه"
             />
           </div>
+          {/* round-34 — نام عربی (خالی = fallback فارسی) */}
+          <ArField
+            label="نام"
+            value={nameAr}
+            onChange={setNameAr}
+            faReference={name}
+            maxLength={60}
+          />
           <div>
             <label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">slug (انگلیسی — برای URL)</label>
             <input

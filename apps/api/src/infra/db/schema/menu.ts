@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 3 از 49
+// مسیر مقصد: apps/api/src/infra/db/schema/menu.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/infra/db/schema/menu.ts
 import {
   boolean,
@@ -20,6 +27,8 @@ export const mainCategories = pgTable(
   'main_categories',
   {
     id: uuid('id').primaryKey().defaultRandom().$type<MainCategoryId>(), name: varchar('name', { length: 60 }).notNull(),
+    /** round-34 — نام عربی (NULL = fallback فارسی) */
+    nameAr: varchar('name_ar', { length: 60 }),
     /** انگلیسی — در URL: /products?tab=restaurant */
     slug: varchar('slug', { length: 60 }).notNull(),
     isActive: boolean('is_active').notNull().default(false),
@@ -44,10 +53,14 @@ export const categories = pgTable(
       .references(() => mainCategories.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 60 }).notNull(),
     slug: varchar('slug', { length: 60 }).notNull(),
+    /** round-34 — نام عربی دسته (NULL = fallback فارسی) */
+    nameAr: varchar('name_ar', { length: 60 }),
     /** سایزبندی برای این دسته فعال است؟ (پیتزا) */
     hasSizes: boolean('has_sizes').notNull().default(false),
     /** قالب نام سایزها — کوچک/متوسط/بزرگ/خانوادگی */
     sizeNames: jsonb('size_names').$type<string[]>().default([]),
+    /** round-34 — قالب نام سایزها به عربی (موازی با sizeNames) */
+    sizeNamesAr: jsonb('size_names_ar').$type<string[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -70,6 +83,11 @@ export const products = pgTable(
       .references(() => categories.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 120 }).notNull(),
     description: text('description'),
+    /** round-34 — محتوای عربی (NULL = fallback فارسی) */
+    nameAr: varchar('name_ar', { length: 120 }),
+    descriptionAr: text('description_ar'),
+    /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
+    arAuto: boolean('ar_auto').notNull().default(false),
     originalPrice: integer('original_price').notNull().default(0),
     discountPercentage: integer('discount_percentage').notNull().default(0),
     prepTime: integer('prep_time').notNull().default(15),
@@ -82,6 +100,8 @@ export const products = pgTable(
      */
     packagingCost: integer('packaging_cost').notNull().default(0),
     ingredients: jsonb('ingredients').$type<string[]>().default([]),
+    /** round-34 — مواد اولیه به عربی (موازی با ingredients) */
+    ingredientsAr: jsonb('ingredients_ar').$type<string[]>(),
     /** آپلود واقعی فاز ۳ — فعلاً مسیر/گرادیانت */
     profileImage: text('profile_image'),
     galleryImages: jsonb('gallery_images').$type<string[]>().default([]),
@@ -107,6 +127,8 @@ export const productSizes = pgTable(
       .$type<ProductId>()
       .references(() => products.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 60 }).notNull(),
+    /** round-34 — نام عربی سایز (NULL = fallback فارسی) */
+    nameAr: varchar('name_ar', { length: 60 }),
     price: integer('price').notNull(),
     sortOrder: integer('sort_order').notNull().default(0),
   },

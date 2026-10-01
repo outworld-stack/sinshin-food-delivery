@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 20 از 49
+// مسیر مقصد: apps/api/src/http/routes/order.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/http/routes/order.routes.ts
 import { Elysia, t } from 'elysia'
 
@@ -11,6 +18,7 @@ import type { CheckoutIdempotency } from '#/domain/order/checkout-idempotency.se
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { Err } from '#/domain/shared/errors'
+import { langFromHeaders } from '#/domain/shared/lang'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
@@ -59,12 +67,13 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       '/restaurant-status',
       // round-13 — وضعیت کامل (شامل علت بسته‌شدن موقت) برای نمایش در چک‌اوت؛
       // isOpen اینجا فقط «ساعتی» است؛ temporarilyClosed جدا می‌آید.
-      () => deps.settings.restaurantStatus(),
+      // round-34 — علت موقت از کلید عربی می‌آید وقتی x-sinshin-lang: ar (خالی = فارسی).
+      ({ headers }) => deps.settings.restaurantStatus(langFromHeaders(headers)),
       {
         detail: {
           summary: 'Restaurant status + temporary-close reason (public)',
           description:
-            'isOpen = scheduled open only. Combine with temporarilyClosed for the customer-facing state. temporaryCloseReason is shown in the checkout order-summary box.',
+            'isOpen = scheduled open only. Combine with temporarilyClosed for the customer-facing state. temporaryCloseReason is shown in the checkout order-summary box. round-34: x-sinshin-lang: ar returns the Arabic close reason when set.',
         },
       },
     )

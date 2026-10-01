@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 40 از 49
+// مسیر مقصد: apps/web/src/routes/admin/settings/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/routes/admin/settings/index.tsx
 // ⬅ NEW: loader پری‌فچ نقش‌محور — هر دو نقش: ناحیه‌های ارسال؛
 // ادمین اصلی: پرچم‌های تنظیمات + محتوای درباره‌ما/گالری (مهم‌ترین کوئری‌های صفحه)
@@ -245,7 +252,15 @@ const SettingsContent = memo(function SettingsContent() {
             <>
               {content.about && (
                 <AboutContentForm
-                  initialData={{ ...content.about, updatedAt: new Date(content.about.updatedAt) }}
+                  initialData={{
+                    ...content.about,
+                    // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = fallback فارسی)
+                    heroTitleAr: content.about.heroTitleAr ?? '',
+                    heroTextAr: content.about.heroTextAr ?? '',
+                    teamTitleAr: content.about.teamTitleAr ?? '',
+                    teamAltAr: content.about.teamAltAr ?? '',
+                    updatedAt: new Date(content.about.updatedAt),
+                  }}
                   isSaving={content.isSavingAbout}
                   onSave={content.saveAbout}
                 />

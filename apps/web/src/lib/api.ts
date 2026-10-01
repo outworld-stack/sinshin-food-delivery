@@ -1,6 +1,14 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 26 از 49
+// مسیر مقصد: apps/web/src/lib/api.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/lib/api.ts
 import { treaty } from '@elysiajs/eden'
 import type { App } from '../../../api/src/app-type'
+import { langHeaders } from '#/lib/lang-header'
 
 /** base با /api — برای helperهای مسیر-محور (getJson/authJson/FileUploader) */
 export function apiBase(): string {
@@ -31,10 +39,12 @@ export function ssrFetchSignal(): AbortSignal | undefined {
   return typeof window === 'undefined' ? AbortSignal.timeout(10_000) : undefined
 }
 
-const includeCookies = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+const includeCookies = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
   fetch(input, {
     ...init,
     credentials: 'include',
+    // round-34 — treaty عمومی هم هدر زبان می‌فرستد (کوکی sinshin-lang)
+    headers: { ...(init?.headers ?? {}), ...(await langHeaders()) },
     // signal صریح caller (اگر باشد) اولویت دارد
     signal: init?.signal ?? ssrFetchSignal(),
   })

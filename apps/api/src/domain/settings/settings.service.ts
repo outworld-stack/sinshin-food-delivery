@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 13 از 49
+// مسیر مقصد: apps/api/src/domain/settings/settings.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/settings/settings.service.ts
 
 import { eq } from 'drizzle-orm'
@@ -56,8 +63,10 @@ export class SettingsService {
     this.cache.set(key, { value, at: Date.now() })
   }
 
-  /** وضعیت کامل رستوران — دو نوع بسته‌بودن */
-  async restaurantStatus(): Promise<{
+  /** وضعیت کامل رستوران — دو نوع بسته‌بودن
+   *  round-34 — lang='ar': علت بسته‌بودن موقت از کلید موازی عربی
+   *  (temporary_close_reason_ar) می‌آید؛ خالی = همان فارسی (fallback). */
+  async restaurantStatus(lang: 'fa' | 'ar' = 'fa'): Promise<{
     isOpen: boolean
     temporarilyClosed: boolean
     temporaryCloseReason: string | null
@@ -66,17 +75,22 @@ export class SettingsService {
     nextOpenTime: string
     anyClosed: boolean
   }> {
-    const [open, tempClosed, reason, tempReopen, nextOpenTime] = await Promise.all([
+    const [open, tempClosed, reason, reasonAr, tempReopen, nextOpenTime] = await Promise.all([
       this.get<boolean>(SETTING_KEYS.restaurantOpen, true),
       this.get<boolean>(SETTING_KEYS.temporarilyClosed, false),
       this.get<string>(SETTING_KEYS.temporaryCloseReason, ''),
+      this.get<string>(SETTING_KEYS.temporaryCloseReasonAr, ''),
       this.get<string>(SETTING_KEYS.temporaryReopenTime, ''),
       this.get<string>(SETTING_KEYS.nextOpenTime, '۱۱:۰۰ صبح'),
     ])
+    // round-34 — COALESCE: عربی خالی → همان فارسی (بدون ترجمه‌ی برچسب‌های زمانی —
+    // ساعت‌ها عددی‌اند و فرانت با فرمتر خودش ارقام را عربی می‌کند)
+    const effectiveReason =
+      lang === 'ar' && reasonAr.trim() !== '' ? reasonAr : reason || 'بسته موقت'
     return {
       isOpen: open,
       temporarilyClosed: tempClosed,
-      temporaryCloseReason: tempClosed ? reason || 'بسته موقت' : null,
+      temporaryCloseReason: tempClosed ? effectiveReason : null,
       temporaryReopenTime: tempClosed ? tempReopen : '',
       nextOpenTime,
       anyClosed: !open || tempClosed,

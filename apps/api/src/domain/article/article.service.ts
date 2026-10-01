@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 10 از 49
+// مسیر مقصد: apps/api/src/domain/article/article.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/domain/article/article.service.ts
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 
@@ -8,6 +15,7 @@ import {
     articleSubCategories,
 } from '#/infra/db/schema'
 import { Err } from '#/domain/shared/errors'
+import { nullIfEmpty, pickAr, type Lang } from '#/domain/shared/lang'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -30,6 +38,12 @@ export interface ArticleView {
     categoryName: string | null
     subCategorySlug: string | null
     subCategoryName: string | null
+    /** ═══ round-34 — محتوای عربی (فقط adminDetail پر می‌کند؛ فرم ویرایش) ═══ */
+    titleAr?: string | null
+    excerptAr?: string | null
+    contentAr?: string | null
+    processesAr?: { title: string; items: string[] }[] | null
+    arAuto?: boolean
 }
 
 /**
@@ -44,9 +58,11 @@ export type ArticleSummaryView = Omit<
 export interface ArticleCategoryView {
     id: string
     name: string
+    /** round-34 — نام عربی خام (فرم ادمین) */
+    nameAr?: string | null
     slug: string
     hasSubCategories: boolean
-    subCategories: { id: string; name: string; slug: string }[]
+    subCategories: { id: string; name: string; nameAr?: string | null; slug: string }[]
 }
 
 export interface ArticleInput {
@@ -59,13 +75,18 @@ export interface ArticleInput {
     categoryId: string
     subCategoryId?: string | null
     processes?: { title: string; items: string[] }[]
+    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = fallback فارسی) */
+    titleAr?: string | null
+    excerptAr?: string | null
+    contentAr?: string | null
+    processesAr?: { title: string; items: string[] }[] | null
 }
 
 type ArticleRow = typeof articles.$inferSelect
 /** ردیف سبک لیست — دقیقاً ستون‌هایی که joinedSummary انتخاب می‌کند */
 type ArticleSummaryRow = Pick<
     ArticleRow,
-    'id' | 'title' | 'excerpt' | 'author' | 'profileImage' | 'categoryId' | 'subCategoryId' | 'views' | 'status' | 'createdAt'
+    'id' | 'title' | 'excerpt' | 'author' | 'profileImage' | 'categoryId' | 'subCategoryId' | 'views' | 'status' | 'createdAt' | 'titleAr' | 'excerptAr'
 >
 type CategoryRow = typeof articleCategories.$inferSelect
 type SubRow = typeof articleSubCategories.$inferSelect
@@ -79,7 +100,8 @@ export class ArticleService {
 
     // ═══ عمومی ═══
 
-    async categories(): Promise<ArticleCategoryView[]> {
+    /** round-34 — lang: نام دسته/ساب‌دسته در نمای عمومی COALESCE(ar, fa) */
+    async categories(lang: Lang = 'fa'): Promise<ArticleCategoryView[]> {
         const cats = await this.deps.db
             .select()
             .from(articleCategories)
@@ -99,18 +121,21 @@ export class ArticleService {
 
         return cats.map((c) => ({
             id: c.id,
-            name: c.name,
+            name: pickAr(lang, c.nameAr, c.name),
+            // round-34 — مقدار خام برای فرم ادمین (هیدراتِ فیلد عربی)
+            nameAr: c.nameAr ?? null,
             slug: c.slug,
             hasSubCategories: c.hasSubCategories,
             subCategories: (subsByCat.get(c.id) ?? []).map((s) => ({
                 id: s.id,
-                name: s.name,
+                name: pickAr(lang, s.nameAr, s.name),
+                nameAr: s.nameAr ?? null,
                 slug: s.slug,
             })),
         }))
     }
 
-    async listPublic(categorySlug?: string, subSlug?: string): Promise<ArticleSummaryView[]> {
+    async listPublic(categorySlug?: string, subSlug?: string, lang: Lang = 'fa'): Promise<ArticleSummaryView[]> {
         const conds = [eq(articles.status, 'ACTIVE')]
         if (categorySlug && categorySlug !== 'all') {
             conds.push(eq(articleCategories.slug, categorySlug))
@@ -119,11 +144,11 @@ export class ArticleService {
             conds.push(eq(articleSubCategories.slug, subSlug))
         }
         const rows = await this.joinedSummary().where(and(...conds)).orderBy(desc(articles.createdAt))
-        return rows.map(({ a, c, s }) => this.toSummary(a, c, s))
+        return rows.map(({ a, c, s }) => this.toSummary(a, c, s, lang))
     }
 
     /** جزئیات عمومی — فقط ACTIVE + شمارش بازدید (سورت most-viewed فرانت) */
-    async byId(id: string): Promise<ArticleView | null> {
+    async byId(id: string, lang: Lang = 'fa'): Promise<ArticleView | null> {
         if (!UUID_RE.test(id)) return null
         const row = (
             await this.deps.db
@@ -141,7 +166,7 @@ export class ArticleService {
             .set({ views: sql`${articles.views} + 1` })
             .where(eq(articles.id, id))
 
-        return this.toView(row.a, row.c, row.s)
+        return this.toView(row.a, row.c, row.s, lang)
     }
 
     // ═══ ادمین: مقالات ═══
@@ -162,7 +187,8 @@ export class ArticleService {
                 .where(eq(articles.id, id))
                 .limit(1)
         )[0]
-        return row ? this.toView(row.a, row.c, row.s) : null
+        // round-34 — فرم ویرایش ادمین: fa مبنا + فیلدهای ar خام (بج دستی/خودکار/ندارد)
+        return row ? this.toView(row.a, row.c, row.s, 'fa', { includeAr: true }) : null
     }
 
     async create(input: ArticleInput): Promise<{ success: boolean; id?: string }> {
@@ -175,6 +201,12 @@ export class ArticleService {
                 title: input.title.trim(),
                 excerpt: input.excerpt.trim(),
                 content: input.content,
+                // round-34 — محتوای عربی: '' → NULL (fallback فارسی)؛ ذخیره‌ی دستی = «دستی»
+                titleAr: nullIfEmpty(input.titleAr),
+                excerptAr: nullIfEmpty(input.excerptAr),
+                contentAr: nullIfEmpty(input.contentAr),
+                processesAr: input.processesAr && input.processesAr.length > 0 ? input.processesAr : null,
+                arAuto: false,
                 author: input.author?.trim() || 'سین شین',
                 categoryId: input.categoryId,
                 subCategoryId: input.subCategoryId ?? null,
@@ -198,6 +230,12 @@ export class ArticleService {
                 title: input.title.trim(),
                 excerpt: input.excerpt.trim(),
                 content: input.content,
+                // round-34 — محتوای عربی: '' → NULL؛ ذخیره‌ی دستی پرچم «خودکار» را برمی‌گرداند
+                titleAr: nullIfEmpty(input.titleAr),
+                excerptAr: nullIfEmpty(input.excerptAr),
+                contentAr: nullIfEmpty(input.contentAr),
+                processesAr: input.processesAr && input.processesAr.length > 0 ? input.processesAr : null,
+                arAuto: false,
                 categoryId: input.categoryId,
                 subCategoryId: input.subCategoryId ?? null,
                 profileImage: input.profileImage || null,
@@ -238,6 +276,9 @@ export class ArticleService {
         name: string
         hasSubCategories: boolean
         subCategories?: string[]
+        /** round-34 — نام عربی دسته + ساب‌دسته‌ها (موازی با subCategories، جفت با ایندکس) */
+        nameAr?: string | null
+        subCategoriesAr?: string[] | null
     }): Promise<{ success: boolean }> {
         const { db } = this.deps
         const name = input.name.trim()
@@ -246,18 +287,23 @@ export class ArticleService {
         const slug = await this.uniqueSlug(name, 'category')
         const [created] = await db
             .insert(articleCategories)
-            .values({ name, slug, hasSubCategories: input.hasSubCategories })
+            .values({ name, nameAr: nullIfEmpty(input.nameAr), slug, hasSubCategories: input.hasSubCategories })
             .returning()
         if (!created) throw Err.internal('ذخیره‌سازی دسته ناموفق بود.')
 
         if (input.hasSubCategories) {
-            for (const raw of input.subCategories ?? []) {
+            for (const [i, raw] of (input.subCategories ?? []).entries()) {
                 const subName = raw.trim()
                 if (!subName) continue
                 const subSlug = await this.uniqueSlug(subName, 'sub')
                 await db
                     .insert(articleSubCategories)
-                    .values({ categoryId: created.id, name: subName, slug: subSlug })
+                    .values({
+                        categoryId: created.id,
+                        name: subName,
+                        nameAr: nullIfEmpty(input.subCategoriesAr?.[i]),
+                        slug: subSlug,
+                    })
             }
         }
         return { success: true }
@@ -265,7 +311,14 @@ export class ArticleService {
 
     async updateCategory(
         id: string,
-        input: { name: string; hasSubCategories: boolean; subCategories?: string[] },
+        input: {
+            name: string
+            hasSubCategories: boolean
+            subCategories?: string[]
+            /** round-34 — نام عربی دسته + ساب‌دسته‌ها (موازی با subCategories، جفت با ایندکس) */
+            nameAr?: string | null
+            subCategoriesAr?: string[] | null
+        },
     ): Promise<void> {
         const { db } = this.deps
         const cat = await db.query.articleCategories.findFirst({
@@ -275,7 +328,11 @@ export class ArticleService {
 
         await db
             .update(articleCategories)
-            .set({ name: input.name.trim(), hasSubCategories: input.hasSubCategories })
+            .set({
+                name: input.name.trim(),
+                nameAr: nullIfEmpty(input.nameAr),
+                hasSubCategories: input.hasSubCategories,
+            })
             .where(eq(articleCategories.id, id))
         // slug عمداً ثابت می‌ماند — URLهای ایندکس‌شده نمی‌شکنند
 
@@ -289,12 +346,28 @@ export class ArticleService {
         const wanted = (input.subCategories ?? []).map((s) => s.trim()).filter(Boolean)
         const wantedSet = new Set(wanted)
 
+        // round-34 — جفتِ عربیِ هر نام (هم‌ایندکس با subCategories فرستاده‌شده)
+        const arOf = (faName: string): string | null => {
+            const idx = (input.subCategories ?? []).findIndex((s) => s.trim() === faName)
+            return idx === -1 ? null : nullIfEmpty(input.subCategoriesAr?.[idx])
+        }
+
         for (const subName of wanted) {
-            if (!existing.some((s) => s.name === subName)) {
+            const match = existing.find((s) => s.name === subName)
+            const subAr = arOf(subName)
+            if (match) {
+                // نام موجود → آپدیت نام عربی فقط وقتی مقدار جدید آمده
+                if (input.subCategoriesAr) {
+                    await db
+                        .update(articleSubCategories)
+                        .set({ nameAr: subAr })
+                        .where(eq(articleSubCategories.id, match.id))
+                }
+            } else {
                 const subSlug = await this.uniqueSlug(subName, 'sub')
                 await db
                     .insert(articleSubCategories)
-                    .values({ categoryId: id, name: subName, slug: subSlug })
+                    .values({ categoryId: id, name: subName, nameAr: subAr, slug: subSlug })
             }
         }
         const stale = existing.filter((s) => !wantedSet.has(s.name)).map((s) => s.id)
@@ -338,6 +411,9 @@ export class ArticleService {
                     views: articles.views,
                     status: articles.status,
                     createdAt: articles.createdAt,
+                    // round-34 — برای COALESCE در toSummary (بدون content سنگین)
+                    titleAr: articles.titleAr,
+                    excerptAr: articles.excerptAr,
                 },
                 c: articleCategories,
                 s: articleSubCategories,
@@ -384,34 +460,59 @@ export class ArticleService {
         }
     }
 
-    private toView(a: ArticleRow, c: CategoryRow | null, s: SubRow | null): ArticleView {
+    private toView(
+        a: ArticleRow,
+        c: CategoryRow | null,
+        s: SubRow | null,
+        lang: Lang = 'fa',
+        opts?: { includeAr?: boolean },
+    ): ArticleView {
         return {
             id: a.id,
-            title: a.title,
-            excerpt: a.excerpt,
-            content: a.content,
+            title: pickAr(lang, a.titleAr, a.title),
+            excerpt: pickAr(lang, a.excerptAr, a.excerpt),
+            content: pickAr(lang, a.contentAr, a.content),
             author: a.author,
             profileImage: a.profileImage,
             galleryImages: a.galleryImages ?? [],
             categoryId: a.categoryId,
             subCategoryId: a.subCategoryId,
-            processes: a.processes ?? [],
+            // round-34 — روندها: آرایه‌ی شیء‌دار → همان COALESCE اما بدون ژنریک
+            processes:
+                lang === 'ar' && a.processesAr && a.processesAr.length > 0
+                    ? a.processesAr
+                    : (a.processes ?? []),
             views: a.views,
             status: a.status,
             publishedAt: a.createdAt.toISOString(),
             categorySlug: c?.slug ?? null,
-            categoryName: c?.name ?? null,
+            categoryName: c ? pickAr(lang, c.nameAr, c.name) : null,
             subCategorySlug: s?.slug ?? null,
-            subCategoryName: s?.name ?? null,
+            subCategoryName: s ? pickAr(lang, s.nameAr, s.name) : null,
+            // round-34 — فقط adminDetail: فیلدهای ar خام برای فرم ویرایش دوزبانه
+            ...(opts?.includeAr
+                ? {
+                    titleAr: a.titleAr ?? null,
+                    excerptAr: a.excerptAr ?? null,
+                    contentAr: a.contentAr ?? null,
+                    processesAr: a.processesAr ?? null,
+                    arAuto: a.arAuto,
+                }
+                : {}),
         }
     }
 
     /** round-17 — نگاشت لیست: همان toView برای فیلدهای سبک */
-    private toSummary(a: ArticleSummaryRow, c: CategoryRow | null, s: SubRow | null): ArticleSummaryView {
+    private toSummary(
+        a: ArticleSummaryRow,
+        c: CategoryRow | null,
+        s: SubRow | null,
+        lang: Lang = 'fa',
+    ): ArticleSummaryView {
         return {
             id: a.id,
-            title: a.title,
-            excerpt: a.excerpt,
+            title: pickAr(lang, a.titleAr, a.title),
+            excerpt: pickAr(lang, a.excerptAr, a.excerpt),
             author: a.author,
             profileImage: a.profileImage,
             categoryId: a.categoryId,
@@ -420,9 +521,9 @@ export class ArticleService {
             status: a.status,
             publishedAt: a.createdAt.toISOString(),
             categorySlug: c?.slug ?? null,
-            categoryName: c?.name ?? null,
+            categoryName: c ? pickAr(lang, c.nameAr, c.name) : null,
             subCategorySlug: s?.slug ?? null,
-            subCategoryName: s?.name ?? null,
+            subCategoryName: s ? pickAr(lang, s.nameAr, s.name) : null,
         }
     }
 }

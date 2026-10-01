@@ -1,7 +1,15 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 17 از 49
+// مسیر مقصد: apps/api/src/http/routes/gallery.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { GalleryService } from '#/domain/gallery/gallery.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { langFromHeaders } from '#/domain/shared/lang'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
@@ -12,7 +20,7 @@ export interface GalleryRoutesDeps {
 
 export const galleryRoutes = (deps: GalleryRoutesDeps) => {
   const publicRoutes = new Elysia({ prefix: '/gallery', tags: ['Gallery'] })
-    .get('/', () => deps.gallery.listPublic(), {
+    .get('/', ({ headers }) => deps.gallery.listPublic(langFromHeaders(headers)), {
       detail: { summary: 'Active gallery images (public, sorted)' },
     })
 
@@ -26,6 +34,8 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
         body: t.Object({
           src: t.String({ minLength: 1, maxLength: 500 }),
           alt: t.String({ maxLength: 200 }),
+          // round-34 — متن جایگزین عربی (خالی = fallback فارسی)
+          altAr: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
           span: t.Union([t.Literal('wide'), t.Literal('normal')]),
         }),
         detail: { summary: 'Add image (sortOrder = last)' },
@@ -39,6 +49,8 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
         body: t.Object({
           src: t.Optional(t.String({ maxLength: 500 })),
           alt: t.Optional(t.String({ maxLength: 200 })),
+          // round-34 — متن جایگزین عربی (خالی = حذف ترجمه = fallback فارسی)
+          altAr: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
           span: t.Optional(t.Union([t.Literal('wide'), t.Literal('normal')])),
           isActive: t.Optional(t.Boolean()),
         }),

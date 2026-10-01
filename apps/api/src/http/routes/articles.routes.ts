@@ -1,9 +1,17 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 16 از 49
+// مسیر مقصد: apps/api/src/http/routes/articles.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/http/routes/articles.routes.ts
 import { Elysia, t } from 'elysia'
 
 import type { SessionService } from '#/domain/auth/session.service'
 import type { ArticleService } from '#/domain/article/article.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { langFromHeaders } from '#/domain/shared/lang'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
@@ -22,12 +30,20 @@ const articleBody = t.Object({
   categoryId: t.String({ pattern: UUID_PATTERN }),
   subCategoryId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
   processes: t.Optional(t.Array(processSchema, { maxItems: 10 })),
+  // round-34 — محتوای عربی (اختیاری؛ خالی = حذف ترجمه = fallback فارسی)
+  titleAr: t.Optional(t.Nullable(t.String({ maxLength: 160 }))),
+  excerptAr: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
+  contentAr: t.Optional(t.Nullable(t.String({ maxLength: 100000 }))),
+  processesAr: t.Optional(t.Nullable(t.Array(processSchema, { maxItems: 10 }))),
 })
 
 const categoryBody = t.Object({
   name: t.String({ minLength: 1, maxLength: 60 }),
   hasSubCategories: t.Boolean(),
   subCategories: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 60 }), { maxItems: 12 })),
+  // round-34 — نام عربی دسته + ساب‌دسته‌ها (موازی با subCategories)
+  nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+  subCategoriesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 12 }))),
 })
 
 export interface ArticlesRoutesDeps {
@@ -40,12 +56,12 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
   const publicRoutes = new Elysia({ prefix: '/articles', tags: ['Articles'] })
     .get(
       '/categories',
-      () => deps.articles.categories(),
+      ({ headers }) => deps.articles.categories(langFromHeaders(headers)),
       { detail: { summary: 'Article categories with sub-categories (public)' } },
     )
     .get(
       '/',
-      ({ query }) => deps.articles.listPublic(query.category, query.sub),
+      ({ query, headers }) => deps.articles.listPublic(query.category, query.sub, langFromHeaders(headers)),
       {
         query: t.Object({
           category: t.Optional(t.String({ maxLength: 60 })),
@@ -56,7 +72,7 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
     )
     .get(
       '/:id',
-      ({ params }) => deps.articles.byId(params.id),
+      ({ params, headers }) => deps.articles.byId(params.id, langFromHeaders(headers)),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
         detail: { summary: 'Article detail (public) — increments view counter' },

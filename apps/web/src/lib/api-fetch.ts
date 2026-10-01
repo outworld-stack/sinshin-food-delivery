@@ -1,9 +1,17 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 25 از 49
+// مسیر مقصد: apps/web/src/lib/api-fetch.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/lib/api-fetch.ts
 // هلپرهای fetch مشترک — همه‌ی server/*.ts از اینجا استفاده می‌کنند
 // cast فقط اینجا (مرز serde) — به‌علاوه‌ی cast در هر caller با contract
 
 import { apiBase, ssrFetchSignal } from '#/lib/api'
 import { getAccessToken, onUnauthorized, tryRefresh } from '#/lib/auth-session'
+import { langHeaders } from '#/lib/lang-header'
 
 export interface FetchOpts {
   /** هدرهای اضافی — با هدرهای پایه merge می‌شوند (مثل idempotency-key) */
@@ -11,8 +19,10 @@ export interface FetchOpts {
 }
 
 export async function getJson<T>(path: string): Promise<T> {
+  // round-34 — x-sinshin-lang از کوکی (SSR: درخواست ورودی؛ مرورگر: document)
   const res = await fetch(apiBase() + path, {
     credentials: 'include',
+    headers: await langHeaders(),
     signal: ssrFetchSignal(), // کار-۳: سقف ۱۰s فقط SSR
   })
   return handleResponse<T>(res)
@@ -21,7 +31,7 @@ export async function getJson<T>(path: string): Promise<T> {
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(apiBase() + path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(await langHeaders()) },
     body: JSON.stringify(body),
     credentials: 'include',
     signal: ssrFetchSignal(), // کار-۳
@@ -39,8 +49,10 @@ export async function authJson<T>(
   const token = getAccessToken()
   // ⬅ phase-3: هدرهای سفارشی «قبل از» توکن — authorization همیشه
   // توسط خود helper ست می‌شود؛ caller نمی‌تواند آن را override کند
+  // round-34 — هدر زبان هم قبل از توکن merge می‌شود (منبع: کوکی)
   const headers: Record<string, string> = {
     'content-type': 'application/json',
+    ...(await langHeaders()),
     ...(opts?.headers ?? {}),
   }
   if (token) headers['authorization'] = `Bearer ${token}`

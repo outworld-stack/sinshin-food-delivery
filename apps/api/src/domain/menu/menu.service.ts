@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 8 از 49
+// مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/menu/menu.service.ts
 import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm'
 
@@ -16,6 +23,7 @@ import {
   type CategoryId,
   type ProductId,
 } from '#/domain/shared/brand'
+import { nullIfEmpty, pickAr, pickArArr, type Lang } from '#/domain/shared/lang'
 
 const CACHE_TTL_SECONDS = 30
 const VERSION_KEY = 'menu:ver'
@@ -40,6 +48,12 @@ export interface ProductDto {
   views: number
   sales: number
   status: string
+  /** round-34 — فقط پاسخ ادمین (adminProductDetails): فیلدهای ar خام برای فرم ویرایش */
+  nameAr?: string | null
+  descriptionAr?: string | null
+  ingredientsAr?: string[] | null
+  /** پرچم «ترجمه‌ی خودکار» (رارد ۳۵) — بج فرم ادمین */
+  arAuto?: boolean
 }
 
 export function finalPriceOf(p: { originalPrice: number; discountPercentage: number }): number {
@@ -48,6 +62,26 @@ export function finalPriceOf(p: { originalPrice: number; discountPercentage: num
 
 export type ProductRow = typeof products.$inferSelect
 export type ProductSizeRow = typeof productSizes.$inferSelect
+export type CategoryRow = typeof categories.$inferSelect
+export type MainCategoryRow = typeof mainCategories.$inferSelect
+
+/**
+ * round-34 — نمای عمومی دسته: COALESCE(ar, fa) روی نام و قالب سایزها.
+ * nameAr/sizeNamesAr نگه داشته می‌شوند (فیلد اختیاری قرارداد shared؛ مصرف‌کننده‌ی
+ * عمومی نادیده‌شان می‌گیرد، ادمین برای ویرایش می‌خواندش).
+ */
+function categoryView(c: CategoryRow, lang: Lang) {
+  return {
+    ...c,
+    name: pickAr(lang, c.nameAr, c.name),
+    sizeNames: pickArArr(lang, c.sizeNamesAr, c.sizeNames ?? []),
+  }
+}
+
+/** round-34 — نمای عمومی main: مثل categoryView فقط برای تب‌های منو */
+function mainCategoryView(m: MainCategoryRow, lang: Lang) {
+  return { ...m, name: pickAr(lang, m.nameAr, m.name) }
+}
 
 /** پایه‌های قیمت‌گذاری batch — خروجی loadPricingBases */
 export interface PricingBases {
@@ -144,36 +178,39 @@ export class MenuService {
   // ── عمومی ──
 
   /** Main های فعال — پیش‌فرض اول، بعد sortOrder */
-  async activeMainCategories() {
-    return this.cached('mains:active', async () => {
+  async activeMainCategories(lang: Lang = 'fa') {
+    return this.cached(`mains:${lang}:active`, async () => {
       const rows = await this.deps.db
         .select()
         .from(mainCategories)
         .where(eq(mainCategories.isActive, true))
         .orderBy(asc(mainCategories.sortOrder))
-      return rows.sort((a, b) => {
-        if (a.isDefault && !b.isDefault) return -1
-        if (!a.isDefault && b.isDefault) return 1
-        return a.sortOrder - b.sortOrder
-      })
+      return rows
+        .map((m) => mainCategoryView(m, lang))
+        .sort((a, b) => {
+          if (a.isDefault && !b.isDefault) return -1
+          if (!a.isDefault && b.isDefault) return 1
+          return a.sortOrder - b.sortOrder
+        })
     })
   }
 
-  async categoriesByMain(slug: string) {
-    return this.cached(`cats:${slug}`, async () => {
+  async categoriesByMain(slug: string, lang: Lang = 'fa') {
+    return this.cached(`cats:${lang}:${slug}`, async () => {
       const main = await this.deps.db.query.mainCategories.findFirst({
         where: and(eq(mainCategories.slug, slug), eq(mainCategories.isActive, true)),
       })
       if (!main) return []
-      return this.deps.db
+      const rows = await this.deps.db
         .select()
         .from(categories)
         .where(eq(categories.mainCategoryId, main.id))
+      return rows.map((c) => categoryView(c, lang))
     })
   }
 
-  async productsByMain(slug: string) {
-    return this.cached(`prods:${slug}`, async () => {
+  async productsByMain(slug: string, lang: Lang = 'fa') {
+    return this.cached(`prods:${lang}:${slug}`, async () => {
       const main = await this.deps.db.query.mainCategories.findFirst({
         where: and(eq(mainCategories.slug, slug), eq(mainCategories.isActive, true)),
       })
@@ -182,7 +219,9 @@ export class MenuService {
         .select()
         .from(categories)
         .where(eq(categories.mainCategoryId, main.id))
-      if (cats.length === 0) return { products: [] as ProductDto[], categories: cats }
+      if (cats.length === 0) {
+        return { products: [] as ProductDto[], categories: cats.map((c) => categoryView(c, lang)) }
+      }
 
       const rows = await this.deps.db
         .select()
@@ -198,12 +237,18 @@ export class MenuService {
         )
         .orderBy(desc(products.createdAt))
 
-      const catMap = new Map(cats.map((c) => [c.id, c.name]))
-      return { products: await this.withSizes(rows, catMap), categories: cats }
+      // round-34 — نام دسته هم COALESCE: categoryName در حالت عربی عربی می‌شود
+      const catMap = new Map(
+        cats.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)] as const),
+      )
+      return {
+        products: await this.withSizes(rows, catMap, lang),
+        categories: cats.map((c) => categoryView(c, lang)),
+      }
     })
   }
 
-  async productById(id: string): Promise<ProductDto | null> {
+  async productById(id: string, lang: Lang = 'fa'): Promise<ProductDto | null> {
     const pid = asProductId(id)
 
     const load = async (): Promise<ProductDto | null> => {
@@ -214,12 +259,16 @@ export class MenuService {
       const cat = await this.deps.db.query.categories.findFirst({
         where: eq(categories.id, row.categoryId),
       })
-      const list = await this.withSizes([row], new Map([[row.categoryId, cat?.name ?? '']]))
+      const list = await this.withSizes(
+        [row],
+        new Map([[row.categoryId, pickAr(lang, cat?.nameAr, cat?.name ?? '')]]),
+        lang,
+      )
       return list[0] ?? null
     }
 
     const ver = await this.version()
-    const k = `menu:v${ver}:prod:${id}`
+    const k = `menu:v${ver}:prod:${lang}:${id}`
     const hit = await this.deps.redis.getJson<ProductDto>(k)
     if (hit !== null) return hit
 
@@ -244,9 +293,11 @@ export class MenuService {
     return p
   }
 
-  async allCategories() {
-    return this.cached('cats:all', async () =>
-      this.deps.db.select().from(categories).orderBy(asc(categories.name)),
+  async allCategories(lang: Lang = 'fa') {
+    return this.cached(`cats:${lang}:all`, async () =>
+      (
+        await this.deps.db.select().from(categories).orderBy(asc(categories.name))
+      ).map((c) => categoryView(c, lang)),
     )
   }
 
@@ -260,7 +311,11 @@ export class MenuService {
     return this.deps.db.select().from(mainCategories).orderBy(asc(mainCategories.sortOrder))
   }
 
-  async createMainCategory(name: string, slug: string): Promise<{ success: boolean; message?: string }> {
+  async createMainCategory(
+    name: string,
+    slug: string,
+    nameAr?: string | null,
+  ): Promise<{ success: boolean; message?: string }> {
     const clean = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
     if (!clean) return { success: false, message: 'slug معتبر نیست (مثلا: cafe)' }
     const clash = await this.deps.db.query.mainCategories.findFirst({
@@ -271,6 +326,7 @@ export class MenuService {
     const all = await this.adminMainCategories()
     await this.deps.db.insert(mainCategories).values({
       name: name.trim(),
+      nameAr: nullIfEmpty(nameAr),
       slug: clean,
       isActive: false,
       isDefault: false,
@@ -350,14 +406,19 @@ export class MenuService {
     mainCategoryId: string
     hasSizes: boolean
     sizeNames: string[]
+    /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
+    nameAr?: string | null
+    sizeNamesAr?: string[] | null
   }): Promise<{ success: boolean; message?: string }> {
     const slug = await this.uniqueCategorySlug(input.name.trim())
     await this.deps.db.insert(categories).values({
       name: input.name.trim(),
+      nameAr: nullIfEmpty(input.nameAr),
       slug,
       mainCategoryId: asMainCategoryId(input.mainCategoryId),
       hasSizes: input.hasSizes,
       sizeNames: input.hasSizes ? input.sizeNames : [],
+      sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
     } as typeof categories.$inferInsert)
     await this.invalidate()
     return { success: true }
@@ -369,15 +430,20 @@ export class MenuService {
     mainCategoryId: string
     hasSizes: boolean
     sizeNames: string[]
+    /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
+    nameAr?: string | null
+    sizeNamesAr?: string[] | null
   }): Promise<void> {
     const catId = asCategoryId(input.id)
     await this.deps.db
       .update(categories)
       .set({
         name: input.name.trim(),
+        nameAr: nullIfEmpty(input.nameAr),
         mainCategoryId: asMainCategoryId(input.mainCategoryId),
         hasSizes: input.hasSizes,
         sizeNames: input.hasSizes ? input.sizeNames : [],
+        sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
       })
       .where(eq(categories.id, catId))
     await this.invalidate()
@@ -444,7 +510,20 @@ export class MenuService {
   }
 
   async adminProductDetails(id: string): Promise<ProductDto | null> {
-    return this.productById(id)
+    // round-34 — فرم ویرایش ادمین هر دو زبان را می‌خواهد: ردیف خام + ar،
+    // بدون کش عمومی و بدون نگاشت زبان (ادمین فارسی‌زبان است، fa مبنا)
+    const pid = asProductId(id)
+    const row = await this.deps.db.query.products.findFirst({
+      where: eq(products.id, pid),
+    })
+    if (!row) return null
+    const cat = await this.deps.db.query.categories.findFirst({
+      where: eq(categories.id, row.categoryId),
+    })
+    const list = await this.withSizes([row], new Map([[row.categoryId, cat?.name ?? '']]), 'fa', {
+      includeAr: true,
+    })
+    return list[0] ?? null
   }
 
   async createProduct(input: {
@@ -458,14 +537,25 @@ export class MenuService {
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
-    sizes?: { name: string; price: number }[]
+    sizes?: { name: string; nameAr?: string | null; price: number }[]
     ingredients?: string[]
+    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = fallback فارسی) */
+    nameAr?: string | null
+    descriptionAr?: string | null
+    ingredientsAr?: string[] | null
   }): Promise<{ success: boolean; id?: string; message?: string }> {
+    const nameAr = nullIfEmpty(input.nameAr)
+    const descriptionAr = nullIfEmpty(input.descriptionAr)
     const [created] = await this.deps.db
       .insert(products)
       .values({
         name: input.name,
         description: input.description,
+        // round-34 — ذخیره‌ی دستی ادمین: arAuto=false (بج «دستی»)
+        nameAr,
+        descriptionAr,
+        ingredientsAr: input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null,
+        arAuto: false,
         originalPrice: input.originalPrice,
         discountPercentage: input.discountPercentage,
         prepTime: input.prepTime,
@@ -498,15 +588,30 @@ export class MenuService {
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
-    sizes?: { name: string; price: number }[]
+    sizes?: { name: string; nameAr?: string | null; price: number }[]
     ingredients?: string[]
+    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = fallback فارسی) */
+    nameAr?: string | null
+    descriptionAr?: string | null
+    ingredientsAr?: string[] | null
   }): Promise<void> {
     const pid = asProductId(input.id)
+    // round-34 — نرمال‌سازی: '' → NULL؛ مواد اولیه‌ی خالی → NULL
+    const nameAr = nullIfEmpty(input.nameAr)
+    const descriptionAr = nullIfEmpty(input.descriptionAr)
+    const ingredientsAr =
+      input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null
     await this.deps.db
       .update(products)
       .set({
         name: input.name,
         description: input.description,
+        // round-34 — ذخیره‌ی دستی ادمین همیشه پرچم «خودکار» را برمی‌گرداند:
+        // مقدار عربی دارد → «دستی»؛ همه خالی → بدون ترجمه (NULL ها بالا مشخص شدند)
+        nameAr,
+        descriptionAr,
+        ingredientsAr,
+        arAuto: false,
         originalPrice: input.originalPrice,
         discountPercentage: input.discountPercentage,
         prepTime: input.prepTime,
@@ -525,7 +630,7 @@ export class MenuService {
     // ── phase-2: آیدی پایدار سایزها ──
     // قبلاً: حذف همه + اینسرت با UUID جدید → سبدِ مشتری که sizeId قدیمی
     // داشت یا خطا می‌خورد یا بی‌سروصدا اولین سایز قیمت می‌شد. الان:
-    //   • نام موجود → همان ردیف، فقط price/sortOrder آپدیت (id ثابت)
+    //   • نام موجود → همان ردیف، فقط price/sortOrder/nameAr آپدیت (id ثابت)
     //   • نام جدید → insert | نام حذف‌شده → delete
     //   • sizesEnabled=false → دست نمی‌زنیم (برای فعال‌سازی مجدد حفظ می‌شوند)
     if (input.sizesEnabled && input.sizes) {
@@ -544,13 +649,19 @@ export class MenuService {
           if (match) {
             await tx
               .update(productSizes)
-              .set({ price: s.price, sortOrder: order })
+              .set({ price: s.price, sortOrder: order, nameAr: nullIfEmpty(s.nameAr) })
               .where(eq(productSizes.id, match.id))
             keepIds.add(match.id)
           } else {
             const [ins] = await tx
               .insert(productSizes)
-              .values({ productId: pid, name: s.name, price: s.price, sortOrder: order })
+              .values({
+                productId: pid,
+                name: s.name,
+                nameAr: nullIfEmpty(s.nameAr),
+                price: s.price,
+                sortOrder: order,
+              })
               .returning({ id: productSizes.id })
             if (ins) keepIds.add(ins.id)
           }
@@ -581,15 +692,27 @@ export class MenuService {
 
   // ── داخلی ──
 
-  private async insertSizes(productId: ProductId, sizes: { name: string; price: number }[]) {
+  private async insertSizes(
+    productId: ProductId,
+    sizes: { name: string; nameAr?: string | null; price: number }[],
+  ) {
     await this.deps.db.insert(productSizes).values(
-      sizes.map((s, i) => ({ productId, name: s.name, price: s.price, sortOrder: i })),
+      sizes.map((s, i) => ({
+        productId,
+        name: s.name,
+        nameAr: nullIfEmpty(s.nameAr),
+        price: s.price,
+        sortOrder: i,
+      })),
     )
   }
 
   private async withSizes(
     rows: Array<typeof products.$inferSelect>,
     catMap: Map<CategoryId, string>,
+    lang: Lang = 'fa',
+    /** round-34 — پاسخ ادمین: فیلدهای ar خام هم برگردند (فرم ویرایش) */
+    opts?: { includeAr?: boolean },
   ): Promise<ProductDto[]> {
     const sizedIds = rows.filter((r) => r.sizesEnabled).map((r) => r.id)
     const sizeRows = sizedIds.length
@@ -608,7 +731,7 @@ export class MenuService {
 
     return rows.map((r) => ({
       id: r.id,
-      name: r.name,
+      name: pickAr(lang, r.nameAr, r.name),
       description: r.description,
       originalPrice: r.originalPrice,
       finalPrice: finalPriceOf(r),
@@ -621,14 +744,25 @@ export class MenuService {
       sizesEnabled: r.sizesEnabled,
       sizes: (sizeMap.get(r.id) ?? []).map((s) => ({
         id: s.id,
-        name: s.name,
+        name: pickAr(lang, s.nameAr, s.name),
         price: s.price,
+        // round-34 — فقط پاسخ ادمین: نام عربی خام سایز برای فرم ویرایش
+        ...(opts?.includeAr ? { nameAr: s.nameAr ?? null } : {}),
       })),
-      ingredients: r.ingredients ?? [],
+      ingredients: pickArArr(lang, r.ingredientsAr, r.ingredients ?? []),
       prepTime: r.prepTime,
       views: r.views,
       sales: r.sales,
       status: r.status,
+      // round-34 — فقط پاسخ ادمین (فرم ویرایش دوزبانه؛ بج دستی/خودکار/ندارد)
+      ...(opts?.includeAr
+        ? {
+            nameAr: r.nameAr ?? null,
+            descriptionAr: r.descriptionAr ?? null,
+            ingredientsAr: r.ingredientsAr ?? null,
+            arAuto: r.arAuto,
+          }
+        : {}),
     }))
   }
 

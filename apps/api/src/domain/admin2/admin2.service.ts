@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 14 از 49
+// مسیر مقصد: apps/api/src/domain/admin2/admin2.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/admin2/admin2.service.ts
 import { and, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm'
 
@@ -379,6 +386,8 @@ export class Admin2Service {
         closed: boolean,
         reason?: string | null,
         reopenTime?: string | null,
+        /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = fallback فارسی) */
+        reasonAr?: string | null,
     ): Promise<void> {
         const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
         if (actorRole === 'admin2' && !(p?.canToggleTemporaryClose)) {
@@ -388,6 +397,11 @@ export class Admin2Service {
         await this.deps.settings.set(
             SETTING_KEYS.temporaryCloseReason,
             closed ? (reason ?? '').slice(0, 120) : '',
+        )
+        // round-34 — کلید موازی عربی؛ فقط موقع بسته‌بودن معنا دارد و با باز شدن پاک می‌شود
+        await this.deps.settings.set(
+            SETTING_KEYS.temporaryCloseReasonAr,
+            closed ? (reasonAr ?? '').trim().slice(0, 120) : '',
         )
         await this.deps.settings.set(
             SETTING_KEYS.temporaryReopenTime,

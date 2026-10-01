@@ -1,7 +1,15 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 37 از 49
+// مسیر مقصد: apps/web/src/components/admin/settings/AboutContentForm.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/settings/AboutContentForm.tsx
 import { memo, useEffect, useState, useCallback } from 'react'
 import type { AboutContent, AboutContentInput } from '#/types/site/about'
 import { FileUploader } from '#/components/FileUploader'
+import { ArField } from '#/components/admin/ArField'
 
 interface AboutContentFormProps {
   initialData: AboutContent
@@ -16,6 +24,11 @@ const EMPTY_FORM: AboutContentInput = {
   teamTitle: '',
   teamGradient: '',
   teamAlt: '',
+  // round-34 — محتوای عربی (خالی = fallback فارسی)
+  heroTitleAr: '',
+  heroTextAr: '',
+  teamTitleAr: '',
+  teamAltAr: '',
 }
 
 const inputCls =
@@ -42,7 +55,14 @@ export const AboutContentForm = memo(function AboutContentForm({
   useEffect(() => {
     if (isDirty) return
     const { updatedAt: _updatedAt, ...fields } = initialData
-    setForm(fields)
+    setForm({
+      ...fields,
+      // round-34 — نرمال‌سازی مقادیر عربی (null/undefined → '' = fallback فارسی)
+      heroTitleAr: fields.heroTitleAr ?? '',
+      heroTextAr: fields.heroTextAr ?? '',
+      teamTitleAr: fields.teamTitleAr ?? '',
+      teamAltAr: fields.teamAltAr ?? '',
+    })
   }, [initialData, isDirty])
 
   const handleTextChange = useCallback(
@@ -50,6 +70,16 @@ export const AboutContentForm = memo(function AboutContentForm({
       (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         setIsDirty(true)
         setForm((prev) => ({ ...prev, [field]: e.target.value }))
+      },
+    [],
+  )
+
+  // round-34 — ArField مقدار خام می‌دهد (نه event) — آداپتور فیلدهای عربی
+  const handleArChange = useCallback(
+    (field: 'heroTitleAr' | 'heroTextAr' | 'teamTitleAr' | 'teamAltAr') =>
+      (value: string) => {
+        setIsDirty(true)
+        setForm((prev) => ({ ...prev, [field]: value }))
       },
     [],
   )
@@ -107,6 +137,25 @@ export const AboutContentForm = memo(function AboutContentForm({
             <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن داستان برند</span>
             <textarea rows={5} value={form.heroText} onChange={handleTextChange('heroText')} className={`${inputCls} leading-7`} />
           </label>
+          {/* round-34 — عنوان و متن عربی HERO */}
+          <ArField
+            label="عنوان اصلی"
+            value={form.heroTitleAr}
+            onChange={handleArChange('heroTitleAr')}
+            arAuto={initialData.arAuto}
+            faReference={form.heroTitle}
+            maxLength={120}
+          />
+          <ArField
+            label="متن داستان برند"
+            value={form.heroTextAr}
+            onChange={handleArChange('heroTextAr')}
+            arAuto={initialData.arAuto}
+            faReference={form.heroText}
+            multiline
+            rows={5}
+            maxLength={2000}
+          />
         </div>
         <div className="space-y-4">
           <ImagePreview src={form.heroGradient} />
@@ -126,10 +175,28 @@ export const AboutContentForm = memo(function AboutContentForm({
             <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">عنوان بخش تیم</span>
             <input value={form.teamTitle} onChange={handleTextChange('teamTitle')} className={inputCls} />
           </label>
+          {/* round-34 — عنوان عربی تیم */}
+          <ArField
+            label="عنوان بخش تیم"
+            value={form.teamTitleAr}
+            onChange={handleArChange('teamTitleAr')}
+            arAuto={initialData.arAuto}
+            faReference={form.teamTitle}
+            maxLength={120}
+          />
           <label className="block">
             <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن جایگزین تصویر تیم (alt)</span>
             <input value={form.teamAlt} onChange={handleTextChange('teamAlt')} className={inputCls} />
           </label>
+          {/* round-34 — alt عربی تیم */}
+          <ArField
+            label="متن جایگزین تصویر تیم"
+            value={form.teamAltAr}
+            onChange={handleArChange('teamAltAr')}
+            arAuto={initialData.arAuto}
+            faReference={form.teamAlt}
+            maxLength={200}
+          />
           <label className="block">
             <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">تصویر تیم</span>
             <FileUploader accept="image/webp" fileTypeText="WebP" onUploadComplete={handleTeamImage} />

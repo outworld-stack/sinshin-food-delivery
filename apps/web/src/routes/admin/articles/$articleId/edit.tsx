@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-34 — sinshin-food-delivery — فایل 31 از 49
+// مسیر مقصد: apps/web/src/routes/admin/articles/$articleId/edit.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty
+// ═══════════════════════════════════════════════════════════════
+
 // src/routes/admin/articles/edit.tsx
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -50,6 +57,11 @@ function EditArticlePage() {
       <ArticleForm initialData={{
         ...article,
         profileImage: article.profileImage ?? '',
+        // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = fallback فارسی)
+        titleAr: article.titleAr ?? '',
+        excerptAr: article.excerptAr ?? '',
+        contentAr: article.contentAr ?? '',
+        processesAr: article.processesAr ?? [],
       }} onSubmit={mutation.mutate} isSubmitting={mutation.isPending} />
     </div>
   )
