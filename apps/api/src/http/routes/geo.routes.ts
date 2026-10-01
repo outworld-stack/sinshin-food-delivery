@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 4 از 17
+// مسیر مقصد: apps/api/src/http/routes/geo.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
 // src/http/routes/geo.routes.ts
 import { Elysia, t } from 'elysia'
 
@@ -21,12 +28,19 @@ const IP_PATTERN =
  *  /geo/gate?ip=  → عمومی؛ فرانت SSR می‌پرسد: «این IP مسدود است؟»
  *                   (خودِ API جداگانه با XFF خودش مسدود می‌کند)
  *  /geo/status    → فقط ادمین اصلی؛ وضعیت بازه‌ها برای صفحه تنظیمات
+ *
+ * round-37 — /geo/gate علاوه بر blocked، «mode» هم برمی‌گرداند تا لایه‌ی SSR
+ * بداند کاربر را به کدام پیام بفرستد (فقط ایران / ایران+عراق).
  */
 export const geoRoutes = (deps: GeoRoutesDeps) => {
   const publicRoutes = new Elysia({ prefix: '/geo', tags: ['Geo'] })
     .get(
       '/gate',
-      async ({ query }) => ({ blocked: await deps.geo.shouldBlock(query.ip) }),
+      async ({ query }) => ({
+        blocked: await deps.geo.shouldBlock(query.ip),
+        /** round-37 — iran-only | iran-iraq | world (برای پیام صفحه‌ی مسدود) */
+        mode: await deps.geo.accessMode(),
+      }),
       {
         query: t.Object({
           ip: t.String({ minLength: 3, maxLength: 45, pattern: IP_PATTERN }),
@@ -36,9 +50,9 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
           ipRateLimit({ redis: deps.redis, scope: 'geo-gate', limit: 240, windowSeconds: 60 }),
         ],
         detail: {
-          summary: 'Geo gate — is this IP blocked by iran-only policy?',
+          summary: 'Geo gate — is this IP blocked? + current access mode',
           description:
-            'Used by the web SSR layer. Internal/private IPs and GEO_BYPASS_IPS are always allowed.',
+            'Used by the web SSR layer. Internal/private IPs and GEO_BYPASS_IPS are always allowed. round-37: mode = iran-only | iran-iraq | world — the blocked page picks its message from it.',
         },
       },
     )
@@ -46,7 +60,11 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
   const adminRoutes = new Elysia({ prefix: '/geo', tags: ['Geo'] })
     .use(requireAdmin(deps.sessions))
     .get('/status', () => deps.geo.status(), {
-      detail: { summary: 'Geo service status (main admin only)' },
+      detail: {
+        summary: 'Geo service status (main admin only)',
+        description:
+          'round-37 — per-country prefixes (iran/iraq), access mode, outside scope, source and bypass count for the settings page card.',
+      },
     })
 
   return new Elysia().use(publicRoutes).use(adminRoutes)

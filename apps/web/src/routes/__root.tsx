@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 8 از 17
+// مسیر مقصد: apps/web/src/routes/__root.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
 // src/routes/__root.tsx
 import { HeadContent, Scripts, createRootRouteWithContext, redirect } from '@tanstack/react-router'
 import { Toast } from '#/components/Toast'
@@ -49,11 +56,19 @@ const SITE_JSON_LD = jsonLdScript({
 export const Route = createRootRouteWithContext<MyRouterContext>()({
   beforeLoad: async ({ location }) => {
     // phase-fix: IP خارج از ایران → صفحه‌ی اختصاصی ۴۰۳ (نه 404)؛
-    // خودِ صفحه‌ی پیام از بررسی معاف است تا ریدایرکت بی‌نهایت نشود
+    // خودِ صفحه‌ی پیام از بررسی معاف است تا ریدایرکت بی‌نهایت نشود.
+    // round-37 — verdict حالا mode هم دارد؛ اگر مسدود شد و حالت
+    // «ایران + عراق» بود، پارامتر m می‌رود تا صفحه‌ی مسدود پیام درست
+    // («فقط از ایران و عراق»، نه «اگر از ایران هستید…») را نشان دهد.
     if (import.meta.env.SSR && !location.pathname.startsWith('/geo-blocked')) {
-      const { isBlockedByGeo } = await import('#/server/geoGate')
-      if (await isBlockedByGeo()) {
-        throw redirect({ to: '/geo-blocked', replace: true })
+      const { getGeoGate } = await import('#/server/geoGate')
+      const gate = await getGeoGate()
+      if (gate.blocked) {
+        throw redirect({
+          to: '/geo-blocked',
+          search: { m: gate.mode === 'iran-iraq' ? 'iran-iraq' : undefined },
+          replace: true,
+        })
       }
     }
     // رارد ۳۱ — زبان فعال از کوکی (سمت سرور از هدر درخواست) تا متن‌های SSR

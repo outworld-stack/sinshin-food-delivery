@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 5 از 17
+// مسیر مقصد: apps/api/src/http/routes/admin-settings.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-34 — sinshin-food-delivery — فایل 21 از 49
 // مسیر مقصد: apps/api/src/http/routes/admin-settings.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -238,7 +245,44 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
         detail: {
           summary: 'Toggle Iran-only access — main admin only',
           description:
-            'When ON, non-Iranian IPs get 404 (site + API). Effective within ~15s (cached). Admins abroad/VPN: set GEO_BYPASS_IPS in env.',
+            'When ON, non-Iranian IPs (including Iraq) get 403 geo-blocked (site + API). Effective within ~15s (cached). Admins abroad/VPN: set GEO_BYPASS_IPS in env. round-37: turning this OFF reveals the outside-scope choice (Iraq-only vs everyone) — see /outside-scope.',
+        },
+      },
+    )
+    // round-37 — دامنه‌ی ورود کاربران خارج از ایران (فقط عراق / همه)
+    // فقط وقتی iran_only_access خاموش است معنا دارد؛ مقدارش حفظ می‌شود و
+    // با روشن‌کردن دوباره‌ی قفل، بی‌اثر (نه پاک) می‌شود.
+    .get(
+      '/outside-scope',
+      async () => ({
+        scope: await deps.settings.get<'iraq' | 'world'>(SETTING_KEYS.outsideAccessScope, 'iraq'),
+      }),
+      {
+        detail: {
+          summary: 'Outside-Iran access scope (iraq | world, default: iraq) — main admin only',
+          description:
+            "Meaningful only while iran_only_access is OFF. 'iraq' = Iran + Iraq allowed, rest blocked. 'world' = no geo restriction.",
+        },
+      },
+    )
+    .post(
+      '/outside-scope',
+      async ({ body, user }) => {
+        await deps.settings.set(SETTING_KEYS.outsideAccessScope, body.scope)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'OUTSIDE_SCOPE_SET',
+          entity: 'settings',
+          metadata: { scope: body.scope },
+        })
+        return { success: true }
+      },
+      {
+        body: t.Object({ scope: t.Union([t.Literal('iraq'), t.Literal('world')]) }),
+        detail: {
+          summary: 'Set outside-Iran access scope — main admin only',
+          description:
+            "'iraq' allows Iranian + Iraqi IPs only; 'world' opens the site to every country. Effective within ~15s (cached). Audit-logged as OUTSIDE_SCOPE_SET.",
         },
       },
     )

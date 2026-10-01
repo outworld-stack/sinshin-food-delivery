@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 6 از 17
+// مسیر مقصد: apps/api/src/app.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-35 — sinshin-food-delivery — فایل 17 از 31
 // مسیر مقصد: apps/api/src/app.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -144,11 +151,20 @@ export const buildApp = (deps: AppDeps) => {
     const ip = clientIp(request.headers.get('x-forwarded-for'))
     if (ip && (await deps.geo.shouldBlock(ip))) {
       // phase-fix: 404 گیج‌کننده بود → 403 + پیام روشن برای کاربر ایرانیِ VPN-دار
+      // round-37 — پیام با حالت واقعی دروازه هماهنگ می‌شود: در حالت
+      // «ایران + عراق» کاربرِ کشور دیگری باید بداند چرا مسدود است.
+      const mode = await deps.geo.accessMode()
+      const message =
+        mode === 'iran-iraq'
+          ? 'دسترسی به این سرویس فقط از ایران و عراق امکان‌پذیر است. اگر داخل یکی از این دو کشور هستید، لطفاً VPN خود را خاموش کنید و صفحه را رفرش کنید.'
+          : 'لطفاً اگر از ایران هستید، لطفاً VPN خودتان را خاموش کنید و صفحه را رفرش کنید.'
       return new Response(
         JSON.stringify({
           error: {
             code: 'GEO_BLOCKED',
-            message: 'لطفاً اگر از ایران هستید، لطفاً VPN خودتان را خاموش کنید و صفحه را رفرش کنید.',
+            message,
+            /** round-37 — حالت دروازه برای لایه‌های بالاتر (web error-map) */
+            policy: mode,
           },
         }),
         { status: 403, headers: { 'content-type': 'application/json' } },

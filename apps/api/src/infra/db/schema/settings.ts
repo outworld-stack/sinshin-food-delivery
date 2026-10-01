@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 3 از 17
+// مسیر مقصد: apps/api/src/infra/db/schema/settings.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-34 — sinshin-food-delivery — فایل 6 از 49
 // مسیر مقصد: apps/api/src/infra/db/schema/settings.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -41,6 +48,12 @@ export const SETTING_KEYS = {
   // per-product (ستون products.packaging_cost) شد و این کلید مرده بود.
 
   iranOnlyAccess: 'iran_only_access', // boolean
+  /**
+   * round-37 — دامنه‌ی ورود کاربران خارج از ایران (فقط وقتی iran_only_access=false).
+   * 'iraq'  = ایران + عراق (پیش‌فرض — امن‌ترین حالت بعد از باز کردن قفل)
+   * 'world' = همه‌ی کشورها
+   */
+  outsideAccessScope: 'outside_access_scope', // 'iraq' | 'world'
 } as const
 
 export const contentAbout = pgTable('content_about', {

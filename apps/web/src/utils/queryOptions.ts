@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 14 از 17
+// مسیر مقصد: apps/web/src/utils/queryOptions.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
 // src/utils/queryOptions.ts
 // فکتوری‌های queryOptions — الگوی رسمی TanStack Query v5
 // مزیت: loader سرور و useQuery کلاینت از همین تعریف استفاده می‌کنن؛
@@ -49,6 +56,9 @@ import {
   getCouriersForAssignment,
   getIranOnlyAccess,
   getRestaurantStatusFull,
+  // رارد ۳۷ — قفل جغرافیایی عراق
+  getOutsideScope,
+  getGeoStatus,
 } from '#/server/admin'
 import { getTerms } from '#/server/terms'
 import { getAdminCoupons, getAdminCoupon } from '#/server/coupons'
@@ -353,6 +363,24 @@ export const settingsIranOnlyOptions = queryOptions({
   queryKey: qk.settingsIranOnly,
   queryFn: () => getIranOnlyAccess(),
   staleTime: 0,
+})
+
+// ═════════════ رارد ۳۷ — قفل جغرافیایی عراق ═════════════
+
+// دامنه‌ی ورود خارج از ایران (فقط عراق / همه) — مثل پرچم ایران: فوری
+export const settingsOutsideScopeOptions = queryOptions({
+  queryKey: qk.settingsOutsideScope,
+  queryFn: () => getOutsideScope(),
+  staleTime: 0,
+})
+
+// وضعیت زنده‌ی دروازه (رنج‌های IR/IQ، منبع، زمان به‌روزرسانی) — کارت تنظیمات؛
+// هر ۳۰ ثانیه خودش تازه می‌شود تا ادمین شمار رنج‌ها را «زنده» ببیند
+export const geoStatusOptions = queryOptions({
+  queryKey: qk.geoStatus,
+  queryFn: () => getGeoStatus(),
+  staleTime: 15_000,
+  refetchInterval: 30_000,
 })
 
 // قوانین — نسخه‌دار؛ مودال ثبت‌نام و ادیتور ادمین یک کش مشترک

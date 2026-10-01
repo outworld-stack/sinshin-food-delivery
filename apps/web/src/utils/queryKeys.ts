@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 13 از 17
+// مسیر مقصد: apps/web/src/utils/queryKeys.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-35 — sinshin-food-delivery — فایل 25 از 31
 // مسیر مقصد: apps/web/src/utils/queryKeys.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -106,6 +113,10 @@ export const qk = {
 
   // phase-fix — پرچم «فقط ایران»
   settingsIranOnly: ['settings-iran-only'] as const,
+
+  // رارد ۳۷ — قفل جغرافیایی عراق: دامنه‌ی خارج + وضعیت زنده‌ی دروازه
+  settingsOutsideScope: ['settings-outside-scope'] as const,
+  geoStatus: ['geo-status'] as const,
 
   // کتگوری‌ها — فرم محصول/کوپن + فیلتر لیست‌ها همه از یک کش
   categories: ['categories'] as const,

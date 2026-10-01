@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-37 — sinshin-food-delivery — فایل 12 از 17
+// مسیر مقصد: apps/web/src/server/admin.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-three
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-34 — sinshin-food-delivery — فایل 49 از 49
 // مسیر مقصد: apps/web/src/server/admin.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -445,6 +452,43 @@ export async function setIranOnlyAccess(input: {
         data: { enabled: boolean }
 }): Promise<void> {
         await authJson<unknown>('/admin/settings/iran-only', 'POST', input.data)
+}
+
+// ═════════════ رارد ۳۷ — قفل جغرافیایی عراق ═════════════
+
+/** رارد ۳۷ — دامنه‌ی ورود کاربران خارج از ایران (وقتی قفلِ فقط ایران خاموش است) */
+export type OutsideScope = 'iraq' | 'world'
+
+export async function getOutsideScope(): Promise<OutsideScope> {
+        // مثل getIranOnlyAccess — مرز serde همین‌جاست؛ هر چیز غیر از 'world' = 'iraq'
+        const d = await authJson<{ scope: unknown }>('/admin/settings/outside-scope', 'GET')
+        return d.scope === 'world' ? 'world' : 'iraq'
+}
+
+export async function setOutsideScope(input: {
+        data: { scope: OutsideScope }
+}): Promise<void> {
+        await authJson<unknown>('/admin/settings/outside-scope', 'POST', input.data)
+}
+
+/** رارد ۳۷ — وضعیت زنده‌ی دروازه برای کارت تنظیمات (رنج‌ها/منبع/به‌روزرسانی) */
+export interface GeoStatusResponse {
+        enabled: boolean
+        mode: 'iran-only' | 'iran-iraq' | 'world'
+        outsideScope: 'iraq' | 'world'
+        rangesLoaded: boolean
+        rangesLoadedAt: string | null
+        source: string | null
+        iran: { ipv4Prefixes: number; ipv6Prefixes: number }
+        iraq: { ipv4Prefixes: number; ipv6Prefixes: number }
+        /** فیلدهای قدیمی = آمار ایران */
+        ipv4Prefixes: number
+        ipv6Prefixes: number
+        bypassIps: number
+}
+
+export async function getGeoStatus(): Promise<GeoStatusResponse> {
+        return authJson<GeoStatusResponse>('/geo/status', 'GET')
 }
 
 export async function getRestaurantOpen(): Promise<{
