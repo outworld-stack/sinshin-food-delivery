@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 23 از 49
+// round-35 — sinshin-food-delivery — فایل 23 از 31
 // مسیر مقصد: packages/shared/src/contracts.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage thirty one
 // ═══════════════════════════════════════════════════════════════
 
 // packages/shared/src/contracts.ts
@@ -833,4 +833,53 @@ export interface SystemMetricsDto {
   sse: SseMetricsDto
   /** مرتب بر اساس نام */
   jobs: JobRunDto[]
+}
+
+// ═══════════ round-35 — Auto-Translation (مترجم آفلاین NLLB) ═══════════
+
+/** نوع موجودیت قابل‌ترجمه — کلید صف translation_jobs */
+export type TranslationEntityType =
+  | 'product'
+  | 'mainCategory'
+  | 'category'
+  | 'article'
+  | 'articleCategory'
+  | 'articleSubCategory'
+  | 'gallery'
+  | 'terms'
+  | 'about'
+
+/** وضعیت job صف ترجمه */
+export type TranslationJobStatus = 'pending' | 'running' | 'done' | 'failed'
+
+/** یک job صف ترجمه — GET /admin/translate/jobs */
+export interface TranslationJobDto {
+  id: string
+  entityType: TranslationEntityType
+  entityId: string
+  status: TranslationJobStatus
+  attempts: number
+  maxAttempts: number
+  lastError: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+/** وضعیت صف + شمار رکوردهای فاقد ترجمه — GET /admin/translate/status */
+export interface TranslationStatusDto {
+  queue: { pending: number; running: number; done: number; failed: number }
+  /** تعداد رکورد هر نوع که «حداقل یک» فیلد عربی‌شان خالی است (کاندیدای bulk) */
+  missing: Partial<Record<TranslationEntityType, number>>
+  /** مترجم آفلاین در دسترس است؟ (کش سلامت ~۳۰ ثانیه) */
+  translatorUp: boolean
+  /** نام مدل مترجم — از /health کانتینر */
+  translatorModel: string
+  /** ISO — آخرین job تمام‌شده */
+  lastFinishedAt: string | null
+}
+
+/** پاسخ POST /admin/translate/preview — پیشنهاد ماشینی برای پر کردن فرم (بدون نوشتن DB) */
+export interface TranslationPreviewResult {
+  translations: string[]
 }

@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 9 از 31
+// مسیر مقصد: apps/api/src/infra/db/schema/index.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 //src/infra/db/schema/index.ts
 export * from './users'
 export * from './devices'
@@ -18,3 +25,4 @@ export * from './reconcile'
 export * from './articles'
 export * from './gallery'
 export * from './checkout-idempotency'
+export * from './translation'

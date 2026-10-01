@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 30 از 49
+// round-35 — sinshin-food-delivery — فایل 29 از 31
 // مسیر مقصد: apps/web/src/components/admin/ArticleForm.tsx
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage thirty one
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/ArticleForm.tsx
@@ -202,6 +202,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         onChange={(v) => setFormData(prev => ({ ...prev, contentAr: v }))}
         arAuto={initialData?.arAuto}
         faReference={formData.content.slice(0, 160) + (formData.content.length > 160 ? '…' : '')}
+        faSource={formData.content}
         multiline
         rows={6}
       />

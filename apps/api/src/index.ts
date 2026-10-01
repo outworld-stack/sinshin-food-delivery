@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 18 از 31
+// مسیر مقصد: apps/api/src/index.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 //src/index.ts
 /**
  * Composition root — all wiring lives here.
@@ -49,6 +56,8 @@ import { HealthAlertJob } from '#/workers/jobs/health-alert.job'
 import { GeoService } from '#/domain/geo/geo.service'
 import { MetricsService } from '#/infra/monitor/metrics'
 import { JobRunRegistry } from '#/infra/monitor/job-registry'
+import { TranslationService } from '#/domain/translation/translation.service'
+import { AutoTranslateJob } from '#/workers/jobs/auto-translate.job'
 import { buildApp } from '#/app'
 
 const config = new AppConfig()
@@ -117,6 +126,8 @@ const auth = new AuthService({ db, config, otp, sessions, devices, admin2 })
 const articles = new ArticleService({ db })
 const gallery = new GalleryService({ db })
 const geo = new GeoService({ db, config, settings })
+// round-35 — صف ترجمه‌ی خودکار (مترجم آفلاین؛ برای باطل‌کردن کش منو به menu وصل است)
+const translation = new TranslationService({ db, config, menu })
 
 // ── cron — registered once ──
 const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis, monitor.jobRuns))
@@ -142,6 +153,8 @@ if (!g.__sinshin_cron_registered) {
       await geo.refresh()
     },
   })
+  // round-35 — worker صف ترجمه (claim اتمیک؛ مترجم پایین = صف pending می‌ماند)
+  scheduler.registerInterval(new AutoTranslateJob({ translation }))
 }
 
 // ── process-level safety net — round-16: باید «قبل از listen» ثبت شوند تا │
@@ -217,6 +230,7 @@ const app = buildApp({
   articles,
   gallery,
   geo,
+  translation,
 })
 
 // round-16 — گارد بوت: اگر پورت گرفته شده باشد/ bind شکست بخورد، با پیام

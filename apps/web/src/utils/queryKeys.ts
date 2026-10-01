@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 25 از 31
+// مسیر مقصد: apps/web/src/utils/queryKeys.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 // src/utils/queryKeys.ts
 // کارخانه‌ی مرکزی کلیدها — منبع واحد حقیقت
 // قانون طلایی: هیچ رشته‌ی خام queryKey خارج از این فایل نوشته نشه؛
@@ -167,4 +174,8 @@ export const qk = {
     adminUserId: string | null; courierId: string | null; phone: string | null;
   }) => ['admin-report', f.type, f.from, f.to, f.status, f.deliveryType,
     f.adminUserId, f.courierId, f.phone] as const,
+
+  // round-35 — صف ترجمه خودکار
+  translationStatus: ['translation-status'] as const,
+  translationJobs: ['translation-jobs'] as const,
 } as const

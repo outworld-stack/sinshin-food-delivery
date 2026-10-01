@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 15 از 31
+// مسیر مقصد: apps/api/src/infra/config/env.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 // src/infra/config/env.ts
 import { normalizePhone } from '#/domain/shared/phone'
 
@@ -89,6 +96,9 @@ export class AppConfig {
   readonly couponNudgeTime: string
 
   readonly geoBypassIps: string[]
+
+  /** round-35 — آدرس سرویس مترجم آفلاین (NLLB) در شبکه داخلی compose؛ پایین بودنش صف ترجمه را نگه می‌دارد */
+  readonly translatorUrl: string
 
   /** round-13 — مختصات رستوران (مبدأ محاسبه‌ی هزینه‌ی ارسال) از env؛ فقط وقتی هر دو مقدار معتبر باشند */
   readonly restaurantLocation: RestaurantLocationConfig | null
@@ -195,6 +205,9 @@ export class AppConfig {
       .split(',')
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
+
+    // round-35 — مترجم آفلاین؛ پیش‌فرض نام سرویس compose (بدون داکر: 127.0.0.1:8300)
+    this.translatorUrl = str('TRANSLATOR_URL', 'http://translator:8300').replace(/\/+$/, '')
 
     // round-13 — RESTAURANT_LAT / RESTAURANT_LNG — مبدأ ناحیه‌های ارسال.
     // هر دو باید finite و در بازه‌ی معتبر باشند؛ وگرنه null (می‌رود سراغ تنظیمات DB).

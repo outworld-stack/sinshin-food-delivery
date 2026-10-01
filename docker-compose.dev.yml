@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 21 از 31
+// مسیر مقصد: docker-compose.dev.yml
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 name: sinshin-dev
 
 # ══════════════════════════════════════════════════════════════
@@ -87,6 +94,8 @@ services:
       REDIS_URL: redis://redis:6379
       SITE_URL: http://localhost:3001
       DEVICE_ENFORCEMENT: ${DEVICE_ENFORCEMENT:-on}
+      # round-35 — مترجم آفلاین در همین شبکه‌ی dev
+      TRANSLATOR_URL: http://translator:8300
 
     volumes:
       # Source code: HMR / live reload
@@ -197,6 +206,47 @@ services:
         condition: service_healthy
 
     restart: "no"
+    networks:
+      - dev
+
+  # ═══════════════════════════════════════════════════════════
+  # Translator — مترجم آفلاین NLLB-200 (round-35)
+  #
+  # در dev پورت روی 127.0.0.1 هم باز است تا وقتی API را بیرون از
+  # داکر با bun اجرا می‌کنی (TRANSLATOR_URL=http://127.0.0.1:8300)
+  # بتوانی از همان ایمیج استفاده کنی.
+  # ═══════════════════════════════════════════════════════════
+
+  translator:
+    build:
+      context: ./services/translator
+      dockerfile: Dockerfile
+
+    image: sinshin/translator:dev
+
+    container_name: sinshin-dev-translator
+
+    restart: unless-stopped
+
+    init: true
+
+    ports:
+      - "127.0.0.1:8300:8300"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/health', timeout=4)",
+        ]
+
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
     networks:
       - dev
 

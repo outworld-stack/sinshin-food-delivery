@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 20 از 31
+// مسیر مقصد: docker-compose.yml
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 name: sinshin
 
 # ══════════════════════════════════════════════════════════════
@@ -43,6 +50,15 @@ x-api-service: &api-service
     SITE_URL: https://${DOMAIN:-sinshin.localhost}
 
     DEVICE_ENFORCEMENT: ${DEVICE_ENFORCEMENT:-on}
+
+    # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
+    TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
+
+    # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
+    TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
+
+    # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
+    TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
 
   volumes:
     - uploads_data:/data/uploads
@@ -470,6 +486,56 @@ services:
       timeout: 3s
       retries: 12
       start_period: 5s
+
+
+  # ════════════════════════════════════════════════════════════
+  # Translator — مترجم آفلاین NLLB-200 (round-35)
+  #
+  # NLLB-200-distilled-600M کوانتیزه‌ی int8 با CTranslate2؛ فقط در
+  # شبکه‌ی internal — هیچ پورتی بیرون باز نمی‌کند. API آن را در
+  # http://translator:8300 صدا می‌زند (TRANSLATOR_URL). ایمیج
+  # دومرحله‌ای است؛ اولین بیلد یک‌بار اینترنت می‌خواهد (دانلود مدل)
+  # اما زمان اجرا کاملاً آفلاین است — جزئیات: services/translator/README.md
+  #
+  # سقف ۲.۵GB: مدل int8 + beam search. جدا از api بلند/پایین می‌شود —
+  # وابستگی boot ندارد (صف ترجمه تا برگشتش pending می‌ماند).
+  # ════════════════════════════════════════════════════════════
+
+  translator:
+    build:
+      context: ./services/translator
+      dockerfile: Dockerfile
+
+    image: sinshin/translator
+
+    container_name: sinshin-translator
+
+    restart: unless-stopped
+
+    init: true
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2500m
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/health', timeout=4)",
+        ]
+
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+    networks:
+      - internal
 
 
 # ══════════════════════════════════════════════════════════════

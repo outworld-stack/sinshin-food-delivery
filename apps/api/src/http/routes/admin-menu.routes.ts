@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 1 از 31
+// مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
+// وضعیت: اصلاحیه — همان فایل ۲۲ رارد ۳۴ که در پنل قبلی به‌خاطر خطای نام فایل خالی نمایش داده شد؛ محتوا سالم و کامل است
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 // src/http/routes/admin-menu.routes.ts
 import { Elysia, t } from 'elysia'
 
@@ -9,7 +16,12 @@ import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
-const sizeInput = t.Object({ name: t.String({ minLength: 1, maxLength: 60 }), price: t.Number({ minimum: 0 }) })
+const sizeInput = t.Object({
+  name: t.String({ minLength: 1, maxLength: 60 }),
+  // round-34 — نام عربی سایز (اختیاری؛ خالی = fallback فارسی)
+  nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+  price: t.Number({ minimum: 0 }),
+})
 
 export interface AdminMenuRoutesDeps {
   sessions: SessionService
@@ -37,11 +49,13 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
 
     .post(
       '/mains',
-      ({ body }) => deps.menu.createMainCategory(body.name, body.slug),
+      ({ body }) => deps.menu.createMainCategory(body.name, body.slug, body.nameAr),
       {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 60 }),
           slug: t.String({ minLength: 1, maxLength: 60 }),
+          // round-34 — نام عربی (اختیاری؛ خالی = fallback فارسی)
+          nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
         }),
         detail: { summary: 'Create main category (inactive by default)' },
       },
@@ -83,6 +97,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           mainCategoryId: body.mainCategoryId,
           hasSizes: body.hasSizes ?? false,
           sizeNames: body.sizeNames ?? [],
+          nameAr: body.nameAr,
+          sizeNamesAr: body.sizeNamesAr ?? null,
         }),
       {
         body: t.Object({
@@ -90,6 +106,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           mainCategoryId: t.String({ pattern: UUID_PATTERN }),
           hasSizes: t.Optional(t.Boolean()),
           sizeNames: t.Optional(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 })),
+          // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
+          nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+          sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
         }),
         detail: { summary: 'Create category (slug auto-generated, unique)' },
       },
@@ -103,6 +122,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           mainCategoryId: body.mainCategoryId,
           hasSizes: body.hasSizes ?? false,
           sizeNames: body.sizeNames ?? [],
+          nameAr: body.nameAr,
+          sizeNamesAr: body.sizeNamesAr ?? null,
         }),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
@@ -111,6 +132,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           mainCategoryId: t.String({ pattern: UUID_PATTERN }),
           hasSizes: t.Optional(t.Boolean()),
           sizeNames: t.Optional(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 })),
+          // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
+          nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+          sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
         }),
         detail: { summary: 'Update category' },
       },
@@ -178,6 +202,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 120 }),
           description: t.String({ maxLength: 2000 }),
+          // round-34 — محتوای عربی (اختیاری؛ خالی = fallback فارسی)
+          nameAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
+          descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+          ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
@@ -212,6 +240,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 120 }),
           description: t.String({ maxLength: 2000 }),
+          // round-34 — محتوای عربی (اختیاری؛ خالی = fallback فارسی)
+          nameAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
+          descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+          ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),

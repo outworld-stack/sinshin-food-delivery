@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 17 از 31
+// مسیر مقصد: apps/api/src/app.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
+
 //src/app.ts
 import { Elysia, NotFoundError, ParseError, ValidationError } from 'elysia'
 
@@ -34,6 +41,7 @@ import type { TermsService } from '#/domain/terms/terms.service'
 import type { ArticleService } from './domain/article/article.service'
 import type { GalleryService } from './domain/gallery/gallery.service'
 import type { GeoService } from '#/domain/geo/geo.service'
+import type { TranslationService } from '#/domain/translation/translation.service'
 
 import { AppError } from '#/domain/shared/errors'
 import { clientIp } from '#/domain/shared/net'
@@ -67,6 +75,7 @@ import { articlesRoutes } from './http/routes/articles.routes'
 import { galleryRoutes } from './http/routes/gallery.routes'
 import { aboutRoutes } from './http/routes/about.routes'
 import { geoRoutes } from '#/http/routes/geo.routes'
+import { adminTranslateRoutes } from '#/http/routes/admin-translate.routes'
 
 
 export interface AppDeps {
@@ -105,6 +114,8 @@ export interface AppDeps {
   articles: ArticleService
   gallery: GalleryService
   geo: GeoService
+  /** round-35 — صف و پیش‌نمایش ترجمه‌ی خودکار (مترجم آفلاین NLLB) */
+  translation: TranslationService
 }
 
 export const buildApp = (deps: AppDeps) => {
@@ -233,6 +244,14 @@ export const buildApp = (deps: AppDeps) => {
     .use(paymentRoutes({ payments: deps.payments }))
     .use(reconcileRoutes({ sessions: deps.sessions, reconcile: deps.reconcile }))
     .use(geoRoutes({ geo: deps.geo, sessions: deps.sessions, redis: deps.redis }))
+    // round-35 — preview/صف/وضعیت ترجمه (گارد پایه؛ قرارداد «دستی برنده» در سرویس)
+    .use(
+      adminTranslateRoutes({
+        sessions: deps.sessions,
+        admin2: deps.admin2,
+        translation: deps.translation,
+      }),
+    )
 
   // round-16 — سقف بدنهٔ درخواست در سطح سوکت (پیش از بافر شدن کامل در حافظه):
   // آپلودها ۲MB هستند؛ ۸MB سقف سخاوتمندانه برای multipart + JSON های بزرگ

@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 8 از 49
+// round-35 — sinshin-food-delivery — فایل 16 از 31
 // مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage thirty one
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/menu/menu.service.ts
@@ -173,6 +173,16 @@ export class MenuService {
   /** هر write ادمین — یک بار */
   private async invalidate(): Promise<void> {
     await this.deps.redis.incr(VERSION_KEY)
+  }
+
+  /**
+   * round-35 — باطل‌کردن عمومی کش منو بعد از ترجمه‌ی خودکار.
+   * صف ترجمه ستون‌های ar را مستقیم روی ردیف‌ها می‌نویسد (بیرون از
+   * متدهای write ادمین)؛ این متد همان INCR نسخه را برایش انجام می‌دهد
+   * تا کاربر عربی کشِ قدیمیِ فارسی را نبیند.
+   */
+  async bustCache(): Promise<void> {
+    await this.invalidate()
   }
 
   // ── عمومی ──

@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 29 از 49
+// round-35 — sinshin-food-delivery — فایل 30 از 31
 // مسیر مقصد: apps/web/src/components/admin/ProductForm.tsx
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage thirty one
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/ProductForm.tsx
@@ -584,6 +584,7 @@ export function ProductForm({
                                                                 setFormData((prev) => ({ ...prev, ingredientsArText: v }))
                                                         }
                                                         arAuto={initialData?.arAuto}
+                                                        faSource={(formData.ingredients ?? []).join('\n')}
                                                         placeholder={
                                                                 (formData.ingredients ?? []).length > 0
                                                                         ? `هر خط = معرب یکی از موارد بالا${formData.ingredients.length > 0 ? ` (مثلاً: ${formData.ingredients[0]})` : ''}`

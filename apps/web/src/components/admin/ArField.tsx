@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 28 از 49
+// round-35 — sinshin-food-delivery — فایل 28 از 31
 // مسیر مقصد: apps/web/src/components/admin/ArField.tsx
-// وضعیت: فایل جدید
-// کامیت پیشنهادی: stage thirty
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/ArField.tsx
@@ -16,8 +16,15 @@
 //    اولین ویرایش دستی ادمین، ذخیره و بج را به «دستی» برمی‌گرداند
 //
 // عربی هم RTL است — dir="rtl" مثل فارسی؛ فونت/استایل همان زبان فرم ادمین.
+//
+// round-35 — دکمه‌ی چوب‌جادویی: پیشنهاد ماشینی از مترجم آفلاین (preview —
+// بدون نوشتن DB). منبع = متن کامل فارسی (faSource) یا مرجع نمایشی؛ خروجی
+// در فیلد قرار می‌گیرد تا ادمین بازبینی و ذخیره کند (ذخیره = بج «دستی»).
 
-import { memo, useCallback, useId } from 'react'
+import { memo, useCallback, useId, useState } from 'react'
+import { Loader, Wand2 } from 'reicon-react'
+import { translatePreview } from '#/server/translation'
+import { useToastStore } from '#/stores/toastStore'
 
 export type ArBadge = 'none' | 'manual' | 'auto'
 
@@ -58,6 +65,8 @@ interface ArFieldProps {
   maxLength?: number
   /** نمایش متن فارسیِ مرجع زیر برچسب (برای ترجمه‌ی راحت‌تر) */
   faReference?: string
+  /** round-35 — متن کامل فارسی برای ترجمه‌ی ماشینی (وقتی faReference کوتاه‌شده است) */
+  faSource?: string
   disabled?: boolean
 }
 
@@ -74,19 +83,48 @@ export const ArField = memo(function ArField({
   placeholder = 'خالی = نمایش همان متن فارسی',
   maxLength,
   faReference,
+  faSource,
   disabled,
 }: ArFieldProps) {
   const badge = arBadgeOf(value, arAuto)
   const badgeStyle = BADGE_STYLES[badge]
   // a11y — label باید به کنترل وصل باشد (useId → یکتا حتی در چند نمونه)
   const fieldId = useId()
+  const showToast = useToastStore((s) => s.showToast)
+
+  // round-35 — وضعیت پیشنهاد ماشینی (فقط داخل همین فیلد)
+  const [isPreviewing, setIsPreviewing] = useState(false)
+  const [machineSuggested, setMachineSuggested] = useState(false)
+  // منبع ترجمه: متن کامل اگر آمده، وگرنه مرجع نمایشی
+  const translateSource = faSource ?? faReference
+  const canSuggest = (translateSource ?? '').trim() !== ''
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setMachineSuggested(false) // ویرایش دستی → حالت «پیشنهاد ماشینی» پاک می‌شود
       onChange(e.target.value)
     },
     [onChange],
   )
+
+  // round-35 — پیشنهاد ماشینی: پر کردن فیلد بدون ذخیره؛ بازبینی با ادمین
+  const handlePreview = useCallback(async () => {
+    const source = (translateSource ?? '').trim()
+    if (source === '' || isPreviewing || disabled) return
+    setIsPreviewing(true)
+    try {
+      const translations = await translatePreview([source])
+      if (translations[0] !== undefined) {
+        onChange(translations[0])
+        setMachineSuggested(true)
+        showToast('ترجمه‌ی پیشنهادی قرار گرفت — بازبینی و ذخیره کنید')
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'خطای ترجمه', 'error')
+    } finally {
+      setIsPreviewing(false)
+    }
+  }, [translateSource, isPreviewing, disabled, onChange, showToast])
 
   return (
     <div>
@@ -95,19 +133,37 @@ export const ArField = memo(function ArField({
           {label}{' '}
           <span className="text-primary dark:text-dark-primary font-DanaDemiBold">(عربی)</span>
         </label>
-        <span
-          className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-DanaDemiBold ${badgeStyle.cls}`}
-          title={
-            badge === 'none'
-              ? 'ترجمه‌ی عربی ثبت نشده — کاربر عربی متن فارسی می‌بیند'
-              : badge === 'auto'
-                ? 'ترجمه‌ی ماشینی (رارد ۳۵) — با ویرایش و ذخیره، دستی می‌شود'
-                : 'ترجمه‌ی دستی ادمین'
-          }
-        >
-          <span aria-hidden className="font-DanaDemiBold">ع</span>
-          {badgeStyle.label}
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span
+            className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-DanaDemiBold ${badgeStyle.cls}`}
+            title={
+              badge === 'none'
+                ? 'ترجمه‌ی عربی ثبت نشده — کاربر عربی متن فارسی می‌بیند'
+                : badge === 'auto'
+                  ? 'ترجمه‌ی ماشینی (رارد ۳۵) — با ویرایش و ذخیره، دستی می‌شود'
+                  : 'ترجمه‌ی دستی ادمین'
+            }
+          >
+            <span aria-hidden className="font-DanaDemiBold">ع</span>
+            {badgeStyle.label}
+          </span>
+          {canSuggest && (
+            <button
+              type="button"
+              onClick={() => void handlePreview()}
+              disabled={disabled || isPreviewing}
+              title="ترجمه‌ی خودکار (پیشنهاد ماشینی — قبل از ذخیره بازبینی کنید)"
+              aria-label="ترجمه‌ی خودکار (پیشنهاد ماشینی — قبل از ذخیره بازبینی کنید)"
+              className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center hover:bg-amber-200 dark:hover:bg-amber-500/20 transition cursor-pointer disabled:opacity-50"
+            >
+              {isPreviewing ? (
+                <Loader size={15} className="animate-spin" />
+              ) : (
+                <Wand2 size={15} />
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {faReference && faReference.trim() !== '' && (
@@ -140,6 +196,12 @@ export const ArField = memo(function ArField({
           disabled={disabled}
           className={inputCls}
         />
+      )}
+
+      {machineSuggested && (
+        <p className="mt-2 text-xs text-amber-500 dark:text-amber-400 leading-5">
+          پیشنهاد ماشینی — هنوز ذخیره نشده؛ بازبینی کنید
+        </p>
       )}
     </div>
   )

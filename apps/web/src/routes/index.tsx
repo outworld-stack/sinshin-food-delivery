@@ -1,158 +1,145 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
-import { ThemeToggle } from '#/components/ThemeToggle';
-import { Brand } from '#/components/Brand';
-import { WordSlider } from '#/components/WordSlider';
-import { LangSwitcher } from '#/components/LangSwitcher';
-import { useAuthStore } from '#/stores/authStore';
-import { useHydrated } from '#/hooks/useHydrated'
-import { I18nProvider, useI18n } from '#/i18n'
-import { shouldShowOutdatedBanner } from '#/lib/browserSupport'
-import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
+// ═══════════════════════════════════════════════════════════════
+// round-35 — sinshin-food-delivery — فایل 31 از 31
+// مسیر مقصد: apps/web/src/routes/admin/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty one
+// ═══════════════════════════════════════════════════════════════
 
+// src/routes/admin/index.tsx
+// ⬅ NEW: loader پری‌فچ + pendingComponent/errorComponent + head noindex
+// (هاور روی «داشبورد» در سایدبار => آمار در کش؛ ناوبری بدون اسکلتون)
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { formatPrice, formatDate } from '#/utils/format'
+import { AdminDashboardSkeleton } from '#/components/LoadingSkeletons'
+import { RouteError } from '#/components/shared/RouteFallbacks'
+import { ChartPanel } from '#/components/shared/ChartPanel'
+import { ReportsBox } from '#/components/admin/reports/ReportsBox'
+import { SystemStatusBox } from '#/components/admin/SystemStatusBox'
+import { TranslationQueueBox } from '#/components/admin/TranslationQueueBox'
+import { adminStatsOptions } from '#/utils/queryOptions'
+import { Users, CheckCircle, Wallet, ShoppingBag } from 'reicon-react'
 
-export const Route = createFileRoute('/')({
-  component: LandingRoute,
-  // رارد ۳۱ — رأی بنر مرورگر قدیمی در لودر محاسبه می‌شود تا در خودِ HTML
-  // اولیه رندر شود: حتی اگر باندل اپ در موتور قدیمی اصلاً اجرا نشود، کاربر
-  // هشدار نارنجی را می‌بیند (خواسته‌ی «هر طور شده»).
-  // سمت سرور: UA از هدر درخواست + کوکی بستن؛ سمت کلاینت (ناوبری): navigator.
-  // نکته: گارد با document است نه navigator — Bun سمت سرور هم navigator دارد!
-  // کرالرها معافند تا اسکرین‌شات نتایج جستجو تمیز بماند (الگوی سئو-۱ geoGate).
-  beforeLoad: () => {
-    if (typeof document === 'undefined') {
-      return (async () => {
-        const { getRequest } = await import('@tanstack/react-start/server')
-        const req = getRequest()
-        const ua = req?.headers.get('user-agent') ?? null
-        if (isTrustedCrawlerUserAgent(ua)) return { oldBrowser: false }
-        const cookie = req?.headers.get('cookie') ?? ''
-        return {
-          oldBrowser: shouldShowOutdatedBanner({
-            ua,
-            dismissed: /(?:^|;\s*)sinshin-obs=1(?:;|$)/.test(cookie),
-          }),
-        }
-      })()
-    }
-    return {
-      oldBrowser: shouldShowOutdatedBanner({
-        ua: navigator.userAgent,
-        dismissed: /(?:^|;\s*)sinshin-obs=1(?:;|$)/.test(document.cookie),
-      }),
-    }
+export const Route = createFileRoute('/admin/')({
+  component: AdminDashboard,
+  ssr: false,
+  // ⬅ NEW: prefetch — هاور روی «داشبورد» در سایدبار => این loader در کلاینت
+  // اجرا و کوئری در کش پر می‌شود. داده پشت گارد نقش است؛ سرور رندرش نمی‌کند
+  loader: async ({ context }) => {
+    await context.queryClient.query(adminStatsOptions)
   },
+
+  pendingComponent: AdminDashboardSkeleton,
+  errorComponent: RouteError,
+
+  head: () => ({
+    meta: [
+      { title: 'داشبورد مدیریت | سین شین' },
+      { name: 'robots', content: 'noindex, nofollow' },
+    ],
+  }),
 })
 
-function LandingRoute() {
-  const { lang, oldBrowser } = Route.useRouteContext()
-  return (
-    <I18nProvider initialLang={lang ?? 'fa'}>
-      <LandingPage showBanner={oldBrowser ?? false} />
-    </I18nProvider>
-  )
-}
+function AdminDashboard() {
+  // آمار داشبورد — فکتوری مرکزی (کلید + staleTime ۳۰s)؛
+  // ⬅ NEW: همان کلیدی که loader روت با query پر کرده
+  const { data: stats, isLoading } = useQuery(adminStatsOptions)
 
-function LandingPage({ showBanner }: { showBanner: boolean }) {
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const hydrated = useHydrated()
-  const showAuthed = hydrated && isAuthenticated;
-  const { t } = useI18n()
+  if (isLoading || !stats) {
+    return <AdminDashboardSkeleton />
+  }
 
-  const sliderWords = [
-    t['landing.word1'],
-    t['landing.word2'],
-    t['landing.word3'],
-    t['landing.word4'],
-    t['landing.word5'],
-    t['landing.word6'],
+  const statCards = [
+    { title: 'کاربران کل', value: stats.totalUsers.toLocaleString('fa-IR'), icon: <Users size={24} />, color: 'bg-blue-100 dark:bg-blue-500/10 text-blue-500' },
+    { title: 'کاربران فعال', value: stats.activeUsers.toLocaleString('fa-IR'), icon: <CheckCircle size={24} />, color: 'bg-green-100 dark:bg-green-500/10 text-green-500' },
+    { title: 'درآمد کل (تومان)', value: formatPrice(stats.totalRevenue), icon: <Wallet size={24} />, color: 'bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary' },
+    { title: 'سفارشات کل', value: stats.totalOrders.toLocaleString('fa-IR'), icon: <ShoppingBag size={24} />, color: 'bg-yellow-100 dark:bg-yellow-500/10 text-yellow-500' },
   ]
 
   return (
-    <>
-      {/* بنر مرورگر قدیمی — رارد ۳۱. تمام استایل‌ها inline با hex ثابت و
-          فونت Tahoma: این بنر باید در مرورگری که CSS مدرن سایت (oklch) را
-          اصلاً نمی‌فهمد هم درست دیده شود؛ به همین دلیل عمداً هیچ Tailwind
-          یا متغیر تم‌ای در آن نیست. display اولیه از رأی سرور می‌آید و
-          اسکریپت ES5 در head (canary/watchdog) می‌تواند روشنش کند.
-          react-بستن دکمه هم در همان اسکریپت است تا با مرگ باندل هم کار کند. */}
-      <div
-        id="old-browser-banner"
-        dir="rtl"
-        role="alert"
-        style={{
-          display: showBanner ? 'block' : 'none',
-          position: 'relative',
-          width: '100%',
-          background: '#fff7ed',
-          borderBottom: '3px solid #f97316',
-          color: '#9a3412',
-          fontFamily: 'Tahoma, Arial, sans-serif',
-          fontSize: '14px',
-          lineHeight: '1.8',
-          textAlign: 'center',
-          padding: '12px 48px 12px 16px',
-          boxSizing: 'border-box',
-          zIndex: 60,
-        }}
-      >
-        ⚠ {t['banner.text']}
-        <button
-          id="old-browser-close"
-          type="button"
-          aria-label={t['banner.close']}
-          title={t['banner.close']}
-          style={{
-            position: 'absolute',
-            left: '12px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            background: 'transparent',
-            border: 'none',
-            color: '#9a3412',
-            fontSize: '22px',
-            lineHeight: '1',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            padding: '4px 10px',
-          }}
-        >
-          ×
-        </button>
+    <div className="space-y-8">
+      <div>
+        <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">داشبورد مدیریت</h1>
+        <p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium">نمای کلی از وضعیت سیستم سین‌شین</p>
       </div>
 
-      <ThemeToggle className="fixed top-6 left-6 z-50" />
-      {/* سوییچر زبان — قرینه‌ی آیکون دارک: دارک گوشه‌ی چپ‌بالا، زبان راست‌بالا.
-          همان اندازه‌ی دکمه و همان سایه/بوردر ThemeToggle → قرینگی کامل. */}
-      <LangSwitcher className="fixed top-6 right-6 z-50" />
-
-      <div className="min-h-screen w-full flex flex-col items-center justify-center relative overflow-hidden bg-white dark:bg-[#1a0a0e] transition-colors duration-500 px-6 py-10">
-        <div className="absolute top-0 -right-20 w-72.5 h-62.5 sm:w-150 sm:h-150 sm:-right-40 bg-primary/20 dark:bg-dark-primary/10 rounded-full blur-[100px] pointer-events-none"></div>
-        <div className="absolute bottom-0 -left-20 w-62.5 h-62.5 sm:w-150 sm:h-150 sm:-left-40 bg-dark-primary/35 dark:bg-[#4a1a24]/30 rounded-full blur-[100px] pointer-events-none"></div>
-
-        <div className="relative z-10 text-center max-w-4xl mx-auto flex flex-col items-center">
-          <Brand />
-          <div className="flex items-center mt-[18vh] sm:mt-[13vh] md:mt-[15vh] lg:mt-[22vh] text-2xl sm:text-4xl md:text-5xl max-sm:-mr-5">
-            <div className="font-DanaRegular flex items-center">
-              <span>{t['landing.sliderPrefix']}</span>
-              <WordSlider className="text-primary dark:text-dark-primary font-da mt-1 mr-1 sm:mr-1.5" words={sliderWords} />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {statCards.map((card, idx) => (
+          <div key={idx} className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-2">{card.title}</p>
+              <p className="font-MorabbaBold text-2xl text-gray-800 dark:text-white">{card.value}</p>
             </div>
+            <div className={`w-12 h-12 rounded-xl ${card.color} flex items-center justify-center shrink-0`}>{card.icon}</div>
           </div>
-          <h1 className="font-MorabbaBold text-3xl sm:text-5xl md:text-7xl text-black dark:text-white my-7 leading-tight tracking-tight">
-            {t['landing.heroLine1']}<br /><span className="text-primary dark:text-dark-primary">{t['landing.heroLine2']}</span>
-          </h1>
-          <p className="font-DanaRegular text-base sm:text-lg md:text-xl text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-            {t['landing.sub']}
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
-            {showAuthed ? (
-              <Link to="/dashboard" className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-base sm:text-lg transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5">{t['landing.profile']}</Link>
-            ) : (
-              <Link to="/login" className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-base sm:text-lg transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5">{t['landing.auth']}</Link>
-            )}
-            <Link to="/products" className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-transparent text-gray-800 dark:text-[#f5e0e6] border-2 border-gray-200 dark:border-[#3a151c] font-DanaDemiBold text-base sm:text-lg hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] transition-all duration-300">{t['landing.products']}</Link>
+        ))}
+      </div>
+
+      {/* round-18 — مانیتورینگ سیستم: نگاه سریع عملیاتی، قبل از تحلیل‌ها */}
+      <SystemStatusBox />
+
+      {/* round-35 — کارت صف ترجمه‌ی خودکار */}
+      <TranslationQueueBox />
+
+      {/* نمودار — پنل مشترک؛ stage-15: چارت‌ها سمت API ساخته می‌شوند
+          (روزانه = ۶ ستونِ ۴ساعتهٔ امروز، هفتگی = شنبه تا جمعه، ...) */}
+      <ChartPanel title="نمودار تحلیل سیستم" chartData={stats.chartData} defaultGranularity="daily" />
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* سفارشات اخیر */}
+        <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+          <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-6 pb-4 border-b border-gray-100 dark:border-white/5">سفارشات اخیر</h2>
+          <div className="space-y-2">
+            {stats.recentOrders.slice(0, 5).map((order) => (
+              <Link key={order.id} to="/admin/orders/$orderId" params={{ orderId: order.id }} className="grid grid-cols-3 gap-4 p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5 hover:border-primary dark:hover:border-dark-primary transition cursor-pointer items-center">
+                <div>
+                  <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">{order.id}</p>
+                  <p className="text-xs text-gray-400 mt-1">{order.user}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-gray-400">{formatDate(order.date)}</p>
+                </div>
+                <div className="text-left">
+                  <p className="font-DanaDemiBold text-primary dark:text-dark-primary text-sm">{formatPrice(order.amount)} ت</p>
+                </div>
+              </Link>
+            ))}
           </div>
+          <Link to="/admin/orders" className="block text-center mt-6 text-sm text-primary dark:text-dark-primary font-DanaDemiBold hover:underline cursor-pointer">
+            مشاهده تمامی سفارشات
+          </Link>
+        </div>
+
+        {/* آخرین کاربران */}
+        <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+          <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-6 pb-4 border-b border-gray-100 dark:border-white/5">آخرین کاربران</h2>
+          <div className="space-y-2">
+            {stats.latestUsers.slice(0, 5).map((user) => (
+              <Link key={user.id} to="/admin/users/$userId" params={{ userId: user.id }} className="grid grid-cols-3 gap-4 p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5 hover:border-primary dark:hover:border-dark-primary transition cursor-pointer items-center">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-[#2a1015] flex items-center justify-center text-xs text-gray-500 font-DanaDemiBold shrink-0">{user.name.charAt(0)}</div>
+                  <div className="min-w-0">
+                    <p className="font-DanaMedium text-gray-800 dark:text-white text-sm truncate">{user.name}</p>
+                    <p className="text-xs text-gray-400" dir="ltr">{user.phone}</p>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="font-DanaMedium text-gray-600 dark:text-gray-300 text-xs">{user.device}</p>
+                </div>
+                <div className="text-left">
+                  <p className="text-xs text-gray-400">{formatDate(user.registeredAt)}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+          <Link to="/admin/users" className="block text-center mt-6 text-sm text-primary dark:text-dark-primary font-DanaDemiBold hover:underline cursor-pointer">
+            مشاهده تمامی کاربران
+          </Link>
         </div>
       </div>
-    </>
+
+      {/* stage-10: مرکز گزارشات — PDFسازی از همه‌ی صفحات این‌جا متمرکز شد */}
+      <ReportsBox />
+    </div>
   )
 }
