@@ -123,7 +123,7 @@ export const Header = memo(function Header() {
 									>
 										<Package
 											size={22}
-											className="h-[18px] w-[18px] sm:h-[22px] sm:w-[22px]"
+											className="h-4.5 w-4.5 sm:h-5.5 sm:w-5.5"
 										/>
 										<span className="absolute -top-1 -left-1 flex h-2.5 w-2.5 sm:h-3 sm:w-3">
 											<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -142,7 +142,7 @@ export const Header = memo(function Header() {
 						>
 							<Cart
 								size={22}
-								className="h-[18px] w-[18px] sm:h-[22px] sm:w-[22px]"
+								className="h-4.5 w-4.5 sm:h-5.5 sm:w-5.5"
 							/>
 							{totalItems > 0 && (
 								<span className="absolute -top-1.5 -left-1.5 sm:-top-2 sm:-left-2 bg-primary dark:bg-dark-primary text-white text-[10px] sm:text-xs w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded-full font-DanaDemiBold shadow-md">

@@ -1,5 +1,5 @@
 {
-  "id": "59df041c-adf2-4a98-b1f9-40f4fcd59eec",
+  "id": "95a7fe83-278e-4cc1-84b4-77f1685ddc11",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -495,6 +495,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "name_ar": {
+          "name": "name_ar",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "slug": {
           "name": "slug",
           "type": "varchar(60)",
@@ -562,6 +568,12 @@
           "type": "varchar(60)",
           "primaryKey": false,
           "notNull": true
+        },
+        "name_ar": {
+          "name": "name_ar",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
         },
         "slug": {
           "name": "slug",
@@ -652,6 +664,31 @@
           "primaryKey": false,
           "notNull": true
         },
+        "title_ar": {
+          "name": "title_ar",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "excerpt_ar": {
+          "name": "excerpt_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_ar": {
+          "name": "content_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ar_auto": {
+          "name": "ar_auto",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "author": {
           "name": "author",
           "type": "varchar(120)",
@@ -690,6 +727,12 @@
           "primaryKey": false,
           "notNull": false,
           "default": "'[]'::jsonb"
+        },
+        "processes_ar": {
+          "name": "processes_ar",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "views": {
           "name": "views",
@@ -2592,6 +2635,19 @@
           "primaryKey": false,
           "notNull": true
         },
+        "alt_ar": {
+          "name": "alt_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ar_auto": {
+          "name": "ar_auto",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "span": {
           "name": "span",
           "type": "varchar(10)",
@@ -3060,6 +3116,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "name_ar": {
+          "name": "name_ar",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "has_sizes": {
           "name": "has_sizes",
           "type": "boolean",
@@ -3073,6 +3135,12 @@
           "primaryKey": false,
           "notNull": false,
           "default": "'[]'::jsonb"
+        },
+        "size_names_ar": {
+          "name": "size_names_ar",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -3151,6 +3219,12 @@
           "type": "varchar(60)",
           "primaryKey": false,
           "notNull": true
+        },
+        "name_ar": {
+          "name": "name_ar",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
         },
         "slug": {
           "name": "slug",
@@ -3255,6 +3329,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "name_ar": {
+          "name": "name_ar",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "price": {
           "name": "price",
           "type": "integer",
@@ -3357,6 +3437,25 @@
           "primaryKey": false,
           "notNull": false
         },
+        "name_ar": {
+          "name": "name_ar",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description_ar": {
+          "name": "description_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ar_auto": {
+          "name": "ar_auto",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "original_price": {
           "name": "original_price",
           "type": "integer",
@@ -3398,6 +3497,12 @@
           "primaryKey": false,
           "notNull": false,
           "default": "'[]'::jsonb"
+        },
+        "ingredients_ar": {
+          "name": "ingredients_ar",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "profile_image": {
           "name": "profile_image",
@@ -4059,6 +4164,37 @@
           "primaryKey": false,
           "notNull": true
         },
+        "hero_title_ar": {
+          "name": "hero_title_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hero_text_ar": {
+          "name": "hero_text_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "team_title_ar": {
+          "name": "team_title_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "team_alt_ar": {
+          "name": "team_alt_ar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ar_auto": {
+          "name": "ar_auto",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -4129,6 +4265,19 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
+        },
+        "sections_ar": {
+          "name": "sections_ar",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ar_auto": {
+          "name": "ar_auto",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",

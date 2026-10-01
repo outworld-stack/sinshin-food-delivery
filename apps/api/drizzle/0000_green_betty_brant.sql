@@ -59,6 +59,7 @@ CREATE TABLE "admin2_sessions" (
 CREATE TABLE "article_categories" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" varchar(60) NOT NULL,
+	"name_ar" varchar(60),
 	"slug" varchar(60) NOT NULL,
 	"has_sub_categories" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -68,6 +69,7 @@ CREATE TABLE "article_sub_categories" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"category_id" uuid NOT NULL,
 	"name" varchar(60) NOT NULL,
+	"name_ar" varchar(60),
 	"slug" varchar(60) NOT NULL
 );
 --> statement-breakpoint
@@ -76,12 +78,17 @@ CREATE TABLE "articles" (
 	"title" varchar(160) NOT NULL,
 	"excerpt" text NOT NULL,
 	"content" text NOT NULL,
+	"title_ar" varchar(160),
+	"excerpt_ar" text,
+	"content_ar" text,
+	"ar_auto" boolean DEFAULT false NOT NULL,
 	"author" varchar(120) DEFAULT 'سین شین' NOT NULL,
 	"category_id" uuid NOT NULL,
 	"sub_category_id" uuid,
 	"profile_image" text,
 	"gallery_images" jsonb DEFAULT '[]'::jsonb,
 	"processes" jsonb DEFAULT '[]'::jsonb,
+	"processes_ar" jsonb,
 	"views" integer DEFAULT 0 NOT NULL,
 	"status" varchar(20) DEFAULT 'ACTIVE' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -248,6 +255,8 @@ CREATE TABLE "gallery_images" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"src" text NOT NULL,
 	"alt" text NOT NULL,
+	"alt_ar" text,
+	"ar_auto" boolean DEFAULT false NOT NULL,
 	"span" varchar(10) DEFAULT 'normal' NOT NULL,
 	"sort_order" integer DEFAULT 0 NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
@@ -293,14 +302,17 @@ CREATE TABLE "categories" (
 	"main_category_id" uuid NOT NULL,
 	"name" varchar(60) NOT NULL,
 	"slug" varchar(60) NOT NULL,
+	"name_ar" varchar(60),
 	"has_sizes" boolean DEFAULT false NOT NULL,
 	"size_names" jsonb DEFAULT '[]'::jsonb,
+	"size_names_ar" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "main_categories" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" varchar(60) NOT NULL,
+	"name_ar" varchar(60),
 	"slug" varchar(60) NOT NULL,
 	"is_active" boolean DEFAULT false NOT NULL,
 	"is_default" boolean DEFAULT false NOT NULL,
@@ -312,6 +324,7 @@ CREATE TABLE "product_sizes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"product_id" uuid NOT NULL,
 	"name" varchar(60) NOT NULL,
+	"name_ar" varchar(60),
 	"price" integer NOT NULL,
 	"sort_order" integer DEFAULT 0 NOT NULL
 );
@@ -321,12 +334,16 @@ CREATE TABLE "products" (
 	"category_id" uuid NOT NULL,
 	"name" varchar(120) NOT NULL,
 	"description" text,
+	"name_ar" varchar(120),
+	"description_ar" text,
+	"ar_auto" boolean DEFAULT false NOT NULL,
 	"original_price" integer DEFAULT 0 NOT NULL,
 	"discount_percentage" integer DEFAULT 0 NOT NULL,
 	"prep_time" integer DEFAULT 15 NOT NULL,
 	"sizes_enabled" boolean DEFAULT false NOT NULL,
 	"packaging_cost" integer DEFAULT 0 NOT NULL,
 	"ingredients" jsonb DEFAULT '[]'::jsonb,
+	"ingredients_ar" jsonb,
 	"profile_image" text,
 	"gallery_images" jsonb DEFAULT '[]'::jsonb,
 	"views" integer DEFAULT 0 NOT NULL,
@@ -385,6 +402,11 @@ CREATE TABLE "content_about" (
 	"team_title" text NOT NULL,
 	"team_gradient" text NOT NULL,
 	"team_alt" text NOT NULL,
+	"hero_title_ar" text,
+	"hero_text_ar" text,
+	"team_title_ar" text,
+	"team_alt_ar" text,
+	"ar_auto" boolean DEFAULT false NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -398,6 +420,8 @@ CREATE TABLE "terms" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"version" integer NOT NULL,
 	"sections" jsonb NOT NULL,
+	"sections_ar" jsonb,
+	"ar_auto" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
