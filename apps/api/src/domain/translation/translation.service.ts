@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-36 — sinshin-food-delivery — فایل 6 از 14
+// مسیر مقصد: apps/api/src/domain/translation/translation.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty two
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-35 — sinshin-food-delivery — فایل 12 از 31
 // مسیر مقصد: apps/api/src/domain/translation/translation.service.ts
 // وضعیت: فایل جدید (قبلاً وجود نداشت)
@@ -27,7 +34,7 @@
  * خطای نهایی = ستون ar همان NULL می‌ماند → کاربر عربی fallback فارسی
  * می‌بیند (COALESCE رارد ۳۴) — سایت هرگز از این بابت نمی‌ایستد.
  */
-import { and, count, desc, eq, isNotNull, isNull, max, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, isNotNull, isNull, max, or, sql, type AnyColumn, type SQL } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
@@ -727,11 +734,26 @@ export class TranslationService {
 
   // ═══════════════════════ اسکن رکوردهای ناقص ═══════════════════════
 
+  /**
+   * round-36 — jsonb مدار-انکد: داده‌های قدیمی (قبل از وصله‌ی client.ts)
+   * ممکن است آرایه را به‌صورت «رشته‌ی jsonb» ذخیره کرده باشند؛ این عبارت
+   * هر دو حالت را به jsonb آرایه‌ای برمی‌گرداند تا jsonb_array_length
+   * هرگز روی scalar نشکند (باگ ۵۰۰ اسکن در تست عمیق).
+   */
+  private static jsonArray(col: AnyColumn): SQL {
+    return sql`CASE
+      WHEN jsonb_typeof(${col}) = 'array' THEN ${col}
+      WHEN jsonb_typeof(${col}) = 'string' AND substring(${col} #>> '{}' from 1 for 1) = '['
+        THEN (${col} #>> '{}')::jsonb
+      ELSE '[]'::jsonb
+    END`
+  }
+
   private productMissingWhere() {
     return or(
       isNull(products.nameAr),
       and(isNotNull(products.description), isNull(products.descriptionAr)),
-      sql`jsonb_array_length(COALESCE(${products.ingredients}, '[]'::jsonb)) > 0 AND ${products.ingredientsAr} IS NULL`,
+      sql`jsonb_array_length(${TranslationService.jsonArray(products.ingredients)}) > 0 AND ${products.ingredientsAr} IS NULL`,
       and(
         eq(products.sizesEnabled, true),
         sql`EXISTS (SELECT 1 FROM ${productSizes} ps WHERE ps.product_id = ${products.id} AND ps.name_ar IS NULL)`,
@@ -743,7 +765,7 @@ export class TranslationService {
     return or(
       isNull(categories.nameAr),
       and(
-        sql`jsonb_array_length(COALESCE(${categories.sizeNames}, '[]'::jsonb)) > 0`,
+        sql`jsonb_array_length(${TranslationService.jsonArray(categories.sizeNames)}) > 0`,
         isNull(categories.sizeNamesAr),
       ),
     )
@@ -755,7 +777,7 @@ export class TranslationService {
       isNull(articles.excerptAr),
       isNull(articles.contentAr),
       and(
-        sql`jsonb_array_length(COALESCE(${articles.processes}, '[]'::jsonb)) > 0`,
+        sql`jsonb_array_length(${TranslationService.jsonArray(articles.processes)}) > 0`,
         isNull(articles.processesAr),
       ),
     )

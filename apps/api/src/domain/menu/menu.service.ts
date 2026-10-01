@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-36 — sinshin-food-delivery — فایل 5 از 14
+// مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty two
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-35 — sinshin-food-delivery — فایل 16 از 31
 // مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -742,7 +749,7 @@ export class MenuService {
     return rows.map((r) => ({
       id: r.id,
       name: pickAr(lang, r.nameAr, r.name),
-      description: r.description,
+      description: pickAr(lang, r.descriptionAr, r.description ?? ''),
       originalPrice: r.originalPrice,
       finalPrice: finalPriceOf(r),
       discountPercentage: r.discountPercentage,

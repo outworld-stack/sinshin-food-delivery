@@ -282,7 +282,7 @@ export function TranslationQueueBox() {
 									type="button"
 									onClick={() => enqueueType(row.type)}
 									disabled={isBulkPending}
-									className="min-h-[44px] px-5 rounded-xl bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary text-xs font-DanaDemiBold hover:bg-primary/20 dark:hover:bg-dark-primary/20 transition cursor-pointer disabled:opacity-50 shrink-0"
+									className="min-h-11 px-5 rounded-xl bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary text-xs font-DanaDemiBold hover:bg-primary/20 dark:hover:bg-dark-primary/20 transition cursor-pointer disabled:opacity-50 shrink-0"
 								>
 									ترجمه
 								</button>
@@ -293,7 +293,7 @@ export function TranslationQueueBox() {
 						type="button"
 						onClick={enqueueAll}
 						disabled={isBulkPending || totalMissing === 0}
-						className="mt-4 w-full sm:w-auto min-h-[44px] px-6 rounded-xl bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-2"
+						className="mt-4 w-full sm:w-auto min-h-11 px-6 rounded-xl bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-2"
 					>
 						{isBulkPending && <Loader size={16} className="animate-spin" />}
 						{isBulkPending ? 'در حال صف‌کردن…' : 'ترجمه‌ی همه‌ی موارد ناقص'}

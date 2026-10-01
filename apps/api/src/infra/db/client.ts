@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-36 — sinshin-food-delivery — فایل 3 از 14
+// مسیر مقصد: apps/api/src/infra/db/client.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty two
+// ═══════════════════════════════════════════════════════════════
+
 //src/infra/db/client.ts
 /**
  * Database — Drizzle روی کلاینت بومی Bun (Bun.sql).
@@ -5,7 +12,32 @@
  */
 import { SQL } from 'bun'
 import { drizzle, type BunSQLDatabase } from 'drizzle-orm/bun-sql'
+import { PgJsonb } from 'drizzle-orm/pg-core'
 import * as schema from './schema'
+
+/**
+ * round-36 — رفع انکد دوباره‌ی ستون‌های jsonb (باگ درایور drizzle/bun-sql).
+ *
+ * پیشینه (کشف در تست عمیق روندهای ۳۱-۳۵): mapToDriverValue پیش‌فرضِ
+ * jsonb در drizzle مقدار را JSON.stringify می‌کند و «رشته» را به‌عنوان
+ * پارامتر می‌دهد؛ Bun.sql هم پارامتر رشته‌ای را برای ستون jsonb به
+ * «رشته‌ی jsonb» تبدیل می‌کند — نتیجه: هر نوشتنِ آرایه/شیء، دوبار انکد
+ * می‌شود (jsonb_typeof = 'string' به‌جای 'array'). خواندن به‌طور تصادفی
+ * متقارن بود (پارس دوباره در Bun.sql + mapFromDriverValue) و برنامه کار
+ * می‌کرد؛ اما هر تابع SQL-سطحی روی ستون (jsonb_array_length در کوئری‌های
+ * اسکن ترجمه‌ی رارد ۳۵) با «cannot get array length of a scalar» می‌شکست.
+ *
+ * رفع: برای درایور Bun.sql پارامتر را «خام» بدهیم — Bun.sql خودش آرایه/
+ * شیء را به jsonb درست انکد می‌کند. این وصله روی prototype، همه‌ی ستون‌های
+ * jsonb اسکیمای موجود را یک‌جا پوشش می‌دهد (بدون بازنویسی اسکیما).
+ * خواندن دست‌نخورده می‌ماند: mapFromDriverValue هر دو حالت (رشته یا
+ * مقدار پارس‌شده) را درست برمی‌گرداند — داده‌های قدیمیِ دوبار-انکد هم
+ * خوانده می‌شوند؛ برای یکدست‌سازی، اسکریپت scripts/normalize-jsonb.ts.
+ */
+const jsonbProto = PgJsonb.prototype as {
+  mapToDriverValue: (value: unknown) => unknown
+}
+jsonbProto.mapToDriverValue = (value: unknown) => value
 
 /** نمونه‌ی drizzle — این چیزی است که به سرویس‌های دامنه تزریق می‌شود */
 export type Db = BunSQLDatabase<typeof schema>

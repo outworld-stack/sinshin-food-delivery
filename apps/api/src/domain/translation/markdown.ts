@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-36 — sinshin-food-delivery — فایل 4 از 14
+// مسیر مقصد: apps/api/src/domain/translation/markdown.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty two
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-35 — sinshin-food-delivery — فایل 11 از 31
 // مسیر مقصد: apps/api/src/domain/translation/markdown.ts
 // وضعیت: فایل جدید (قبلاً وجود نداشت)
@@ -57,7 +64,7 @@ const HAS_LETTER = /[\p{L}\p{N}]/u
 
 type Piece =
   | { readonly kind: 'raw'; readonly s: string }
-  | { readonly kind: 'seg'; readonly pre: string; readonly body: string; readonly post: string }
+  | { readonly kind: 'seg'; readonly pre: string; readonly body: string; readonly post: string; readonly glue?: boolean }
 
 /** خط خروجی — یا ساده (تکه‌ها پشت‌سرهم) یا ردیف جدول (سلول‌ها با | جدایشان بازسازی می‌شوند) */
 type Block =
@@ -144,7 +151,10 @@ export function planText(input: string): TextPlan {
       target.push({ kind: 'seg', pre, body: protectedBody, post })
       return
     }
-    // بلند → چند قطعه‌ی پیوسته؛ pre روی اولی، post روی آخری
+    // بلند → چند قطعه‌ی پیوسته؛ pre روی اولی، post روی آخری.
+    // round-36 — glue: فاصله‌ای که شکستن مرز جمله/کلمه بلعیده، هنگام
+    // بازچینی به‌صورت فاصله‌ی بین قطعات برمی‌گردد (باگ تست عمیق:
+    // «…است.این جمله…» بدون فاصله چسبیده بود).
     const chunks = splitLongText(protectedBody, MAX_SEGMENT_CHARS)
     chunks.forEach((c, i) => {
       target.push({
@@ -152,6 +162,7 @@ export function planText(input: string): TextPlan {
         pre: i === 0 ? pre : '',
         body: c,
         post: i === chunks.length - 1 ? post : '',
+        glue: i > 0,
       })
     })
   }
@@ -230,7 +241,9 @@ export function planText(input: string): TextPlan {
 
   const renderPiece = (p: Piece, translations: string[]): string => {
     if (p.kind === 'raw') return p.s
-    return p.pre + restore(translations.shift() ?? '', stash) + p.post
+    const t = restore(translations.shift() ?? '', stash)
+    // قطعات پیوسته‌ی یک خط بلند با یک فاصله به هم می‌چسبند (glue)
+    return p.pre + (p.kind === 'seg' && p.glue && t !== '' ? ' ' : '') + t + p.post
   }
 
   return {

@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-36 — sinshin-food-delivery — فایل 9 از 14
+// مسیر مقصد: apps/web/vite.config.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty two
+// ═══════════════════════════════════════════════════════════════
+
 import { defineConfig } from 'vite'
 import { devtools } from '@tanstack/devtools-vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
@@ -14,11 +21,11 @@ const config = defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:4000',
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:4000',
         changeOrigin: true,
       },
     },

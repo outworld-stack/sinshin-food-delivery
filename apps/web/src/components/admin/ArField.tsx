@@ -167,7 +167,7 @@ export const ArField = memo(function ArField({
       </div>
 
       {faReference && faReference.trim() !== '' && (
-        <p className="mb-2 text-xs text-gray-400 dark:text-gray-500 leading-5 break-words">
+        <p className="mb-2 text-xs text-gray-400 dark:text-gray-500 leading-5 wrap-break-word">
           فارسی: {faReference}
         </p>
       )}
