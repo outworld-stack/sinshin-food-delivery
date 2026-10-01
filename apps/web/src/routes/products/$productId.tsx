@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-39 — sinshin-food-delivery — فایل 4 از 5
+// مسیر مقصد: apps/web/src/routes/products/$productId.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-five
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 9 از 18
 // مسیر مقصد: web/src/routes/products/$productId.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -28,7 +35,7 @@ import {
 	alternateLinks,
 	headLang,
 	langUrl,
-	localized,
+	localizedFor,
 	productJsonLd,
 	withBrand,
 } from '#/lib/seo'
@@ -67,8 +74,9 @@ export const Route = createFileRoute('/products/$productId')({
 			return { meta: [{ title: SEO[lang].notFoundProduct.title }] }
 		}
 		const ogImage = absoluteUrl(loaderData.profileImage) ?? DEFAULT_OG_IMAGE
-		const name = localized(loaderData.nameAr, loaderData.name)
-		const description = localized(
+		const name = localizedFor(lang, loaderData.nameAr, loaderData.name)
+		const description = localizedFor(
+			lang,
 			loaderData.descriptionAr,
 			loaderData.description,
 		)

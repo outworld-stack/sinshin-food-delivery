@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-39 — sinshin-food-delivery — فایل 5 از 5
+// مسیر مقصد: apps/web/src/routes/articles/$articleId.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-five
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 11 از 18
 // مسیر مقصد: web/src/routes/articles/$articleId.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -19,7 +26,7 @@ import {
         articleJsonLd,
         headLang,
         langUrl,
-        localized,
+        localizedFor,
         withBrand,
 } from '#/lib/seo'
 import { absoluteUrl, DEFAULT_OG_IMAGE } from '#/lib/site'
@@ -53,10 +60,10 @@ export const Route = createFileRoute('/articles/$articleId')({
                         absoluteUrl(loaderData.galleryImages?.[0]) ??
                         DEFAULT_OG_IMAGE
                 const title = withBrand(
-                        localized(loaderData.titleAr, loaderData.title),
+                        localizedFor(lang, loaderData.titleAr, loaderData.title),
                         lang,
                 )
-                const description = localized(loaderData.excerptAr, loaderData.excerpt)
+                const description = localizedFor(lang, loaderData.excerptAr, loaderData.excerpt)
                 const canonical = langUrl(`/articles/${loaderData.id}`, lang)
                 return {
                         meta: [

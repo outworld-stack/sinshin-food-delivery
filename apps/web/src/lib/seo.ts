@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-39 — sinshin-food-delivery — فایل 3 از 5
+// مسیر مقصد: apps/web/src/lib/seo.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-five
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 3 از 18
 // مسیر مقصد: web/src/lib/seo.ts
 // وضعیت: فایل جدید — ایجاد شود
@@ -60,8 +67,23 @@ export interface HeadFnCtx {
     matches: ReadonlyArray<{ context?: unknown }>
 }
 
-/** زبان فعال از مچ ریشه — قبل از هر چیز در همه‌ی headها صدا زده می‌شود */
+/**
+ * زبان فعال — قبل از هر چیز در همه‌ی headها صدا زده می‌شود.
+ *
+ * رارد ۳۹ — سمت کلاینت، کوکیِ زنده مرجع است: router.invalidate لودرها را
+ * دوباره اجرا می‌کند ولی beforeLoad ریشه را نه → matches[0].context.lang
+ * زبانِ لحظه‌ی لود صفحه می‌ماند؛ بدون این، بعد از سوییچِ بدون ناوبری،
+ * عنوان/برند/canonical صفحه یک زبان عقب می‌ماندند (setLang کوکی را همان
+ * لحظه می‌نویسد و head بعد از invalidate دوباره ارزیابی می‌شود → زبانِ
+ * تازه بی‌درنگ اعمال می‌شود). سمت سرور بدون تغییر: context قبل‌لود ریشه
+ * (?lang= > کوکی درخواست) — کرالرها کوکی کلاینت ندارند که این شاخه چرخیده
+ * باشد. الگوی regex همان lang-header.ts — بدون وابستگی جدید به i18n.
+ */
 export function headLang(matches: HeadFnCtx['matches']): Lang {
+    if (typeof document !== 'undefined') {
+        if (/(?:^|;\s*)sinshin-lang=ar(?:;|$)/.test(document.cookie)) return 'ar'
+        if (/(?:^|;\s*)sinshin-lang=fa(?:;|$)/.test(document.cookie)) return 'fa'
+    }
     const lang = (matches[0]?.context as { lang?: Lang } | undefined)?.lang
     return lang === 'ar' ? 'ar' : 'fa'
 }
@@ -111,6 +133,22 @@ export function localized(
 ): string {
     const v = ar?.trim()
     return v ? v : (fa ?? '')
+}
+
+/**
+ * انتخاب محتوا «به زبانِ فعال» — رارد ۳۹.
+ *
+ * نکته‌ی ظریف: localized() همیشه عربیِ موجود را ترجیح می‌دهد (قرارداد
+ * COALESCE برای وقتی که سرور عربی خواسته)؛ در head/JSON-LD که هر دو زبان
+ * ممکن‌اند، این یعنی صفحه‌ی فارسی هم عنوان عربی می‌گرفت! اینجا زبان تعیین
+ * می‌کند: ar → عربی با fallback فارسی (localized)؛ fa → خودِ فیلد فارسی.
+ */
+export function localizedFor(
+    lang: Lang,
+    ar: string | null | undefined,
+    fa: string | null | undefined,
+): string {
+    return lang === 'ar' ? localized(ar, fa) : (fa ?? '')
 }
 
 // ── head سازها ──
@@ -247,8 +285,8 @@ export function breadcrumbJsonLd(
 /** اسکیمای Product — نام/توضیح دوزبانه + Offer (قیمت تومان → ریال ×۱۰) */
 export function productJsonLd(product: Product, lang: Lang) {
     const s = SEO[lang]
-    const name = localized(product.nameAr, product.name)
-    const description = localized(product.descriptionAr, product.description)
+    const name = localizedFor(lang, product.nameAr, product.name)
+    const description = localizedFor(lang, product.descriptionAr, product.description)
     const images = [
         absoluteUrl(product.profileImage) ?? DEFAULT_OG_IMAGE,
         ...product.galleryImages
@@ -292,7 +330,7 @@ export function productJsonLd(product: Product, lang: Lang) {
 /** اسکیمای Article — عنوان/خلاصه دوزبانه + نویسنده + BreadcrumbList */
 export function articleJsonLd(article: ArticleDto, lang: Lang) {
     const s = SEO[lang]
-    const title = localized(article.titleAr, article.title)
+    const title = localizedFor(lang, article.titleAr, article.title)
     const ogImage =
         absoluteUrl(article.profileImage) ??
         absoluteUrl(article.galleryImages?.[0]) ??
@@ -303,7 +341,7 @@ export function articleJsonLd(article: ArticleDto, lang: Lang) {
             {
                 '@type': 'Article',
                 headline: title,
-                description: localized(article.excerptAr, article.excerpt),
+                description: localizedFor(lang, article.excerptAr, article.excerpt),
                 image: [ogImage],
                 ...(article.publishedAt ? { datePublished: article.publishedAt } : {}),
                 inLanguage: LOCALE_TAG[lang],

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-39 — sinshin-food-delivery — فایل 2 از 5
+// مسیر مقصد: apps/web/src/utils/queryKeys.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-five
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-37 — sinshin-food-delivery — فایل 13 از 17
 // مسیر مقصد: apps/web/src/utils/queryKeys.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -45,6 +52,9 @@ export const qk = {
   articleCategories: ['article-categories'] as const,
   articles: (category: string, subCategory: string) =>
     ['articles', category, subCategory] as const,
+  // رارد ۳۹ — پریفکس لیست مقالات؛ برای invalidation زبان‌محور (همه‌ی
+  // category/subCategoryهای کش‌شده یکجا) — خودِ فراخوانی‌ها تغییری نمی‌کنند
+  articlesAll: ['articles'] as const,
 
   // --- محتوای سایت ---
   aboutContent: ['about-content'] as const,
@@ -78,6 +88,9 @@ export const qk = {
   cartDetails: (
     items: ReadonlyArray<{ productId: string; sizeId: string | null; quantity: number }>,
   ) => ['cart-details', items] as const,
+  // رارد ۳۹ — پریفکس جزئیات سبد؛ نام محصول/سایز سمت سرور COALESCE عربی/فارسی
+  // می‌شود → با تعویض زبان باید invalidate شود (هر ترکیب آیتم‌ها یکجا)
+  cartDetailsAll: ['cart-details'] as const,
 
   // --- پنل ادمین ---
   adminStats: ['admin-stats'] as const,
@@ -190,3 +203,32 @@ export const qk = {
   translationStatus: ['translation-status'] as const,
   translationJobs: ['translation-jobs'] as const,
 } as const
+
+// ═══════════════ رارد ۳۹ — کلیدهای حساس به زبان ═══════════════
+// داده‌ی این کلیدها از API با COALESCE(ar, fa) می‌آید (قرارداد رارد ۳۴):
+// اسم/توضیح/محتویات محصولات، منوها و دسته‌ها، مقاله‌ها، درباره، گالری،
+// قوانین، علت بسته‌بودن موقت، نام آیتم‌های سبد و پیش‌نمایش چک‌اوت.
+//
+// ریشه‌ی باگ «تأخیر ترجمه»: این کلیدها پارامتر زبان ندارند (عمداً —
+// زبان از هدر x-sinshin-lang می‌آید، نه از URL/کلید)، پس تعویض زبان
+// به‌تنهایی هیچ فچ جدیدی راه نمی‌انداخت و کشِ React Query تا انقضای
+// staleTime (۳۰ تا ۳۰۰ ثانیه) + رفرش/رفکوس، زبانِ قبلی را نشان می‌داد —
+// دقیقاً همان «اسم غذاها و توضیحات با تأخیر زیاد عربی/فارسی می‌شوند».
+//
+// راه‌حل: I18nProvider.setLang این فهرست را cancel + invalidate می‌کند
+// (فایل i18n/index.tsx) تا داده‌ی زبانِ تازه همان لحظه بیاید. پنل ادمین
+// عمداً خارج این فهرست است — ادمین/ادمین₂/پیک فارسیِ خالص می‌مانند و
+// ستون‌های عربیه‌شان را جداگانه در فرم‌ها می‌بینند (قرارداد رارد ۳۴).
+export const langSensitiveKeys = [
+  qk.activeMainCategories, // تب‌های منو (دسته‌های اصلی)
+  qk.productsByMainPrefix, // لیست منو: محصولات + دسته‌های هر تب
+  qk.productByIdAll, // صفحه‌ی جزئیات محصول (نام/توضیح/محتویات/سایزها)
+  qk.articleCategories, // دسته‌های مقاله
+  qk.articlesAll, // لیست مقاله‌ها
+  qk.aboutContent, // درباره‌ی ما
+  qk.galleryImages, // گالری (متن‌های alt)
+  qk.termsContent, // قوانین (مودال ثبت‌نام)
+  qk.restaurantStatus, // علت بسته‌شدن موقت (چک‌اوت/هدر)
+  qk.cartDetailsAll, // نام محصول/سایز در سبد
+  qk.checkoutPreviewPrefix, // نام آیتم‌ها در پیش‌نمایش چک‌اوت
+] as const

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-39 — sinshin-food-delivery — فایل 1 از 5
+// مسیر مقصد: apps/web/src/i18n/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-five
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 4 از 18
 // مسیر مقصد: web/src/i18n/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -21,6 +28,8 @@
 // fmt: فارسی دقیقاً همان توابع utils/format موجود (رفتار صفر-تغییر)؛
 // عربی قرینه‌ی ar-EG همان‌ها. صفحاتی که ترجمه نمی‌شوند همچنان از توابع
 // قدیمی مستقیم استفاده می‌کنند — دست‌نخورده.
+import { useQueryClient } from '@tanstack/react-query'
+import { useRouter } from '@tanstack/react-router'
 import {
 	createContext,
 	type ReactNode,
@@ -37,6 +46,7 @@ import {
 	formatRelative,
 	formatTime,
 } from '#/utils/format'
+import { langSensitiveKeys } from '#/utils/queryKeys'
 import { arApiErrorMessage } from './apiErrors'
 import { ar } from './ar'
 import { type Dict, fa } from './fa'
@@ -217,16 +227,54 @@ export function I18nProvider({
 		() => readLangCookie() ?? initialLang,
 	)
 
-	const setLang = useCallback((next: Lang) => {
-		writeLangCookie(next)
-		setLangState(next)
-		// اتریبیوت زبان سند — پنل ادمین/پیک هرگز Provider ندارد و همیشه fa می‌ماند
-		try {
-			document.documentElement.lang = next
-		} catch {
-			/* noop */
-		}
-	}, [])
+	// رارد ۳۹ — ابزارهای فوری‌سازی تعویض زبانِ داده‌های محتوایی:
+	// کوئری‌کلاینت برای cancel/invalidate کلیدهای حساس به زبان، و روتر
+	// برای اجرای دوباره‌ی لودرها (صفحات جزئیات که با loaderData رندر
+	// می‌شوند) + beforeLoad ریشه (context.lang → عنوان/متا/توکن‌های سند).
+	// Provider فقط داخل درخت روتر می‌نشیند، پس هر دو همیشه در دسترس‌اند.
+	const queryClient = useQueryClient()
+	const router = useRouter()
+
+	const setLang = useCallback(
+		(next: Lang) => {
+			// کلیک روی زبانِ فعال — بی‌اثر؛ قبلاً کوکی/state همان مقدار بازنویسی
+			// می‌شد که حالا با invalidation پرهزینه هم بود.
+			if (next === lang) return
+			writeLangCookie(next)
+			setLangState(next)
+			// اتریبیوت زبان سند — پنل ادمین/پیک هرگز Provider ندارد و همیشه fa می‌ماند
+			try {
+				document.documentElement.lang = next
+			} catch {
+				/* noop */
+			}
+			// رارد ۳۹ — ریشه‌ی باگ «تأخیر ترجمه» همین‌جا بسته شد: رشته‌های UI
+			// از دیکشنری کلاینت همان لحظه عوض می‌شدند، اما داده‌ی محتوایی
+			// (اسم غذاها، توضیحات، منوها، محتویات، مقاله‌ها، گالری، درباره،
+			// قوانین، سبد…) در کشِ React Query با کلیدِ بدونِ زبان می‌ماند و
+			// فقط بعد از staleTime + رفرش/رفکوس دوباره فچ می‌شد → «با تأخیر
+			// زیاد عربی/فارسی می‌شد». ترتیب مهم است — کوکی از قبل نوشته شده،
+			// پس فچ‌های زیر هدر x-sinshin-lang تازه می‌فرستند (langHeaders از
+			// همان کوکی می‌خواند):
+			//   ① cancel — فچ در-پروازِ زبانِ قبل، نتیجه‌ی قدیمی ننویسد
+			//   ② invalidate — کوئری‌های فعال همان لحظه ریفچ؛ غیرفعال‌ها stale
+			//      می‌شوند و در مونت/ناوبری بعدی تازه می‌آیند
+			//   ③ router.invalidate — لودرهای روت‌های فعال (جزئیات محصول/مقاله)
+			//      و beforeLoad ریشه دوباره اجرا می‌شوند (کوکی تازه را می‌خوانند)
+			try {
+				for (const key of langSensitiveKeys) {
+					queryClient.cancelQueries({ queryKey: key })
+				}
+				for (const key of langSensitiveKeys) {
+					queryClient.invalidateQueries({ queryKey: key })
+				}
+				router.invalidate()
+			} catch {
+				/* noop — تعویض زبان هرگز نباید خطا بدهد */
+			}
+		},
+		[lang, queryClient, router],
+	)
 
 	const value = useMemo<I18nValue>(
 		() => ({
