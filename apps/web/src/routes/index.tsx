@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-38 — sinshin-food-delivery — فایل 7 از 18
+// مسیر مقصد: web/src/routes/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-four
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-36 — sinshin-food-delivery — فایل 1 از 14
 // مسیر مقصد: apps/web/src/routes/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -15,10 +22,15 @@ import { WordSlider } from '#/components/WordSlider'
 import { useHydrated } from '#/hooks/useHydrated'
 import { I18nProvider, useI18n } from '#/i18n'
 import { shouldShowOutdatedBanner } from '#/lib/browserSupport'
+import { seoHead } from '#/lib/seo'
 import { useAuthStore } from '#/stores/authStore'
 
 export const Route = createFileRoute('/')({
 	component: LandingRoute,
+	// رارد ۳۸ — سئوی دوزبانه‌ی لندینگ: عنوان/توضیح/og + canonical +
+	// هر سه hreflang (fa / ar / x-default) به زبان فعال — بقیه‌ی متادیتای
+	// سایت از head ریشه می‌آید (metaByAttribute فرزند برنده است).
+	head: seoHead('home'),
 	// رارد ۳۱ — رأی بنر مرورگر قدیمی در لودر محاسبه می‌شود تا در خودِ HTML
 	// اولیه رندر شود: حتی اگر باندل اپ در موتور قدیمی اصلاً اجرا نشود، کاربر
 	// هشدار نارنجی را می‌بیند (خواسته‌ی «هر طور شده»).

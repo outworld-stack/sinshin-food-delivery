@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// round-38 — sinshin-food-delivery — فایل 1 از 18
+// مسیر مقصد: api/src/infra/db/client.ts
+// وضعیت: جایگزینی کامل فایل موجود (رفع باگ)
+// کامیت پیشنهادی: stage thirty-four
+// ⚠ بحرانی — رفع خطای 42804 سید (بولین/عدد در jsonb)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-36 — sinshin-food-delivery — فایل 3 از 14
 // مسیر مقصد: apps/api/src/infra/db/client.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -33,11 +41,29 @@ import * as schema from './schema'
  * خواندن دست‌نخورده می‌ماند: mapFromDriverValue هر دو حالت (رشته یا
  * مقدار پارس‌شده) را درست برمی‌گرداند — داده‌های قدیمیِ دوبار-انکد هم
  * خوانده می‌شوند؛ برای یکدست‌سازی، اسکریپت scripts/normalize-jsonb.ts.
+ *
+ * round-38 — رفع خطای 42804 روی مقادیر اسکالر (کشف در seed v3):
+ * Bun.sql برای بولین/عددِ خام، پارامتر را با OID بومیِ پستگرس می‌فرستد
+ * (boolean / int / double precision) و سرور روی ستون jsonb رد می‌کند:
+ *   «column "value" is of type jsonb but expression is of type boolean»
+ * (نمونه‌ی واقعی: seed → settings → restaurant_open=true؛ همان خطا در
+ * SettingsService.set با هر کلید بولینی مثل temporarily_closed هم رخ
+ * می‌داد — یعنی باگ runtime بود، نه فقط seed.)
+ * رفع: بولین/عدد را داخل شیئی با toJSON می‌پیچیم — Bun.sql شیءها را با
+ * JSON.stringify سریال می‌کند و toJSON مقدار اصلی را برمی‌گرداند؛ نتیجه
+ * درستِ jsonb اسکالر است (true / false / 42) و خواندن هم متقارن است
+ * (jsonb boolean → JS boolean). برای null/رشته/آرایه/شیء همان «خام»
+ * قبلی درست است (رشته → jsonb string، آرایه → array، شیء → object).
  */
 const jsonbProto = PgJsonb.prototype as {
   mapToDriverValue: (value: unknown) => unknown
 }
-jsonbProto.mapToDriverValue = (value: unknown) => value
+jsonbProto.mapToDriverValue = (value: unknown) => {
+        if (typeof value === 'boolean' || typeof value === 'number') {
+                return { toJSON: () => value }
+        }
+        return value
+}
 
 /** نمونه‌ی drizzle — این چیزی است که به سرویس‌های دامنه تزریق می‌شود */
 export type Db = BunSQLDatabase<typeof schema>

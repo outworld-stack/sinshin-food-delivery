@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-38 — sinshin-food-delivery — فایل 15 از 18
+// مسیر مقصد: web/src/routes/cart/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-four
+// ═══════════════════════════════════════════════════════════════
+
 // src/routes/cart/index.tsx
 
 import { asProductId, asSizeId } from '@sinshin/shared'
@@ -15,9 +22,10 @@ import { CartSummary } from '#/components/site/cart/CartSummary'
 import { useCartPage } from '#/hooks/site/useCartPage'
 import { useBack } from '#/hooks/useBack'
 import { useHydrated } from '#/hooks/useHydrated'
+import { useI18n } from '#/i18n'
+import { noindexHead } from '#/lib/seo'
 import { cartItemKey } from '#/stores/cartStore'
 import { cartDetailsOptions } from '#/utils/queryOptions'
-import { useI18n } from '#/i18n'
 
 function CartPage() {
         const back = useBack('/products')
@@ -182,10 +190,6 @@ export const Route = createFileRoute('/cart/')({
         component: CartPage,
         pendingComponent: CartPageSkeleton,
         errorComponent: RouteError,
-        head: () => ({
-                meta: [
-                        { title: 'سبد خرید | سین شین' },
-                        { name: 'robots', content: 'noindex, nofollow' },
-                ],
-        }),
+        // رارد ۳۸ — noindex با عنوان دوزبانه
+        head: noindexHead('cart'),
 })
