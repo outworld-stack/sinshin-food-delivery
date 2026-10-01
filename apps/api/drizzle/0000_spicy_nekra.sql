@@ -489,6 +489,20 @@ CREATE TABLE "reconcile_findings" (
 	"occurrences" integer DEFAULT 1 NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "translation_jobs" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"entity_type" varchar(30) NOT NULL,
+	"entity_id" varchar(64) NOT NULL,
+	"status" varchar(12) DEFAULT 'pending' NOT NULL,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"max_attempts" integer DEFAULT 3 NOT NULL,
+	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"last_error" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"started_at" timestamp with time zone,
+	"finished_at" timestamp with time zone
+);
+--> statement-breakpoint
 ALTER TABLE "addresses" ADD CONSTRAINT "addresses_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin2_activities" ADD CONSTRAINT "admin2_activities_admin_user_id_users_id_fk" FOREIGN KEY ("admin_user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin2_profiles" ADD CONSTRAINT "admin2_profiles_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -631,4 +645,6 @@ CREATE UNIQUE INDEX "reviews_order_product_key" ON "reviews" USING btree ("order
 CREATE INDEX "reviews_product_status_idx" ON "reviews" USING btree ("product_id","status");--> statement-breakpoint
 CREATE INDEX "reviews_status_idx" ON "reviews" USING btree ("status");--> statement-breakpoint
 CREATE UNIQUE INDEX "reconcile_finding_key" ON "reconcile_findings" USING btree ("check_id","entity_id");--> statement-breakpoint
-CREATE INDEX "reconcile_finding_status_idx" ON "reconcile_findings" USING btree ("status","severity","first_seen_at");
+CREATE INDEX "reconcile_finding_status_idx" ON "reconcile_findings" USING btree ("status","severity","first_seen_at");--> statement-breakpoint
+CREATE INDEX "translation_jobs_claim_idx" ON "translation_jobs" USING btree ("status","next_attempt_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "translation_jobs_pending_key" ON "translation_jobs" USING btree ("entity_type","entity_id") WHERE "translation_jobs"."status" = 'pending';
