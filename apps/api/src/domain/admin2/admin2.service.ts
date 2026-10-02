@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 14 از 49
+// round-48 — sinshin-food-delivery — فایل 13 از 97
 // مسیر مقصد: apps/api/src/domain/admin2/admin2.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/admin2/admin2.service.ts
@@ -45,6 +45,23 @@ const PROFILE_CACHE_TTL_MS = 15_000
  * لاگین: فقط با بسته‌بودنِ «ساعتی» رد می‌شود (موقت آزاد است).
  * لاگین موفق → ردیف admin2Sessions + رویداد LOGIN + اطلاعِ صفِ داخل حوزه.
  */
+/** رارد ۴۸ — همه‌ی ۱۴ دسترسی روشن؛ برای ادمین اصلی در مسیر session پنل زنده */
+export const ALL_ADMIN2_PERMISSIONS: Admin2Permissions = {
+    hall: true,
+    takeaway: true,
+    productsRead: true,
+    productsWrite: true,
+    usersRead: true,
+    usersWrite: true,
+    couriersRead: true,
+    couriersWrite: true,
+    mainCategoriesRead: true,
+    mainCategoriesWrite: true,
+    orderDetailsRead: true,
+    canToggleTemporaryClose: true,
+    canEditPackagingFee: true,
+}
+
 export class Admin2Service {
     /** round-16 — userId → { at, profile|null } — ایندکس‌شده با TTL ۱۵s */
     private readonly profileCache = new Map<
@@ -146,21 +163,7 @@ export class Admin2Service {
         const p = await this.cachedProfile(userId)
         if (!p) return null
         if (!p.isActive) throw Err.forbidden('دسترسی این ادمین غیرفعال است.')
-        return {
-            hall: p.scopeHall,
-            takeaway: p.scopeTakeaway,
-            productsRead: p.productsRead,
-            productsWrite: p.productsWrite,
-            usersRead: p.usersRead,
-            usersWrite: p.usersWrite,
-            couriersRead: p.couriersRead,
-            couriersWrite: p.couriersWrite,
-            mainCategoriesRead: p.mainCategoriesRead,
-            mainCategoriesWrite: p.mainCategoriesWrite,
-            orderDetailsRead: p.orderDetailsRead,
-            canToggleTemporaryClose: p.canToggleTemporaryClose,
-            canEditPackagingFee: p.canEditPackagingFee,
-        }
+        return Admin2Service.toPermissions(p)
     }
 
     /** لیست ادمین‌های ۲ — پنل ادمین اصلی
@@ -440,6 +443,27 @@ export class Admin2Service {
         else this.profileCache.clear()
     }
 
+    /** رارد ۴۸ (اسکن A10) — نگاشت ردیف پروفایل → ۱۴ کلید قرارداد؛ تنها مبدأ */
+    private static toPermissions(
+        p: typeof admin2Profiles.$inferSelect,
+    ): Admin2Permissions {
+        return {
+            hall: p.scopeHall,
+            takeaway: p.scopeTakeaway,
+            productsRead: p.productsRead,
+            productsWrite: p.productsWrite,
+            usersRead: p.usersRead,
+            usersWrite: p.usersWrite,
+            couriersRead: p.couriersRead,
+            couriersWrite: p.couriersWrite,
+            mainCategoriesRead: p.mainCategoriesRead,
+            mainCategoriesWrite: p.mainCategoriesWrite,
+            orderDetailsRead: p.orderDetailsRead,
+            canToggleTemporaryClose: p.canToggleTemporaryClose,
+            canEditPackagingFee: p.canEditPackagingFee,
+        }
+    }
+
     /** شرط حوزه روی deliveryType */
     private scopeClause(scope: Admin2Scope) {
         if (scope.hall && scope.takeaway) return sql`true`
@@ -464,21 +488,7 @@ export class Admin2Service {
             lastName: p.lastName,
             isActive: p.isActive,
             ordersConfirmed: p.ordersConfirmed,
-            permissions: {
-                hall: p.scopeHall,
-                takeaway: p.scopeTakeaway,
-                productsRead: p.productsRead,
-                productsWrite: p.productsWrite,
-                usersRead: p.usersRead,
-                usersWrite: p.usersWrite,
-                couriersRead: p.couriersRead,
-                couriersWrite: p.couriersWrite,
-                mainCategoriesRead: p.mainCategoriesRead,
-                mainCategoriesWrite: p.mainCategoriesWrite,
-                orderDetailsRead: p.orderDetailsRead,
-                canToggleTemporaryClose: p.canToggleTemporaryClose,
-                canEditPackagingFee: p.canEditPackagingFee,
-            },
+            permissions: Admin2Service.toPermissions(p),
             sessions,
             lastActivity,
         }

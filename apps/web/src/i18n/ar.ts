@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-37 — sinshin-food-delivery — فایل 11 از 17
+// round-48 — sinshin-food-delivery — فایل 72 از 97
 // مسیر مقصد: apps/web/src/i18n/ar.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-three
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/i18n/ar.ts
@@ -145,8 +145,6 @@ export const ar: Dict = {
         'pdetail.reviews': 'آراء العملاء',
         'pdetail.noReviews': 'لم يُسجَّل ويُعتمد أي رأي لهذا المنتج حتى الآن',
         'pdetail.anonUser': 'مستخدم',
-        'pdetail.home': 'الرئيسية',
-        'pdetail.menu': 'القائمة',
 
         // ── سلة الشراء (الجولة ٣٢) ──
         'cart.title': 'سلة الشراء',
@@ -446,20 +444,6 @@ export const ar: Dict = {
         'dash.wallet.sort.income': 'وارد (دخل)',
         'dash.wallet.sort.expense': 'صادر (مصروف)',
 
-        // ── تسجيل المُحيل (الجولة ٣٣) ──
-        'dash.referral.scanButton': 'مسح كود الإحالة',
-        'dash.referral.codeAria': 'كود الإحالة',
-        'dash.referral.submitAria': 'تسجيل كود الإحالة',
-        'dash.referral.desc':
-                'امسح رمز QR لكود إحالة صديقك أو أدخل الكود يدوياً — منذ لحظة التسجيل، تُشحن نسبة من مبلغ طلباته في محفظتك. تسجيل المُحيل ممكن مرة واحدة فقط.',
-        'dash.referral.applying': 'جارٍ تسجيل المُحيل...',
-        'dash.referral.appliedToast': 'تم تسجيل مُحيلك: {n}',
-        'dash.referral.applyFailed': 'فشل تسجيل المُحيل',
-        'dash.referral.qrNotFound': 'لم يتم العثور على كود الإحالة في هذا الرمز',
-        'dash.referral.invalidCode': 'كود الإحالة غير صالح',
-        'dash.referral.scanHint':
-                'وجّه الكاميرا نحو رمز QR للمُحيل من صفحة «دعوة الأصدقاء» لدى صديقك؛ إذا لم تكن الكاميرا متاحة، حمّل صورة الرمز.',
-
         // ── ترقيم الصفحات (الجولة ٣٣) ──
         'pagination.showing': 'عرض',
         'pagination.to': 'إلى',
@@ -493,14 +477,6 @@ export const ar: Dict = {
         'rf.loading': 'جارٍ التحميل',
 
         // ── قارئ QR (الجولة ٣٣) ──
-        'qr.starting': 'جارٍ تشغيل الكاميرا...',
-        'qr.cameraDenied':
-                'تم رفض الوصول إلى الكاميرا — فعّل إذن الكاميرا من إعدادات المتصفح أو حمّل صورة الرمز.',
-        'qr.cameraNotFound': 'لم يتم العثور على كاميرا — يمكنك تحميل صورة الرمز.',
-        'qr.cameraFailed': 'تعذّر تشغيل الكاميرا — حمّل صورة الرمز.',
-        'qr.uploadPhoto': 'تحميل صورة الرمز',
-        'qr.fileNoCode': 'لم يتم العثور على رمز في هذه الصورة — التقط صورة أوضح للرمز.',
-        'qr.fileReadError': 'تعذّر قراءة الصورة.',
 
         // ── الخريطة (الجولة ٣٣) ──
         'map.pickLocation': 'اختيار الموقع على الخريطة',

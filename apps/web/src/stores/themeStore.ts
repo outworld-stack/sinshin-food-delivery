@@ -35,12 +35,6 @@ export const useThemeStore = create<ThemeState>()(
   )
 )
 
-// سمت کلاینت — بعد از سوار شدن: کلاس از استور
-export function applyThemeClass(isDark: boolean) {
-  if (typeof document !== 'undefined') {
-    document.documentElement.classList.toggle('dark', isDark)
-  }
-};
 
 if (typeof window !== 'undefined') {
   useThemeStore.persist.rehydrate()

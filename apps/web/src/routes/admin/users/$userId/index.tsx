@@ -21,6 +21,7 @@ import { LogsBox } from '#/components/admin/user-detail/LogsBox'
 import { AddressesBox } from '#/components/admin/user-detail/AddressesBox'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { ChevronRight, Pen, Monitor } from 'reicon-react'
+import { faNum } from '#/utils/format'
 
 export const Route = createFileRoute('/admin/users/$userId/')({
   ssr: false,
@@ -117,7 +118,7 @@ function AdminUserDetailPage() {
         </div>
         <div className="bg-white dark:bg-[#2a1015] p-5 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
           <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-2">تعداد زیرمجموعه‌ها</p>
-          <p className="font-MorabbaBold text-xl text-gray-800 dark:text-white">{user.referralsCount.toLocaleString('fa-IR')}</p>
+          <p className="font-MorabbaBold text-xl text-gray-800 dark:text-white">{faNum(user.referralsCount)}</p>
         </div>
       </div>
 

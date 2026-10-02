@@ -4,8 +4,8 @@ import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { ReportQueryService } from '#/domain/report/report-query.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 export interface AdminReportRoutesDeps {
   sessions: SessionService

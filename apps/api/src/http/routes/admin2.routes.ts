@@ -5,8 +5,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 export interface Admin2RoutesDeps {
   sessions: SessionService

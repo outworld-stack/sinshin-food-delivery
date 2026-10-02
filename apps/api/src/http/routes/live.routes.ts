@@ -2,14 +2,13 @@
 import { Elysia, t } from "elysia";
 
 import type { SessionService } from "#/domain/auth/session.service";
+import { ALL_ADMIN2_PERMISSIONS } from "#/domain/admin2/admin2.service";
 import type { Admin2Service } from "#/domain/admin2/admin2.service";
 import type { LiveService } from "#/domain/live/live.service";
 import type { OrderService } from "#/domain/order/order.service";
 import { requireAdmin2 } from "#/http/hooks/require-admin2";
+import { DISPLAY_PATTERN, UUID_PATTERN } from '#/domain/shared/ids'
 
-const DISPLAY_PATTERN = "^ord-[a-z0-9]{8}$";
-const UUID_PATTERN =
-	"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
 
 export interface LiveRoutesDeps {
 	sessions: SessionService;
@@ -37,21 +36,9 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
 							userId: user.id,
 							firstName: user.name ?? "ادمین اصلی",
 							lastName: null,
-							permissions: {
-								hall: true,
-								takeaway: true,
-								productsRead: true,
-								productsWrite: true,
-								usersRead: true,
-								usersWrite: true,
-								couriersRead: true,
-								couriersWrite: true,
-								mainCategoriesRead: true,
-								mainCategoriesWrite: true,
-								orderDetailsRead: true,
-								canToggleTemporaryClose: true,
-								canEditPackagingFee: true,
-							},
+							// رارد ۴۸ — از منبع واحد کنار خود قرارداد (قبلاً literal موازی بود؛
+							// مجوز پانزدهم یعنی سه ویرایش هماهنگ در سه فایل)
+							permissions: ALL_ADMIN2_PERMISSIONS,
 						},
 						queueCount: await deps.admin2.queueCountFor(user.id, user.role),
 					};

@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 14 از 18
-// مسیر مقصد: web/src/routes/login.tsx
+// round-48 — sinshin-food-delivery — فایل 83 از 97
+// مسیر مقصد: apps/web/src/routes/login.tsx
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/routes/login.tsx
@@ -21,6 +21,7 @@ import { checkIsNewUser, requestOtp, verifyOtp } from '#/server/auth'
 import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { collectDeviceSignals } from '#/utils/deviceFingerprint'
+import { isValidIranPhone, sanitizePhone } from '#/utils/phone'
 import { clearStoredRef, getStoredRef } from '#/utils/referralCapture'
 
 export const Route = createFileRoute('/login')({
@@ -219,14 +220,14 @@ function LoginPage() {
 
 	const handlePhoneInput = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
-			phoneForm.setFieldValue('phone', e.target.value.replace(/[^0-9]/g, ''))
+			phoneForm.setFieldValue('phone', sanitizePhone(e.target.value))
 		},
 		[phoneForm],
 	)
 
 	const handleCodeChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
-			const value = e.target.value.replace(/[^0-9]/g, '')
+			const value = sanitizePhone(e.target.value)
 			otpForm.setFieldValue('code', value)
 			if (value.length === 6) {
 				setTimeout(() => otpForm.handleSubmit(), 150)
@@ -278,7 +279,7 @@ function LoginPage() {
 									validators={{
 										onChange: ({ value }) => {
 											if (!value) return t['login.phoneRequired']
-											if (!/^09[0-9]{9}$/.test(value))
+											if (!isValidIranPhone(value))
 												return t['login.phoneFormat']
 											return undefined
 										},

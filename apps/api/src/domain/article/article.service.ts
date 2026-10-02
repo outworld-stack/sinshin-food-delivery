@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 10 از 49
+// round-48 — sinshin-food-delivery — فایل 14 از 97
 // مسیر مقصد: apps/api/src/domain/article/article.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/domain/article/article.service.ts
@@ -16,8 +16,10 @@ import {
 } from '#/infra/db/schema'
 import { Err } from '#/domain/shared/errors'
 import { nullIfEmpty, pickAr, type Lang } from '#/domain/shared/lang'
+import type { RedisService } from '#/infra/redis/redis'
+import { VersionedCache } from '#/domain/shared/versioned-cache'
+import { UUID_RE } from '#/domain/shared/ids'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** قرارداد ArticleDto از @sinshin/shared */
 export interface ArticleView {
@@ -95,8 +97,22 @@ type SubRow = typeof articleSubCategories.$inferSelect
  * مقالات — عمومی (فقط ACTIVE) + ادمین (همه).
  * «مرگ 404» — فرانت از اول روی این قراردادها ساخته شده بود، روت‌ها نبودند.
  */
+const CACHE_TTL_SECONDS = 30 // همان کهنگیِ منو
+const VERSION_KEY = 'articles:ver'
+
 export class ArticleService {
-    constructor(private readonly deps: { db: Db }) { }
+    constructor(private readonly deps: { db: Db; redis: RedisService }) {
+        // رارد ۴۸ (اسکن C2) — لیست عمومی مقالات روی مسیر SSR هر بازدید
+        // بدون سقف و بدون کش از DB کشیده می‌شد؛ حالا همان کش نسخه‌دارِ منو.
+        this.cache = new VersionedCache({
+            redis: deps.redis,
+            versionKey: VERSION_KEY,
+            prefix: 'arts',
+            ttlSeconds: CACHE_TTL_SECONDS,
+        })
+    }
+
+    private readonly cache: VersionedCache
 
     // ═══ عمومی ═══
 
@@ -136,15 +152,29 @@ export class ArticleService {
     }
 
     async listPublic(categorySlug?: string, subSlug?: string, lang: Lang = 'fa'): Promise<ArticleSummaryView[]> {
-        const conds = [eq(articles.status, 'ACTIVE')]
-        if (categorySlug && categorySlug !== 'all') {
-            conds.push(eq(articleCategories.slug, categorySlug))
-        }
-        if (subSlug && subSlug !== 'all') {
-            conds.push(eq(articleSubCategories.slug, subSlug))
-        }
-        const rows = await this.joinedSummary().where(and(...conds)).orderBy(desc(articles.createdAt))
-        return rows.map(({ a, c, s }) => this.toSummary(a, c, s, lang))
+        const cat = categorySlug && categorySlug !== 'all' ? categorySlug : 'all'
+        const sub = subSlug && subSlug !== 'all' ? subSlug : 'all'
+        return this.cache.cached(`list:${lang}:${cat}:${sub}`, async () => {
+            const conds = [eq(articles.status, 'ACTIVE')]
+            if (cat !== 'all') {
+                conds.push(eq(articleCategories.slug, cat))
+            }
+            if (sub !== 'all') {
+                conds.push(eq(articleSubCategories.slug, sub))
+            }
+            const rows = await this.joinedSummary().where(and(...conds)).orderBy(desc(articles.createdAt))
+            return rows.map(({ a, c, s }) => this.toSummary(a, c, s, lang))
+        })
+    }
+
+    /**
+     * رارد ۴۸ — باطل‌کردن عمومی کش مقالات (الگوی bustCache منو).
+     * صف ترجمه ستون‌های ar را مستقیم روی ردیف‌ها می‌نویسد (بیرون از
+     * متدهای write ادمین)؛ این متد همان INCR نسخه را برایش انجام می‌دهد
+     * تا کاربر عربی کشِ قدیمیِ فارسی را نبیند.
+     */
+    async bustCache(): Promise<void> {
+        await this.cache.invalidate()
     }
 
     /** جزئیات عمومی — فقط ACTIVE + شمارش بازدید (سورتِ پربازدیدترین فرانت) */
@@ -217,6 +247,7 @@ export class ArticleService {
             })
             .returning()
         if (!created) throw Err.internal('ذخیره‌سازی مقاله ناموفق بود.')
+        await this.cache.invalidate()
         return { success: true, id: created.id }
     }
 
@@ -248,6 +279,7 @@ export class ArticleService {
             .where(eq(articles.id, id))
             .returning()
         if (!updated) throw Err.notFound('مقاله پیدا نشد.')
+        await this.cache.invalidate()
         return { success: true }
     }
 
@@ -258,6 +290,7 @@ export class ArticleService {
             .where(eq(articles.id, id))
             .returning({ id: articles.id })
         if (removed.length === 0) throw Err.notFound('مقاله پیدا نشد.')
+        await this.cache.invalidate()
         return { success: true }
     }
 
@@ -268,6 +301,7 @@ export class ArticleService {
             .update(articles)
             .set({ status: row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE', updatedAt: new Date() })
             .where(eq(articles.id, row.id))
+        await this.cache.invalidate()
     }
 
     // ═══ ادمین: دسته‌ها ═══
@@ -306,6 +340,7 @@ export class ArticleService {
                     })
             }
         }
+        await this.cache.invalidate()
         return { success: true }
     }
 
@@ -375,6 +410,7 @@ export class ArticleService {
             // مقالاتِ ارجاع‌دهنده: FK → SET NULL — بی‌خطر
             await db.delete(articleSubCategories).where(inArray(articleSubCategories.id, stale))
         }
+        await this.cache.invalidate()
     }
 
     async deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
@@ -387,6 +423,7 @@ export class ArticleService {
             return { success: false, message: 'ابتدا مقالات این دسته را منتقل یا حذف کنید' }
         }
         await this.deps.db.delete(articleCategories).where(eq(articleCategories.id, id))
+        await this.cache.invalidate()
         return { success: true }
     }
 

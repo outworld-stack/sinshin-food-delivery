@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-43 — sinshin-food-delivery — فایل 2 از 14
+// round-48 — sinshin-food-delivery — فایل 12 از 97
 // مسیر مقصد: apps/api/src/domain/admin/admin.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-eight
+// کامیت پیشنهادی: stage forty-three
 // ═════════════════════════════════════════════════════════════
 
 // src/domain/admin/admin.service.ts
@@ -320,10 +320,13 @@ export class AdminService {
                 .map((r) => [r.addressId!, r.count]),
         )
 
+        // رارد ۴۸ (اسکن C3) — چارت فقط بازه‌ی جاری را می‌خواند (سند charts)؛
+        // بدون این کران، کل تاریخچه‌ی سفارش کاربر برای نموداری که داده‌های
+        // قدیمی‌تر را دور می‌ریخت واکشی می‌شد (کاربر ۸۰۰ سفارشی = ۸۰۰ ردیف).
         const chartOrders = await db
             .select({ date: orders.createdAt, value: orders.totalAmount })
             .from(orders)
-            .where(eq(orders.userId, uid))
+            .where(and(eq(orders.userId, uid), gte(orders.createdAt, currentPeriodStart())))
 
         return {
             id: uid,

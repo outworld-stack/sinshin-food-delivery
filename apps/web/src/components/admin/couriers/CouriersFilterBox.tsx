@@ -2,6 +2,7 @@
 import { memo, useCallback } from 'react'
 import { Search, Restart } from 'reicon-react'
 import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
+import { FILTER_INPUT_CLS, FILTER_LABEL_CLS } from '#/components/admin/filters'
 
 
 interface CouriersFilterBoxProps {
@@ -24,17 +25,17 @@ export const CouriersFilterBox = memo(function CouriersFilterBox({
     <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
         <div className="lg:col-span-2">
-          <label className="block text-xs text-gray-400 mb-1 font-DanaMedium">جستجو (نام پیک یا موبایل)</label>
+          <label className={FILTER_LABEL_CLS}>جستجو (نام پیک یا موبایل)</label>
           <input
             type="text"
             value={tempSearch}
             onChange={handleSearch}
             placeholder="محمد یا 0912..."
-            className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary"
+            className={FILTER_INPUT_CLS}
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1 font-DanaMedium">از تاریخ</label>
+          <label className={FILTER_LABEL_CLS}>از تاریخ</label>
           <PersianDatePicker
             value={dateFrom || null}
             onChange={(iso) => onDateFrom(iso ?? '')}
@@ -43,7 +44,7 @@ export const CouriersFilterBox = memo(function CouriersFilterBox({
         </div>
 
         <div>
-          <label className="block text-xs text-gray-400 mb-1 font-DanaMedium">تا تاریخ</label>
+          <label className={FILTER_LABEL_CLS}>تا تاریخ</label>
           <PersianDatePicker
             value={dateTo || null}
             onChange={(iso) => onDateTo(iso ?? '')}

@@ -7,9 +7,9 @@ import type { CourierService } from '#/domain/courier/courier.service'
 import type { RedisService } from '#/infra/redis/redis'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
+import { UUID_PATTERN } from '#/domain/shared/ids'
+import { DISPLAY_PATTERN } from '#/domain/shared/ids'
 
-const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 export interface CourierRoutesDeps {
   sessions: SessionService

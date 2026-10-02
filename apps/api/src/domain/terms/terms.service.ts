@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 12 از 49
+// round-48 — sinshin-food-delivery — فایل 29 از 97
 // مسیر مقصد: apps/api/src/domain/terms/terms.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/terms/terms.service.ts
@@ -39,22 +39,7 @@ export class TermsService {
     if (!row) {
       return { sections: [], sectionsAr: null, arAuto: false, version: 0, updatedAt: new Date() }
     }
-    // round-34 — بندهای عربی: ساختار موازی sections؛ هم‌ترازی با ایندکس حیاتی است —
-    // بخشِ بدون ترجمه‌ی عربی به همان فارسی برمی‌گردد (COALESCE به‌ازای هر مورد)
-    const sections =
-      lang === 'ar' && row.sectionsAr && row.sectionsAr.length > 0
-        ? row.sections.map((s, i) => {
-            const a = row.sectionsAr?.[i]
-            return a && (a.title.trim() !== '' || a.items.length > 0) ? a : s
-          })
-        : row.sections
-    return {
-      sections,
-      sectionsAr: row.sectionsAr ?? null,
-      arAuto: row.arAuto,
-      version: row.version,
-      updatedAt: row.createdAt,
-    }
+    return this.toContent(row, lang)
   }
 
   /** نسخه‌ی خاص — برای ثبت لحظه‌ی پذیرش در auth */
@@ -63,7 +48,19 @@ export class TermsService {
       where: eq(terms.version, version),
     })
     if (!row) return null
-    // round-34 — همان COALESCE بخش‌به‌بخشِ نسخه‌ی خاص (ارجاع تاریخی)
+    return this.toContent(row, lang)
+  }
+
+
+  /**
+   * رارد ۴۸ (اسکن A12) — همان COALESCE بخش‌به‌بخش که قبلاً در latest و
+   * byVersion بایت‌به‌بایت تکرار می‌شد؛ بخشِ بدون ترجمه‌ی عربی به همان
+   * فارسی برمی‌گردد (هم‌ترازی با ایندکس حیاتی است).
+   */
+  private toContent(
+    row: typeof terms.$inferSelect,
+    lang: Lang,
+  ): TermsContent {
     const sections =
       lang === 'ar' && row.sectionsAr && row.sectionsAr.length > 0
         ? row.sections.map((s, i) => {

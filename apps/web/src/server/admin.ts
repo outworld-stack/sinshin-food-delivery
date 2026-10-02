@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-37 — sinshin-food-delivery — فایل 12 از 17
+// round-48 — sinshin-food-delivery — فایل 84 از 97
 // مسیر مقصد: apps/web/src/server/admin.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-three
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/server/admin.ts — داشبورد + کاربران + سفارشات + پیک‌ها + ادمین۲ + پنل زنده + تنظیمات — تماماً API
@@ -114,15 +114,6 @@ export async function deleteUserAddress(input: {
         return { ok: true }
 }
 
-export async function getUserAuditLogs(input: {
-        data: { userId: string }
-}): Promise<
-        Array<{ id: string; userName: string; action: string; timestamp: Date }>
-> {
-        return authJson<
-                Array<{ id: string; userName: string; action: string; timestamp: Date }>
-        >(`/admin/users/${input.data.userId}/activities`, 'GET')
-}
 
 // ═════════════ سفارشات ادمین ═════════════
 

@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-37 — sinshin-food-delivery — فایل 15 از 17
+// round-48 — sinshin-food-delivery — فایل 64 از 97
 // مسیر مقصد: apps/web/src/components/admin/settings/GeoAccessCard.tsx
 // وضعیت: فایل جدید
-// کامیت پیشنهادی: stage thirty-three
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/settings/GeoAccessCard.tsx
@@ -32,6 +32,7 @@ import { qk } from '#/utils/queryKeys'
 import { Toggle } from '#/components/shared/Toggle'
 import { useToastStore } from '#/stores/toastStore'
 import { Shield, ShieldCheck, Discover2, Refresh, Clock, Radio, AlertTriangle, Check } from 'reicon-react'
+import { faNum } from '#/utils/format'
 
 /** فقط زمان نسخه‌ی خوانا برای پنل (ادمین، سمت کلاینت) */
 function fmtTime(iso: string | null): string {
@@ -257,8 +258,8 @@ export const GeoAccessCard = memo(function GeoAccessCard() {
               <div className="h-4 mt-2 rounded bg-gray-100 dark:bg-white/5 animate-pulse" />
             ) : (
               <p className="text-xs text-gray-700 dark:text-gray-200 mt-1.5 font-DanaMedium" dir="rtl">
-                {(geo?.iran.ipv4Prefixes ?? 0).toLocaleString('fa-IR')} رنج IPv4 ·{' '}
-                {(geo?.iran.ipv6Prefixes ?? 0).toLocaleString('fa-IR')} رنج IPv6
+                {faNum((geo?.iran.ipv4Prefixes ?? 0))} رنج IPv4 ·{' '}
+                {faNum((geo?.iran.ipv6Prefixes ?? 0))} رنج IPv6
               </p>
             )}
           </div>
@@ -271,8 +272,8 @@ export const GeoAccessCard = memo(function GeoAccessCard() {
               <div className="h-4 mt-2 rounded bg-gray-100 dark:bg-white/5 animate-pulse" />
             ) : (
               <p className="text-xs text-gray-700 dark:text-gray-200 mt-1.5 font-DanaMedium" dir="rtl">
-                {(geo?.iraq.ipv4Prefixes ?? 0).toLocaleString('fa-IR')} رنج IPv4 ·{' '}
-                {(geo?.iraq.ipv6Prefixes ?? 0).toLocaleString('fa-IR')} رنج IPv6
+                {faNum((geo?.iraq.ipv4Prefixes ?? 0))} رنج IPv4 ·{' '}
+                {faNum((geo?.iraq.ipv6Prefixes ?? 0))} رنج IPv6
               </p>
             )}
           </div>
@@ -289,7 +290,7 @@ export const GeoAccessCard = memo(function GeoAccessCard() {
           </span>
           <span className="inline-flex items-center gap-1">
             <Refresh size={12} />
-            IP های عبور (bypass): {(geo?.bypassIps ?? 0).toLocaleString('fa-IR')}
+            IP های عبور (bypass): {faNum((geo?.bypassIps ?? 0))}
           </span>
         </div>
       </div>

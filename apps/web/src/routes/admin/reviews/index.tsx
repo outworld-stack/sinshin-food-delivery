@@ -8,6 +8,7 @@ import { RouteError } from '#/components/shared/RouteFallbacks'
 import { formatDate } from '#/utils/format'
 import { Check, X, User, MessageSquare, Package } from 'reicon-react'
 import { AdminReviewsPageSkeleton } from '#/components/LoadingSkeletons'
+import { faNum } from '#/utils/format'
 
 // ترتیب راست به چپ: همه - تاییدشده - ردشده - در انتظار تایید
 const FILTERS: { key: ReviewFilter; label: string }[] = [
@@ -109,7 +110,7 @@ const ReviewsPage = memo(function ReviewsPage() {
           >
             {f.label}
             <span className="text-[10px] bg-gray-200 dark:bg-[#2a1015] px-1.5 rounded-full font-DanaDemiBold">
-              {page.counts[f.key].toLocaleString('fa-IR')}
+              {faNum(page.counts[f.key])}
             </span>
           </button>
         ))}

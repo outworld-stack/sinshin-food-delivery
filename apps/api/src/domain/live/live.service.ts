@@ -15,8 +15,8 @@ import { Err } from "#/domain/shared/errors";
 import type { Admin2Service } from "#/domain/admin2/admin2.service";
 import type { SseHub } from "#/infra/realtime/sse-hub";
 import { asCourierId, asUserId, type CourierId } from "#/domain/shared/brand";
+import { requireOrder } from '#/domain/order/order-lookup'
 
-const DISPLAY_RE = /^ord-[a-z0-9]{8}$/;
 
 export interface LiveOrderView {
 	id: string;
@@ -416,15 +416,8 @@ export class LiveService {
 	}
 
 	private async mustGet(displayId: string): Promise<OrderRow> {
-		if (!DISPLAY_RE.test(displayId)) throw Err.notFound("سفارش پیدا نشد.");
-		const row = (
-			await this.deps.db
-				.select()
-				.from(orders)
-				.where(eq(orders.displayId, displayId))
-		)[0];
-		if (!row) throw Err.notFound("سفارش پیدا نشد.");
-		return row;
+		// رارد ۴۸ — همان order-lookup مشترک (قبلاً کپی محلی همین منطق بود)
+		return requireOrder(this.deps.db, displayId);
 	}
 
 	/**

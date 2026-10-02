@@ -14,10 +14,10 @@ import { parseCookies, serializeCookie } from '#/domain/shared/cookies'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
 import { clientIp } from '#/domain/shared/net'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
 const RT_COOKIE = 'sinshin_rt'
 const HASH_PATTERN = '^[a-f0-9]{64}$'
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 export interface AuthRoutesDeps {
   config: AppConfig

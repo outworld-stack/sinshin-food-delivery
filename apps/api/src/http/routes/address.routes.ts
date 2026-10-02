@@ -5,8 +5,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { AddressService } from '#/domain/address/address.service'
 import { Err } from '#/domain/shared/errors'
 import { requireAuth } from '#/http/hooks/require-auth'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 export interface AddressRoutesDeps {
   sessions: SessionService

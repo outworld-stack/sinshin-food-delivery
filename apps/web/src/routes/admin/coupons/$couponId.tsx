@@ -5,7 +5,7 @@
 // stage-10: دکمه‌ی وضعیت حالا تغییر وضعیت می‌دهد — فعال‌سازی مجدد بعد از غیرفعال‌سازی.
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { deleteCoupon, updateCoupon, setCouponActive } from '#/server/coupons'
+import { updateCoupon } from '#/server/coupons'
 import { adminCouponDetailsOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { CouponForm, type CouponFormPayload } from '#/components/admin/coupons/CouponForm'
@@ -25,6 +25,7 @@ import {
 } from '#/utils/couponDisplay'
 import { ChevronRight, Trash2, ArrowRotate } from 'reicon-react'
 import { useState } from 'react'
+import { useCouponDelete, useCouponActivate } from '#/hooks/admin/useCouponMutations'
 
 export const Route = createFileRoute('/admin/coupons/$couponId')({
   ssr: false,
@@ -60,26 +61,14 @@ function CouponDetailPage() {
     },
   })
 
-  const deleteMut = useMutation({
-    mutationFn: () => deleteCoupon(couponId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.adminCoupons })
-      // حذف در این پروژه = غیرفعال‌سازی (سفارش‌های در جریان سالم می‌مانند)
-      showToast('کوپن غیرفعال شد')
-      navigate({ to: '/admin/coupons' })
-    },
+  // رارد ۴۸ — جهش‌ها از هوک مشترک؛ حذف = غیرفعال‌سازی (سفارش‌های در جریان سالم می‌مانند)
+  const deleteMut = useCouponDelete({
+    couponId,
+    onDeleted: () => navigate({ to: '/admin/coupons' }),
   })
 
   // stage-10: فعال‌سازی مجدد — در جای خود می‌ماند (بدون ناوبری)
-  const activateMut = useMutation({
-    mutationFn: () => setCouponActive(couponId, true),
-    onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: qk.adminCoupons })
-      queryClient.invalidateQueries({ queryKey: qk.adminCouponDetails(couponId) })
-      showToast(res.message || 'کوپن فعال شد')
-    },
-    onError: (err) => showToast(err.message || 'فعال‌سازی ناموفق بود', 'error'),
-  })
+  const activateMut = useCouponActivate({ couponId })
 
   if (!isMainAdmin) {
     return <PermissionGate hasAccess={false} pageName="جزئیات کوپن" />

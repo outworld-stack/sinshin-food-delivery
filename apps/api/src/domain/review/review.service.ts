@@ -5,8 +5,8 @@ import type { Db } from '#/infra/db/client'
 import { orderItems, orders, products, reviews, users } from '#/infra/db/schema'
 import { asProductId, asReviewId, asUserId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
+import { requireOwnedOrder } from '#/domain/order/order-lookup'
 
-const DISPLAY_RE = /^ord-[a-z0-9]{8}$/
 
 /** ماسک شماره در API عمومی — شماره کامل فقط برای ادمین */
 const maskPhone = (p: string): string =>
@@ -21,9 +21,7 @@ export class ReviewService {
 
   /** ثبت نظر مشتری — به‌ازای محصول انتخابی */
   async submit(userId: string, displayId: string, productId: string, feedback: string): Promise<{ success: boolean; message?: string }> {
-    if (!DISPLAY_RE.test(displayId)) throw Err.notFound('سفارش پیدا نشد.')
-    const order = (await this.deps.db.select().from(orders).where(eq(orders.displayId, displayId)))[0]
-    if (!order || order.userId !== userId) throw Err.notFound('سفارش پیدا نشد.')
+    const order = await requireOwnedOrder(this.deps.db, userId, displayId)
     if (order.status !== 'DELIVERED') {
       return { success: false, message: 'نظر فقط بعد از تحویل سفارش قابل ثبت است' }
     }
@@ -52,9 +50,7 @@ export class ReviewService {
 
   /** محصولاتی از این سفارش که نظر ثبت شده — جلوگیری از تکرار در UI */
   async reviewedProducts(userId: string, displayId: string): Promise<{ productIds: string[] }> {
-    if (!DISPLAY_RE.test(displayId)) throw Err.notFound('سفارش پیدا نشد.')
-    const order = (await this.deps.db.select().from(orders).where(eq(orders.displayId, displayId)))[0]
-    if (!order || order.userId !== userId) throw Err.notFound('سفارش پیدا نشد.')
+    const order = await requireOwnedOrder(this.deps.db, userId, displayId)
     const rows = await this.deps.db
       .select({ productId: reviews.productId })
       .from(reviews)

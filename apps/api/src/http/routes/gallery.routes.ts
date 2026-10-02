@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 17 از 49
+// round-48 — sinshin-food-delivery — فایل 44 از 97
 // مسیر مقصد: apps/api/src/http/routes/gallery.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 import { Elysia, t } from 'elysia'
@@ -10,8 +10,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { GalleryService } from '#/domain/gallery/gallery.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { langFromHeaders } from '#/domain/shared/lang'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 export interface GalleryRoutesDeps {
   sessions: SessionService

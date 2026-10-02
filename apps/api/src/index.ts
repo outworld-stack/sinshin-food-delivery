@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 18 از 31
+// round-48 — sinshin-food-delivery — فایل 53 از 97
 // مسیر مقصد: apps/api/src/index.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 //src/index.ts
@@ -124,11 +124,11 @@ const reports = new ReportService({ db, config, sms, links, reconcile })
 const audit = new AuditService({ db })
 const reportQueries = new ReportQueryService({ db, audit })
 const auth = new AuthService({ db, config, otp, sessions, devices, admin2 })
-const articles = new ArticleService({ db })
+const articles = new ArticleService({ db, redis })
 const gallery = new GalleryService({ db })
 const geo = new GeoService({ db, config, settings })
 // round-35 — صف ترجمه‌ی خودکار (مترجم آفلاین؛ برای باطل‌کردن کش منو به menu وصل است)
-const translation = new TranslationService({ db, config, menu })
+const translation = new TranslationService({ db, config, menu, articles })
 
 // ── زمان‌بند — فقط یک‌بار ثبت می‌شود ──
 const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis, monitor.jobRuns))

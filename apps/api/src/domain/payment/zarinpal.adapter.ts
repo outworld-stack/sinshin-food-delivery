@@ -1,6 +1,7 @@
 //src/domain/payment/zarinpal.adapter.ts
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { postGatewayJson } from './http-util'
 import type {
   GatewayInitInput,
   GatewayInitResult,
@@ -38,23 +39,17 @@ export class ZarinpalAdapter implements PaymentGateway {
   }
 
   async init(input: GatewayInitInput): Promise<GatewayInitResult> {
-    const res = await Bun.fetch(this.requestUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const json = await postGatewayJson<{ data?: { authority?: string } }>(
+      this.requestUrl,
+      {
         merchant_id: this.merchantId,
         amount: input.amount * 10, // تومان → ریال
         callback_url: input.callbackUrl,
         description: input.description,
         metadata: input.mobile ? { mobile: input.mobile } : undefined,
-      }),
-      // رارد ۴۵ — مهلت از کانفیگ (PAYMENT_TIMEOUT_MS)؛ قبلاً ۱۵ ثانیه‌ی ثابت
-      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
-    })
-    // round-16 — پاسخ غیر-JSON درگاه (صفحهٔ خطای HTML ساپارک) نباید ۵۰۰/کرش بدهد
-    const json = (await res.json().catch(() => null)) as {
-      data?: { authority?: string }
-    } | null
+      },
+      this.config.gateway.timeoutMs,
+    )
     const authority = json?.data?.authority
     if (!authority) throw Err.conflict('ایجاد پرداخت زرین‌پال ناموفق بود.')
     return { paymentUrl: `${this.startPay}/${authority}`, gatewayRef: authority }
@@ -63,17 +58,15 @@ export class ZarinpalAdapter implements PaymentGateway {
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
     // phase-fix: مرجع ذخیره‌شده در DB مقدم است؛ کوئری فقط پشتیبان است.
     const authority = input.gatewayRef ?? input.query.authority ?? ''
-    const res = await Bun.fetch(this.verifyUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const json = await postGatewayJson<{ data?: { code?: number } }>(
+      this.verifyUrl,
+      {
         merchant_id: this.merchantId,
         amount: input.amount * 10,
         authority,
-      }),
-      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
-    })
-    const json = (await res.json().catch(() => null)) as { data?: { code?: number } } | null
+      },
+      this.config.gateway.timeoutMs,
+    )
     const code = json?.data?.code
     // 100 = موفق ، 101 = قبلاً تایید شده (تکرارناپذر)
     if (code === 100 || code === 101) {

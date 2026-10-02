@@ -1,5 +1,6 @@
 // src/components/AdminChart.tsx
 import type { AdminChartProps } from '#/types/shared/ui';
+import { faNum } from '#/utils/format'
 
 export function AdminChart({ chartType, data }: AdminChartProps) {
   const maxVal = Math.max(...data.map(d => d.value), 1);
@@ -18,7 +19,7 @@ export function AdminChart({ chartType, data }: AdminChartProps) {
           {data.map((item, index) => (
             <div key={index} className="flex-1 h-full flex flex-col items-center justify-end relative group cursor-pointer px-1">
               <div className={`absolute bottom-full mb-2 ${getTooltipClass(index, data.length)} opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-50 whitespace-nowrap pointer-events-none`}>
-                <div className="bg-gray-800 dark:bg-black text-white text-xs font-DanaMedium px-2 py-1 rounded-md shadow-lg">{item.value.toLocaleString('fa-IR')}</div>
+                <div className="bg-gray-800 dark:bg-black text-white text-xs font-DanaMedium px-2 py-1 rounded-md shadow-lg">{faNum(item.value)}</div>
               </div>
               <div className="w-full bg-primary dark:bg-dark-primary rounded-t-sm transition-all duration-500 group-hover:opacity-80 relative overflow-hidden" style={{ height: `${(item.value / maxVal) * 100}%`, minHeight: '2px' }}></div>
             </div>
@@ -56,14 +57,14 @@ export function AdminChart({ chartType, data }: AdminChartProps) {
         <div className="relative w-48 h-48 rounded-full shadow-lg shrink-0" style={{ background: `conic-gradient(${gradient})` }}>
           <div className="absolute inset-6 bg-white dark:bg-[#2a1015] rounded-full flex items-center justify-center flex-col shadow-inner">
             <span className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium">مجموع</span>
-            <span className="font-MorabbaBold text-lg text-gray-800 dark:text-white mt-1">{sum.toLocaleString('fa-IR')}</span>
+            <span className="font-MorabbaBold text-lg text-gray-800 dark:text-white mt-1">{faNum(sum)}</span>
           </div>
         </div>
         <div className="max-h-40 overflow-y-auto w-full md:w-auto pr-2 grid grid-cols-2 md:grid-cols-1 gap-2">
           {chartData.map((d, i) => (
             <div key={i} className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: getColor(i) }}></span>
-              <span className="text-xs font-DanaMedium text-gray-600 dark:text-gray-300 truncate">{d.label}: <span className="font-DanaDemiBold text-gray-800 dark:text-white">{d.value.toLocaleString('fa-IR')}</span></span>
+              <span className="text-xs font-DanaMedium text-gray-600 dark:text-gray-300 truncate">{d.label}: <span className="font-DanaDemiBold text-gray-800 dark:text-white">{faNum(d.value)}</span></span>
             </div>
           ))}
         </div>
@@ -105,7 +106,7 @@ export function AdminChart({ chartType, data }: AdminChartProps) {
             <div key={i} className="absolute group" style={{ left: `${p.x}%`, top: `${p.y}%`, transform: 'translate(-50%, -50%)' }}>
               <div className="w-2 h-2 rounded-full bg-primary dark:bg-dark-primary border border-white dark:border-[#2a1015] shadow-sm"></div>
               <div className={`absolute bottom-full mb-1 ${getTooltipClass(i, points.length)} opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-50 whitespace-nowrap pointer-events-none`}>
-                <div className="bg-gray-800 dark:bg-black text-white text-xs font-DanaMedium px-2 py-1 rounded-md shadow-lg">{p.value.toLocaleString('fa-IR')}</div>
+                <div className="bg-gray-800 dark:bg-black text-white text-xs font-DanaMedium px-2 py-1 rounded-md shadow-lg">{faNum(p.value)}</div>
               </div>
             </div>
           ))}

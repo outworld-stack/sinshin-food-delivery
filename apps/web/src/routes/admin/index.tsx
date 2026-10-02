@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-36 — sinshin-food-delivery — فایل 2 از 14
+// round-48 — sinshin-food-delivery — فایل 77 از 97
 // مسیر مقصد: apps/web/src/routes/admin/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty two
+// کامیت پیشنهادی: stage forty-three
 // ⚠ این فایل «داشبورد ادمین» است — نه صفحه‌ی اصلی سایت (فایل ۰۱)!
 // ═══════════════════════════════════════════════════════════════
 
@@ -19,7 +19,7 @@ import { TranslationQueueBox } from '#/components/admin/TranslationQueueBox'
 import { AdminDashboardSkeleton } from '#/components/LoadingSkeletons'
 import { ChartPanel } from '#/components/shared/ChartPanel'
 import { RouteError } from '#/components/shared/RouteFallbacks'
-import { formatDate, formatPrice } from '#/utils/format'
+import { faNum, formatDate, formatPrice } from '#/utils/format'
 import { adminStatsOptions } from '#/utils/queryOptions'
 
 export const Route = createFileRoute('/admin/')({
@@ -54,13 +54,13 @@ function AdminDashboard() {
 	const statCards = [
 		{
 			title: 'کاربران کل',
-			value: stats.totalUsers.toLocaleString('fa-IR'),
+			value: faNum(stats.totalUsers),
 			icon: <Users size={24} />,
 			color: 'bg-blue-100 dark:bg-blue-500/10 text-blue-500',
 		},
 		{
 			title: 'کاربران فعال',
-			value: stats.activeUsers.toLocaleString('fa-IR'),
+			value: faNum(stats.activeUsers),
 			icon: <CheckCircle size={24} />,
 			color: 'bg-green-100 dark:bg-green-500/10 text-green-500',
 		},
@@ -73,7 +73,7 @@ function AdminDashboard() {
 		},
 		{
 			title: 'سفارشات کل',
-			value: stats.totalOrders.toLocaleString('fa-IR'),
+			value: faNum(stats.totalOrders),
 			icon: <ShoppingBag size={24} />,
 			color: 'bg-yellow-100 dark:bg-yellow-500/10 text-yellow-500',
 		},

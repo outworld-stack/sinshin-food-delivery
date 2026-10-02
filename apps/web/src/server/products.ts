@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 44 از 49
+// round-48 — sinshin-food-delivery — فایل 86 از 97
 // مسیر مقصد: apps/web/src/server/products.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/server/products.ts — منوی عمومی + سبد + پنل ادمین — همه از API واقعی
@@ -12,7 +12,6 @@ import { getJson, postJson, authJson } from '#/lib/api-fetch'
 import type { ProductFormData } from '#/types/forms'
 import type {
   ProductId,
-  SizeId,
   MainCategory,
   Category,
   Product,
@@ -65,29 +64,6 @@ export async function getCartDetails(
   return postJson<CartDetails>('/menu/cart/details', {
     items: input.data.items,
   })
-}
-
-// ─── قیمت مؤثر — نمایشی کلاینت (سرور مرجع نهایی در چک‌اوت) ───
-
-export function getEffectivePrice(
-  product: Product,
-  sizeId?: SizeId | null,
-): number {
-  if (product.sizesEnabled && product.sizes.length > 0) {
-    const size = sizeId
-      ? product.sizes.find((s) => s.id === sizeId)
-      : product.sizes[0]
-    return size?.price ?? product.finalPrice
-  }
-  return product.finalPrice
-}
-
-export function getSizeName(
-  product: Product,
-  sizeId?: SizeId | null,
-): string | null {
-  if (!product.sizesEnabled || !sizeId) return null
-  return product.sizes.find((s) => s.id === sizeId)?.name ?? null
 }
 
 // ══════════════════════════════════════════════════════════════

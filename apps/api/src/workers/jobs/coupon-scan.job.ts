@@ -59,23 +59,28 @@ export class CouponScanJob implements DailyJob {
 
       const candidates = await this.deps.coupons.findNudgeCandidates(coupon.id)
 
-      for (const c of candidates) {
-        // شرطِ ناقص برای گزارش — ایندکس امن (kاملپ)
+      // رارد ۴۸ (اسکن C8) — درج دسته‌ای (۵۰۰تایی) به‌جای یک INSERT به‌ازای
+      // هر کاندید؛ سقف کاندیدها ۵۰۰۰ است و شبانه تا هزاران رفت‌وبرگشت می‌شد.
+      // یکتایی (userId,couponId,scanDate) با onConflictDoNothing همان قبل حفظ می‌شود.
+      const values = candidates.map((c) => {
+        // شرطِ ناقص برای گزارش — ایندکس ایمن (کران‌گذاری شده تا از محدوده بیرون نزند)
         const idx = Math.max(0, Math.min(c.missingCount - 1, conditions.length - 1))
         const missingCondition = conditions[idx]
-
+        return {
+          userId: c.userId,
+          couponId: coupon.id,
+          missingConditionId: asConditionId(missingCondition?.id ?? conditions[0]!.id),
+          missingCount: c.missingCount,
+          scanDate,
+        }
+      })
+      for (let i = 0; i < values.length; i += 500) {
         await db
           .insert(couponNudges)
-          .values({
-            userId: c.userId,
-            couponId: coupon.id,
-            missingConditionId: asConditionId(missingCondition?.id ?? conditions[0]!.id),
-            missingCount: c.missingCount,
-            scanDate,
-          })
+          .values(values.slice(i, i + 500))
           .onConflictDoNothing()
-        totalNudges++
       }
+      totalNudges += values.length
 
       console.log(
         `[cron:coupon-scan] coupon "${coupon.title ?? coupon.code}": ${candidates.length} nudge candidate(s)`,

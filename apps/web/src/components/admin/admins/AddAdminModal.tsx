@@ -5,6 +5,7 @@ import { addSubAdmin } from '#/server/admin'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { Plus } from 'reicon-react'
+import { sanitizePhone, isValidIranPhone } from '#/utils/phone'
 
 interface AddAdminModalProps {
   onClose: () => void
@@ -53,14 +54,14 @@ export const AddAdminModal = memo(function AddAdminModal({ onClose }: AddAdminMo
   })
 
   const handlePhoneChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    set({ phone: e.target.value.replace(/[^0-9]/g, '') })
+    set({ phone: sanitizePhone(e.target.value) })
   }, [set])
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     if (!form.firstName.trim()) { set({ error: 'نام الزامی است' }); return }
     if (!form.lastName.trim()) { set({ error: 'نام خانوادگی الزامی است' }); return }
-    if (!/^09[0-9]{9}$/.test(form.phone)) { set({ error: 'فرمت شماره صحیح نیست (09xxxxxxxxx)' }); return }
+    if (!isValidIranPhone(form.phone)) { set({ error: 'فرمت شماره صحیح نیست (09xxxxxxxxx)' }); return }
     set({ error: '' })
     mutation.mutate({ phone: form.phone, firstName: form.firstName.trim(), lastName: form.lastName.trim(), scope: form.scope })
   }, [form, set, mutation])

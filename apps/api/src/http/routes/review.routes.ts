@@ -6,9 +6,9 @@ import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { ReviewService } from '#/domain/review/review.service'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
+import { UUID_PATTERN } from '#/domain/shared/ids'
+import { DISPLAY_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
 
 export interface ReviewRoutesDeps {
   sessions: SessionService

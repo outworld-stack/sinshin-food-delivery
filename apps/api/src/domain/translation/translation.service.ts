@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-36 — sinshin-food-delivery — فایل 6 از 14
+// round-48 — sinshin-food-delivery — فایل 30 از 97
 // مسیر مقصد: apps/api/src/domain/translation/translation.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty two
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/domain/translation/translation.service.ts
@@ -32,6 +32,7 @@ import { and, count, desc, eq, isNotNull, isNull, max, or, sql, type AnyColumn, 
 import type { Db } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import type { MenuService } from '#/domain/menu/menu.service'
+import type { ArticleService } from '#/domain/article/article.service'
 import {
   asCategoryId,
   asGalleryImageId,
@@ -113,7 +114,7 @@ export class TranslationService {
   private healthModel = ''
 
   constructor(
-    private readonly deps: { db: Db; config: AppConfig; menu: MenuService },
+    private readonly deps: { db: Db; config: AppConfig; menu: MenuService; articles: ArticleService },
   ) {
     this.client = new TranslateClient({ config: deps.config })
   }
@@ -341,9 +342,12 @@ export class TranslationService {
     if (out.nameAr !== undefined) patch.nameAr = out.nameAr
     if (out.descriptionAr !== undefined) patch.descriptionAr = out.descriptionAr
     if (out.ingredientsAr !== undefined) patch.ingredientsAr = out.ingredientsAr
-    for (const s of sizeWrites) {
-      await db.update(productSizes).set({ nameAr: s.nameAr }).where(eq(productSizes.id, asSizeId(s.id)))
-    }
+    // رارد ۴۸ (اسکن C9) — نوشتنِ سایزهای مستقل موازی شد (قبلاً پشت‌سرهم)
+    await Promise.all(
+      sizeWrites.map((s) =>
+        db.update(productSizes).set({ nameAr: s.nameAr }).where(eq(productSizes.id, asSizeId(s.id))),
+      ),
+    )
     const wroteAny =
       Object.keys(patch).length > 0 || sizeWrites.length > 0
     if (wroteAny) {
@@ -468,6 +472,7 @@ export class TranslationService {
     if (Object.keys(patch).length > 0) {
       if (!skippedManual) patch.arAuto = true
       await db.update(articles).set(patch).where(eq(articles.id, entityId))
+      await this.deps.articles.bustCache()
       return null
     }
     return skippedManual ? 'همه‌ی فیلدها دستی بودند — چیزی بازنویسی نشد' : 'فیلد قابل‌ترجمه‌ای نبود'
@@ -483,6 +488,7 @@ export class TranslationService {
     const nameAr = clamp(t ?? '', 60)
     if (nameAr.trim() === '') return 'ترجمه خالی برگشت'
     await db.update(articleCategories).set({ nameAr }).where(eq(articleCategories.id, entityId))
+    await this.deps.articles.bustCache()
     return null
   }
 
@@ -498,6 +504,7 @@ export class TranslationService {
     const nameAr = clamp(t ?? '', 60)
     if (nameAr.trim() === '') return 'ترجمه خالی برگشت'
     await db.update(articleSubCategories).set({ nameAr }).where(eq(articleSubCategories.id, entityId))
+    await this.deps.articles.bustCache()
     return null
   }
 
@@ -685,15 +692,22 @@ export class TranslationService {
         queue[r.status] = r.n
       }
     }
+    // رارد ۴۸ (اسکن C6) — شمارنده‌های مستقل موازی شدند؛ این مسیر با پول ۵
+    // ثانیه‌ای پنل ترجمه گرم می‌شود و قبلاً ~۹ رفت‌وبرگشت متوالی DB داشت.
+    const [missingEntries, lastRow, health] = await Promise.all([
+      Promise.all(
+        TRANSLATION_ENTITY_TYPES.map(async (t) => [t, await this.missingCount(t)] as const),
+      ),
+      this.deps.db
+        .select({ last: max(translationJobs.finishedAt) })
+        .from(translationJobs)
+        .then((rows) => rows[0]),
+      this.cachedHealth(),
+    ])
     const missing: Partial<Record<TranslationEntityType, number>> = {}
-    for (const t of TRANSLATION_ENTITY_TYPES) {
-      const n = await this.missingCount(t)
+    for (const [t, n] of missingEntries) {
       if (n > 0) missing[t] = n
     }
-    const [lastRow] = await this.deps.db
-      .select({ last: max(translationJobs.finishedAt) })
-      .from(translationJobs)
-    const health = await this.cachedHealth()
     return {
       queue,
       missing,

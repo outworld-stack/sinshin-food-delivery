@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 16 از 49
+// round-48 — sinshin-food-delivery — فایل 40 از 97
 // مسیر مقصد: apps/api/src/http/routes/articles.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/http/routes/articles.routes.ts
@@ -12,8 +12,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { ArticleService } from '#/domain/article/article.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { langFromHeaders } from '#/domain/shared/lang'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 const processSchema = t.Object({
   title: t.String({ minLength: 1, maxLength: 120 }),

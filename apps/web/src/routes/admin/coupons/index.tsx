@@ -6,14 +6,12 @@
 //     «undefined نفر»، مخاطب/وضعیت غلط می‌ساخت.
 //  ۳) کل کارت کلیک‌پذیر است و به صفحه‌ی کوپن می‌رود.
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { deleteCoupon, setCouponActive } from '#/server/coupons'
+import { useQuery } from '@tanstack/react-query'
+import { useCouponDelete, useCouponActivate } from '#/hooks/admin/useCouponMutations'
 import { AdminCouponsPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { ConfirmModal } from '#/components/ConfirmModal'
-import { useToastStore } from '#/stores/toastStore'
 import { adminCouponsOptions } from '#/utils/queryOptions'
-import { qk } from '#/utils/queryKeys'
 import {
   couponStatus,
   couponStatusLabel,
@@ -200,48 +198,23 @@ const CouponCard = memo(function CouponCard({
 // --- صفحه — assemble ---
 const AdminCouponsPage = memo(function AdminCouponsPage() {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const showToast = useToastStore((s) => s.showToast)
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [couponToDelete, setCouponToDelete] = useState<string | null>(null)
 
   const { data: coupons, isLoading } = useQuery(adminCouponsOptions)
 
-  // حذف اپتیمیستیک با rollback — همان الگوی قبل از phase-9
-  const deleteMut = useMutation({
-    mutationFn: (id: string) => deleteCoupon(id),
-    onMutate: async (id) => {
-      await queryClient.cancelQueries({ queryKey: qk.adminCoupons })
-      const previous = queryClient.getQueryData<CouponWithConditionsDto[]>(qk.adminCoupons)
-      queryClient.setQueryData<CouponWithConditionsDto[]>(qk.adminCoupons, (old) =>
-        old ? old.filter((c) => c.coupon.id !== id) : old)
-      return { previous }
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(qk.adminCoupons, ctx.previous)
-    },
-    onSuccess: () => {
-      showToast('کوپن غیرفعال شد')
+  // رارد ۴۸ — جهش‌ها از هوک مشترک؛ حذف اپتیمیستیک همان الگوی قبل از phase-9
+  const deleteMut = useCouponDelete({
+    optimisticDelete: true,
+    onDeleted: () => {
       setIsDeleteModalOpen(false)
       setCouponToDelete(null)
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: qk.adminCoupons })
     },
   })
 
   // stage-10: فعال‌سازی مجدد — مستقیم (بدون مودال)؛ خطا (مثل انقضای گذشته) پیام شناور می‌شود
-  const activateMut = useMutation({
-    mutationFn: (id: string) => setCouponActive(id, true),
-    onSuccess: (res) => {
-      showToast(res.message || 'کوپن فعال شد')
-    },
-    onError: (err) => showToast(err.message || 'فعال‌سازی ناموفق بود', 'error'),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: qk.adminCoupons })
-    },
-  })
+  const activateMut = useCouponActivate()
 
   const handleOpenNew = useCallback(() => {
     navigate({ to: '/admin/coupons/new' })

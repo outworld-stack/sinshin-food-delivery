@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-43 — sinshin-food-delivery — فایل 4 از 14
+// round-48 — sinshin-food-delivery — فایل 47 از 97
 // مسیر مقصد: apps/api/src/http/routes/order.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-eight
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 //src/http/routes/order.routes.ts
@@ -20,10 +20,9 @@ import { requireAuth } from '#/http/hooks/require-auth'
 import { Err } from '#/domain/shared/errors'
 import { langFromHeaders } from '#/domain/shared/lang'
 import type { CheckoutResponse } from '@sinshin/shared'
+import { UUID_PATTERN, DISPLAY_PATTERN, isDisplayId } from '#/domain/shared/ids'
+import { cartItemSchema, deliveryTypeSchema } from '#/http/schemas'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
-const DISPLAY_PATTERN_SAFE = (v: string) => /^ord-[a-z0-9]{8}$/.test(v)
 
 export interface OrderRoutesDeps {
   sessions: SessionService
@@ -209,15 +208,8 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       },
       {
         body: t.Object({
-          items: t.Array(
-            t.Object({
-              productId: t.String({ pattern: UUID_PATTERN }),
-              sizeId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
-              quantity: t.Integer({ minimum: 1, maximum: 99 }),
-            }),
-            { minItems: 1, maxItems: 100 },
-          ),
-          deliveryType: t.Union([t.Literal('DELIVERY'), t.Literal('PICKUP'), t.Literal('DINE_IN')]),
+          items: t.Array(cartItemSchema, { minItems: 1, maxItems: 100 }),
+          deliveryType: deliveryTypeSchema,
           useWallet: t.Boolean(),
           addressId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
           customerNote: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
@@ -242,15 +234,8 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       },
       {
         body: t.Object({
-          items: t.Array(
-            t.Object({
-              productId: t.String({ pattern: UUID_PATTERN }),
-              sizeId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
-              quantity: t.Integer({ minimum: 1, maximum: 99 }),
-            }),
-            { minItems: 1, maxItems: 100 },
-          ),
-          deliveryType: t.Union([t.Literal('DELIVERY'), t.Literal('PICKUP'), t.Literal('DINE_IN')]),
+          items: t.Array(cartItemSchema, { minItems: 1, maxItems: 100 }),
+          deliveryType: deliveryTypeSchema,
           useWallet: t.Boolean(),
           addressId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
           couponCode: t.Optional(t.Nullable(t.String({ maxLength: 32 }))),
@@ -302,7 +287,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
     .get(
       '/:displayId/invoice',
       ({ user, params, query }) => {
-        if (!DISPLAY_PATTERN_SAFE(params.displayId)) throw Err.notFound('سفارش پیدا نشد.')
+        if (!isDisplayId(params.displayId)) throw Err.notFound('سفارش پیدا نشد.')
         return deps.orders.byDisplayId(user.id, params.displayId).then((order) => {
           if (query.type === 'kitchen') {
             return {

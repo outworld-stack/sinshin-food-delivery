@@ -34,7 +34,7 @@ import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
 import { type PrintPaper, printHtmlDocument } from '#/lib/printDocument'
 import { type AdminReportType, queryAdminReport } from '#/server/reports'
 import { useToastStore } from '#/stores/toastStore'
-import { formatDate } from '#/utils/format'
+import { faNum, formatDate } from '#/utils/format'
 import {
 	formatJalali,
 	gregorianToJalali,
@@ -653,8 +653,8 @@ export const ReportsBox = memo(function ReportsBox() {
 								{report.title}
 							</h3>
 							<p className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-DanaMedium">
-								{report.subtitle} · {totalRows.toLocaleString('fa-IR')} ردیف در{' '}
-								{report.tables.length.toLocaleString('fa-IR')} جدول
+								{report.subtitle} · {faNum(totalRows)} ردیف در{' '}
+								{faNum(report.tables.length)} جدول
 							</p>
 						</div>
 						<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">

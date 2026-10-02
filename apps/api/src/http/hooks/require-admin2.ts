@@ -5,14 +5,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service, Admin2Permissions } from '#/domain/admin2/admin2.service'
 import { Err } from '#/domain/shared/errors'
 
-/** استخراج + احراز مشترک */
-async function authenticate(sessions: SessionService, request: Request) {
-  const header = request.headers.get('authorization') ?? ''
-  let token = header.startsWith('Bearer ') ? header.slice(7).trim() : null
-  if (!token) token = new URL(request.url).searchParams.get('token')
-  if (!token) throw Err.unauthorized()
-  return sessions.authenticate(token)
-}
+// رارد ۴۸ (اسکن A15) — استخراج توکن از require-auth مشترک (کپی موازی حذف شد)
+import { authenticateRequest as authenticate } from './require-auth'
 
 /**
  * phase-1 — پروفایل + isActive + مجوزها در یک مسیر.

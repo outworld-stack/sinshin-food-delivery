@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 15 از 31
+// round-48 — sinshin-food-delivery — فایل 54 از 97
 // مسیر مقصد: apps/api/src/infra/config/env.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/infra/config/env.ts
@@ -95,8 +95,6 @@ export class AppConfig {
   readonly isProd: boolean
   readonly port: number
   readonly host: string
-  readonly logLevel: string
-
   readonly databaseUrl: string
   readonly redisUrl: string
   /** رارد ۴۵ — سقف اتصال‌های هم‌زمان هر نمونه‌ی API به پستگرس */
@@ -170,8 +168,6 @@ export class AppConfig {
 
     this.port = num('PORT', 3000)
     this.host = str('HOST', '0.0.0.0')
-    this.logLevel = str('LOG_LEVEL', this.isProd ? 'info' : 'debug')
-
     this.databaseUrl = str(
       'DATABASE_URL',
       'postgres://sinshin:sinshin_local@localhost:5432/sinshin',

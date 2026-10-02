@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { requestCourierOtp, verifyCourierOtp } from '#/server/courier'
 import { useToastStore } from '#/stores/toastStore'
 import { setCourierToken } from '#/utils/courierSession'
+import { sanitizePhone } from '#/utils/phone'
 
 export const Route = createFileRoute('/courier/login')({
   component: CourierLoginPage,
@@ -54,7 +55,7 @@ function CourierLoginPage() {
               type="tel"
               dir="ltr"
               value={phone}
-              onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+              onChange={e => setPhone(sanitizePhone(e.target.value))}
               placeholder="09xxxxxxxxx"
               className="w-full text-center p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border-2 outline-none"
             />
@@ -69,7 +70,7 @@ function CourierLoginPage() {
               dir="ltr"
               maxLength={6}
               value={code}
-              onChange={e => setCode(e.target.value.replace(/[^0-9]/g, ''))}
+              onChange={e => setCode(sanitizePhone(e.target.value))}
               placeholder="کد ۶ رقمی"
               className="w-full text-center text-2xl p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border-2 outline-none"
             />

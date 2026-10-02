@@ -165,7 +165,6 @@ docker compose -f docker-compose.dev.yml up -d postgres redis
 | `MAX_DEVICES_PER_USER` | `5` | سقف دستگاه فعال هر کاربر |
 | `COUPON_SCAN_TIME` / `COUPON_NUDGE_TIME` | `02:00` / `11:00` | ساعت job های شبانه/یادآور (تهران) |
 | `API_UPSTREAMS` | `api:3000` | بالانسر Caddy — فقط برای ریپلا‌های api |
-| `LOG_LEVEL` | `info` | سطح لاگ API |
 | `ZARINPAL_SANDBOX` | `false` | سرویس تست رسمی زرین‌پال — در production بوت را می‌کُشد (جدول تست بالا) |
 | `PAYMENT_TIMEOUT_MS` | `15000` | مهلت هر فراخوانی HTTP به درگاه‌های پرداخت (میلی‌ثانیه) |
 | `SMS_TIMEOUT_MS` | `10000` | مهلت فراخوانی درگاه پیامک (میلی‌ثانیه) |

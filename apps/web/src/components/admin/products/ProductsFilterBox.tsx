@@ -1,5 +1,6 @@
 // src/components/admin/products/ProductsFilterBox.tsx
 import { memo, useCallback } from 'react'
+import { FILTER_INPUT_CLS as INPUT_CLS, FILTER_LABEL_CLS as LABEL_CLS } from '#/components/admin/filters'
 
 interface CategoryItem {
   id: string
@@ -15,9 +16,6 @@ interface ProductsFilterBoxProps {
   onStatus: (v: string) => void
   onCategory: (v: string) => void
 }
-
-const INPUT_CLS = 'w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none focus:border-primary'
-const LABEL_CLS = 'block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium'
 
 // فیلتر محصولات — دسکتاپ/تبلت (اینا instant اعمال می‌شن، موکاپ نیست)
 export const ProductsFilterBox = memo(function ProductsFilterBox({

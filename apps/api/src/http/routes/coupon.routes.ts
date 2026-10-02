@@ -5,8 +5,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { CouponService } from '#/domain/coupon/coupon.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 const CONDITION_TYPES = [
   'MIN_ORDERS_COUNT', 'MIN_TOTAL_SPEND', 'MIN_PRODUCT_ORDERS', 'MIN_CATEGORY_ORDERS',

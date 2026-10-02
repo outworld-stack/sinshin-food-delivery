@@ -5,6 +5,7 @@ import { addCourier } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
 import { Plus, X } from 'reicon-react'
+import { sanitizePhone, isValidIranPhone } from '#/utils/phone'
 
 interface AddCourierModalProps {
   onClose: () => void
@@ -39,13 +40,13 @@ export const AddCourierModal = memo(function AddCourierModal({ onClose }: AddCou
   })
 
   const handlePhoneChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    set({ phone: e.target.value.replace(/[^0-9]/g, '') })
+    set({ phone: sanitizePhone(e.target.value) })
   }, [set])
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name.trim()) { set({ error: 'نام الزامی است' }); return }
-    if (!/^09[0-9]{9}$/.test(form.phone)) { set({ error: 'شماره معتبر نیست (09xxxxxxxxx)' }); return }
+    if (!isValidIranPhone(form.phone)) { set({ error: 'شماره معتبر نیست (09xxxxxxxxx)' }); return }
     set({ error: '' })
     mutation.mutate({ name: form.name.trim(), phone: form.phone })
   }, [form, set, mutation])

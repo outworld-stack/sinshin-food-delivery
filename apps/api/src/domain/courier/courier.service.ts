@@ -8,21 +8,30 @@ import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
 import type { RedisService } from '#/infra/redis/redis'
 import type { SmsService } from '#/infra/sms/sms.service'
-import { randomOtpCode, sha256, safeEqual } from '#/domain/shared/crypto'
+import { sendOtp, verifyOtp, type OtpKeys } from '#/domain/shared/otp-core'
 import { asCourierId } from '#/domain/shared/brand'
+import { requireOrder } from '#/domain/order/order-lookup'
 
-const DISPLAY_RE = /^ord-[a-z0-9]{8}$/
 const COURIER_TOKEN_TTL_SECONDS = 3600 // ۱ ساعت
 const LOCATION_THROTTLE_MS = 3000 // حداکثر یک آپدیت در ۳ ثانیه
+// سیاست‌های OTP پیک — همان اعداد قبلی، حالا نام‌دار و کنار هم
+const COURIER_OTP_TTL_SECONDS = 120
+const COURIER_OTP_COOLDOWN_SECONDS = 60
+const COURIER_OTP_MAX_PER_HOUR = 5
 const COURIER_OTP_MAX_ATTEMPTS = 5
 
-const K = {
+/** کلیدهای OTP پیک — بخش اول هم‌شکل قرارداد هسته‌ی مشترک (رارد ۴۸) */
+const otpKeys: OtpKeys = {
   code: (phone: string) => `courier:otp:${phone}`,
-  token: (token: string) => `courier:tok:${token}`,
-  throttle: (orderId: string) => `courier:loc:${orderId}`,
-  cd: (phone: string) => `courier:cd:${phone}`,
+  cooldown: (phone: string) => `courier:cd:${phone}`,
   attempts: (phone: string) => `courier:att:${phone}`,
   hour: (phone: string) => `courier:h:${phone}`,
+}
+
+const K = {
+  ...otpKeys,
+  token: (token: string) => `courier:tok:${token}`,
+  throttle: (orderId: string) => `courier:loc:${orderId}`,
 }
 
 /**
@@ -45,36 +54,25 @@ export class CourierService {
     })
     if (!courier) throw Err.notFound('پیکی با این شماره ثبت نشده است.')
 
-    const cooldown = 60
-    // phase-1: قبلاً «وجود کد» چک می‌شد (یعنی عملاً ۱۲۰ ثانیه) ولی پیام ۶۰ می‌داد
-    if (await this.deps.redis.exists(K.cd(phone))) {
-      throw Err.rateLimited(`کد قبلی هنوز معتبر است؛ ${cooldown} ثانیه دیگر.`, cooldown)
-    }
-    // phase-1: سقف ساعتی هر شماره — پیامک هزینه دارد
-    const hourCount = Number((await this.deps.redis.get(K.hour(phone))) ?? 0)
-    if (hourCount >= 5) {
-      throw Err.rateLimited('سقف درخواست کد پیک در این ساعت پر شده است.', 3600)
-    }
-
-    // round-28 — ۶ رقم + منطق اتمیک، هم‌راستا با OtpService اصلی
-    const code = randomOtpCode(6)
-    await this.deps.redis.set(K.code(phone), sha256(`${code}:${phone}`), { ex: 120 })
-    await this.deps.redis.set(K.cd(phone), '1', { ex: cooldown })
-    await this.deps.redis.incr(K.hour(phone))
-    await this.deps.redis.expire(K.hour(phone), 3600)
-    await this.deps.redis.del(K.attempts(phone)) // ریست تلاش‌ها با کد جدید
-
-    // phase-1: پیامک واقعی — قبلاً فقط console.log بود؛ یعنی کدِ OTP در لاگِ محیط اصلی!
-    const sent = await this.deps.sms.send(phone, `کد ورود پیک سین‌شین: ${code}`)
-    if (!sent && this.deps.config.isProd) {
-      await this.deps.redis.del(K.code(phone))
-      await this.deps.redis.del(K.cd(phone))
-      throw Err.internal('ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.')
-    }
-
-    // phase-1 (باگ 🔴۱): در محیط اصلی هرگز — شرط provider===console حذف شد
-    const reveal = !this.deps.config.isProd
-    return { cooldownSeconds: cooldown, ...(reveal ? { devCode: code } : {}) }
+    // رارد ۴۸ — مکانیزم به هسته‌ی مشترک رفت؛ سقف‌ها همان اعداد قبلی‌اند.
+    // تفاوت‌های عمدی با نسخه‌ی قبل: گیتِ کول‌داون اتمیک است (قبلاً exists→set
+    // بود و دو درخواست هم‌زمان دو پیامک می‌گرفتند) و سقف ساعتی قبل از گیت
+    // چک می‌شود (هم‌ترتیب مسیر کاربر).
+    return sendOtp(this.deps, {
+      phone,
+      ttlSeconds: COURIER_OTP_TTL_SECONDS,
+      cooldownSeconds: COURIER_OTP_COOLDOWN_SECONDS,
+      maxPerHour: COURIER_OTP_MAX_PER_HOUR,
+      keys: otpKeys,
+      messages: {
+        hourCap: 'سقف درخواست کد پیک در این ساعت پر شده است.',
+        cooldown: (s) => `کد قبلی هنوز معتبر است؛ ${s} ثانیه دیگر.`,
+        storeFail: 'ذخیره‌ی کد ناموفق بود؛ کمی بعد تلاش کنید.',
+        smsFail: 'ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.',
+      },
+      smsText: (code) => `کد ورود پیک سین‌شین: ${code}`,
+      isProd: this.deps.config.isProd,
+    })
   }
 
   async verifyOtp(phone: string, code: string): Promise<{ token: string; courierId: string }> {
@@ -83,25 +81,24 @@ export class CourierService {
     })
     if (!courier) throw Err.notFound('پیکی با این شماره ثبت نشده است.')
 
-    const stored = await this.deps.redis.get(K.code(phone))
-    if (!stored) throw Err.validation('کدی برای این شماره صادر نشده یا منقضی شده است.')
-
-    // round-28 — شمارنده اتمیک (INCR اول، بعد سقف) — هم‌الگوی OtpService:
-    // N درخواست موازی دیگر همه attempts=0 نمی‌بینند
-    const attempts = await this.deps.redis.incr(K.attempts(phone))
-    if (attempts === 1) await this.deps.redis.expire(K.attempts(phone), 120)
-    if (attempts > COURIER_OTP_MAX_ATTEMPTS) {
-      await this.deps.redis.del(K.code(phone))
+    // رارد ۴۸ — مکانیزم تایید روی هسته‌ی مشترک؛ پیام‌ها همان قبلی‌اند
+    const result = await verifyOtp({ redis: this.deps.redis }, {
+      phone,
+      code,
+      maxAttempts: COURIER_OTP_MAX_ATTEMPTS,
+      ttlSeconds: COURIER_OTP_TTL_SECONDS,
+      keys: otpKeys,
+    })
+    if (!result.ok && result.reason === 'no-code') {
+      throw Err.validation('کدی برای این شماره صادر نشده یا منقضی شده است.')
+    }
+    if (!result.ok && result.reason === 'too-many') {
       throw Err.rateLimited('تلاش‌های ناموفق زیاد است؛ کد جدید بگیرید.', 60)
     }
-
-    if (!safeEqual(stored, sha256(`${code}:${phone}`))) {
-      // شمارش همین‌جا بالا رفته (INCR اول) — فقط خطا
+    if (!result.ok) {
+      // mismatch — شمارش همین‌جا بالا رفته (INCR اول) — فقط خطا
       throw Err.validation('کد وارد شده صحیح نیست.')
     }
-
-    await this.deps.redis.del(K.code(phone))
-    await this.deps.redis.del(K.attempts(phone))
 
     // توکن ۱ ساعته
     const token = crypto.randomUUID()
@@ -390,11 +387,7 @@ export class CourierService {
   // ── داخلی ──
 
   private async mustGet(displayId: string): Promise<OrderRow> {
-    if (!DISPLAY_RE.test(displayId)) throw Err.notFound('سفارش پیدا نشد.')
-    const row = (
-      await this.deps.db.select().from(orders).where(eq(orders.displayId, displayId))
-    )[0]
-    if (!row) throw Err.notFound('سفارش پیدا نشد.')
-    return row
+    // رارد ۴۸ — همان order-lookup مشترک (قبلاً کپی محلی همین منطق بود)
+    return requireOrder(this.deps.db, displayId)
   }
 }

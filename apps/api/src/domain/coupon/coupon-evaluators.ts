@@ -2,6 +2,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
+import { UUID_RE } from '#/domain/shared/ids'
 
 /**
  * ۹ ارزیاب شرط کوپن — SQL خالص ایندکس‌دار.
@@ -49,7 +50,6 @@ const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
 // و چون grantIfEligible داخل tx همین settlePayment اجرا می‌شود، سفارشِ
 // پول‌گرفته‌شده برای همیشه PENDING می‌ماند. گارد: مقدار خراب → شرط
 // «همیشه ناراضی» (sql`false`)، نه انفجار.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const uuidOrFalse = (v: string | null): string | null => (v && UUID_RE.test(v) ? v : null)
 
 /** سفارش‌های موفق کاربر — عبارت مشترک */

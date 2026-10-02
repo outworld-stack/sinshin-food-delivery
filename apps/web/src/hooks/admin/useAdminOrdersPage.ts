@@ -18,12 +18,13 @@ import { z } from 'zod'
 import { searchTextField } from '#/utils/searchSchema'
 import { useAuthStore } from '#/stores/authStore'
 import { adminOrdersOptions, admin2FilterOptions, courierFilterOptions } from '#/utils/queryOptions'
+import { pageField, limitField } from '#/utils/searchSchema'
 
 // --- اسکیمای search — فیلترها شهروند URL شدن ---
 // catch: URL دستکاری‌شده با مقدار خراب → پیش‌فرض جایگزین، نه خطای روت
 export const adminOrdersSearchSchema = z.object({
-  page: z.number().int().min(1).catch(1).default(1),
-  limit: z.number().int().min(5).max(100).catch(10).default(10),
+  page: pageField,
+  limit: limitField(10),
   search: searchTextField,
   status: z.string().catch('all').default('all'),
   sortDate: z.string().catch('newest').default('newest'),

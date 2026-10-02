@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 1 از 31
+// round-48 — sinshin-food-delivery — فایل 35 از 97
 // مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
 // وضعیت: اصلاحیه — همان فایل ۲۲ رارد ۳۴ که در پنل قبلی به‌خاطر خطای نام فایل خالی نمایش داده شد؛ محتوا سالم و کامل است
-// کامیت پیشنهادی: stage thirty one
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/http/routes/admin-menu.routes.ts
@@ -13,8 +13,8 @@ import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { MenuService } from '#/domain/menu/menu.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 const sizeInput = t.Object({
   name: t.String({ minLength: 1, maxLength: 60 }),

@@ -10,8 +10,8 @@ import {
 import { asCampaignId, type CampaignId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
 import { buildUserCondition, type ConditionType } from './coupon-evaluators'
+import { UUID_RE } from '#/domain/shared/ids'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // رارد ۴۷ — شکل سیم این خروجی = CouponWithConditionsDto در قرارداد مشترک؛
 // ردیف خام دیتابیس مستقیم برمی‌گردد (createdAt هم روی سیم هست و از رارد ۴۷
@@ -47,16 +47,39 @@ export class CouponService {
 
     if (active.length === 0) return 0
 
+    // رارد ۴۸ (اسکن C1) — این مسیر داخل tx تسویه‌ی هر پرداخت موفق و زیر
+    // قفل ردیف کاربر اجرا می‌شود؛ قبلاً ۱+۳K کوئری به‌ازای K کوپن فعال بود.
+    // شرط‌ها حالا با یک کوئریِ inArray گروه می‌شوند و کوپن‌هایی که از قبل
+    // grant دارند (درجِ تکراری جز عمل بی‌اثر چیزی نمی‌کرد)
+    // از همان اول skip می‌شوند. کوئری واجدشرط‌ها هر کوپن مستقل می‌ماند
+    // (ترکیب چند کوپن در یک SQL ریسک رفتاری دارد — عمداً انجام نشد).
+    const activeIds = active.map((c) => c.id)
+    const [allConds, grantedRows] = await Promise.all([
+      tx
+        .select()
+        .from(couponConditions)
+        .where(inArray(couponConditions.couponId, activeIds)),
+      tx
+        .select({ couponId: couponGrants.couponId })
+        .from(couponGrants)
+        .where(and(inArray(couponGrants.couponId, activeIds), eq(couponGrants.userId, userId))),
+    ])
+    const condsByCoupon = new Map<string, Array<typeof couponConditions.$inferSelect>>()
+    for (const c of allConds) {
+      const list = condsByCoupon.get(c.couponId as string) ?? []
+      list.push(c)
+      condsByCoupon.set(c.couponId as string, list)
+    }
+    const alreadyGranted = new Set(grantedRows.map((r) => r.couponId as string))
+
     const ctx = { db: this.deps.db, userId, now: new Date() }
     let granted = 0
 
     for (const coupon of active) {
-      const conds = await tx
-        .select()
-        .from(couponConditions)
-        .where(eq(couponConditions.couponId, coupon.id))
+      const conds = condsByCoupon.get(coupon.id as string) ?? []
 
       if (conds.length === 0) continue
+      if (alreadyGranted.has(coupon.id as string)) continue
 
       const built = buildUserCondition(
         ctx,
@@ -220,16 +243,17 @@ export class CouponService {
 
   async list(): Promise<CouponWithConditions[]> {
     const rows = await this.deps.db.select().from(coupons).orderBy(desc(coupons.createdAt))
-    const counts = await this.recipientsCounts(rows.map((r) => r.id))
-    const out: CouponWithConditions[] = []
-    for (const c of rows) {
-      out.push({
-        coupon: c,
-        conditions: await this.conditionsOf(c.id),
-        recipientsCount: counts.get(c.id as string) ?? 0,
-      })
-    }
-    return out
+    // رارد ۴۸ (اسکن C4) — شرط‌ها هم مثل recipientsCounts (phase-9) دسته‌ای
+    // کشیده می‌شوند؛ قبلاً ۲+N کوئری در هر بازدید صفحه‌ی کوپن‌ها بود.
+    const [counts, conditionsByCoupon] = await Promise.all([
+      this.recipientsCounts(rows.map((r) => r.id)),
+      this.conditionsOfMany(rows.map((r) => r.id)),
+    ])
+    return rows.map((c) => ({
+      coupon: c,
+      conditions: conditionsByCoupon.get(c.id as string) ?? [],
+      recipientsCount: counts.get(c.id as string) ?? 0,
+    }))
   }
 
   /** phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی ادمین (پیوند مستقیم بدون وابستگی به کش لیست) */
@@ -404,6 +428,26 @@ export class CouponService {
   }
 
   // ══ داخلی ══
+
+  /** رارد ۴۸ — نسخه‌ی دسته‌ای conditionsOf برای لیست‌ها (یک کوئری، گروه‌بندی در Map) */
+  private async conditionsOfMany(couponIds: Array<CampaignId>) {
+    const map = new Map<string, Array<{ id: string; type: ConditionType; params: Record<string, unknown> }>>()
+    if (couponIds.length === 0) return map
+    const rows = await this.deps.db
+      .select()
+      .from(couponConditions)
+      .where(inArray(couponConditions.couponId, couponIds))
+    for (const r of rows) {
+      const list = map.get(r.couponId as string) ?? []
+      list.push({
+        id: r.id,
+        type: r.type as ConditionType,
+        params: (r.params ?? {}) as Record<string, unknown>,
+      })
+      map.set(r.couponId as string, list)
+    }
+    return map
+  }
 
   private async conditionsOf(couponId: CampaignId) {
     const rows = await this.deps.db

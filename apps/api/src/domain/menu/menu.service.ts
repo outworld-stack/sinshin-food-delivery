@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-36 — sinshin-food-delivery — فایل 5 از 14
+// round-48 — sinshin-food-delivery — فایل 20 از 97
 // مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty two
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/menu/menu.service.ts
@@ -10,6 +10,7 @@ import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
+import { VersionedCache } from '#/domain/shared/versioned-cache'
 import {
   categories,
   mainCategories,
@@ -114,43 +115,18 @@ export async function loadPricingBases(
  * است و بقیه به همان نتیجه می‌پیوندند.
  */
 export class MenuService {
-  constructor(private readonly deps: { db: Db; redis: RedisService }) { }
-
-  /** کار-۴: پرومیس‌های در حال پرواز per cache-key (بعد از تفسیر حذف می‌شوند) */
-  private inflight = new Map<string, Promise<unknown>>()
-
-  private async version(): Promise<number> {
-    const v = await this.deps.redis.get(VERSION_KEY)
-    return v ? Number(v) || 0 : 0
+  constructor(private readonly deps: { db: Db; redis: RedisService }) {
+    // رارد ۴۸ — ماشین‌آلات کش به VersionedCache مشترک رفت؛ کلید‌ها و
+    // رفتار بایت‌به‌بایت همان قبل است (menu:v{ver}:...)
+    this.cache = new VersionedCache({
+      redis: deps.redis,
+      versionKey: VERSION_KEY,
+      prefix: 'menu',
+      ttlSeconds: CACHE_TTL_SECONDS,
+    })
   }
 
-  private async cached<T extends object>(key: string, loader: () => Promise<T>): Promise<T> {
-    const ver = await this.version()
-    const k = `menu:v${ver}:${key}`
-    const hit = await this.deps.redis.getJson<T>(k)
-    if (hit !== null) return hit
-
-    // کار-۴: single-flight — اگر هم‌زمانی دارد همین کلید را load می‌کند، join
-    const existing = this.inflight.get(k) as Promise<T> | undefined
-    if (existing) return existing
-
-    const p = (async () => {
-      try {
-        const value = await loader()
-        await this.deps.redis.setJson(k, value, { ex: CACHE_TTL_SECONDS })
-        return value
-      } finally {
-        this.inflight.delete(k)
-      }
-    })()
-    this.inflight.set(k, p)
-    return p
-  }
-
-  /** هر write ادمین — یک بار */
-  private async invalidate(): Promise<void> {
-    await this.deps.redis.incr(VERSION_KEY)
-  }
+  private readonly cache: VersionedCache
 
   /**
    * round-35 — باطل‌کردن عمومی کش منو بعد از ترجمه‌ی خودکار.
@@ -159,14 +135,14 @@ export class MenuService {
    * تا کاربر عربی کشِ قدیمیِ فارسی را نبیند.
    */
   async bustCache(): Promise<void> {
-    await this.invalidate()
+    await this.cache.invalidate()
   }
 
   // ── عمومی ──
 
   /** Main های فعال — پیش‌فرض اول، بعد sortOrder */
   async activeMainCategories(lang: Lang = 'fa') {
-    return this.cached(`mains:${lang}:active`, async () => {
+    return this.cache.cached(`mains:${lang}:active`, async () => {
       const rows = await this.deps.db
         .select()
         .from(mainCategories)
@@ -183,7 +159,7 @@ export class MenuService {
   }
 
   async categoriesByMain(slug: string, lang: Lang = 'fa') {
-    return this.cached(`cats:${lang}:${slug}`, async () => {
+    return this.cache.cached(`cats:${lang}:${slug}`, async () => {
       const main = await this.deps.db.query.mainCategories.findFirst({
         where: and(eq(mainCategories.slug, slug), eq(mainCategories.isActive, true)),
       })
@@ -197,7 +173,7 @@ export class MenuService {
   }
 
   async productsByMain(slug: string, lang: Lang = 'fa') {
-    return this.cached(`prods:${lang}:${slug}`, async () => {
+    return this.cache.cached(`prods:${lang}:${slug}`, async () => {
       const main = await this.deps.db.query.mainCategories.findFirst({
         where: and(eq(mainCategories.slug, slug), eq(mainCategories.isActive, true)),
       })
@@ -254,34 +230,14 @@ export class MenuService {
       return list[0] ?? null
     }
 
-    const ver = await this.version()
-    const k = `menu:v${ver}:prod:${lang}:${id}`
-    const hit = await this.deps.redis.getJson<ProductDto>(k)
-    if (hit !== null) return hit
-
     // کار-۴: همان single-flight — جزئیات محصول در صفحه‌ی محصول می‌تواند
-    // هم‌زمان توسط SSR + چند کامپوننت درخواست شود
-    const existing = this.inflight.get(k) as Promise<ProductDto | null> | undefined
-    if (existing) return existing
-
-    const p = (async (): Promise<ProductDto | null> => {
-      try {
-        const value = await load()
-        // null کش نمی‌شود (مثل قبل) — محصولِ حذف‌شده بعد از نامعتبرسازی دوباره پرسیده می‌شود
-        if (value !== null) {
-          await this.deps.redis.setJson(k, value, { ex: CACHE_TTL_SECONDS })
-        }
-        return value
-      } finally {
-        this.inflight.delete(k)
-      }
-    })()
-    this.inflight.set(k, p)
-    return p
+    // هم‌زمان توسط SSR + چند کامپوننت درخواست شود.
+    // null کش نمی‌شود (مثل قبل) — محصولِ حذف‌شده بعد از نامعتبرسازی دوباره پرسیده می‌شود
+    return this.cache.cachedNullable(`prod:${lang}:${id}`, load)
   }
 
   async allCategories(lang: Lang = 'fa') {
-    return this.cached(`cats:${lang}:all`, async () =>
+    return this.cache.cached(`cats:${lang}:all`, async () =>
       (
         await this.deps.db.select().from(categories).orderBy(asc(categories.name))
       ).map((c) => categoryView(c, lang)),
@@ -319,7 +275,7 @@ export class MenuService {
       isDefault: false,
       sortOrder: all.length + 1,
     } as typeof mainCategories.$inferInsert)
-    await this.invalidate()
+    await this.cache.invalidate()
     return { success: true }
   }
 
@@ -333,7 +289,7 @@ export class MenuService {
       .update(mainCategories)
       .set({ isActive: !row.isActive })
       .where(eq(mainCategories.id, mcId))
-    await this.invalidate()
+    await this.cache.invalidate()
   }
 
   async setDefaultMainCategory(id: string): Promise<{ success: boolean; message?: string }> {
@@ -351,7 +307,7 @@ export class MenuService {
         .set({ isDefault: true })
         .where(eq(mainCategories.id, mcId))
     })
-    await this.invalidate()
+    await this.cache.invalidate()
     return { success: true }
   }
 
@@ -368,7 +324,7 @@ export class MenuService {
       await tx.update(mainCategories).set({ sortOrder: b.sortOrder }).where(eq(mainCategories.id, a.id))
       await tx.update(mainCategories).set({ sortOrder: a.sortOrder }).where(eq(mainCategories.id, b.id))
     })
-    await this.invalidate()
+    await this.cache.invalidate()
   }
 
   async deleteMainCategory(id: string): Promise<{ success: boolean; message?: string }> {
@@ -382,7 +338,7 @@ export class MenuService {
       return { success: false, message: 'ابتدا دسته‌های زیرمجموعه را منتقل یا حذف کنید' }
     }
     await this.deps.db.delete(mainCategories).where(eq(mainCategories.id, mcId))
-    await this.invalidate()
+    await this.cache.invalidate()
     return { success: true }
   }
 
@@ -407,7 +363,7 @@ export class MenuService {
       sizeNames: input.hasSizes ? input.sizeNames : [],
       sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
     } as typeof categories.$inferInsert)
-    await this.invalidate()
+    await this.cache.invalidate()
     return { success: true }
   }
 
@@ -433,7 +389,7 @@ export class MenuService {
         sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
       })
       .where(eq(categories.id, catId))
-    await this.invalidate()
+    await this.cache.invalidate()
   }
 
   async deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
@@ -447,7 +403,7 @@ export class MenuService {
       return { success: false, message: 'ابتدا محصولات این دسته را منتقل یا حذف کنید' }
     }
     await this.deps.db.delete(categories).where(eq(categories.id, catId))
-    await this.invalidate()
+    await this.cache.invalidate()
     return { success: true }
   }
 
@@ -560,7 +516,7 @@ export class MenuService {
     if (input.sizesEnabled && input.sizes?.length) {
       await this.insertSizes(created.id, input.sizes)
     }
-    await this.invalidate()
+    await this.cache.invalidate()
     return { success: true, id: created.id }
   }
 
@@ -662,7 +618,7 @@ export class MenuService {
       })
     }
 
-    await this.invalidate()
+    await this.cache.invalidate()
   }
 
   async toggleProductStatus(id: string): Promise<void> {
@@ -674,7 +630,7 @@ export class MenuService {
       .update(products)
       .set({ status: row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE', updatedAt: new Date() })
       .where(eq(products.id, row.id))
-    await this.invalidate()
+    await this.cache.invalidate()
   }
 
   // ── داخلی ──

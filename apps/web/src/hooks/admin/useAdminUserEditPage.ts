@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { updateAdminUser } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
+import { sanitizePhone } from '#/utils/phone'
 
 // --- وضعیت: فرم + قفل‌ها + مودال‌ها + پرچم ویرایش ---
 interface UserEditState {
@@ -110,7 +111,7 @@ export function useAdminUserEditPage(
   }, [])
 
   const handlePhoneChange = useCallback((raw: string) => {
-    dispatch({ type: 'SET_FIELD', field: 'phone', payload: raw.replace(/[^0-9]/g, '') })
+    dispatch({ type: 'SET_FIELD', field: 'phone', payload: sanitizePhone(raw) })
   }, [])
 
   const handleRequestUnlockPhone = useCallback(() => dispatch({ type: 'REQUEST_UNLOCK_PHONE' }), [])

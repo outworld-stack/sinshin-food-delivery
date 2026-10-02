@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 7 از 49
+// round-48 — sinshin-food-delivery — فایل 28 از 97
 // مسیر مقصد: apps/api/src/domain/shared/lang.ts
 // وضعیت: فایل جدید
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/domain/shared/lang.ts
@@ -54,11 +54,4 @@ export function nullIfEmpty(v: string | null | undefined): string | null {
 /** آیا این رکورد هر مقدار عربی دستی دارد؟ (پرچم arAuto روی ذخیره‌ی دستی) */
 export function hasAnyAr(...values: Array<string | null | undefined>): boolean {
   return values.some((v) => v != null && v !== '')
-}
-
-/** آیا کاربر عربی چیزی جز پشتیبان فارسی می‌بیند؟ — بج «ترجمه ناقص» در پنل ادمین رارد ۳۵ */
-export function arComplete(
-  row: { ar: Array<string | null | undefined>; fa: Array<string | null | undefined> },
-): boolean {
-  return row.ar.every((a, i) => (row.fa[i] != null && row.fa[i] !== '' ? a != null && a !== '' : true))
 }

@@ -15,15 +15,14 @@ import {
 import { asUserId, asCourierId } from '#/domain/shared/brand'
 import type { ReportLinks } from '#/domain/report/report-links'
 import { MiniReportPage } from '#/http/templates/mini-report'
+import { faNum, faDate } from '#/domain/report/format'
+import { forbidden } from './report.routes'
 
 export interface ReportPanelRoutesDeps {
   db: Db
   links: ReportLinks
 }
 
-const faNum = (n: number) => n.toLocaleString('fa-IR')
-const faDate = (d: Date) =>
-  new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short' }).format(d)
 
 export const reportPanelRoutes = (deps: ReportPanelRoutesDeps) =>
   new Elysia({ prefix: '/reports/panel', tags: ['Reports'] })
@@ -33,10 +32,7 @@ export const reportPanelRoutes = (deps: ReportPanelRoutesDeps) =>
       async ({ params }) => {
         const scope = deps.links.verifyPanel(params.token)
         if (!scope) {
-          return new Response(
-            JSON.stringify({ error: { code: 'FORBIDDEN', message: 'لینک گزارش نامعتبر است.' } }),
-            { status: 403, headers: { 'content-type': 'application/json' } },
-          )
+          return forbidden()
         }
 
         switch (scope.page) {

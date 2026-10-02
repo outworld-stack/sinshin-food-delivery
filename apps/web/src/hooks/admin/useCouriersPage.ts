@@ -17,12 +17,13 @@ import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
 import { searchTextField } from '#/utils/searchSchema'
 import { adminCouriersOptions } from '#/utils/queryOptions'
+import { pageField, limitField } from '#/utils/searchSchema'
 
 // --- اسکیمای search — بازه تاریخ + جستجو + صفحه‌بندی، همه در URL ---
 // catch: URL دستکاری‌شده با مقدار خراب → پیش‌فرض جایگزین، نه خطای روت
 export const adminCouriersSearchSchema = z.object({
-  page: z.number().int().min(1).catch(1).default(1),
-  limit: z.number().int().min(5).max(100).catch(10).default(10),
+  page: pageField,
+  limit: limitField(10),
   search: searchTextField,
   dateFrom: z.string().catch('').default(''),
   dateTo: z.string().catch('').default(''),

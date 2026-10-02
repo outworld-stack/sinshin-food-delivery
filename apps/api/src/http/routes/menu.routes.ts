@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 15 از 49
+// round-48 — sinshin-food-delivery — فایل 46 از 97
 // مسیر مقصد: apps/api/src/http/routes/menu.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 //src/http/routes/menu.routes.ts
@@ -11,8 +11,9 @@ import { Elysia, t } from 'elysia'
 import type { MenuService } from '#/domain/menu/menu.service'
 import type { CartService } from '#/domain/cart/cart.service'
 import { langFromHeaders } from '#/domain/shared/lang'
+import { UUID_PATTERN } from '#/domain/shared/ids'
+import { cartItemSchema } from '#/http/schemas'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 export interface MenuRoutesDeps {
   menu: MenuService
@@ -75,14 +76,9 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
       ({ body, headers }) => deps.cart.details(body.items, langFromHeaders(headers)),
       {
         body: t.Object({
-          items: t.Array(
-            t.Object({
-              productId: t.String({ pattern: UUID_PATTERN }),
-              sizeId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
-              quantity: t.Number({ minimum: 1, maximum: 99 }),
-            }),
-            { maxItems: 100 },
-          ),
+          // رارد ۴۸ — آیتم از اسکیمای مشترک؛ quantity حالا Integer است
+          // (قبلاً t.Number بود و اعشار می‌پذیرفت — دریفت خاموش با چک‌اوت)
+          items: t.Array(cartItemSchema, { maxItems: 100 }),
         }),
         detail: {
           summary: 'Server-side cart pricing',

@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════
-// round-43 — sinshin-food-delivery — فایل 8 از 14
+// round-48 — sinshin-food-delivery — فایل 65 از 97
 // مسیر مقصد: apps/web/src/components/admin/users/UserCard.tsx
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-eight
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════
 
 // src/components/admin/users/UserCard.tsx
@@ -28,6 +28,30 @@ export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: Us
 
   const displayName = user.firstName ? `${user.firstName} ${user.lastName || ''}` : 'ناشناس'
   const mobileName = user.firstName ? `${user.firstName}` : 'ناشناس'
+
+  // رارد ۴۸ (اسکن B11) — بلوک اکشن که قبلاً بایت‌به‌بایت دو بار (موبایل/دسکتاپ) تکرار می‌شد
+  const Actions = (
+    <>
+          <Link to="/admin/users/$userId" params={{ userId: user.id }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2a1015] transition cursor-pointer" title="مشاهده جزئیات">
+            <Eye size={18} />
+          </Link>
+          <Can allowed={canToggle}>
+            <button
+              onClick={handleToggle}
+              disabled={isProtectedAdmin}
+              title={isProtectedAdmin ? 'حساب ادمین اصلی قابل مسدودسازی نیست' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
+              aria-label={isProtectedAdmin ? 'ادمین اصلی — محافظت‌شده' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
+              className={`p-2 rounded-lg transition ${isProtectedAdmin
+                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                : user.status === 'ACTIVE'
+                  ? 'text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer'
+                  : 'text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer'}`}
+            >
+              {isProtectedAdmin ? <Shield size={18} /> : user.status === 'ACTIVE' ? <Ban size={18} /> : <Check size={18} />}
+            </button>
+          </Can>
+    </>
+  )
 
   return (
     <div className="border border-gray-300 dark:border-white/10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] p-4">
@@ -63,24 +87,7 @@ export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: Us
           </div>
         </div>
         <div className="flex flex-col gap-2 items-center justify-center">
-          <Link to="/admin/users/$userId" params={{ userId: user.id }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2a1015] transition cursor-pointer" title="مشاهده جزئیات">
-            <Eye size={18} />
-          </Link>
-          <Can allowed={canToggle}>
-            <button
-              onClick={handleToggle}
-              disabled={isProtectedAdmin}
-              title={isProtectedAdmin ? 'حساب ادمین اصلی قابل مسدودسازی نیست' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
-              aria-label={isProtectedAdmin ? 'ادمین اصلی — محافظت‌شده' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
-              className={`p-2 rounded-lg transition ${isProtectedAdmin
-                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                : user.status === 'ACTIVE'
-                  ? 'text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer'
-                  : 'text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer'}`}
-            >
-              {isProtectedAdmin ? <Shield size={18} /> : user.status === 'ACTIVE' ? <Ban size={18} /> : <Check size={18} />}
-            </button>
-          </Can>
+          {Actions}
         </div>
       </div>
 
@@ -95,24 +102,7 @@ export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: Us
         <div className="font-DanaDemiBold text-primary dark:text-dark-primary text-sm">{formatPrice(user.totalSpent)} ت</div>
         <div className="text-xs text-gray-500 dark:text-gray-400">{formatDate(user.registeredAt)}</div>
         <div className="flex flex-col xl:flex-row items-start xl:items-center justify-start xl:justify-end gap-2">
-          <Link to="/admin/users/$userId" params={{ userId: user.id }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2a1015] transition cursor-pointer" title="مشاهده جزئیات">
-            <Eye size={18} />
-          </Link>
-          <Can allowed={canToggle}>
-            <button
-              onClick={handleToggle}
-              disabled={isProtectedAdmin}
-              title={isProtectedAdmin ? 'حساب ادمین اصلی قابل مسدودسازی نیست' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
-              aria-label={isProtectedAdmin ? 'ادمین اصلی — محافظت‌شده' : user.status === 'ACTIVE' ? 'مسدودسازی' : 'فعال‌سازی'}
-              className={`p-2 rounded-lg transition ${isProtectedAdmin
-                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                : user.status === 'ACTIVE'
-                  ? 'text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer'
-                  : 'text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10 cursor-pointer'}`}
-            >
-              {isProtectedAdmin ? <Shield size={18} /> : user.status === 'ACTIVE' ? <Ban size={18} /> : <Check size={18} />}
-            </button>
-          </Can>
+          {Actions}
         </div>
       </div>
 

@@ -5,8 +5,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { OrderService } from '#/domain/order/order.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
+import { DISPLAY_PATTERN } from '#/domain/shared/ids'
 
-const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
 
 export interface AdminOrderRoutesDeps {
   sessions: SessionService

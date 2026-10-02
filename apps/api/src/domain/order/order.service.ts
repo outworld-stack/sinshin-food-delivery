@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-43 — sinshin-food-delivery — فایل 3 از 14
+// round-48 — sinshin-food-delivery — فایل 21 از 97
 // مسیر مقصد: apps/api/src/domain/order/order.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-eight
+// کامیت پیشنهادی: stage forty-three
 // ═════════════════════════════════════════════════════════════
 
 //src/domain/order/order.service.ts
@@ -49,8 +49,8 @@ import type {
 	OrderBreakdown,
 	StaffInvoice,
 } from "@sinshin/shared";
+import { requireOrder, requireOwnedOrder, findOrder } from './order-lookup'
 
-const DISPLAY_RE = /^ord-[a-z0-9]{8}$/;
 
 function newDisplayId(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(8));
@@ -708,16 +708,9 @@ export class OrderService {
 		displayId: string,
 		reason: string,
 	): Promise<{ displayId: string; refundedAmount: number }> {
-		if (!DISPLAY_RE.test(displayId)) throw Err.notFound("سفارش پیدا نشد.");
-
 		return this.deps.db.transaction(async (tx) => {
-			const row = (
-				await tx
-					.select()
-					.from(orders)
-					.where(eq(orders.displayId, displayId))
-					.for("update")
-			)[0];
+			// رارد ۴۸ — گارد الگو و واکشی از order-lookup مشترک (با قفل سطر)
+			const row = await findOrder(tx, displayId, { forUpdate: true });
 			if (!row) throw Err.notFound("سفارش پیدا نشد.");
 			if (row.status === "CANCELED")
 				throw Err.conflict("این سفارش قبلاً لغو شده است.");
@@ -871,14 +864,7 @@ export class OrderService {
 	}
 
 	async byDisplayId(userId: string, displayId: string) {
-		if (!DISPLAY_RE.test(displayId)) throw Err.notFound("سفارش پیدا نشد.");
-		const row = (
-			await this.deps.db
-				.select()
-				.from(orders)
-				.where(eq(orders.displayId, displayId))
-		)[0];
-		if (!row || row.userId !== userId) throw Err.notFound("سفارش پیدا نشد.");
+		const row = await requireOwnedOrder(this.deps.db, userId, displayId);
 		// round-16 — سه کوئری مستقل → Promise.all (همان نتیجه، یک رفت‌وبرگشت)
 		const [items, profit, courier] = await Promise.all([
 			this.deps.db
@@ -901,14 +887,7 @@ export class OrderService {
 	 * مشتری/نوع تحویل/آدرس/پیک برای فاکتور اشپزخانه + فروش (با QR پیک).
 	 */
 	async invoiceForStaff(displayId: string): Promise<StaffInvoice> {
-		if (!DISPLAY_RE.test(displayId)) throw Err.notFound("سفارش پیدا نشد.");
-		const row = (
-			await this.deps.db
-				.select()
-				.from(orders)
-				.where(eq(orders.displayId, displayId))
-		)[0];
-		if (!row) throw Err.notFound("سفارش پیدا نشد.");
+		const row = await requireOrder(this.deps.db, displayId);
 
 		const [items, user, courier] = await Promise.all([
 			this.deps.db
@@ -949,14 +928,7 @@ export class OrderService {
 
 	/** تایید تحویل توسط مشتری — قرارداد فرانت */
 	async confirmDelivery(userId: string, displayId: string): Promise<void> {
-		if (!DISPLAY_RE.test(displayId)) throw Err.notFound("سفارش پیدا نشد.");
-		const row = (
-			await this.deps.db
-				.select()
-				.from(orders)
-				.where(eq(orders.displayId, displayId))
-		)[0];
-		if (!row || row.userId !== userId) throw Err.notFound("سفارش پیدا نشد.");
+		const row = await requireOwnedOrder(this.deps.db, userId, displayId);
 		// امن-۷: فقط بعد از تایید رستوران — PAID یعنی سفارش هنوز وارد جریان
 		// آشپزخانه/پیک نشده؛ بستنش توسط مشتری زودهنگام بود و جریان را می‌شکست
 		if (row.status !== "CONFIRMED" && row.status !== "ON_THE_WAY") {
@@ -985,14 +957,7 @@ export class OrderService {
 		userId: string,
 		displayId: string,
 	): Promise<{ isEnabled: boolean }> {
-		if (!DISPLAY_RE.test(displayId)) throw Err.notFound("سفارش پیدا نشد.");
-		const row = (
-			await this.deps.db
-				.select()
-				.from(orders)
-				.where(eq(orders.displayId, displayId))
-		)[0];
-		if (!row || row.userId !== userId) throw Err.notFound("سفارش پیدا نشد.");
+		const row = await requireOwnedOrder(this.deps.db, userId, displayId);
 		return { isEnabled: row.trackingEnabled };
 	}
 
@@ -1005,26 +970,6 @@ export class OrderService {
 		if (rows.length === 0) return [];
 		const ids = rows.map((r) => r.id);
 
-		const items = await this.deps.db
-			.select()
-			.from(orderItems)
-			.where(inArray(orderItems.orderId, ids));
-		const itemsByOrder = new Map<OrderId, OrderItemRow[]>();
-		for (const it of items) {
-			const list = itemsByOrder.get(it.orderId) ?? [];
-			list.push(it);
-			itemsByOrder.set(it.orderId, list);
-		}
-
-		const profits = await this.deps.db
-			.select({
-				orderId: referralProfits.orderId,
-				amount: referralProfits.amount,
-			})
-			.from(referralProfits)
-			.where(inArray(referralProfits.orderId, ids));
-		const profitByOrder = new Map(profits.map((p) => [p.orderId, p.amount]));
-
 		// round-12 — نام/تلفن پیک واقعی (قبلاً همیشه null بود؛ کامنت «فاز ۵» دیگر
 		// درست نبود — سرویس live فقط نمای ادمین را پر می‌کند، نه مسیر کاربر)
 		const courierIds = [
@@ -1032,16 +977,39 @@ export class OrderService {
 				rows.map((r) => r.courierId).filter((c): c is CourierId => !!c),
 			),
 		];
-		const courierRows = courierIds.length
-			? await this.deps.db
-					.select({
-						id: couriers.id,
-						name: couriers.name,
-						phone: couriers.phone,
-					})
-					.from(couriers)
-					.where(inArray(couriers.id, courierIds))
-			: [];
+
+		// رارد ۴۸ (اسکن C7) — سه کوئریِ مستقل موازی شدند؛ همان الگویی که
+		// round-16 برای byDisplayId رفت (مصرف‌کننده: پروفایل سبک در هدر/چک‌اوت)
+		const [items, profits, courierRows] = await Promise.all([
+			this.deps.db
+				.select()
+				.from(orderItems)
+				.where(inArray(orderItems.orderId, ids)),
+			this.deps.db
+				.select({
+					orderId: referralProfits.orderId,
+					amount: referralProfits.amount,
+				})
+				.from(referralProfits)
+				.where(inArray(referralProfits.orderId, ids)),
+			courierIds.length
+				? this.deps.db
+						.select({
+							id: couriers.id,
+							name: couriers.name,
+							phone: couriers.phone,
+						})
+						.from(couriers)
+						.where(inArray(couriers.id, courierIds))
+				: Promise.resolve([]),
+		]);
+		const itemsByOrder = new Map<OrderId, OrderItemRow[]>();
+		for (const it of items) {
+			const list = itemsByOrder.get(it.orderId) ?? [];
+			list.push(it);
+			itemsByOrder.set(it.orderId, list);
+		}
+		const profitByOrder = new Map(profits.map((p) => [p.orderId, p.amount]));
 		const courierById = new Map(courierRows.map((c) => [c.id, c]));
 
 		return rows.map((r) =>

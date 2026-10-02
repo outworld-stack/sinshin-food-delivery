@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-43 — sinshin-food-delivery — فایل 7 از 14
+// round-48 — sinshin-food-delivery — فایل 89 از 97
 // مسیر مقصد: apps/web/src/utils/queryOptions.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-eight
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/utils/queryOptions.ts
@@ -127,16 +127,6 @@ export const userProfileOptions = queryOptions({
   queryKey: qk.userProfile,
   queryFn: () => getUserProfile(),
   staleTime: 60_000,
-});
-
-export const userProfileClientOptions = queryOptions({
-  ...userProfileOptions,
-  queryFn: async () => {
-    // کلاینت-only — اول مطمئن شو توکن هست
-    const { ensureSession } = await import('#/lib/auth-session')
-    await ensureSession()
-    return getUserProfile()
-  },
 });
 
 // کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).

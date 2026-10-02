@@ -11,8 +11,8 @@ import type { AdminUserSort } from '@sinshin/shared'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { Err } from '#/domain/shared/errors'
 import { asUserId } from '#/domain/shared/brand'
+import { UUID_PATTERN } from '#/domain/shared/ids'
 
-const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 /** round-16 — sorts خام کاربر است؛ JSON خراب باید ۴۲۲ بدهد نه ۵۰۰ */
 function parseSorts(raw: string | undefined): AdminUserSort[] | undefined {

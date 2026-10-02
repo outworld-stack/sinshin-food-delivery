@@ -8,6 +8,7 @@ import type {
   GatewayVerifyResult,
   PaymentGateway,
 } from './gateway.types'
+import { postGatewayJson, amountMatches } from './http-util'
 
 const SEND_URL = 'https://pay.ir/pg/send'
 const VERIFY_URL = 'https://pay.ir/pg/verify'
@@ -26,21 +27,17 @@ export class PayirAdapter implements PaymentGateway {
   }
 
   async init(input: GatewayInitInput): Promise<GatewayInitResult> {
-    const res = await Bun.fetch(SEND_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const json = await postGatewayJson<{ token?: string }>(
+      SEND_URL,
+      {
         api: this.apiKey,
         amount: input.amount * 10,
         callback: input.callbackUrl,
         description: input.description,
         mobile: input.mobile ?? undefined,
-      }),
-      // رارد ۴۵ — مهلت از کانفیگ (PAYMENT_TIMEOUT_MS)؛ قبلاً ۱۵ ثانیه‌ی ثابت
-      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
-    })
-    // round-16 — پاسخ غیر-JSON درگاه نباید ۵۰۰ بدهد
-    const json = (await res.json().catch(() => null)) as { token?: string } | null
+      },
+      this.config.gateway.timeoutMs,
+    )
     if (!json?.token) throw Err.conflict('ایجاد پرداخت پی‌ایر ناموفق بود.')
     return { paymentUrl: `https://pay.ir/pg/${json.token}`, gatewayRef: json.token }
   }
@@ -50,29 +47,23 @@ export class PayirAdapter implements PaymentGateway {
     // هم‌تراز با زرین‌پال (stage two). قبلاً توکن کوئری مقدم بود و
     // state جعلی می‌توانست تایید را روی توکن دلخواه اجرا کند.
     const token = input.gatewayRef ?? input.query.token ?? ''
-    const res = await Bun.fetch(VERIFY_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ api: this.apiKey, token }),
-      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
-    })
-    // round-16 — پاسخ غیر-JSON درگاه (HTML/تایم‌اوت سرویس): وضعیت «نامشخص»،
-    // نه شکست قطعی — failPayment بدون اطلاع یعنی بازگشت وجه اشتباه؛
-    // کارِ تایم‌اوت دوباره تایید می‌کند (هم‌تراز با indeterminate زرین‌پال)
-    const json = (await res.json().catch(() => null)) as {
+    // پاسخ غیر-JSON درگاه (HTML/تایم‌اوت سرویس): وضعیت «نامشخص»، نه شکست
+    // قطعی — failPayment بدون اطلاع یعنی بازگشت وجه اشتباه؛ کارِ تایم‌اوت
+    // دوباره تایید می‌کند (هم‌تراز با indeterminate زرین‌پال)
+    const json = await postGatewayJson<{
       status?: number
       amount?: number
-    } | null
+    }>(VERIFY_URL, { api: this.apiKey, token }, this.config.gateway.timeoutMs)
     if (json === null) {
       return { success: false, gatewayRef: token, indeterminate: true }
     }
     // phase-2: چک مبلغ — پاسخ تایید پی‌ایر شامل amount است؛ تطابق اجباری
-    const amountOk = json.amount === undefined || Number(json.amount) === input.amount * 10
-    if (json.status === 1 && !amountOk) {
-      console.error(
-        `[payir] مبلغ verify (${json.amount}) با مبلغ پرداخت (${input.amount * 10}) نمی‌خواند`,
-      )
-    }
+    const amountOk = amountMatches({
+      gatewayAmount: json.amount,
+      expectedRial: input.amount * 10,
+      successReported: json.status === 1,
+      tag: 'payir',
+    })
     return { success: json.status === 1 && amountOk, gatewayRef: token }
   }
 }

@@ -75,17 +75,3 @@ export async function logout() {
   onUnauthorized()
   return { success: true as const }
 }
-
-/** خروج از همه‌ی دستگاه‌ها */
-export async function logoutAll() {
-  try { await authApi.auth['logout-all'].post() } catch { /* هیچ‌کاری نمی‌کند */ }
-  onUnauthorized()
-  return { success: true as const }
-}
-
-/** حذف یکی از دستگاه‌های من */
-export async function removeDevice(deviceId: string) {
-  const { error } = await authApi.auth.devices({ id: deviceId }).delete()
-  if (error) throw toError(error)
-  return { success: true as const }
-}

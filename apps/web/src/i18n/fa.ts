@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-37 — sinshin-food-delivery — فایل 10 از 17
+// round-48 — sinshin-food-delivery — فایل 73 از 97
 // مسیر مقصد: apps/web/src/i18n/fa.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-three
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 // src/i18n/fa.ts
@@ -145,8 +145,6 @@ export const fa = {
         'pdetail.reviews': 'نظرات مشتریان',
         'pdetail.noReviews': 'نظری برای این محصول تاکنون ثبت و تایید نشده است',
         'pdetail.anonUser': 'کاربر',
-        'pdetail.home': 'خانه',
-        'pdetail.menu': 'منو',
 
         // ── سبد خرید (رارد ۳۲) ──
         'cart.title': 'سبد خرید',
@@ -446,20 +444,6 @@ export const fa = {
         'dash.wallet.sort.income': 'ورودی (درآمد)',
         'dash.wallet.sort.expense': 'خروجی (هزینه)',
 
-        // ── ثبت معرف (رارد ۳۳) ──
-        'dash.referral.scanButton': 'اسکن کد معرف',
-        'dash.referral.codeAria': 'کد معرف',
-        'dash.referral.submitAria': 'ثبت کد معرف',
-        'dash.referral.desc':
-                'QR کد معرف دوستتان را اسکن کنید یا کد را دستی وارد کنید — از لحظه‌ی ثبت، درصدی از مبلغ سفارش‌های او در کیف پول شما شارژ می‌شود. ثبت معرف فقط یک‌بار امکان‌پذیر است.',
-        'dash.referral.applying': 'در حال ثبت معرف...',
-        'dash.referral.appliedToast': 'معرف شما ثبت شد: {n}',
-        'dash.referral.applyFailed': 'ثبت معرف ناموفق بود',
-        'dash.referral.qrNotFound': 'کد معرف در این QR پیدا نشد',
-        'dash.referral.invalidCode': 'کد معرف معتبر نیست',
-        'dash.referral.scanHint':
-                'کد QR معرف را از صفحه‌ی «دعوت دوستان» دوستتان جلوی دوربین بگیرید؛ اگر دوربین در دسترس نبود، عکس کد را بارگذاری کنید.',
-
         // ── صفحه‌بندی (رارد ۳۳) ──
         'pagination.showing': 'نمایش',
         'pagination.to': 'تا',
@@ -493,14 +477,6 @@ export const fa = {
         'rf.loading': 'در حال بارگذاری',
 
         // ── اسکنر QR (رارد ۳۳) ──
-        'qr.starting': 'در حال راه‌اندازی دوربین...',
-        'qr.cameraDenied':
-                'دسترسی به دوربین رد شد — از تنظیمات مرورگر اجازهٔ دوربین را روشن کنید یا عکس کد را بارگذاری کنید.',
-        'qr.cameraNotFound': 'دوربینی یافت نشد — می‌توانید عکس کد را بارگذاری کنید.',
-        'qr.cameraFailed': 'راه‌اندازی دوربین ممکن نشد — عکس کد را بارگذاری کنید.',
-        'qr.uploadPhoto': 'بارگذاری عکس کد',
-        'qr.fileNoCode': 'کدی در این عکس پیدا نشد — عکس واضح‌تری از کد بگیرید.',
-        'qr.fileReadError': 'خواندن عکس ممکن نشد.',
 
         // ── نقشه (رارد ۳۳) ──
         'map.pickLocation': 'انتخاب موقعیت روی نقشه',

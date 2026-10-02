@@ -25,6 +25,7 @@ import { useHydrated } from '#/hooks/useHydrated'
 import { ensureAuthHydrated, useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { faNum, formatDate, formatPrice } from '#/utils/format'
+import { courierScanUrl } from '#/utils/invoicePrint'
 import { adminOrderDetailsOptions } from '#/utils/queryOptions'
 
 const OrderDetailPage = memo(function OrderDetailPage() {
@@ -53,8 +54,12 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 		return <RouteNotFound />
 	}
 
-	// لینک اسکن پیک — QR واقعی روی فاکتور فروش همین مسیر را انکد می‌کند
-	const scanUrl = `${window.location.origin}/courier/scan/${order.id}${order.courierSecurityEnabled && order.courierId ? `?courier=${order.courierId}` : ''}`
+	// لینک اسکن پیک — همان فرمولِ فاکتور چاپی (منبع واحد؛ رارد ۴۸)
+	const scanUrl = courierScanUrl({
+		orderId: order.id,
+		courierId: order.courierId,
+		courierSecurityEnabled: order.courierSecurityEnabled,
+	})
 
 	const isDelivery = order.deliveryType === 'DELIVERY'
 

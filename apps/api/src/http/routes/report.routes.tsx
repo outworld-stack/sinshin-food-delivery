@@ -105,7 +105,7 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
   return new Elysia().use(publicRoutes).use(guarded)
 }
 
-function forbidden(): Response {
+export function forbidden(): Response {
   return new Response(
     JSON.stringify({ error: { code: 'FORBIDDEN', message: 'لینک گزارش نامعتبر است.' } }),
     { status: 403, headers: { 'content-type': 'application/json' } },

@@ -23,13 +23,14 @@ import { useToastStore } from '#/stores/toastStore'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { adminProductsOptions, adminCategoriesOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
+import { pageField, limitField } from '#/utils/searchSchema'
 
 // --- اسکیمای search — فیلترها شهروند URL شدن ---
 // catch: URL دستکاری‌شده با مقدار خراب → پیش‌فرض جایگزین، نه خطای روت
 // (limit پیش‌فرض ۵ — همان رفتار قبلی این صفحه)
 export const adminProductsSearchSchema = z.object({
-  page: z.number().int().min(1).catch(1).default(1),
-  limit: z.number().int().min(5).max(100).catch(5).default(5),
+  page: pageField,
+  limit: limitField(5),
   search: searchTextField,
   status: z.string().catch('all').default('all'),
   categoryId: z.string().catch('all').default('all'),

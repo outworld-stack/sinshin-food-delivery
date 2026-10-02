@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { Bicycle , Route as RouteIcon, ChevronLeft } from 'reicon-react'
 import { formatPrice, formatDate, formatTime } from '#/utils/format'
 import type { CourierListRowDto } from '@sinshin/shared'
+import { faNum } from '#/utils/format'
 
 interface CourierCardProps {
   courier: CourierListRowDto
@@ -38,13 +39,13 @@ export const CourierCard = memo(function CourierCard({ courier }: CourierCardPro
           <div className="text-center">
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">سفرها</p>
             <p className="font-DanaDemiBold text-gray-800 dark:text-white">
-              {courier.trips.length.toLocaleString('fa-IR')}
+              {faNum(courier.trips.length)}
             </p>
           </div>
           <div className="text-center">
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">تحویل‌ها</p>
             <p className="font-DanaDemiBold text-gray-800 dark:text-white">
-              {allDeliveries.length.toLocaleString('fa-IR')}
+              {faNum(allDeliveries.length)}
             </p>
           </div>
           <div className="text-center">

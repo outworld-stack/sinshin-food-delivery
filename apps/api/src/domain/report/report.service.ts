@@ -8,20 +8,8 @@ import type { SmsService } from '#/infra/sms/sms.service'
 import type { ReportLinks } from './report-links'
 import type { ReportViewModel } from '#/http/templates/report'
 import type { ReconcileService } from '#/domain/reconcile/reconcile.service'
+import { faNum, faDate, ORDER_TABLE_HEAD, orderRow } from './format'
 
-
-const faNum = (n: number) => n.toLocaleString('fa-IR')
-const faDelivery = (t: string) =>
-  t === 'DELIVERY' ? 'ارسال با پیک' : t === 'PICKUP' ? 'بیرون‌بر' : 'سرو در سالن'
-const faStatus = (s: string) =>
-  s === 'PAID' ? 'در انتظار تایید'
-    : s === 'CONFIRMED' ? 'تایید شده'
-      : s === 'ON_THE_WAY' ? 'در مسیر'
-        : s === 'DELIVERED' ? 'تحویل شده'
-          : s === 'CANCELED' ? 'پرداخت ناموفق'
-            : 'در انتظار پرداخت'
-const faDate = (d: Date) =>
-  new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short' }).format(d)
 
 export class ReportService {
   constructor(
@@ -77,20 +65,8 @@ export class ReportService {
         { label: 'میانگین سفارش (تومان)', value: faNum(agg.avg) },
       ],
       orders: {
-        head: ['شناسه', 'نوع تحویل', 'وضعیت', 'مبلغ کل', 'پرداخت آنلاین', 'کیف پول', 'تخفیف', 'ارسال', 'بسته‌بندی', 'مشتری', 'زمان ثبت'],
-        rows: orderRows.map(({ o, u }) => [
-          o.displayId,
-          faDelivery(o.deliveryType),
-          faStatus(o.status),
-          faNum(o.breakdown.totalAmount),
-          faNum(o.breakdown.amountPaidOnline),
-          faNum(o.breakdown.walletDeduction),
-          faNum(o.breakdown.discount),
-          faNum(o.breakdown.deliveryFee),
-          faNum(o.breakdown.packagingFee),
-          u.phone,
-          faDate(o.createdAt),
-        ]),
+        head: ORDER_TABLE_HEAD,
+        rows: orderRows.map(({ o, u }) => orderRow(o, u, { num: faNum, date: faDate })),
       },
       wallet: {
         head: ['نوع', 'مبلغ (تومان)', 'توضیح', 'زمان'],
@@ -117,23 +93,10 @@ export class ReportService {
     }
     const [orderRows] = await this.orderAndWalletRows(from, to)
 
-    const lines = [
-      'شناسه,نوع تحویل,وضعیت,مبلغ کل,پرداخت آنلاین,کیف پول,تخفیف,ارسال,بسته‌بندی,مشتری,زمان ثبت',
-    ]
+    const lines = [ORDER_TABLE_HEAD.join(',')]
     for (const { o, u } of orderRows) {
-      const cells = [
-        o.displayId,
-        faDelivery(o.deliveryType),
-        faStatus(o.status),
-        o.breakdown.totalAmount,
-        o.breakdown.amountPaidOnline,
-        o.breakdown.walletDeduction,
-        o.breakdown.discount,
-        o.breakdown.deliveryFee,
-        o.breakdown.packagingFee,
-        u.phone,
-        o.createdAt.toISOString(),
-      ].map((c) => `"${String(c).replace(/"/g, '""')}"`)
+      const cells = orderRow(o, u, { num: String, date: (d) => d.toISOString() })
+        .map((c) => `"${String(c).replace(/"/g, '""')}"`)
       lines.push(cells.join(','))
     }
     return '\uFEFF' + lines.join('\r\n')

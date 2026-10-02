@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 18 از 49
+// round-48 — sinshin-food-delivery — فایل 33 از 97
 // مسیر مقصد: apps/api/src/http/routes/about.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
 import { Elysia, t } from 'elysia'
@@ -12,6 +12,7 @@ import { contentAbout } from '#/infra/db/schema'
 import type { SessionService } from '#/domain/auth/session.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { langFromHeaders, pickAr } from '#/domain/shared/lang'
+import { nullIfEmpty as trim } from '#/domain/shared/lang'
 
 export interface AboutRoutesDeps {
   db: Db
@@ -42,11 +43,7 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
       async ({ body }) => {
         const existing = (await deps.db.select().from(contentAbout).limit(1))[0]
         // round-34 — فیلدهای عربی اختیاری؛ '' → NULL (حذف ترجمه = پشتیبان فارسی)؛
-        // ذخیره‌ی دستی پرچم «خودکار» را خاموش می‌کند
-        const trim = (v: string | null | undefined) => {
-          const s = (v ?? '').trim()
-          return s === '' ? null : s
-        }
+        // ذخیره‌ی دستی پرچم «خودکار» را خاموش می‌کند (trim = nullIfEmpty مشترک)
         const patch = {
           heroTitle: body.heroTitle,
           heroText: body.heroText,

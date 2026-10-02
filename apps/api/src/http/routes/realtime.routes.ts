@@ -9,6 +9,8 @@ import type { SessionService } from '#/domain/auth/session.service'
 import { asOrderId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
 import { requireAuth } from '#/http/hooks/require-auth'
+import { UUID_RE } from '#/domain/shared/ids'
+import { DISPLAY_RE } from '#/domain/shared/ids'
 
 const encoder = new TextEncoder()
 const sseChunk = (event: string, data: unknown): Uint8Array =>
@@ -16,8 +18,6 @@ const sseChunk = (event: string, data: unknown): Uint8Array =>
 
 // ── phase-1: کانال‌های مجاز (سفت‌تر از قبل) ──
 // demo:* (تست) | orders:new (پنل) | orders:{displayId یا uuid} (ردیابی)
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-const DISPLAY_RE = /^ord-[a-z0-9]{8}$/
 const CHANNEL_RE =
   /^(demo:[A-Za-z0-9_-]{1,40}|orders:new|orders:(ord-[a-z0-9]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))$/
 

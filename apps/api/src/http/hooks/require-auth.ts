@@ -5,7 +5,7 @@ import type { SessionService } from '#/domain/auth/session.service'
 import { Err } from '#/domain/shared/errors'
 
 /** استخراج + احراز توکن — مشترک بین requireAuth و requireAdmin */
-async function authenticateRequest(sessions: SessionService, request: Request) {
+export async function authenticateRequest(sessions: SessionService, request: Request) {
   const header = request.headers.get('authorization') ?? ''
   let token = header.startsWith('Bearer ') ? header.slice(7).trim() : null
   if (!token) token = new URL(request.url).searchParams.get('token')

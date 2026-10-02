@@ -39,21 +39,6 @@ import type { AdminReportQuery, AdminReportResult } from '@sinshin/shared'
  * کپی موازی server/reports فرانت هم با همان منبع بسته شد. شکل‌ها تغییر نکرده‌اند.
  */
 
-const faNum = (n: number) => n.toLocaleString('fa-IR')
-const faDate = (d: Date) =>
-    new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short' }).format(d)
-const faDelivery = (t: string) =>
-    t === 'DELIVERY' ? 'ارسال با پیک' : t === 'PICKUP' ? 'بیرون‌بر' : 'سرو در سالن'
-// round-11 (اسکن M-4): سفارش refunded قبلاً «پرداخت ناموفق» نشان داده می‌شد
-// (refund → status=CANCELED) — ابتدا paymentStatus چک می‌شود، بعد status.
-const faStatus = (s: string, paymentStatus?: string) =>
-    paymentStatus === 'REFUNDED' ? 'بازگشت وجه'
-        : s === 'PAID' ? 'در انتظار تایید'
-            : s === 'CONFIRMED' ? 'تایید شده'
-                : s === 'ON_THE_WAY' ? 'در مسیر'
-                    : s === 'DELIVERED' ? 'تحویل شده'
-                        : s === 'CANCELED' ? 'پرداخت ناموفق'
-                            : 'در انتظار پرداخت'
 const faAction = (a: string) =>
     ({
         LOGIN: 'ورود',
@@ -68,7 +53,9 @@ const faAction = (a: string) =>
         SECURITY_TOGGLE: 'تغییر امنیت پیک',
     })[a] ?? a
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+import { faNum, faDate, faDelivery, faStatus, ORDER_TABLE_HEAD, orderRow } from './format'
+import { UUID_RE } from '#/domain/shared/ids'
+
 const PHONE_RE = /^09[0-9]{9}$/
 
 export class ReportQueryService {
@@ -143,20 +130,8 @@ export class ReportQueryService {
             tables: [
                 {
                     title: 'سفارشات',
-                    head: ['شناسه', 'نوع تحویل', 'وضعیت', 'مبلغ کل', 'پرداخت آنلاین', 'کیف پول', 'تخفیف', 'ارسال', 'بسته‌بندی', 'مشتری', 'زمان ثبت'],
-                    rows: rows.map(({ o, u }) => [
-                        o.displayId,
-                        faDelivery(o.deliveryType),
-                        faStatus(o.status, o.paymentStatus),
-                        faNum(o.breakdown.totalAmount),
-                        faNum(o.breakdown.amountPaidOnline),
-                        faNum(o.breakdown.walletDeduction),
-                        faNum(o.breakdown.discount),
-                        faNum(o.breakdown.deliveryFee),
-                        faNum(o.breakdown.packagingFee),
-                        u.phone,
-                        faDate(o.createdAt),
-                    ]),
+                    head: ORDER_TABLE_HEAD,
+                    rows: rows.map(({ o, u }) => orderRow(o, u, { num: faNum, date: faDate })),
                 },
             ],
         }

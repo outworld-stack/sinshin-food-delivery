@@ -8,6 +8,7 @@ import { courierScan, updateCourierLocation } from '#/server/courier'
 import { useToastStore } from '#/stores/toastStore'
 import { Bicycle, Check, Play, Pin, X } from 'reicon-react'
 import { getCourierToken } from '#/utils/courierSession'
+import { faNum } from '#/utils/format'
 
 export const Route = createFileRoute('/courier/scan/$orderId')({
   // پیکِ تخصیص‌یافته از پارامتر آدرس می‌آید (QR امنیتی)
@@ -153,7 +154,7 @@ function CourierScanPage() {
                   {position ? `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}` : 'در انتظار GPS…'}
                 </p>
                 <p className="text-xs text-gray-400 font-DanaMedium">
-                  ارسال‌های موفق: {sentCount.toLocaleString('fa-IR')} · حداکثر هر ۵ ثانیه
+                  ارسال‌های موفق: {faNum(sentCount)} · حداکثر هر ۵ ثانیه
                 </p>
               </div>
 
