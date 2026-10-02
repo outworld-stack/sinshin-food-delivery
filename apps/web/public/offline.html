@@ -1,9 +1,31 @@
+<!--
+═══════════════════════════════════════════════════════════════
+round-40 — sinshin-food-delivery — فایل 7 از 7
+مسیر مقصد: apps/web/public/offline.html
+وضعیت: جایگزینی کامل فایل موجود
+کامیت پیشنهادی: stage thirty-six
+═══════════════════════════════════════════════════════════════
+-->
+
 <!doctype html>
 <html lang="fa" dir="rtl">
 
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- رارد ۴۰ — دوزبانه شدن صفحه‌ی آفلاین PWA (آخرین گپ زبان عربی):
+         پیش‌فرض فارسی؛ اگر کوکی sinshin-lang=ar باشد، همین اسکریپت ES5
+         (قبل از رندر بدنه اجرا می‌شود → بدون فلش) زبان سند را ar می‌کند
+         و CSS فقط متن‌های همان زبان را نشان می‌دهد. عنوان هم همان‌جا
+         عوض می‌شود. آفلاین یعنی بدون باندل/فونت/JS اپ — همه‌چیز محلی. -->
+    <script>
+        try {
+            if (/(?:^|;\s*)sinshin-lang=ar(?:;|$)/.test(document.cookie)) {
+                document.documentElement.lang = 'ar'
+                document.title = 'أنت غير متصل | سين شين'
+            }
+        } catch (e) { }
+    </script>
     <title>آفلاین هستید | سین‌شین</title>
     <style>
         body {
@@ -49,15 +71,29 @@
             cursor: pointer;
             margin-top: 20px;
         }
+
+        /* رارد ۴۰ — هر دو زبان در DOM هستند؛ CSS فقط زبانِ فعال را نشان می‌دهد */
+        [data-ar] {
+            display: none
+        }
+
+        html[lang="ar"] [data-fa] {
+            display: none
+        }
+
+        html[lang="ar"] [data-ar] {
+            display: inline
+        }
     </style>
 </head>
 
 <body>
     <div class="box">
         <div class="icon">📡</div>
-        <h1>اتصال اینترنت قطع است</h1>
-        <p>برای استفاده از سین‌شین، اتصال خود را بررسی و دوباره تلاش کنید.</p>
-        <button onclick="location.reload()">تلاش مجدد</button>
+        <h1><span data-fa>اتصال اینترنت قطع است</span><span data-ar>انقطع الاتصال بالإنترنت</span></h1>
+        <p><span data-fa>برای استفاده از سین‌شین، اتصال خود را بررسی و دوباره تلاش کنید.</span><span data-ar>للاستفادة
+                من سين شين، يُرجى التحقق من اتصالك والمحاولة من جديد.</span></p>
+        <button onclick="location.reload()"><span data-fa>تلاش مجدد</span><span data-ar>إعادة المحاولة</span></button>
     </div>
 </body>
 

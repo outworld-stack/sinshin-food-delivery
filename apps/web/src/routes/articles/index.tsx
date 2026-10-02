@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-40 — sinshin-food-delivery — فایل 6 از 7
+// مسیر مقصد: apps/web/src/routes/articles/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-six
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 10 از 18
 // مسیر مقصد: web/src/routes/articles/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -83,6 +90,8 @@ const ArticlesPage = memo(function ArticlesPage() {
 						) : page.visibleArticles.length > 0 ? (
 							page.visibleArticles.map((article) => (
 								<ArticleCard
+									// رارد ۴۰ — key هر آیتم تا هشدار «unique key prop» کنسول نباشد
+									key={article.id}
 									article={{
 										...article,
 										profileImage: article.profileImage ?? null,

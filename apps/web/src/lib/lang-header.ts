@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-40 — sinshin-food-delivery — فایل 2 از 7
+// مسیر مقصد: apps/web/src/lib/lang-header.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-six
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 5 از 18
 // مسیر مقصد: web/src/lib/lang-header.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -20,12 +27,18 @@
  * منبع حقیقت همان کوکی sinshin-lang است (رارد ۳۱):
  *  • مرورگر: document.cookie
  *  • SSR: هدر cookie درخواستِ ورودی — از طریق getRequest() تان‌استک
- *    (همان الگوی geoGate.ts؛ import پویا تا باندل کلاینت آلوده نشود)
  *
  * round-38 — اولویتِ جدید ?lang= (سئوی دوزبانه): پارامتر URL بالاتر از
  * کوکی خوانده می‌شود — دقیقاً همان قرارداد beforeLoad ریشه. کرالری که
  * /products?lang=ar را می‌گیرد هنوز کوکی ندارد؛ بدون این، داده‌ی SSR
  * (و head داینامیک) فارسی می‌ماند و کل واریانت عربی بی‌اثر می‌شد.
+ *
+ * round-40 — شاخه‌ی SSR به ماژول سرور server/ssr-request.ts منتقل شد.
+ * این فایل در گراف کلاینت است (از مسیر api-fetch ← server/* ← routes)
+ * و import پویای مستقیمِ `@tanstack/react-start/server` در هر ماژولِ
+ * گراف کلاینت، هشدار import-protection می‌داد (حتی داخل گاردِ runtime).
+ * الگوی جدید همان geoGate است: گارد import.meta.env.SSR + import پویای
+ * ماژول محلی که هرگز به باندل/گراف کلاینت راه نمی‌یابد.
  *
  * فقط حالت 'ar' هدر می‌فرستد — fa پیش‌فرضِ سرور است و بدون هدر
  * رفتار قبلی (فارسی) دقیقاً حفظ می‌شود؛ ترافیک قدیمی و کرالرها بی‌تغییر.
@@ -33,28 +46,25 @@
  * ادمین/پیک هم اگر کوکی ar داشته باشند هدر می‌فرستند، ولی روت‌های
  * ادمین زبان نمی‌پرسند — بی‌اثر و بی‌خطر.
  */
-import { langFromUrl } from '#/i18n'
 
 /** کوکی sinshin-lang را از رشته‌ی cookie بیرون می‌کشد */
 function parseLangCookie(cookie: string): 'fa' | 'ar' {
-  return /(?:^|;\s*)sinshin-lang=ar(?:;|$)/.test(cookie) ? 'ar' : 'fa'
+	return /(?:^|;\s*)sinshin-lang=ar(?:;|$)/.test(cookie) ? 'ar' : 'fa'
 }
 
 /** زبان فعالِ این درخواست — مرورگر یا SSR (اول ?lang=، بعد کوکی) */
 export async function resolveRequestLang(): Promise<'fa' | 'ar'> {
-  if (typeof window !== 'undefined') {
-    return parseLangCookie(document.cookie)
-  }
-  // SSR — همان الگوی geoGate/__root: import پویای ماژول سرور
-  try {
-    const { getRequest } = await import('@tanstack/react-start/server')
-    const req = getRequest()
-    const urlLang = langFromUrl(req?.url)
-    if (urlLang) return urlLang
-    return parseLangCookie(req?.headers.get('cookie') ?? '')
-  } catch {
-    return 'fa'
-  }
+	if (!import.meta.env.SSR) {
+		return parseLangCookie(document.cookie)
+	}
+	// SSR — الگوی geoGate: ماژول سرور فقط داخل این گارد پویا import می‌شود؛
+	// در بیلد کلاینت import.meta.env.SSR=false → کل شاخه (با import) حذف.
+	try {
+		const { ssrRequestLang } = await import('#/server/ssr-request')
+		return ssrRequestLang()
+	} catch {
+		return 'fa'
+	}
 }
 
 /**
@@ -62,6 +72,6 @@ export async function resolveRequestLang(): Promise<'fa' | 'ar'> {
  * (هیچ تماسی تغییر شکل نمی‌دهد؛ فقط ar هدر اضافه می‌کند).
  */
 export async function langHeaders(): Promise<Record<string, string>> {
-  const lang = await resolveRequestLang()
-  return lang === 'ar' ? { 'x-sinshin-lang': 'ar' } : {}
+	const lang = await resolveRequestLang()
+	return lang === 'ar' ? { 'x-sinshin-lang': 'ar' } : {}
 }

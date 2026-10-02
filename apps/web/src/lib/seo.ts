@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-40 — sinshin-food-delivery — فایل 3 از 7
+// مسیر مقصد: apps/web/src/lib/seo.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-six
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-39 — sinshin-food-delivery — فایل 3 از 5
 // مسیر مقصد: apps/web/src/lib/seo.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -109,15 +116,16 @@ export function alternateHrefs(path: string): {
 }
 
 /** لینک‌های hreflang صفحه — در هر رندر (فارسی یا عربی) هر سه زبان حاضرند.
- *  نکته: پراپ با حروف کوچک «hreflang» داده می‌شود تا React آن را عیناً (فرم
- *  استاندارد HTML) رندر کند — هشدار dev «Did you mean hrefLang» فقط در
- *  بیلد توسعه است و یک‌بار ثبت می‌شود؛ خروجی prod تمیز است. */
+ *  نکته (رارد ۴۰): پراپ React با فرم camelCase «hrefLang» داده می‌شود —
+ *  React آن را به اتریبیوت استانداردِ حروف‌کوچکِ hreflang رندر می‌کند
+ *  (خروجی HTML بایت‌به‌بایت همان است) و هشدار dev «Invalid DOM property
+ *  hreflang» که در هر بار لود در کنسول ثبت می‌شد، دیگر نمی‌گیرد. */
 export function alternateLinks(path: string) {
     const h = alternateHrefs(path)
     return [
-        { rel: 'alternate', hreflang: 'fa', href: h.fa },
-        { rel: 'alternate', hreflang: 'ar', href: h.ar },
-        { rel: 'alternate', hreflang: 'x-default', href: h.xDefault },
+        { rel: 'alternate', hrefLang: 'fa', href: h.fa },
+        { rel: 'alternate', hrefLang: 'ar', href: h.ar },
+        { rel: 'alternate', hrefLang: 'x-default', href: h.xDefault },
     ]
 }
 

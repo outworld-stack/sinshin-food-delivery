@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-40 — sinshin-food-delivery — فایل 4 از 7
+// مسیر مقصد: apps/web/src/routes/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-six
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 7 از 18
 // مسیر مقصد: web/src/routes/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -13,7 +20,6 @@
 // ⚠ این فایل «صفحه‌ی اصلی سایت» است (ریشه/لندینگ) — نه داشبورد ادمین!
 // ═══════════════════════════════════════════════════════════════
 
-import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Brand } from '#/components/Brand'
 import { LangSwitcher } from '#/components/LangSwitcher'
@@ -37,20 +43,17 @@ export const Route = createFileRoute('/')({
 	// سمت سرور: UA از هدر درخواست + کوکی بستن؛ سمت کلاینت (ناوبری): navigator.
 	// نکته: گارد با document است نه navigator — Bun سمت سرور هم navigator دارد!
 	// کرالرها معافند تا اسکرین‌شات نتایج جستجو تمیز بماند (الگوی سئو-۱ geoGate).
+	// رارد ۴۰ — شاخه‌ی سرور به ماژول server/ssr-request.ts منتقل شد و گارد
+	// از typeof document به import.meta.env.SSR تغییر کرد: گاردِ runtime در
+	// باندل کلاینت می‌ماند و هشدار import-protection می‌داد؛ گارد کامپایل‌تاب
+	// در بیلد کلاینت کل شاخه (با import پویا) را حذف می‌کند (الگوی geoGate).
 	beforeLoad: () => {
-		if (typeof document === 'undefined') {
+		if (import.meta.env.SSR) {
 			return (async () => {
-				const { getRequest } = await import('@tanstack/react-start/server')
-				const req = getRequest()
-				const ua = req?.headers.get('user-agent') ?? null
-				if (isTrustedCrawlerUserAgent(ua)) return { oldBrowser: false }
-				const cookie = req?.headers.get('cookie') ?? ''
-				return {
-					oldBrowser: shouldShowOutdatedBanner({
-						ua,
-						dismissed: /(?:^|;\s*)sinshin-obs=1(?:;|$)/.test(cookie),
-					}),
-				}
+				const { ssrLandingOldBrowserVote } = await import(
+					'#/server/ssr-request'
+				)
+				return { oldBrowser: ssrLandingOldBrowserVote() }
 			})()
 		}
 		return {

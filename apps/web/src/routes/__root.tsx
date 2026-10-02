@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// round-40 — sinshin-food-delivery — فایل 5 از 7
+// مسیر مقصد: apps/web/src/routes/__root.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-six
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 6 از 18
 // مسیر مقصد: web/src/routes/__root.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -17,13 +24,7 @@ import {
 import { useEffect } from 'react'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { Toast } from '#/components/Toast'
-import {
-	LANG_COOKIE,
-	LANG_COOKIE_RE,
-	type Lang,
-	langFromUrl,
-	readLangCookie,
-} from '#/i18n'
+import { type Lang, readLangCookie } from '#/i18n'
 import { siteHead } from '#/lib/seo'
 import { PwaRegister } from '#/pwa/register-sw'
 import { useThemeStore } from '#/stores/themeStore'
@@ -65,25 +66,16 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 		// hreflang و sitemap به ?lang=ar اشاره می‌کنند). با آمدن پارامتر، کوکی
 		// هم هم‌راستا می‌شود تا ناوبری‌های بعدیِ همان نشست در همان زبان بمانند.
 		// سمت کلاینت (ناوبری SPA) کوکی منبع حقیقت است — همان قرارداد رارد ۳۱.
+		//
+		// رارد ۴۰ — منطق SSR (getRequest/setCookie) به ماژول server/ssr-request.ts
+		// منتقل شد: import پویای مستقیمِ @tanstack/react-start/server در این فایل
+		// (که در گراف کلاینت است) هشدار import-protection می‌داد؛ الگوی geoGate
+		// (گارد import.meta.env.SSR + import پویای ماژول محلی) هم هشدار را
+		// می‌بندد و هم نشتی به باندل کلاینت را در بیلد تولیدی.
 		let lang: Lang = 'fa'
 		if (import.meta.env.SSR) {
-			const { getRequest, setCookie } = await import(
-				'@tanstack/react-start/server'
-			)
-			const req = getRequest()
-			const fromUrl = langFromUrl(req?.url)
-			if (fromUrl) {
-				lang = fromUrl
-				setCookie(LANG_COOKIE, fromUrl, {
-					path: '/',
-					maxAge: 31536000,
-					sameSite: 'lax',
-				})
-			} else {
-				const cookie = req?.headers.get('cookie') ?? ''
-				const m = LANG_COOKIE_RE.exec(cookie)
-				if (m) lang = m[1] as Lang
-			}
+			const { ssrResolveRootLang } = await import('#/server/ssr-request')
+			lang = ssrResolveRootLang()
 		} else {
 			lang = readLangCookie() ?? 'fa'
 		}
@@ -121,10 +113,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 
 	useEffect(() => {
 		captureRefFromUrl()
-		// رارد ۳۱ — علامت «اپ بالا آمد» برای نگهبانِ بنر مرورگر قدیمی:
-		// اگر باندل مدرن در موتور قدیمی کرش کند، این خط هرگز اجرا نمی‌شود و
-		// اسکریپت ES5 در head بعد از ۶ ثانیه بنر را روشن می‌کند.
-		;(window as unknown as { __sinshinBooted?: boolean }).__sinshinBooted = true
+			// رارد ۳۱ — علامت «اپ بالا آمد» برای نگهبانِ بنر مرورگر قدیمی:
+			// اگر باندل مدرن در موتور قدیمی کرش کند، این خط هرگز اجرا نمی‌شود و
+			// اسکریپت ES5 در head بعد از ۶ ثانیه بنر را روشن می‌کند.
+			; (window as unknown as { __sinshinBooted?: boolean }).__sinshinBooted = true
 		// استورها سطح ماژول زنده شدن — اینجا کلاس تم و theme-color سینک می‌شن.
 		// pwa-۴: theme-color هم با «تم دستی» هم‌گام می‌شود (نه فقط سیستم‌عامل) —
 		// نوار مرورگر/وضعیت اپ نصب‌شده در دارک‌مود هم‌رنگِ اپ می‌ماند.
