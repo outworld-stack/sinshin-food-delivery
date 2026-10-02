@@ -2,7 +2,12 @@
     email {$ACME_EMAIL:dev@sinshin.localhost}
 }
 
-{$DOMAIN:sinshin.localhost} {
+# ── دامنه‌ی بدون پیشوند — همیشه به‌صورت دائمی به دامنه‌ی اصلی هدایت می‌شود ──
+{$APEX_DOMAIN:sinshin.localhost} {
+    redir https://{$DOMAIN:www.sinshin.localhost}{uri} permanent
+}
+
+{$DOMAIN:www.sinshin.localhost} {
     encode zstd gzip
 
     header {

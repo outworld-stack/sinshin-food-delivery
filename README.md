@@ -110,7 +110,7 @@ docker compose -f docker-compose.dev.yml up -d postgres redis
 
 | متغیر | چیست | چطور مقدار بدهم |
 |---|---|---|
-| `DOMAIN` | دامنهٔ سایت؛ Caddy با همین نام گواهی TLS می‌گیرد و `SITE_URL` از آن ساخته می‌شود | دامنهٔ ثبت‌شده‌ات، مثل `sinshin.ir` (بدون `https://`) |
+| `DOMAIN` | دامنهٔ اصلی سایت **با پیشوند `www`** — Caddy با همین نام گواهی TLS می‌گیرد و `SITE_URL` (آدرس برگشت پرداخت‌ها) از آن ساخته می‌شود | دقیقاً `www.sinshin-foodpark.ir` (بدون `https://`) |
 | `ACME_EMAIL` | ایمیلی که Let's Encrypt هشدارهای گواهی را می‌فرستد | یک ایمیل واقعی |
 | `POSTGRES_PASSWORD` | پسورد کاربر دیتابیس | `openssl rand -base64 24` |
 | `DATABASE_URL` | رشتهٔ اتصال به دیتابیس — **باید همان پسورد بالا داخلش باشد** | `postgres://sinshin:<همان پسورد>@postgres:5432/sinshin` |
@@ -139,8 +139,9 @@ docker compose -f docker-compose.dev.yml up -d postgres redis
 
 | متغیر | پیش‌فرض | چیست |
 |---|---|---|
+| `APEX_DOMAIN` | `sinshin.localhost` | دامنهٔ بدون پیشوند — ریدایرکت دائمی به دامنهٔ اصلی (روی سرور: `sinshin-foodpark.ir`) |
 | `HEALTH_ALERT_PHONES` | = SUPER_ADMIN_PHONES | گیرندگان پیامک قطعی/برگشت db/redis/uploads |
-| `RESTAURANT_LAT` / `RESTAURANT_LNG` | از تنظیمات پنل ادمین | مختصات رستوران — مبدأ محاسبهٔ هزینهٔ ارسال (env روی DB اولویت دارد) |
+| `RESTAURANT_LAT` / `RESTAURANT_LNG` | مختصات رستوران در بندرانزلی (نمونهٔ فایل env) | مختصات رستوران — مبدأ محاسبهٔ هزینهٔ ارسال (env روی DB اولویت دارد) |
 | `GEO_BYPASS_IPS` | خالی | IPهایی که سد «فقط ایران» را رد می‌کنند (با کاما) |
 | `BACKUP_HOUR` | `5` | ساعت بکاپ روزانهٔ دیتابیس (به وقت تهران) |
 | `BACKUP_KEEP` | `7` | تعداد نسخهٔ بکاپ نگه‌داشته‌شده |
@@ -167,19 +168,22 @@ docker compose -f docker-compose.dev.yml up -d postgres redis
 
 ## ۵) دامنه — ست کردن DNS و TLS
 
-1. در پنل ثبت‌کنندهٔ دامنه، یک رکورد **A** بساز:
+1. در پنل ثبت‌کنندهٔ دامنه، برای **هر دو** شکل دامنه رکورد بساز:
 
 ```
-نوع: A    نام: @    مقدار: <IP سرور>
+نوع: A       نام: @     مقدار: <IP سرور>
+نوع: CNAME   نام: www   مقدار: @
 ```
 
-   (برای `www` می‌توانی یک CNAME از `www` به `@` بزنی؛ اما Caddyfile فعلی فقط
-   دامنهٔ اصلی را سرو می‌کند — کاربر `www` را با یک ریدایرکت ثبت‌کننده بده.)
+   (Caddy برای هر دو نام گواهی می‌گیرد: دامنهٔ اصلی `www` را سرو می‌کند و
+   دامنهٔ بدون پیشوند را خودش با ریدایرکت دائمی به آن می‌فرستد — نیازی به
+   ریدایرکت ثبت‌کننده نیست.)
 
 2. در `.env` ریشه:
 
 ```
-DOMAIN=sinshin.ir
+DOMAIN=www.sinshin-foodpark.ir
+APEX_DOMAIN=sinshin-foodpark.ir
 ACME_EMAIL=you@example.com
 ```
 
@@ -188,7 +192,7 @@ ACME_EMAIL=you@example.com
 4. استک را بالا بیاور — Caddy خودش برای دامنه گواهی Let's Encrypt می‌گیرد و
    تمدیدش خودکار است. گواهی‌ها در volume `sinshin_caddy_data` می‌مانند.
 
-> اگر فعلاً دامنه نداری، همان پیش‌فرض `sinshin.localhost` با گواهی self-signedِ
+> اگر فعلاً دامنه نداری، همان پیش‌فرض `www.sinshin.localhost` با گواهی self-signedِ
 > داخلی کار می‌کند (فقط داخل سرور، نه مرورگر بیرونی).
 
 ---

@@ -1,10 +1,3 @@
-// ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 20 از 31
-// مسیر مقصد: docker-compose.yml
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
-// ═══════════════════════════════════════════════════════════════
-
 name: sinshin
 
 # ══════════════════════════════════════════════════════════════
@@ -47,15 +40,9 @@ x-api-service: &api-service
     NODE_ENV: production
     PORT: "3000"
 
-    SITE_URL: https://${DOMAIN:-sinshin.localhost}
+    SITE_URL: https://${DOMAIN:-www.sinshin.localhost}
 
     DEVICE_ENFORCEMENT: ${DEVICE_ENFORCEMENT:-on}
-
-    # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
-    TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
-
-    # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
-    TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
 
     # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
     TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
@@ -120,7 +107,10 @@ services:
       - "443:443"
 
     environment:
-      DOMAIN: ${DOMAIN:-sinshin.localhost}
+      DOMAIN: ${DOMAIN:-www.sinshin.localhost}
+
+      # دامنه‌ی بدون پیشوند — سرو ریدایرکت دائمی به دامنه‌ی اصلی
+      APEX_DOMAIN: ${APEX_DOMAIN:-sinshin.localhost}
 
       ACME_EMAIL: ${ACME_EMAIL:-dev@sinshin.localhost}
 

@@ -267,7 +267,12 @@ export function siteJsonLd(lang: Lang) {
                 url: SITE_URL,
                 logo: `${SITE_URL}/icons/icon-512-v1.png`,
                 image: DEFAULT_OG_IMAGE,
-                telephone: '+982112345678',
+                telephone: '+981344552313',
+                geo: {
+                    '@type': 'GeoCoordinates',
+                    latitude: 37.4822056,
+                    longitude: 49.4418273,
+                },
                 servesCuisine: s.servesCuisine,
             },
         ],

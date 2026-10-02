@@ -112,7 +112,7 @@ await db.transaction(async (tx) => {
       { key: 'temporarily_closed', value: false },
       { key: 'live_tracking_enabled', value: false },
       // stage-10: packaging_fee حذف شد — بسته‌بندی per-product در ستون packaging_cost
-      { key: 'restaurant_location', value: { lat: 35.6892, lng: 51.389 } },
+      { key: 'restaurant_location', value: { lat: 37.4822056, lng: 49.4418273 } },
       // رارد ۳۷ — پیش‌فرض‌های دروازه‌ی جغرافیایی (قفل ایران روشن؛ دامنه‌ی عراق)
       { key: 'iran_only_access', value: true },
       { key: 'outside_access_scope', value: 'iraq' },

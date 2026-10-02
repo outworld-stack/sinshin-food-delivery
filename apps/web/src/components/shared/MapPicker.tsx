@@ -64,7 +64,7 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
               setLatDraft(e.target.value)
               push(e.target.value, lngDraft)
             }}
-            placeholder="35.6892"
+            placeholder="37.4822"
             step="0.000001"
             min="-90"
             max="90"
@@ -84,7 +84,7 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
               setLngDraft(e.target.value)
               push(latDraft, e.target.value)
             }}
-            placeholder="51.3890"
+            placeholder="49.4418"
             step="0.000001"
             min="-180"
             max="180"
@@ -110,7 +110,7 @@ const SDK_JS = 'https://cdn.neshan.org/sdk/ol/v4.6.2/ol.js'
 const SDK_CSS = 'https://cdn.neshan.org/sdk/ol/v4.6.2/ol.css'
 
 const NESHAN_KEY = import.meta.env.VITE_NESHAN_API_KEY as string | undefined
-const DEFAULT_CENTER = { lat: 35.6892, lng: 51.389 } // تهران
+const DEFAULT_CENTER = { lat: 37.4822056, lng: 49.4418273 } // رستوران سین‌شین — بندرانزلی
 
 let sdkPromise: Promise<void> | null = null
 function loadNeshanSdk(): Promise<void> {
