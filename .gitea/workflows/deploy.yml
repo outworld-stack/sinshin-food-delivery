@@ -1,0 +1,71 @@
+# ═══════════════════════════════════════════════════════════════
+# round-50 — sinshin-food-delivery — فایل 4 از 10
+# مسیر مقصد: .gitea/workflows/deploy.yml
+# وضعیت: فایل جدید
+# کامیت پیشنهادی: stage forty-four
+# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# CI/CD سین‌شین — استقرار خودکار روی خودِ سرور
+#
+# هر push به main این سه کار را پشت‌سرهم انجام می‌دهد:
+#   ۱) کد ‎/opt/sinshin-food-delivery به آخرین کامیت می‌رسد
+#   ۲) ‎docker compose up -d --build (مهاجرت‌ها خودکار قبل از api)
+#   ۳) سلامت‌سنجی — تا سرویس جواب ندهد job سبز نمی‌شود
+#
+# رانر (deploy/gitea) با برچسب deploy:host اجرایش می‌کند؛ دستورها
+# داخل کانتینر رانر هستند — جایی که سوکت داکر و ‎/opt ماونت است.
+# هیچ اکشن بیرونی (uses:) استفاده نشده تا سرور به گیت‌هاب نیاز
+# نداشته باشد. شرح کامل: README گام ۵ و ۱۳.
+# ═══════════════════════════════════════════════════════════════
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: deploy
+    timeout-minutes: 55
+
+    steps:
+      - name: همگام‌سازی کد
+        run: |
+          set -e
+          if [ ! -d /opt/sinshin-food-delivery/.git ]; then
+            echo "کد هنوز در /opt کلون نشده — راهنما: README گام ۶ (کلون اول روی سرور)"
+            exit 1
+          fi
+          cd /opt/sinshin-food-delivery
+          git fetch origin main
+          git reset --hard origin/main
+          echo "کد روی کامیت: $(git log --oneline -1)"
+
+      - name: بیلد و بالا آوردن استک
+        run: |
+          set -e
+          cd /opt/sinshin-food-delivery
+          if [ ! -f .env ]; then
+            echo "فایل .env هنوز ساخته نشده — راهنما: README گام ۸"
+            exit 1
+          fi
+          docker compose up -d --build
+
+      - name: سلامت‌سنجی
+        run: |
+          set -e
+          cd /opt/sinshin-food-delivery
+          # تا دو دقیقه فرصت می‌دهیم: بوت اول پس از بیلد کمی طول می‌کشد
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if curl -fsS http://localhost/api/health > /dev/null 2>&1; then
+              docker compose ps
+              echo ""
+              echo "استقرار کامل شد — سلامت تایید شد"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "سرویس در دو دقیقه جواب نداد — وضعیت سرویس‌ها:"
+          docker compose ps
+          exit 1

@@ -1,3 +1,9 @@
+# ═══════════════════════════════════════════════════════════════
+# round-50 — sinshin-food-delivery — فایل 3 از 10
+# مسیر مقصد: Caddyfile
+# وضعیت: جایگزینی کامل فایل موجود
+# کامیت پیشنهادی: stage forty-four
+# ═══════════════════════════════════════════════════════════════
 {
     email {$ACME_EMAIL:dev@sinshin.localhost}
 }
@@ -83,3 +89,19 @@
         reverse_proxy web:3000
     }
 }
+
+# ── گیتا (اختیاری — HTTPS روی پنل گیتا) ─────────────────────
+# استک گیتا (deploy/gitea) رابط وب را روی پورت 3000 با HTTP سرو
+# می‌کند و push هم با SSH روی 2222 امن است. این بلوک فقط برای آن
+# روز است که خواستی رابط وب گیتا هم HTTPS شود:
+#   ۱) رکورد DNS:  نوع A، نام git، مقدار IP سرور
+#   ۲) در ‎.env ریشه:  GIT_DOMAIN=git.sinshin-foodpark.ir
+#   ۳) این بلوک را از کامنت خارج کن و caddy را ری‌استارت کن:
+#      ‎docker compose restart caddy
+#   ۴) در ‎deploy/gitea/.env مقدار ROOT_URL را هم به آدرس https
+#      همان زیردامنه تغییر بده و گیتا را recreate کن.
+#
+# {$GIT_DOMAIN:git.sinshin.localhost} {
+#     encode zstd gzip
+#     reverse_proxy gitea:3000
+# }

@@ -1,0 +1,149 @@
+# ═══════════════════════════════════════════════════════════════
+# round-50 — sinshin-food-delivery — فایل 5 از 10
+# مسیر مقصد: deploy/gitea/docker-compose.yml
+# وضعیت: فایل جدید
+# کامیت پیشنهادی: stage forty-four
+# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# استک گیتا + رانر CI/CD — روی خودِ سرور، بدون هیچ سرویس بیرونی.
+#
+# راه‌اندازی (از ریشه‌ی ریپو):
+#   ۱) ‎cp deploy/gitea/.env.example deploy/gitea/.env  ← فقط SERVER_IP
+#   ۲) ‎docker compose -f deploy/gitea/docker-compose.yml up -d gitea
+#   ۳) بعد از ساخت ریپو و توکن ثبت رانر (README گام ۴ و ۵):
+#      توکن را در ‎.env همین پوشه بگذار و:
+#      ‎docker compose -f deploy/gitea/docker-compose.yml up -d
+#
+# پورت‌ها روی سرور: 3000 (رابط وب گیتا) و 2222 (‏git push با SSH)
+# راهنمای کامل: README.md گام ۴، ۵ و ۱۳
+# ═══════════════════════════════════════════════════════════════
+
+name: sinshin-gitea
+
+services:
+
+  # ═════════════════════════════════════════════════════════════
+  # Gitea — مخزن گیت + رابط وب + اجرای Actions
+  # ═════════════════════════════════════════════════════════════
+
+  gitea:
+    image: gitea/gitea:1.24
+
+    container_name: sinshin-gitea
+
+    restart: unless-stopped
+    init: true
+
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+
+      # دیتابیس سبک sqlite — برای گیتای تک‌کاربره کاملاً کافی است
+      GITEA__database__DB_TYPE: sqlite3
+
+      # آدرس‌هایی که گیتا در رابط وب برای clone نشان می‌دهد؛
+      # هر دو از SERVER_IP در ‎.env همین پوشه خوانده می‌شوند.
+      GITEA__server__ROOT_URL: http://${SERVER_IP:?در deploy/gitea/.env مقدار SERVER_IP را بگذار}:3000/
+      GITEA__server__SSH_DOMAIN: ${SERVER_IP:?}
+      GITEA__server__SSH_PORT: "2222"
+
+      # Actions (همان CI/CD) روشن
+      GITEA__actions__ENABLED: "true"
+
+    volumes:
+      - gitea_data:/data
+
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+    ports:
+      # رابط وب — http://SERVER_IP:3000
+      - "3000:3000"
+
+      # git push با SSH
+      - "2222:22"
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+
+    networks:
+      - edge
+
+
+  # ═════════════════════════════════════════════════════════════
+  # رانر — اجرای workflow استقرار (.gitea/workflows/deploy.yml)
+  #
+  # حالت host: دستورهای job مستقیم داخل همین کانتینر اجرا
+  # می‌شوند؛ برای همین سه چیز به آن وصل است:
+  #   • سوکت داکر ← بیلد و بالا آوردن استک اصلی
+  #   • ‎/opt/sinshin-food-delivery ← همان کدی که deploy می‌شود
+  #   • شبکه‌ی host ← دسترسی به گیتا روی localhost:3000
+  #
+  # تا توکن ثبت در ‎.env گذاشته نشود، فقط ثبت را تلاش می‌کند و
+  # استک اصلی دست نمی‌خورد.
+  # ═════════════════════════════════════════════════════════════
+
+  runner:
+    build:
+      context: .
+      dockerfile: runner.Dockerfile
+
+    image: sinshin/gitea-runner
+
+    container_name: sinshin-runner
+
+    restart: unless-stopped
+    init: true
+
+    network_mode: host
+
+    environment:
+      GITEA_INSTANCE_URL: http://localhost:3000
+
+      GITEA_RUNNER_NAME: sinshin-deploy
+
+      # توکن ثبت رانر — از: مدیریت سایت ← Actions ← Runners ← Create Token
+      GITEA_RUNNER_REGISTRATION_TOKEN: ${GITEA_RUNNER_REGISTRATION_TOKEN:-NOT-SET-YET}
+
+      CONFIG_FILE: /config.yaml
+
+    volumes:
+      - ./runner-config.yaml:/config.yaml:ro
+
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      - /opt/sinshin-food-delivery:/opt/sinshin-food-delivery
+
+      - runner_data:/data
+
+    depends_on:
+      - gitea
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+
+
+volumes:
+
+  gitea_data:
+    name: sinshin_gitea_data
+
+  runner_data:
+    name: sinshin_runner_data
+
+
+networks:
+
+  # همان شبکه‌ی لبه‌ی استک اصلی (sinshin-edge) — اگر نباشد ساخته
+  # می‌شود و اگر استک اصلی زودتر بالا آمده باشد همان را استفاده
+  # می‌کند. نتیجه: هر روز که خواستی رکورد git دامنه بسازی و بلوک
+  # کامنت‌شده‌ی گیتا را در Caddyfile فعال کنی، caddy گیتا را همین‌جا
+  # با نام «gitea» پیدا می‌کند (‏HTTPS روی پنل گیتا — README گام ۱۵).
+  edge:
+    name: sinshin-edge

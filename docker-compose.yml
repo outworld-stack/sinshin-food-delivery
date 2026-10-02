@@ -1,4 +1,10 @@
 # ═══════════════════════════════════════════════════════════════
+# round-50 — sinshin-food-delivery — فایل 9 از 10
+# مسیر مقصد: docker-compose.yml
+# وضعیت: جایگزینی کامل فایل موجود
+# کامیت پیشنهادی: stage forty-four
+# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # round-49 — sinshin-food-delivery — فایل 4 از 6
 # مسیر مقصد: docker-compose.yml
 # وضعیت: جایگزینی کامل فایل موجود
@@ -120,6 +126,11 @@ services:
       APEX_DOMAIN: ${APEX_DOMAIN:-sinshin.localhost}
 
       ACME_EMAIL: ${ACME_EMAIL:-dev@sinshin.localhost}
+
+      # رارد ۵۰ — زیردامنه‌ی اختیاری گیتا؛ فقط وقتی معنا دارد که
+      # بلوک کامنت‌شده‌ی انتهای Caddyfile فعال شده باشد (پیش‌فرض
+      # بی‌اثر و بی‌ضرر است).
+      GIT_DOMAIN: ${GIT_DOMAIN:-git.sinshin.localhost}
 
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
 
