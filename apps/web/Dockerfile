@@ -1,3 +1,10 @@
+# ═══════════════════════════════════════════════════════════════
+# round-49 — sinshin-food-delivery — فایل 3 از 6
+# مسیر مقصد: apps/web/Dockerfile
+# وضعیت: جایگزینی کامل فایل موجود
+# کامیت پیشنهادی: stage forty-three
+# ═══════════════════════════════════════════════════════════════
+
 # apps/web/Dockerfile — برای Docker (BuildKit) نوشته شده.
 #
 # چرا FROM با نام کوتاه (بدون پیشوند docker.io)؟
@@ -37,6 +44,11 @@ RUN --mount=type=cache,id=sinshin-bun-web,target=/root/.bun/install/cache \
 # ──────────────────────────────────────────────────────────
 FROM deps AS dev
 
+# round-49 — کلید نقشهٔ نشان: در دِو هم از همان build arg می‌آید
+# (Vite متغیرهای VITE_* را از محیط build می‌خواند؛ خالی = فرم دستی).
+ARG VITE_NESHAN_API_KEY
+ENV VITE_NESHAN_API_KEY=${VITE_NESHAN_API_KEY}
+
 ENV NODE_ENV=development
 
 WORKDIR /app/apps/web
@@ -50,6 +62,13 @@ CMD ["bun", "run", "dev", "--host", "0.0.0.0"]
 # Production build
 # ──────────────────────────────────────────────────────────
 FROM deps AS build
+
+# round-49 — کلید نقشهٔ نشان باید «موقع build» داخل باندل برود —
+# Vite متغیرهای VITE_* را از محیط build جایگزین می‌کند. compose این
+# مقدار را از ‎.env ریشه (VITE_NESHAN_API_KEY) به‌عنوان build arg
+# می‌رساند؛ خالی = فرم مختصات دستی جای نقشه (رفتار قبلی).
+ARG VITE_NESHAN_API_KEY
+ENV VITE_NESHAN_API_KEY=${VITE_NESHAN_API_KEY}
 
 COPY packages/shared/src packages/shared/src
 COPY apps/web apps/web

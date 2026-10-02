@@ -1,3 +1,10 @@
+# ═══════════════════════════════════════════════════════════════
+# round-49 — sinshin-food-delivery — فایل 4 از 6
+# مسیر مقصد: docker-compose.yml
+# وضعیت: جایگزینی کامل فایل موجود
+# کامیت پیشنهادی: stage forty-three
+# ═══════════════════════════════════════════════════════════════
+
 name: sinshin
 
 # ══════════════════════════════════════════════════════════════
@@ -183,6 +190,11 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       target: runtime
+      # round-49 — کلید نقشهٔ نشان برای بیلد وب؛ از ‎.env ریشه می‌آید.
+      # Vite متغیرهای VITE_* را موقع build داخل باندل می‌بندد —
+      # خالی = فرم مختصات دستی جای نقشه (رفتار قبلی).
+      args:
+        VITE_NESHAN_API_KEY: ${VITE_NESHAN_API_KEY:-}
 
     image: sinshin/web
 
