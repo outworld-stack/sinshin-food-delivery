@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-43 — sinshin-food-delivery — فایل 3 از 14
+// مسیر مقصد: apps/api/src/domain/order/order.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-eight
+// ═════════════════════════════════════════════════════════════
+
 //src/domain/order/order.service.ts
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
@@ -37,6 +44,7 @@ import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.servic
 import type { SettingsService } from "#/domain/settings/settings.service";
 import type { OrderBreakdown } from "#/infra/db/schema";
 import type { CouponService } from "../coupon/coupon.service";
+import type { CheckoutPreviewData } from "@sinshin/shared";
 
 const REFERRAL_PERCENT = 10;
 const DISPLAY_RE = /^ord-[a-z0-9]{8}$/;
@@ -66,7 +74,8 @@ export interface CheckoutInput {
 	gatewayId?: string | null;
 }
 
-export interface CheckoutResult {
+/** نتیجه داخلی سرویس — قرارداد پاسخ HTTP در بسته‌ی مشترک تعریف شده است */
+export interface CheckoutServiceResult {
 	displayId: string;
 	requiresPayment: boolean;
 	paymentId?: PaymentId;
@@ -105,7 +114,7 @@ export class OrderService {
 	async checkout(
 		userId: string,
 		input: CheckoutInput,
-	): Promise<CheckoutResult> {
+	): Promise<CheckoutServiceResult> {
 		const { db } = this.deps;
 		if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
 
@@ -397,21 +406,7 @@ export class OrderService {
 	async preview(
 		userId: string,
 		input: CheckoutInput,
-	): Promise<{
-		breakdown: OrderBreakdown;
-		items: {
-			name: string;
-			sizeName: string | null;
-			unitPrice: number;
-			quantity: number;
-		}[];
-		coupon: {
-			code: string;
-			valid: boolean;
-			discount: number;
-			message?: string;
-		} | null;
-	}> {
+	): Promise<CheckoutPreviewData> {
 		const { db } = this.deps;
 		if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
 

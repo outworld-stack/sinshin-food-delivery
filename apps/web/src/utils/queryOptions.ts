@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-37 — sinshin-food-delivery — فایل 14 از 17
+// round-43 — sinshin-food-delivery — فایل 7 از 14
 // مسیر مقصد: apps/web/src/utils/queryOptions.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-three
+// کامیت پیشنهادی: stage thirty-eight
 // ═══════════════════════════════════════════════════════════════
 
 // src/utils/queryOptions.ts
@@ -65,7 +65,7 @@ import { getAdminCoupons, getAdminCoupon } from '#/server/coupons'
 import { getDeliveryZones } from '#/server/deliveryZones'
 import type { DeliveryType } from '#/types/site/checkout'
 import type { OrderRow } from '#/types/admin/orders'
-import type { ProductId, SizeId } from '@sinshin/shared'
+import type { AdminUsersData, ProductId, SizeId } from '@sinshin/shared'
 
 // دیتای ترکیبی منو — یک کوئری، دو درخواست موازی
 export interface MainData {
@@ -426,24 +426,8 @@ export interface AdminUsersFilters {
   sortSpent: string
 }
 
-// ردیف کاربر — مشترک بین سرور و optimistic update
-export interface AdminUserRow {
-  id: string
-  firstName?: string | null
-  lastName?: string | null
-  phone: string
-  device: string
-  status: string
-  walletBalance: number
-  totalSpent: number
-  registeredAt: Date
-  /** stage-10: 'admin' → آیکون مسدودسازی disable (حساب ادمین اصلی) */
-  role?: string
-}
-export interface AdminUsersData {
-  users: AdminUserRow[]
-  total: number
-}
+// ردیف/بسته‌ی داده‌ی کاربران — رارد ۴۳ مستقیم از قرارداد مشترک
+// (قبلاً کپی محلی با نقش اختیاری بود و با سرویس دریف می‌کرد)
 
 // sorts سرور از فیلدهای کش‌شده مشتق می‌شه — مپینگ یکجا
 function usersSorts(f: AdminUsersFilters) {

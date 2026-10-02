@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-43 — sinshin-food-delivery — فایل 2 از 14
+// مسیر مقصد: apps/api/src/domain/admin/admin.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-eight
+// ═════════════════════════════════════════════════════════════
+
 // src/domain/admin/admin.service.ts
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 
@@ -18,6 +25,7 @@ import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain
 import { Err } from '#/domain/shared/errors'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
+import type { AdminUsersData } from '@sinshin/shared'
 
 export interface AdminUserSort {
     field: 'registeredAt' | 'walletBalance' | 'totalSpent'
@@ -114,22 +122,7 @@ export class AdminService {
         device?: string
         status?: string
         sorts?: AdminUserSort[]
-    }): Promise<{
-        users: Array<{
-            id: UserId
-            firstName?: string | null
-            lastName?: string | null
-            phone: string
-            device: string
-            status: string
-            walletBalance: number
-            totalSpent: number
-            registeredAt: Date
-            /** stage-10: 'admin' → آیکون مسدودسازی در فرانت disable */
-            role: string
-        }>
-        total: number
-    }> {
+    }): Promise<AdminUsersData> {
         const { db } = this.deps
         const conditions = []
 

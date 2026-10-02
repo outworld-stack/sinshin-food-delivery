@@ -1,17 +1,20 @@
+// ═══════════════════════════════════════════════════════════
+// round-43 — sinshin-food-delivery — فایل 5 از 14
+// مسیر مقصد: apps/web/src/components/shared/StatusBadge.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-eight
+// ═══════════════════════════════════════════════════════════
+
 // src/components/shared/StatusBadge.tsx
+import type { OrderStatus } from '@sinshin/shared'
 import { memo } from 'react'
 import { useI18nSafe } from '#/i18n'
 
-// منبع واحد وضعیت‌های سفارش — همه‌جا فقط از همین خونده شه
-// نکته: «لغو» دیگه وجود نداره — تنها پایان ناموفق، «پرداخت ناموفق»ئه (تصمیم پرسش ۴)
-export type OrderStatusKey =
-  | 'PENDING_PAYMENT'
-  | 'PAID'
-  | 'CONFIRMED'
-  | 'ON_THE_WAY'
-  | 'DELIVERED'
-  | 'PAYMENT_FAILED'
-  | 'CANCELED' // داده‌های موک — نمایشش همون «پرداخت ناموفق»ئه
+// منبع واحد وضعیت‌های سفارش — شش مقدارِ دیتابیس، مستقیم از قرارداد مشترک.
+// «لغو» تنها پایان ناموفق است و برچسب نمایشی‌اش «پرداخت ناموفق» می‌ماند
+// (تصمیم پرسش ۴). رارد ۴۳ — مقدار ساختگی‌ای که در دیتابیس وجود نداشت
+// حذف شد؛ شکست پرداخت از راه کلید «لغو» به همین برچسب می‌رسد.
+export type OrderStatusKey = OrderStatus
 
 interface StatusEntry {
   user: string
@@ -44,11 +47,6 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatusKey, StatusEntry> = {
     user: 'تحویل شد',
     admin: 'تحویل شده',
     color: 'bg-green-100 text-green-600 dark:bg-green-500/10 dark:text-green-400',
-  },
-  PAYMENT_FAILED: {
-    user: 'پرداخت ناموفق',
-    admin: 'پرداخت ناموفق',
-    color: 'bg-red-100 text-red-600 dark:bg-red-500/10 dark:text-red-400',
   },
   CANCELED: {
     user: 'پرداخت ناموفق',
@@ -84,8 +82,7 @@ export const StatusBadge = memo(function StatusBadge({
       CONFIRMED: t['status.CONFIRMED'],
       ON_THE_WAY: t['status.ON_THE_WAY'],
       DELIVERED: t['status.DELIVERED'],
-      PAYMENT_FAILED: t['status.PAYMENT_FAILED'],
-      CANCELED: t['status.PAYMENT_FAILED'], // داده‌های موک — نمایش همان «فشل الدفع»
+      CANCELED: t['status.PAYMENT_FAILED'], // «لغو» → برچسب عربیِ «فشل الدفع» (تصمیم پرسش ۴)
     }
     label = AR_USER[status as OrderStatusKey] ?? t['status.unknown']
   }

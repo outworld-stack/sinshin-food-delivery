@@ -1,24 +1,20 @@
+// ═══════════════════════════════════════════════════════════
+// round-43 — sinshin-food-delivery — فایل 8 از 14
+// مسیر مقصد: apps/web/src/components/admin/users/UserCard.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-eight
+// ═══════════════════════════════════════════════════════════
+
 // src/components/admin/users/UserCard.tsx
 import { memo, useCallback } from 'react'
 import { Link } from '@tanstack/react-router'
 import { formatPrice, formatDate } from '#/utils/format'
 import { Can } from '#/components/shared/PermissionGate'
 import { Eye, Ban, Check, Shield } from 'reicon-react'
+import type { AdminUserRow } from '@sinshin/shared'
 
 interface UserCardProps {
-  user: {
-    id: string
-    firstName?: string | null
-    lastName?: string | null
-    phone: string
-    device: string
-    status: string
-    walletBalance: number
-    totalSpent: number
-    registeredAt: Date
-    /** stage-10: 'admin' → آیکون مسدودسازی disable (حساب ادمین اصلی محافظت‌شده) */
-    role?: string
-  }
+  user: AdminUserRow
   canToggle: boolean
   onToggle: (id: string, status: string) => void
 }

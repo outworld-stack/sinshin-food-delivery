@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════
+// round-43 — sinshin-food-delivery — فایل 10 از 14
+// مسیر مقصد: apps/web/src/server/checkout.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-eight
+// ═══════════════════════════════════════════════════════════
+
 // src/server/checkout.ts — تماماً API + auth
 import { getJson, authJson } from '#/lib/api-fetch'
 import { asAddressId, asProductId, asSizeId } from '@sinshin/shared'
@@ -5,9 +12,10 @@ import type {
   RestaurantStatusDto,
   CheckoutResponse,
   CheckoutRequest,
+  CheckoutPreviewData,
   PaymentStatus,
 } from '@sinshin/shared'
-import type { RestaurantStatus, CheckoutPreviewData } from '#/types/site/checkout'
+import type { RestaurantStatus } from '#/types/site/checkout'
 
 // ─── وضعیت رستوران ───
 export async function getRestaurantStatus(): Promise<RestaurantStatus> {

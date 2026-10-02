@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-43 — sinshin-food-delivery — فایل 9 از 14
+// مسیر مقصد: apps/web/src/types/site/checkout.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-eight
+// ═══════════════════════════════════════════════════════════════
+
 // src/types/site/checkout.ts
 
 export type DeliveryType = 'DELIVERY' | 'PICKUP' | 'DINE_IN'
@@ -11,41 +18,9 @@ export interface RestaurantStatus {
   closeReason?: string | null
 }
 
-// فاکتور (خروجی سرور) — صفحه‌ی چاپ فاکتور
-export interface InvoiceData {
-  orderId: string
-  items: { name: string; sizeName?: string | null; quantity: number; price: number }[]
-  foodTotal: number
-  discount: number
-  walletDeduction: number
-  deliveryFee: number
-  totalAmount: number
-  amountPaidOnline: number
-  deliveryType: DeliveryType
-  customerNote?: string | null
-}
-
-// ── phase-3: پیش‌نمایش چک‌اوت — قیمت‌گذاری ۱۰۰٪ سروری ──
-export interface CheckoutPreviewCoupon {
-  code: string
-  valid: boolean
-  discount: number
-  message?: string
-}
-
-export interface CheckoutPreviewData {
-  breakdown: {
-    foodTotal: number
-    discount: number
-    walletDeduction: number
-    deliveryFee: number
-    packagingFee: number
-    totalAmount: number
-    amountPaidOnline: number
-  }
-  items: { name: string; sizeName: string | null; unitPrice: number; quantity: number }[]
-  coupon: CheckoutPreviewCoupon | null
-}
+// رارد ۴۳ — InvoiceData مرده بود و حذف شد؛ تایپ‌های پیش‌نمایش
+// چک‌اوت به قرارداد مشترک منتقل شدند و از @sinshin/shared
+// import می‌شوند.
 
 // محاسبات نمایشی — همه از breakdown سرور مشتق می‌شوند
 export interface CheckoutCalculation {

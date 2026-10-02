@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// round-43 — sinshin-food-delivery — فایل 11 از 14
+// مسیر مقصد: apps/web/src/hooks/admin/useAdminUsersPage.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// کامیت پیشنهادی: stage thirty-eight
+// ═══════════════════════════════════════════════════════════════
+
 // src/hooks/admin/useAdminUsersPage.ts
 // ⬅ NEW GENERATION: «URL as State» برای لیست ادمین
 //
@@ -18,7 +25,8 @@ import { searchTextField } from '#/utils/searchSchema'
 import { toggleUserStatus } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import { usePermissions } from '#/hooks/admin/usePermissions'
-import { adminUsersOptions, type AdminUsersData } from '#/utils/queryOptions'
+import { adminUsersOptions } from '#/utils/queryOptions'
+import type { AdminUsersData } from '@sinshin/shared'
 import { qk } from '#/utils/queryKeys'
 
 // --- اسکیمای search — شهروند URL شدن فیلترها ---

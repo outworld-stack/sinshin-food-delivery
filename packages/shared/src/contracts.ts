@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 23 از 31
+// round-43 — sinshin-food-delivery — فایل 1 از 14
 // مسیر مقصد: packages/shared/src/contracts.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
+// کامیت پیشنهادی: stage thirty-eight
 // ═══════════════════════════════════════════════════════════════
 
 // packages/shared/src/contracts.ts
@@ -51,12 +51,6 @@ export interface VerifyOtpResponse {
   queueCount?: number
   user: AuthUser
   device: { id: DeviceId; name?: string | null }
-}
-
-export interface ApiError {
-  code: string
-  message: string
-  details?: unknown
 }
 
 // ═══════════ Menu ═══════════
@@ -204,7 +198,12 @@ export interface CheckoutInput {
   gatewayId?: string | null
 }
 
-export interface CheckoutResult {
+/**
+ * رارد ۴۳ — عمداً با «نوع» تعریف شده نه «اینترفیس»: پاسخ چک‌اوت در
+ * جدول idempotency مانند رکورد JSON ذخیره می‌شود؛ فقط نوعِ شیء‌محور
+ * امضای ایندکس ضمنی دارد و مستقیم قابل انتساب است — اینترفیس نه.
+ */
+export type CheckoutResult = {
   orderCompleted: boolean
   orderId: string // displayId — قابل‌نمایش، برند ندارد
   requiresPayment: boolean
@@ -212,18 +211,19 @@ export interface CheckoutResult {
   breakdown: OrderBreakdown
 }
 
-export interface InvoiceData {
-  orderId: string // displayId
-  items: { name: string; sizeName?: string | null; quantity: number; price: number }[]
-  foodTotal: number
+// ═══════════ پیش‌نمایش چک‌اوت (رارد ۴۳ — منبع واحد دو طرف) ═══════════
+
+export interface CheckoutPreviewCoupon {
+  code: string
+  valid: boolean
   discount: number
-  walletDeduction: number
-  deliveryFee: number
-  packagingFee: number
-  totalAmount: number
-  amountPaidOnline: number
-  deliveryType: DeliveryType
-  customerNote?: string | null
+  message?: string
+}
+
+export interface CheckoutPreviewData {
+  breakdown: OrderBreakdown
+  items: { name: string; sizeName: string | null; unitPrice: number; quantity: number }[]
+  coupon: CheckoutPreviewCoupon | null
 }
 
 // ═══════════ User Order View (mapOne) ═══════════
@@ -347,19 +347,6 @@ export interface CouponRule {
   quantity?: number
 }
 
-export interface CouponDto {
-  id: CampaignId
-  code: string
-  title?: string | null
-  discountPercentage: number
-  maxUses: number
-  isPublic: boolean
-  isActive: boolean
-  usedCount: number
-  expiryDate?: string | null
-  rules: CouponRule[]
-}
-
 // ═══════════ Articles (ادغام دو بخش تکراری — نسخه‌ی کامل) ═══════════
 
 export interface ArticleSubCategoryDto {
@@ -428,44 +415,11 @@ export interface RestaurantStatusDto {
   anyClosed: boolean
 }
 
-// ═══════════ Admin2 / Live ═══════════
-// TODO(phase-4): Admin2PermissionsDto و SubAdminPermissionsDto عملاً یک چیزند
-// (hall/takeaway ↔ scopeHall/scopeTakeaway) — بعد از ممیزی مصرف‌کننده‌ها ادغام شوند.
-
-export interface Admin2PermissionsDto {
-  hall: boolean
-  takeaway: boolean
-  productsRead: boolean
-  productsWrite: boolean
-  usersRead: boolean
-  usersWrite: boolean
-  couriersRead: boolean
-  couriersWrite: boolean
-  mainCategoriesRead: boolean
-  mainCategoriesWrite: boolean
-  orderDetailsRead: boolean
-  canToggleTemporaryClose: boolean
-  canEditPackagingFee: boolean
-}
-
 // ═══════════ Payments / Checkout API ═══════════
-
-export interface PaymentInitResult {
-  paymentUrl: string
-}
 
 // phase-0: قبلاً کپیِ تکراری از CheckoutInput/Result بودند
 export type CheckoutRequest = CheckoutInput
 export type CheckoutResponse = CheckoutResult
-
-export interface MockPayRequest {
-  success: boolean
-}
-
-export interface MockPayResponse {
-  orderDisplayId: string
-  paymentStatus: 'SUCCESS' | 'FAILED'
-}
 
 // ═══════════ Gallery ═══════════
 
@@ -521,9 +475,6 @@ export interface AboutContentDto {
 
 // ═══════════ Coupons (Admin) ═══════════
 
-// phase-0: alias — قبلاً کپیِ تکراری از CouponRule بود
-export type CouponRuleDto = CouponRule
-
 export interface CouponWithConditionsDto {
   coupon: {
     id: CampaignId
@@ -549,14 +500,16 @@ export interface CouponWithConditionsDto {
 
 export interface AdminUserRow {
   id: UserId
-  firstName?: string | null
-  lastName?: string | null
+  firstName: string | null
+  lastName: string | null
   phone: string
   device: string
   status: string
   walletBalance: number
   totalSpent: number
   registeredAt: Date
+  /** رارد ۴۳ — همیشه ارسال می‌شود؛ 'admin' → آیکون مسدودسازی در فرانت disable */
+  role: string
 }
 
 export interface AdminUsersData {
@@ -744,9 +697,6 @@ export interface AdminOrdersData {
   orders: OrderRow[]
   total: number
 }
-
-// phase-0: alias — قبلاً کپیِ ساختاریِ تکراری از OrderRow بود
-export type AdminOrderRow = OrderRow
 
 // ═══════════ Admin: Dashboard Stats ═══════════
 

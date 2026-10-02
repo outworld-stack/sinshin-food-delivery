@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 20 از 49
+// round-43 — sinshin-food-delivery — فایل 4 از 14
 // مسیر مقصد: apps/api/src/http/routes/order.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// کامیت پیشنهادی: stage thirty-eight
 // ═══════════════════════════════════════════════════════════════
 
 //src/http/routes/order.routes.ts
@@ -19,6 +19,7 @@ import type { SseHub } from '#/infra/realtime/sse-hub'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { Err } from '#/domain/shared/errors'
 import { langFromHeaders } from '#/domain/shared/lang'
+import type { CheckoutResponse } from '@sinshin/shared'
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 const DISPLAY_PATTERN = '^ord-[a-z0-9]{8}$'
@@ -159,8 +160,8 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
           }
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let response: Record<string, any>
+        // رارد ۴۳ — پاسخ چک‌اوت با قرارداد مشترک تایپ‌دار شد
+        let response: CheckoutResponse
         try {
           const r = await deps.orders.checkout(user.id, body)
           // round-16 — چک‌اوت تمام-کیف‌پول همین‌جا PAID می‌شود؛
