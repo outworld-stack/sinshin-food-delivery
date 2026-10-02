@@ -207,6 +207,7 @@ export const fa = {
         'checkout.gateway.ZARINPAL': 'زرین‌پال',
         'checkout.gateway.PAYIR': 'پی‌ایر',
         'checkout.gateway.SEP': 'بانک سامان',
+        'checkout.gateway.MELLAT': 'بانک ملت',
         'checkout.addressTitle': 'آدرس تحویل',
         'checkout.newAddress': 'آدرس جدید',
         'checkout.noAddress': 'شما هنوز آدرسی ثبت نکرده‌اید',

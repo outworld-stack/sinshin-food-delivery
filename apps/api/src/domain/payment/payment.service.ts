@@ -13,6 +13,7 @@ import { MockAdapter } from './mock.adapter'
 import { ZarinpalAdapter } from './zarinpal.adapter'
 import { PayirAdapter } from './payir.adapter'
 import { SepAdapter } from './sep.adapter'
+import { MellatAdapter } from './mellat.adapter'
 import type { PaymentGateway } from './gateway.types'
 
 
@@ -33,6 +34,7 @@ export class PaymentService {
       ['ZARINPAL', new ZarinpalAdapter(deps.config)],
       ['PAYIR', new PayirAdapter(deps.config)],
       ['SEP', new SepAdapter(deps.config)],
+      ['MELLAT', new MellatAdapter(deps.config)],
     ])
   }
 

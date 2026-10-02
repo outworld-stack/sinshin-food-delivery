@@ -50,7 +50,7 @@ const initialState: CheckoutState = {
   couponDraft: '',
   couponCode: null,
   useWallet: false,
-  selectedGateway: import.meta.env.DEV ? 'MOCK' : 'ZARINPAL',
+  selectedGateway: import.meta.env.DEV ? 'MOCK' : 'MELLAT',
   customerNote: '',
 }
 

@@ -16,7 +16,7 @@ export const payments = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    /** ZARINPAL | PAYIR | SEP | MOCK */
+    /** ZARINPAL | PAYIR | SEP | MELLAT | MOCK */
     gateway: varchar('gateway', { length: 30 }).notNull(),
     /** direct | indirect | mock */
     mode: varchar('mode', { length: 20 }).notNull(),

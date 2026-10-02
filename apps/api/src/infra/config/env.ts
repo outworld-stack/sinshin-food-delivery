@@ -31,6 +31,9 @@ export interface GatewayConfig {
   zarinpalCallback: string
   payirApiKey: string
   sepTerminalId: string
+  mellatTerminalId: string
+  mellatUserName: string
+  mellatUserPassword: string
 }
 
 export interface RestaurantLocationConfig {
@@ -181,6 +184,9 @@ export class AppConfig {
       zarinpalCallback: str('ZARINPAL_CALLBACK'),
       payirApiKey: str('PAYIR_API_KEY'),
       sepTerminalId: str('SEP_TERMINAL_ID'),
+      mellatTerminalId: str('MELLAT_TERMINAL_ID'),
+      mellatUserName: str('MELLAT_USERNAME'),
+      mellatUserPassword: str('MELLAT_PASSWORD'),
     }
 
     this.device = {

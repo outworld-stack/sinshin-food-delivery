@@ -207,6 +207,7 @@ export const ar: Dict = {
         'checkout.gateway.ZARINPAL': 'زرين‌بال',
         'checkout.gateway.PAYIR': 'باي‌إير',
         'checkout.gateway.SEP': 'بنك سامان',
+        'checkout.gateway.MELLAT': 'بنك ملت',
         'checkout.addressTitle': 'عنوان التسليم',
         'checkout.newAddress': 'عنوان جديد',
         'checkout.noAddress': 'لم تسجّل أي عنوان بعد',
