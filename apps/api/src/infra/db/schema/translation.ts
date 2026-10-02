@@ -13,14 +13,14 @@ import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid, varchar } 
  * round-35 — صف ترجمه‌ی خودکار (مترجم آفلاین NLLB).
  *
  * یک رکورد = «کل» فیلدهای عربیِ یک موجودیت محتوا (محصول، مقاله، ...).
- * claim اتمیک بین رپلیکاها:
+ * تصرف اتمیک بین رپلیکاها:
  *   UPDATE ... WHERE id = (SELECT id ... FOR UPDATE SKIP LOCKED)
- * ایندکس جزئیِ یکتا فقط روی pending → dedupe صف بدون تداخل با تاریخ
+ * ایندکس جزئیِ یکتا فقط روی وضعیتِ در انتظار → حذف تکرارِ صف بدون تداخل با تاریخ
  * done/failed (همان موجودیت می‌تواند بعداً دوباره صف شود).
  *
- * retry: attempts/max_attempts + next_attempt_at (backoff در سرویس)؛
+ * تلاش مجدد: attempts/max_attempts + next_attempt_at (عقب‌افتادگی در سرویس)؛
  * خطای نهایی = ستون‌های ar همان‌طور NULL می‌مانند → کاربر عربی
- * fallback فارسی می‌بیند (COALESCE رارد ۳۴) — سایت هرگز نمی‌ایستد.
+ * پشتیبان فارسی می‌بیند (COALESCE رارد ۳۴) — سایت هرگز نمی‌ایستد.
  */
 export const translationJobs = pgTable(
   'translation_jobs',
@@ -34,7 +34,7 @@ export const translationJobs = pgTable(
     status: varchar('status', { length: 12 }).notNull().default('pending'),
     attempts: integer('attempts').notNull().default(0),
     maxAttempts: integer('max_attempts').notNull().default(3),
-    /** تلاش بعدی — برای backoff و جلوگیری از busy-loop */
+    /** تلاش بعدی — برای عقب‌افتادگی و جلوگیری از حلقه‌ی مشغول */
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
     lastError: text('last_error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

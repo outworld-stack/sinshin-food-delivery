@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-five
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 11 از 18
-// مسیر مقصد: web/src/routes/articles/$articleId.tsx
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
-// ═══════════════════════════════════════════════════════════════
-
 // src/routes/articles/$articleId.tsx
 import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { ChevronRight, Feather } from 'reicon-react'
@@ -46,7 +39,7 @@ export const Route = createFileRoute('/articles/$articleId')({
         errorComponent: RouteError,
         notFoundComponent: RouteNotFound,
 
-        // رارد ۳۸ — سئوی داینامیک دوزبانه: عنوان/خلاصه عربی با fallback
+        // رارد ۳۸ — سئوی داینامیک دوزبانه: عنوان/خلاصه عربی با پشتیبان
         // فارسی، canonical واریانت زبان، هر سه hreflang، تاریخ انتشار og
         // و JSON-LD (Article + BreadcrumbList) با کلید بومی 'script:ld+json'
         // مستقیم در head — دوزبانه و اسکیپ‌شده توسط خود روتر.
@@ -111,7 +104,7 @@ function ArticleDetailPage() {
                 ]
 
         // رارد ۳۸ — JSON-LD (Article + BreadcrumbList) به head منتقل شد:
-        // دوزبانه (localized) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
+        // دوزبانه (بومی‌سازی‌شده) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
 
         return (
                 <div className="py-10 px-4 max-w-3xl mx-auto">
@@ -133,7 +126,7 @@ function ArticleDetailPage() {
                                                 {article.author}
                                         </span>
                                         <span className="text-sm text-gray-500 dark:text-gray-400">
-                                                {fmt.date(article.publishedAt ?? new Date())}
+                                                {fmt.date(article.publishedAt)}
                                         </span>
                                 </div>
                         </div>
@@ -142,7 +135,7 @@ function ArticleDetailPage() {
                                 {article.title}
                         </h1>
 
-                        {/* سئو-۸: <img> واقعی به‌جای background (alt + دیده‌شدن در Google Images) */}
+                        {/* سئو-۸: <img> واقعی به‌جای پس‌زمینه (alt + دیده‌شدن در Google Images) */}
                         <div className="w-full aspect-video rounded-3xl mb-8 shadow-lg bg-gray-200 dark:bg-[#2a1015] overflow-hidden">
                                 {article.profileImage ? (
                                         <img
@@ -204,7 +197,7 @@ function ArticleDetailPage() {
                                 {article.categorySlug && (
                                         <Link
                                                 to="/articles"
-                                                search={{ category: article.categorySlug }}
+                                                search={{ category: article.categorySlug ?? undefined }}
                                                 className="cursor-pointer px-4 py-2 rounded-full bg-gray-100 dark:bg-[#2a1015] text-gray-700 dark:text-gray-300 hover:bg-primary hover:text-white dark:hover:bg-dark-primary transition text-sm font-DanaMedium"
                                         >
                                                 {article.categoryName}
@@ -214,8 +207,8 @@ function ArticleDetailPage() {
                                         <Link
                                                 to="/articles"
                                                 search={{
-                                                        category: article.categorySlug,
-                                                        subCategory: article.subCategorySlug,
+                                                        category: article.categorySlug ?? undefined,
+                                                        subCategory: article.subCategorySlug ?? undefined,
                                                 }}
                                                 className="cursor-pointer px-4 py-2 rounded-full bg-gray-100 dark:bg-[#2a1015] text-gray-700 dark:text-gray-300 hover:bg-primary hover:text-white dark:hover:bg-dark-primary transition text-sm font-DanaMedium"
                                         >

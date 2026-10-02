@@ -14,7 +14,7 @@ export const articleCategories = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: varchar('name', { length: 60 }).notNull(),
-    /** round-34 — نام عربی (NULL = fallback فارسی) */
+    /** round-34 — نام عربی (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
     slug: varchar('slug', { length: 60 }).notNull(),
     hasSubCategories: boolean('has_sub_categories').notNull().default(false),
@@ -31,7 +31,7 @@ export const articleSubCategories = pgTable(
       .notNull()
       .references(() => articleCategories.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 60 }).notNull(),
-    /** round-34 — نام عربی ساب‌دسته (NULL = fallback فارسی) */
+    /** round-34 — نام عربی ساب‌دسته (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
     slug: varchar('slug', { length: 60 }).notNull(),
   },
@@ -48,7 +48,7 @@ export const articles = pgTable(
     title: varchar('title', { length: 160 }).notNull(),
     excerpt: text('excerpt').notNull(),
     content: text('content').notNull(),
-    /** round-34 — محتوای عربی (NULL = fallback فارسی؛ excerpt/title مانند name) */
+    /** round-34 — محتوای عربی (NULL = پشتیبان فارسی؛ excerpt/title مانند name) */
     titleAr: varchar('title_ar', { length: 160 }),
     excerptAr: text('excerpt_ar'),
     contentAr: text('content_ar'),

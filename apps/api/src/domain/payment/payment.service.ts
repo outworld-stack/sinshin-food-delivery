@@ -88,10 +88,10 @@ export class PaymentService {
     return { paymentUrl: r.paymentUrl }
   }
 
-  /** پرداخت mock — POST {success} با state امضاشده */
+  /** پرداخت ساختگی — POST {success} با state امضاشده */
   async handleMockPay(token: string, success: boolean) {
     // phase-1 (باگ 🔴۳): در حالت real هیچ مسیری به MOCK نمی‌رسد —
-    // حتی state های قدیمی مانده از دوره‌ی mock
+    // حتی state های قدیمی مانده از دوره‌ی ساختگی
     if (this.deps.config.gateway.mode !== 'mock') {
       throw Err.forbidden('درگاه MOCK غیرفعال است.')
     }
@@ -106,7 +106,7 @@ export class PaymentService {
     return { orderDisplayId: r.orderDisplayId, paymentStatus: r.paymentStatus }
   }
 
-  /** callback درگاه واقعی — state + تطبیق درگاه + query خام درگاه */
+  /** callback درگاه واقعی — state + تطبیق درگاه + کوئری خام درگاه */
   async handleCallback(gatewayId: string, query: Record<string, string>) {
     const paymentId = verifyState(query.state ?? '', this.deps.config.jwtSecret)
     if (!paymentId) throw Err.forbidden('state نامعتبر است.')
@@ -117,7 +117,7 @@ export class PaymentService {
     if (!payment) throw Err.notFound('پرداخت پیدا نشد.')
 
     // phase-2: تطبیق درگاه callback با درگاهِ خود پرداخت —
-    // قبلاً می‌شد state یک درگاه را از مسیر درگاه دیگر verify کرد
+    // قبلاً می‌شد state یک درگاه را از مسیر درگاه دیگر تایید کرد
     if ((payment.gateway ?? '').toUpperCase() !== gatewayId.toUpperCase()) {
       throw Err.forbidden('این state به این درگاه تعلق ندارد.')
     }
@@ -125,13 +125,13 @@ export class PaymentService {
     const gw = this.gateway(gatewayId)
     const v = await gw.verify({ gatewayRef: payment.gatewayRef, amount: payment.amount, query })
 
-    // phase-fix: نتیجه‌ی قطعی نیست (خطای گذرای درگاه) — سفارش را fail نکن؛
-    // job تایم‌اوت دوباره verify می‌کند و مشتری به صفحه سفارشش برمی‌گردد.
+    // phase-fix: نتیجه‌ی قطعی نیست (خطای گذرای درگاه) — سفارش را شکست نده؛
+    // کارِ تایم‌اوت دوباره تایید می‌کند و مشتری به صفحه سفارشش برمی‌گردد.
     if (v.indeterminate) {
       // round-23 (سامان): اگر آداپتور در این تلاش مرجع تازه‌ای یافته (RefNum
-      // سامان — فقط در callback می‌رسد)، همین‌جا ذخیره کن تا re-verify بعدیِ
-      // job تایم‌اوت بدون query هم ممکن باشد. برای زرین‌پال/پی‌ایر مرجع
-      // ثابت است و این write عملاً no-op می‌شود.
+      // سامان — فقط در callback می‌رسد)، همین‌جا ذخیره کن تا تاییدِ مجددِ بعدیِ
+      // کارِ تایم‌اوت بدون کوئری هم ممکن باشد. برای زرین‌پال/پی‌ایر مرجع
+      // ثابت است و این نوشتن عملاً بی‌اثر می‌شود.
       if (v.gatewayRef && v.gatewayRef !== payment.gatewayRef) {
         await this.deps.db
           .update(payments)
@@ -144,7 +144,7 @@ export class PaymentService {
     }
 
     // callback تکراری (رفرش صفحه‌ی برگشت / دوبارفرستادن درگاه) →
-    // claim اتمیک CONFLICT می‌دهد؛ به‌جای 409 خام، همان صفحه‌ی سفارش را نشان بده
+    // تصرف اتمیک CONFLICT می‌دهد؛ به‌جای 409 خام، همان صفحه‌ی سفارش را نشان بده
     let orderDisplayId: string
     try {
       const r = await this.finalize(
@@ -170,9 +170,9 @@ export class PaymentService {
   }
 
   /**
- * phase-2 — job تایم‌اوت: پرداخت‌های PENDING رهاشده.
+ * phase-2 — کارِ تایم‌اوت: پرداخت‌های PENDING رهاشده.
  * درگاه واقعی + gatewayRef → ری-وریفای (مشتری پرداخت کرده ولی callback
- * نرسیده — تب بسته شده/قطعی). وگرنه fail → CANCELED + بازگستِ کیف پول
+ * نرسیده — تب بسته شده/قطعی). وگرنه شکست → CANCELED + بازگشتِ کیف پول
  * + آزادسازی کوپن (failPayment). از گاردهای gateway() عمداً عبور
  * می‌کنیم — این پرداختِ موجود است، نه انتخاب جدید.
  */
@@ -228,8 +228,8 @@ export class PaymentService {
   // ── داخلی ──
 
   /**
-   * نهایی‌سازی — claim اتمیک (status=PENDING → نتیجه) داخل tx؛
-   * callback تکراری/موازی با conflict رد می‌شود. سپس settle/fail سفارش در همان tx.
+   * نهایی‌سازی — تصرف اتمیک (status=PENDING → نتیجه) داخل tx؛
+   * callback تکراری/موازی با conflict رد می‌شود. سپس تسویه/شکست سفارش در همان tx.
    *
    * امن-۸: در شکست، failInfo (منبع/درگاه) داخل payments.metadata
    * ثبت می‌شود — برای تحلیل پس از حادثه و چک R11 (spot-check دستی PSP).
@@ -243,7 +243,7 @@ export class PaymentService {
     const { db } = this.deps
 
     const result = await db.transaction(async (tx) => {
-      // metadata فعلی برای merge — فقط خواندن؛ claim اتمیک همان update
+      // metadata فعلی برای ادغام — فقط خواندن؛ تصرف اتمیک همان update
       // با status=PENDING است، پس این select مسیر رقابت را عوض نمی‌کند
       const current = (
         await tx.select().from(payments).where(eq(payments.id, paymentId))
@@ -295,7 +295,7 @@ export class PaymentService {
           : { event: 'order-updated', data: { id: result.orderDisplayId } },
       )
     } catch {
-      /* noop — publish هرگز نباید مسیر پرداخت را بشکند */
+      /* هیچ‌کاری نمی‌کند — publish هرگز نباید مسیر پرداخت را بشکند */
     }
     return result
   }

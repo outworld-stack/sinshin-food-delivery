@@ -28,7 +28,7 @@ export const users = pgTable(
     role: varchar('role', { length: 20 }).notNull().default('user'),
     tokenVersion: integer('token_version').notNull().default(0),
     bannedAt: timestamp('banned_at', { withTimezone: true }),
-    suspendedAt: timestamp('suspended_at', { withTimezone: true }), // status نمایشی پنل (toggle)
+    suspendedAt: timestamp('suspended_at', { withTimezone: true }), // status نمایشی پنل (تغییر وضعیت)
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     referralCode: varchar('referral_code', { length: 16 }),
     referredBy: uuid('referred_by').references((): AnyPgColumn => users.id),

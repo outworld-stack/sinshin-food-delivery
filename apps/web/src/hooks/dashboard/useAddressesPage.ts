@@ -6,7 +6,7 @@ import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { useI18n } from '#/i18n'
 
-// --- State ---
+// ── وضعیت ──
 interface AddressesState {
   isModalOpen: boolean
   editingId: string | null
@@ -39,7 +39,7 @@ function addressesReducer(state: AddressesState, action: AddressesAction): Addre
   }
 }
 
-// --- هوک — فقط UI state؛ فرم داخل مودال خودش state داره ---
+// --- هوک — فقط وضعیت UI؛ فرم داخل مودال خودش وضعیت داره ---
 export function useAddressesPage() {
   const [state, dispatch] = useReducer(addressesReducer, initialAddressesState)
   const queryClient = useQueryClient()

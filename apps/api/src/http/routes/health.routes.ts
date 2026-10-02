@@ -27,7 +27,7 @@ export interface HealthDeps {
   sseHub: SseHub
 }
 
-/** round-19 — probe به infra/health/probes.ts منتقل شد (مشترک با job هشدار) */
+/** round-19 — کاوشگر به infra/health/probes.ts منتقل شد (مشترک با کار هشدار) */
 
 export const healthRoutes = (deps: HealthDeps) =>
   new Elysia({ prefix: '/health', tags: ['Health'] })
@@ -40,7 +40,7 @@ export const healthRoutes = (deps: HealthDeps) =>
         // کار نمی‌کند (auth/منو/سفارش/پرداخت) → 503 یعنی Caddy/compose
         // این رپلیکا را از چرخش درمی‌آورند. ردیس و uploads «نرم» اند: قطعی‌شان
         // فقط قابلیت‌هایی را می‌شکند (ورود OTP، آپلود فایل) و بقیهٔ سایت با
-        // fallback های موجود سرو می‌کند — گزارش در بدنه، نه در کد وضعیت.
+        // پشتیبان‌های موجود سرو می‌کند — گزارش در بدنه، نه در کد وضعیت.
         if (!dbUp) set.status = 503
         return {
           status: dbUp && redisUp && uploadsUp ? 'ok' : 'degraded',

@@ -1,12 +1,12 @@
 // src/hooks/admin/useCouriersPage.ts
-// ⬅ NEW GENERATION: «URL as State» برای پیک‌ها
+// ⬅ نسل جدید: «URL به‌عنوان وضعیت» برای پیک‌ها
 // (همان الگوی موفق صفحات کاربران/سفارشات)
 //
-// چرا؟ نسخه قبلی همه‌چیز را در reducer نگه می‌داشت:
+// چرا؟ نسخه قبلی همه‌چیز را در کاهنده نگه می‌داشت:
 //   ✗ رفرش = از دست رفتن بازه تاریخ و صفحه
 //   ✗ back/forward مرورگر = بی‌اثر
 //   ✗ بازه‌ی گزارش قابل اشتراک‌گذاری نبود (مهم‌ترین فیلد این صفحه!)
-//   ✗ queryFn داخل همین هوک بود => loader روت نمی‌توانست prefetch کند
+//   ✗ queryFn داخل همین هوک بود => loader روت نمی‌توانست پیش‌واکشی کند
 //
 // حالا: همه‌ی فیلترها = search params روت (validateSearch با zod).
 // نکته‌ی UX: تاریخ‌ها مستقیم به URL می‌روند (دیت‌پیکر تعویض گسسته دارد،
@@ -30,7 +30,7 @@ export const adminCouriersSearchSchema = z.object({
 export type AdminCouriersSearch = z.infer<typeof adminCouriersSearchSchema>
 
 // --- هوک ---
-// فقط یک درَفت محلی باقی مانده (جستجو) — reducer حذف شد؛ useState کفایت می‌کند
+// فقط یک درَفت محلی باقی مانده (جستجو) — کاهنده حذف شد؛ useState کفایت می‌کند
 export function useCouriersPage() {
   // درَفت جستجو — تا وقتی «اعمال» نشده فچی در کار نیست
   const [tempSearch, setTempSearch] = useState('')
@@ -38,7 +38,7 @@ export function useCouriersPage() {
   const navigate = useNavigate({ from: '/admin/couriers/' })
   const search = useSearch({ from: '/admin/couriers/' })
 
-  // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با query پر کرده.
+  // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
   // placeholderData داخل فکتوری: تعویض صفحه/بازه بدون فلیک اسکلتون
   const { data, isLoading } = useQuery(adminCouriersOptions({
     page: search.page, limit: search.limit,
@@ -87,8 +87,8 @@ export function useCouriersPage() {
   }, [navigate, search])
 
   return {
-    // shape قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
-    // dateFrom/dateTo/page/limit دیگر از reducer نیستند؛ از URL می‌آیند (تایپ‌دار)
+    // ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
+    // dateFrom/dateTo/page/limit دیگر از کاهنده نیستند؛ از URL می‌آیند (تایپ‌دار)
     state: { tempSearch, dateFrom: search.dateFrom, dateTo: search.dateTo, page: search.page, limit: search.limit },
     data, isLoading, stats,
     handleSearchChange, handleDateFrom, handleDateTo,

@@ -3,6 +3,7 @@ import { and, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from 'driz
 import { buildRangeCharts } from '#/domain/shared/charts'
 import type { Db } from '#/infra/db/client'
 import { courierDeliveries, courierTrips, couriers, orders, type OrderRow } from '#/infra/db/schema'
+import type { CourierListRowDto } from '@sinshin/shared'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
 import type { RedisService } from '#/infra/redis/redis'
@@ -63,7 +64,7 @@ export class CourierService {
     await this.deps.redis.expire(K.hour(phone), 3600)
     await this.deps.redis.del(K.attempts(phone)) // ریست تلاش‌ها با کد جدید
 
-    // phase-1: پیامک واقعی — قبلاً فقط console.log بود؛ یعنی کدِ OTP در لاگِ prod!
+    // phase-1: پیامک واقعی — قبلاً فقط console.log بود؛ یعنی کدِ OTP در لاگِ محیط اصلی!
     const sent = await this.deps.sms.send(phone, `کد ورود پیک سین‌شین: ${code}`)
     if (!sent && this.deps.config.isProd) {
       await this.deps.redis.del(K.code(phone))
@@ -71,7 +72,7 @@ export class CourierService {
       throw Err.internal('ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.')
     }
 
-    // phase-1 (باگ 🔴۱): در prod هرگز — شرط provider===console حذف شد
+    // phase-1 (باگ 🔴۱): در محیط اصلی هرگز — شرط provider===console حذف شد
     const reveal = !this.deps.config.isProd
     return { cooldownSeconds: cooldown, ...(reveal ? { devCode: code } : {}) }
   }
@@ -162,7 +163,7 @@ export class CourierService {
 
   /**
    * موقعیت پیک — فقط ON_THE_WAY + سفارش trackingEnabled.
-   * throttle: بیش از یک آپدیت در ۳ ثانیه → رد بی‌جواب.
+   * محدودسازی: بیش از یک آپدیت در ۳ ثانیه → رد بی‌جواب.
    */
   async updateLocation(
     courierToken: string,
@@ -184,7 +185,7 @@ export class CourierService {
       return { success: false, message: 'این پیک به این سفارش تخصیص نیافته' }
     }
 
-    // throttle سرور — setNx با TTL کوتاه
+    // محدودسازی سرور — setNx با TTL کوتاه
     const throttleKey = K.throttle(displayId)
     if (!(await this.deps.redis.setNx(throttleKey, '1', { ex: Math.ceil(LOCATION_THROTTLE_MS / 1000) }))) {
       return { success: true } // ردِ بی‌جواب — مشتری بعدی را می‌گیرد
@@ -229,17 +230,9 @@ export class CourierService {
     dateFrom?: string
     dateTo?: string
   }): Promise<{
-    couriers: Array<{
-      id: string
-      name: string
-      phone: string
-      createdAt: Date
-      trips: Array<
-        typeof courierTrips.$inferSelect & {
-          deliveries: Array<typeof courierDeliveries.$inferSelect>
-        }
-      >
-    }>
+    // رارد ۴۷ — شکل ردیف از قرارداد مشترک (CourierListRowDto)؛ trips روی
+    // سیم ستون‌های بیشتری دارد ولی مصرف‌کننده فقط زیرمجموعه‌ی قرارداد را می‌خواند
+    couriers: CourierListRowDto[]
     total: number
   }> {
     const { db } = this.deps

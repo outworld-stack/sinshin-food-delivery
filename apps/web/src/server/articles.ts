@@ -53,7 +53,7 @@ export async function createArticle(input: {
   categoryId: string
   subCategoryId?: string | null
   processes: { title: string; items: string[] }[]
-  /** round-34 — محتوای عربی ('' → null = fallback فارسی) */
+  /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null
   contentAr?: string | null
@@ -78,7 +78,7 @@ export async function updateArticle(input: {
   categoryId: string
   subCategoryId?: string | null
   processes: { title: string; items: string[] }[]
-  /** round-34 — محتوای عربی ('' → null = fallback فارسی) */
+  /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null
   contentAr?: string | null

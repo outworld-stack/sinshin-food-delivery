@@ -1,11 +1,11 @@
 //src/infra/report/xlsx.writer.ts
 /**
  * XLSX مینیمال — دست‌ساز، بدون وابستگی.
- * Excel-strict: fills>=2 (none+gray125)، cellStyles Normal، bookViews، dimension،
+ * مطابق سخت‌گیری‌های اکسل: fills>=2 (none+gray125)، cellStyles Normal، bookViews، dimension،
  * گارد NaN/تاریخ نامعتبر — همه‌ی سخت‌گیری‌های شناخته‌شده‌ی اکسل اعمال شده.
  */
 
-// ── ZIP writer (store method — بدون فشرده‌سازی) ──
+// ── نویسنده‌ی ZIP (روش ذخیره — بدون فشرده‌سازی) ──
 
 interface ZipEntry {
     name: string
@@ -99,7 +99,7 @@ function buildZip(entries: ZipEntry[]): Uint8Array {
     return out
 }
 
-// ── XML helpers ──
+// ── ابزارهای XML ──
 
 const esc = (s: string): string =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -230,7 +230,7 @@ export function buildXlsx(sheets: SheetData[]): Uint8Array {
     })
 
 
-    // harden: fills>=2 + cellStyles Normal — سخت‌گیری اکسل
+    // سخت‌گیریِ اکسل: fills>=2 + cellStyles Normal
     entries.push({
         name: 'xl/styles.xml',
         data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

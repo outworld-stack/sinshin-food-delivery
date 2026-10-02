@@ -79,7 +79,7 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
 			},
 		)
 
-		/** لیست زنده — صفِ scope + مالِ خودش؛ ادمین اصلی: کل صف + همهٔ فعال‌ها */
+		/** لیست زنده — صفِ حوزه + مالِ خودش؛ ادمین اصلی: کل صف + همهٔ فعال‌ها */
 		.get("/orders", ({ user }) => deps.live.liveOrders(user.id, user.role), {
 			detail: {
 				summary:
@@ -110,7 +110,7 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
 			},
 		)
 
-		/** تایید سفارش — قلب پنل (ادمین اصلی = scope کامل) */
+		/** تایید سفارش — قلب پنل (ادمین اصلی = حوزه کامل) */
 		.post(
 			"/orders/:displayId/confirm",
 			({ user, params, body }) =>

@@ -76,13 +76,13 @@ const parsePayResult = (raw: string): { code: string; refId: string } => {
  *      شناسه‌ی پرداخت) → RefId؛ کاربر به StartPay/RefId می‌رود.
  *   ۲) برگشت بانک به callback با فرم POST (ResCode/RefId/SaleOrderId/
  *      SaleReferenceId) — فقط ResCode=0 مسیر تایید دارد.
- *   ۳) verify → bpVerifyRequest و بلافاصله bpSettleRequest سمت سرور؛
+ *   ۳) تایید → bpVerifyRequest و بلافاصله bpSettleRequest سمت سرور؛
  *      مرجع قطعی تراکنش SaleReferenceId است.
  *
  * نکته‌ی gatewayRef — دو حالتِ کدگذاری‌شده با برچسب:
  *   • پس از init: «orderId:t:RefId» — t یعنی توکنِ صفحه‌ی پرداخت؛
  *   • پس از callback: «orderId:s:SaleReferenceId» — s یعنی مرجعِ ماندگار
- *     تراکنش که job تایم‌اوت بدون query هم می‌تواند دوباره وریفای کند
+ *     تراکنش که کارِ تایم‌اوت بدون کوئری هم می‌تواند دوباره وریفای کند
  *     (هم‌مکانیزم RefNum سامان از رارد ۲۳).
  *
  * پیوند امنیتی (هم‌تراز امن-۴ بقیه‌ی درگاه‌ها):
@@ -91,8 +91,8 @@ const parsePayResult = (raw: string): { code: string; refId: string } => {
  *   تراکنشِ سفارش دیگری را به این پرداخت بچسباند.
  *
  * ریسک پذیرفته‌شده (هم‌تراز سامان): اگر callback هرگز نرسد (تب بسته
- * شده)، تراکنش وریفای نشده و شاپرک خودش مبلغ را آزاد می‌کند؛ job
- * تایم‌اوت سفارش را قطعاً fail می‌کند.
+ * شده)، تراکنش وریفای نشده و شاپرک خودش مبلغ را آزاد می‌کند؛ کارِ
+ * تایم‌اوت سفارش را قطعاً شکست می‌دهد.
  */
 export class MellatAdapter implements PaymentGateway {
   readonly id = 'MELLAT'
@@ -149,13 +149,13 @@ export class MellatAdapter implements PaymentGateway {
     const [, orderId = '', kind = '', storedRef = ''] = m
 
     if (kind !== 't') {
-      // مرجع ماندگار از callback قبلی — مسیر ری-وریفای job تایم‌اوت
+      // مرجع ماندگار از callback قبلی — مسیر ری-وریفای کارِ تایم‌اوت
       return this.verifyAndSettle(orderId, storedRef)
     }
 
     const resCode = input.query.ResCode ?? input.query.resCode
     if (resCode === undefined) {
-      // query خالی = job تایم‌اوت روی پرداختِ بدون callback → رهاشده
+      // کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback → رهاشده
       return { success: false, gatewayRef: input.gatewayRef }
     }
     if (resCode !== '0') {
@@ -203,7 +203,7 @@ export class MellatAdapter implements PaymentGateway {
 
     const verified = await this.bpCall('bpVerifyRequest', common)
     if (verified === null) {
-      // فالت/شبکه — قطعی نیست؛ job دوباره می‌کوشد
+      // فالت/شبکه — قطعی نیست؛ کار دوباره می‌کوشد
       return { success: false, gatewayRef: composite, indeterminate: true }
     }
     if (verified === '48') {

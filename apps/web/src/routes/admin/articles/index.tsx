@@ -1,5 +1,5 @@
 // src/routes/admin/articles/index.tsx
-// ⬅ NEW: loader پری‌فچ موازی (مقالات + دسته‌ها) + pendingComponent/errorComponent + head noindex
+// ⬅ NEW: پیش‌واکشی موازی در loader (مقالات + دسته‌ها) + pendingComponent/errorComponent + head noindex
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
@@ -20,7 +20,7 @@ import {
 export const Route = createFileRoute('/admin/articles/')({
         component: AdminArticlesPage,
         ssr: false,
-        // ⬅ NEW: prefetch — هاور روی لینک «مقالات» در سایدبار => این loader در کلاینت
+        // ⬅ NEW: پیش‌واکشی — هاور روی لینک «مقالات» در سایدبار => این loader در کلاینت
         // هر دو کوئری صفحه را به‌صورت موازی در کش پر می‌کند؛ ناوبری بدون اسکلتون.
         // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
         loader: async ({ context }) => {
@@ -45,7 +45,7 @@ function AdminArticlesPage() {
         const queryClient = useQueryClient()
         const showToast = useToastStore((state) => state.showToast)
 
-        // ⬅ NEW: کوئری‌ها — همان کلیدهایی که loader روت با query پر کرده
+        // ⬅ NEW: کوئری‌ها — همان کلیدهایی که loader روت با کوئری پر کرده
         const { data: articles, isLoading } = useQuery(adminArticlesOptions)
         const { data: categories } = useQuery(articleCategoriesOptions)
 

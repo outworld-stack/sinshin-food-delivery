@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty two
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 16 از 31
-// مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
-// ═══════════════════════════════════════════════════════════════
-
 //src/domain/menu/menu.service.ts
 import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm'
 
@@ -31,37 +24,14 @@ import {
   type ProductId,
 } from '#/domain/shared/brand'
 import { nullIfEmpty, pickAr, pickArArr, type Lang } from '#/domain/shared/lang'
+import type { Product } from '@sinshin/shared'
 
 const CACHE_TTL_SECONDS = 30
 const VERSION_KEY = 'menu:ver'
-/** DTO محصول — قرارداد فرانت (finalPrice محاسباتی، مثل موک) */
-export interface ProductDto {
-  id: string
-  name: string
-  description: string | null
-  originalPrice: number
-  finalPrice: number
-  discountPercentage: number
-  /** stage-10: هزینه بسته‌بندی هر واحد — فقط DELIVERY/PICKUP */
-  packagingCost: number
-  categoryId: string
-  categoryName?: string
-  profileImage: string | null
-  galleryImages: string[]
-  sizesEnabled: boolean
-  sizes: { id: string; name: string; price: number }[]
-  ingredients: string[]
-  prepTime: number
-  views: number
-  sales: number
-  status: string
-  /** round-34 — فقط پاسخ ادمین (adminProductDetails): فیلدهای ar خام برای فرم ویرایش */
-  nameAr?: string | null
-  descriptionAr?: string | null
-  ingredientsAr?: string[] | null
-  /** پرچم «ترجمه‌ی خودکار» (رارد ۳۵) — بج فرم ادمین */
-  arAuto?: boolean
-}
+/** رارد ۴۷ — DTO محصول = قرارداد مشترک (کپی محلی حذف شد؛ برندهای id از
+ *  اسکیمای دیتابیس می‌آیند و nameAr سایز هم حالا در تایپ دیده می‌شود —
+ *  قبلاً کپی محلی فیلد nameAr سایز را نداشت و پاسخ ادمین بی‌تایپ بود). */
+export type ProductDto = Product
 
 export function finalPriceOf(p: { originalPrice: number; discountPercentage: number }): number {
   return Math.round(p.originalPrice * (1 - p.discountPercentage / 100))
@@ -90,19 +60,19 @@ function mainCategoryView(m: MainCategoryRow, lang: Lang) {
   return { ...m, name: pickAr(lang, m.nameAr, m.name) }
 }
 
-/** پایه‌های قیمت‌گذاری batch — خروجی loadPricingBases */
+/** پایه‌های قیمت‌گذاری دسته‌ای — خروجی loadPricingBases */
 export interface PricingBases {
   productMap: Map<ProductId, ProductRow>
   sizesByProduct: Map<ProductId, ProductSizeRow[]>
 }
 
 /**
- * perf-fix (کار-۲) + round-28 — پایه‌های قیمت‌گذاری batch:
+ * perf-fix (کار-۲) + round-28 — پایه‌های قیمت‌گذاری دسته‌ای:
  * ۱ کوئری محصولات (یکتا) + ۱ کوئری همه‌ی سایزها — به‌جای ۲-۳ کوئری به‌ازای
- * هر آیتم. checkout/preview (داخل tx خودش را می‌دهد) و سبد خرید (بدون tx)
+ * هر آیتم. چک‌اوت/preview (داخل tx خودش را می‌دهد) و سبد خرید (بدون tx)
  * هر دو از همین یک پیاده‌سازی می‌خوانند — DRY. ترتیب sortOrder صعودی مثل
  * قبل حفظ می‌شود. «سیاستِ انتخاب» سایز نزد مصرف‌کننده می‌ماند چون دوگانه
- * است: سبد آسان‌گیر (fallback اولین سایز) و چک‌اوت سخت‌گیر (خطا روی سایز
+ * است: سبد آسان‌گیر (پشتیبان اولین سایز) و چک‌اوت سخت‌گیر (خطا روی سایز
  * حذف‌شده) — ادغامشان با پرچم، کد را کثیف می‌کرد.
  */
 export async function loadPricingBases(
@@ -135,7 +105,7 @@ export async function loadPricingBases(
 /**
  * منو — عمومی با کش ردیس (نسخه‌دار) + مدیریت ادمین مستقیم DB.
  *
- * کش نسخه‌دار: کلید = menu:v{ver}:... ؛ invalidate = INCR menu:ver.
+ * کش نسخه‌دار: کلید = menu:v{ver}:... ؛ نامعتبرسازی = INCR menu:ver.
  * بدون SCAN/پترن — ساده‌ترین مکانیزم با کمترین حالت خراب.
  *
  * perf-fix (کار-۴): single-flight — در لحظه‌ی expire (لحظه‌ی پیک‌ترافیک)
@@ -146,7 +116,7 @@ export async function loadPricingBases(
 export class MenuService {
   constructor(private readonly deps: { db: Db; redis: RedisService }) { }
 
-  /** کار-۴: پرومیس‌های در حال پرواز per cache-key (بعد از resolve حذف می‌شوند) */
+  /** کار-۴: پرومیس‌های در حال پرواز per cache-key (بعد از تفسیر حذف می‌شوند) */
   private inflight = new Map<string, Promise<unknown>>()
 
   private async version(): Promise<number> {
@@ -297,7 +267,7 @@ export class MenuService {
     const p = (async (): Promise<ProductDto | null> => {
       try {
         const value = await load()
-        // null کش نمی‌شود (مثل قبل) — محصولِ حذف‌شده بعد از invalidate دوباره پرسیده می‌شود
+        // null کش نمی‌شود (مثل قبل) — محصولِ حذف‌شده بعد از نامعتبرسازی دوباره پرسیده می‌شود
         if (value !== null) {
           await this.deps.redis.setJson(k, value, { ex: CACHE_TTL_SECONDS })
         }
@@ -320,7 +290,7 @@ export class MenuService {
 
   // ── قیمت‌گذاری ──
   // round-28 — effectivePrice تک‌محصولی حذف شد؛ تنها مصرف‌کننده‌اش (سبد)
-  // حالا از loadPricingBases مشترک با checkout می‌خواند (بالای فایل).
+  // حالا از loadPricingBases مشترک با چک‌اوت می‌خواند (بالای فایل).
 
   // ── ادمین: Main ها ──
 
@@ -556,7 +526,7 @@ export class MenuService {
     sizesEnabled?: boolean
     sizes?: { name: string; nameAr?: string | null; price: number }[]
     ingredients?: string[]
-    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = fallback فارسی) */
+    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = پشتیبان فارسی) */
     nameAr?: string | null
     descriptionAr?: string | null
     ingredientsAr?: string[] | null
@@ -607,7 +577,7 @@ export class MenuService {
     sizesEnabled?: boolean
     sizes?: { name: string; nameAr?: string | null; price: number }[]
     ingredients?: string[]
-    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = fallback فارسی) */
+    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = پشتیبان فارسی) */
     nameAr?: string | null
     descriptionAr?: string | null
     ingredientsAr?: string[] | null

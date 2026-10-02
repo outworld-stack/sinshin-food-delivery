@@ -29,7 +29,7 @@ const AddMainModal = memo(function AddMainModal({ onClose }: { onClose: () => vo
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
   const [name, setName] = useState('')
-  // round-34 — نام عربی (اختیاری؛ خالی = fallback فارسی)
+  // round-34 — نام عربی (اختیاری؛ خالی = پشتیبان فارسی)
   const [nameAr, setNameAr] = useState('')
   const [slug, setSlug] = useState('')
   const [error, setError] = useState('')
@@ -78,7 +78,7 @@ const AddMainModal = memo(function AddMainModal({ onClose }: { onClose: () => vo
               placeholder="مثلاً: کافه"
             />
           </div>
-          {/* round-34 — نام عربی (خالی = fallback فارسی) */}
+          {/* round-34 — نام عربی (خالی = پشتیبان فارسی) */}
           <ArField
             label="نام"
             value={nameAr}

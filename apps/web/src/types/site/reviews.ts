@@ -1,15 +1,9 @@
 // src/types/site/reviews.ts
 
-// نظر تأییدشده محصول که در سایت نمایش داده می‌شه
-export interface ProductReview {
-  id: string
-  orderId: string
-  productId: string
-  productName: string
-  firstName?: string | null
-  lastName?: string | null
-  phone: string
-  comment: string
-  date: Date | string
-  status: 'pending' | 'approved' | 'rejected'
-}
+// رارد ۴۷ — نظر تأییدشده محصول = قرارداد مشترک (کپی محلی حذف شد).
+// نکته‌های صادقانه‌ی قرارداد: productName در اندپوینت عمومی همیشه null است
+// (نام نمایشی از firstName/lastName ساخته می‌شود)، orderId خامِ UUID است و
+// phone ماسک‌شده — قبلاً کپی محلی همه را دروغ می‌گفت.
+import type { ProductReviewDto } from '@sinshin/shared'
+
+export type ProductReview = ProductReviewDto

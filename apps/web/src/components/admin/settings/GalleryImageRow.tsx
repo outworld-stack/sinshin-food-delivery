@@ -15,7 +15,7 @@ import { isRealImageUrl } from '#/utils/image'
 
 export interface GalleryImageEditFields {
 	alt: string
-	/** round-34 — متن جایگزین عربی ('' = حذف ترجمه = fallback فارسی) */
+	/** round-34 — متن جایگزین عربی ('' = حذف ترجمه = پشتیبان فارسی) */
 	altAr: string
 	span: GallerySpan
 	src: string

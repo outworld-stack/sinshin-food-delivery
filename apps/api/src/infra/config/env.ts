@@ -55,7 +55,7 @@ export interface DeviceConfig {
 
 /** round-19 — دیده‌بان سلامت: پیامک هنگام قطعی/برگشت db/redis/uploads */
 export interface HealthAlertConfig {
-  /** گیرنده‌ها؛ خالی = fallback به SUPER_ADMIN_PHONES */
+  /** گیرنده‌ها؛ خالی = پشتیبان (SUPER_ADMIN_PHONES) */
   phones: string[]
   /** فاصلهٔ سنجش (ثانیه) */
   everySeconds: number
@@ -73,7 +73,7 @@ export interface GeoPolicyConfig {
 
 /** رارد ۴۵ — پالیسی‌های مغایرت‌گیری مالی (خواندن یک‌جای پرچم‌ها) */
 export interface ReconcileConfig {
-  /** چک‌هایی که auto-fix فعال دارند (پیش‌فرض هیچ‌کدام — report-only) */
+  /** چک‌هایی که اصلاح خودکار فعال دارند (پیش‌فرض هیچ‌کدام — فقط گزارش) */
   autoChecks: ReadonlySet<string>
   /** پنجره‌ی چک برداشت کیف پول (روز) */
   r3WindowDays: number
@@ -82,12 +82,12 @@ export interface ReconcileConfig {
 const DEV_JWT_SECRET = 'dev-only-insecure-secret'
 
 /**
- * کانفیگ کلاس‌محور — fail-fast در production.
- * پیش‌فرض‌ها برای اجرای بی‌دردسر dev روی سیستم (localhost) چیده شده‌اند؛
- * داخل Docker با env_file مقادیر سرویس‌ها (postgres/redis) override می‌شوند.
+ * کانفیگ کلاس‌محور — شکست سریع در محیط عملیاتی.
+ * پیش‌فرض‌ها برای اجرای بی‌دردسرِ محیط توسعه روی سیستم (localhost) چیده شده‌اند؛
+ * داخل Docker با env_file مقادیر سرویس‌ها (postgres/redis) بازنویسی می‌شوند.
  *
  * phase-1: assertProdInvariants — قبلاً فقط DEV-JWT چک می‌شد؛ حالا
- * placeholder ها، SMS_PROVIDER=console (باگ 🔴۱)، GATEWAY_MODE=mock (باگ 🔴۳)،
+ * جای‌نگهدارها، SMS_PROVIDER=console (باگ 🔴۱)، GATEWAY_MODE=mock (باگ 🔴۳)،
  * SUPER_ADMIN_PHONES خالی، SITE_URL غیر https و UPLOAD_DIR نسبی هم بوت را می‌کُشند.
  */
 export class AppConfig {
@@ -265,9 +265,9 @@ export class AppConfig {
         ? referralRaw
         : 10
 
-    // رارد ۴۵ — پرچم‌های auto-fix مغایرت‌گیری که قبلاً سرویس مستقیم از
+    // رارد ۴۵ — پرچم‌های اصلاح خودکارِ مغایرت‌گیری که قبلاً سرویس مستقیم از
     // Bun.env می‌خواند؛ اینجا یک‌جا خوانده و تایپ‌دار می‌شوند. R11 همیشه
-    // report-only است و پرچمی ندارد.
+    // فقط گزارش است و پرچمی ندارد.
     const autoChecks = new Set<string>()
     for (let i = 1; i <= 10; i++) {
       if (bool(`RECONCILE_AUTO_R${i}`, false)) autoChecks.add(`R${i}`)
@@ -282,7 +282,7 @@ export class AppConfig {
     this.translatorUrl = str('TRANSLATOR_URL', 'http://translator:8300').replace(/\/+$/, '')
 
     // round-13 — RESTAURANT_LAT / RESTAURANT_LNG — مبدأ ناحیه‌های ارسال.
-    // هر دو باید finite و در بازه‌ی معتبر باشند؛ وگرنه null (می‌رود سراغ تنظیمات DB).
+    // هر دو باید عددِ متناهی و در بازه‌ی معتبر باشند؛ وگرنه null (می‌رود سراغ تنظیمات DB).
     const lat = Number(source['RESTAURANT_LAT'])
     const lng = Number(source['RESTAURANT_LNG'])
     this.restaurantLocation =
@@ -295,7 +295,7 @@ export class AppConfig {
     this.assertProdInvariants()
   }
 
-  // ═══════════ phase-1: production fail-fast — کرش بوت عمدی است ═══════════
+  // ═══════════ phase-1: شکست سریع در محیط عملیاتی — کرش بوت عمدی است ═══════════
   private assertProdInvariants(): void {
     if (!this.isProd) return
 
@@ -332,7 +332,7 @@ export class AppConfig {
       problems.push('SUPER_ADMIN_PHONES خالی است — دسترسی پنل از دست می‌رود.')
     }
 
-    // ── HTTPS: کوکی امن و callback درگاه‌ها (فاز ۲) ──
+    // ── HTTPS: کوکی امن و آدرس بازگشت درگاه‌ها (فاز ۲) ──
     if (!this.siteUrl.startsWith('https://')) {
       problems.push(`SITE_URL باید https باشد (فعلی: ${this.siteUrl}).`)
     }

@@ -5,15 +5,8 @@
 // کامیت پیشنهادی: stage thirty-three
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 40 از 49
-// مسیر مقصد: apps/web/src/routes/admin/settings/index.tsx
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
-// ═══════════════════════════════════════════════════════════════
-
 // src/routes/admin/settings/index.tsx
-// ⬅ NEW: loader پری‌فچ نقش‌محور — هر دو نقش: ناحیه‌های ارسال؛
+// ⬅ NEW: پیش‌واکشی نقش‌محور در loader — هر دو نقش: ناحیه‌های ارسال؛
 // ادمین اصلی: پرچم‌های تنظیمات + محتوای درباره‌ما/گالری (مهم‌ترین کوئری‌های صفحه)
 import { createFileRoute } from '@tanstack/react-router'
 import { memo, useCallback, useState } from 'react'
@@ -229,7 +222,7 @@ const SettingsContent = memo(function SettingsContent() {
                 <AboutContentForm
                   initialData={{
                     ...content.about,
-                    // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = fallback فارسی)
+                    // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = پشتیبان فارسی)
                     heroTitleAr: content.about.heroTitleAr ?? '',
                     heroTextAr: content.about.heroTextAr ?? '',
                     teamTitleAr: content.about.teamTitleAr ?? '',
@@ -263,7 +256,7 @@ export const Route = createFileRoute('/admin/settings/')({
   ssr: false,
   component: SettingsPage,
 
-  // ⬅ NEW: prefetch نقش‌محور — هاور روی «تنظیمات» در سایدبار:
+  // ⬅ NEW: پیش‌واکشی نقش‌محور — هاور روی «تنظیمات» در سایدبار:
   //   * هر دو نقش: ناحیه‌های ارسال (مشترک — بالای صفحه)
   //   * ادمین اصلی: پرچم‌ها + محتوا (درباره ما/گالری) به‌صورت موازی
   // گارد والد (/admin) قبل از این loader اجرا شده و ریدایرکت لازم را انجام داده

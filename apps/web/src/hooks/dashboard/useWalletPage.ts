@@ -1,15 +1,15 @@
 // src/hooks/dashboard/useWalletPage.ts
-// ⬅ NEW GENERATION: «URL as State» برای کیف پول
+// ⬅ نسل جدید: «URL به‌عنوان وضعیت» برای کیف پول
 // (همان الگوی موفق صفحات ادمین — کاربران/سفارشات/پیک‌ها)
 //
-// چرا؟ نسخه قبلی سورت و صفحه‌بندیِ «دو لیست» را در reducer نگه می‌داشت:
+// چرا؟ نسخه قبلی سورت و صفحه‌بندیِ «دو لیست» را در کاهنده نگه می‌داشت:
 //   ✗ رفرش = برگشت به صفحه ۱ و سورت پیش‌فرض
 //   ✗ back/forward مرورگر = بی‌اثر
 //   ✗ «تراکنش‌های ورودی، صفحه ۲» قابل اشتراک‌گذاری نبود
 //
 // حالا: هر ۵ فیلد (سورت + ۲ صفحه + ۲ تعداد) = search params روت.
 // دو لیست مستقل (تراکنش/زیرمجموعه) → دو گروه جدا در URL.
-// reducer حذف شد؛ URL منبع حقیقت است.
+// کاهنده حذف شد؛ URL منبع حقیقت است.
 import { useCallback, useMemo } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { z } from 'zod'
@@ -96,8 +96,8 @@ export function useWalletPage(transactions: TransactionRowData[], referrals: Ref
   }, [navigate, search])
 
   return {
-    // shape قبلی حفظ شده — WalletBalanceCard/TransactionsList/... بدون تغییر کار می‌کنند؛
-    // مقادیر از URL می‌آیند (تایپ‌دار) نه reducer
+    // ساختار قبلی حفظ شده — WalletBalanceCard/TransactionsList/... بدون تغییر کار می‌کنند؛
+    // مقادیر از URL می‌آیند (تایپ‌دار) نه کاهنده
     state: {
       txSort: search.txSort,
       txPage: search.txPage,

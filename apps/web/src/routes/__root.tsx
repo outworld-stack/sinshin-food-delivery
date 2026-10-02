@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-six
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 6 از 18
-// مسیر مقصد: web/src/routes/__root.tsx
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
-// ═══════════════════════════════════════════════════════════════
-
 import type { QueryClient } from '@tanstack/react-query'
 // src/routes/__root.tsx
 import {
@@ -68,9 +61,9 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 		// سمت کلاینت (ناوبری SPA) کوکی منبع حقیقت است — همان قرارداد رارد ۳۱.
 		//
 		// رارد ۴۰ — منطق SSR (getRequest/setCookie) به ماژول server/ssr-request.ts
-		// منتقل شد: import پویای مستقیمِ @tanstack/react-start/server در این فایل
+		// منتقل شد: درون‌ریزی پویای مستقیمِ @tanstack/react-start/server در این فایل
 		// (که در گراف کلاینت است) هشدار import-protection می‌داد؛ الگوی geoGate
-		// (گارد import.meta.env.SSR + import پویای ماژول محلی) هم هشدار را
+		// (گارد import.meta.env.SSR + درون‌ریزی پویای ماژول محلی) هم هشدار را
 		// می‌بندد و هم نشتی به باندل کلاینت را در بیلد تولیدی.
 		let lang: Lang = 'fa'
 		if (import.meta.env.SSR) {
@@ -83,9 +76,9 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 	},
 	// رارد ۳۸ — head ریشه حالا تابع است: متادیتای سایت + og + JSON-LD
 	// (WebSite + Restaurant) به زبانِ فعال رندر می‌شود. صفحات فرزند
-	// عنوان/توضیح/og خودشان را override می‌کنند؛ og:image و og:locale و
+	// عنوان/توضیح/og خودشان را بازنویسی می‌کنند؛ og:image و og:locale و
 	// twitter فقط اینجا تعریف می‌شوند. JSON-LD با کلید بومی 'script:ld+json'
-	// مستقیم در head می‌نشیند (اسکیپ \u003c ضد breakout — همان jsonLdScript).
+	// مستقیم در head می‌نشیند (اسکیپ \u003c ضد گریز — همان jsonLdScript).
 	head: (ctx) => ({
 		...siteHead(ctx),
 		links: [
@@ -142,9 +135,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				{/* رارد ۳۱ — سنجش مرورگر قدیمی، کاملاً ES5 و مستقل از باندل اپ:
             ① پیش‌رنگ: lang سند از کوکی، قبل از اولین پینت (ادمین/پیک همیشه fa)
             ② canary: اگر مرورگر oklch یا سینتکس مدرن JS را نفهمد → بنر لندینگ
-            ③ watchdog: اگر تا ۶ ثانیه اپ بالا نیامده بود «و» canary خراب بود → بنر
+            ③ نگهبان: اگر تا ۶ ثانیه اپ بالا نیامده بود «و» canary خراب بود → بنر
             ④ دکمه‌ی بستن: کوکی ۳۰ روزه — بدون هیچ وابستگی به React/Tailwind.
-            کلاً encapsulated در try/catch — هرگز صفحه را نمی‌شکند. */}
+            کلاً کپسوله در try/catch — هرگز صفحه را نمی‌شکند. */}
 				<script
 					// biome-ignore lint/security/noDangerouslySetInnerHtml: اسکریپت ES5 سنجش مرورگر قدیمی — ثابت و بدون ورودی کاربر
 					dangerouslySetInnerHTML={{

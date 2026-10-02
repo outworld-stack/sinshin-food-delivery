@@ -2,7 +2,7 @@
 // phase-9: صفحه‌ی اختصاصی هر کوپن — قبلاً مودال بود که با تاریخ invalid
 // کرش می‌کرد (RangeError: Invalid time value). حالا: کارت وضعیت + ویرایش
 // + حذف، همه از قرارداد واقعی سرور (coupon/conditions/recipientsCount).
-// stage-10: دکمه‌ی وضعت toggle شد — فعال‌سازی مجدد بعد از غیرفعال‌سازی.
+// stage-10: دکمه‌ی وضعیت حالا تغییر وضعیت می‌دهد — فعال‌سازی مجدد بعد از غیرفعال‌سازی.
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { deleteCoupon, updateCoupon, setCouponActive } from '#/server/coupons'
@@ -115,7 +115,7 @@ function CouponDetailPage() {
               مشاهده و ویرایش جزئیات کوپن
             </p>
           </div>
-          {/* stage-10: toggle وضعیت — فعال: دکمه‌ی قرمز غیرفعال‌سازی؛
+          {/* stage-10: تغییر وضعیت — فعال: دکمه‌ی قرمز غیرفعال‌سازی؛
               غیرفعال: دکمه‌ی سبز فعال‌سازی؛ منقضی: غیرقابل فعال‌سازی تا ویرایش انقضا */}
           {c.isActive ? (
             <button

@@ -1,21 +1,21 @@
 // src/components/admin/admins/PermissionsEditor.tsx
 import { memo, useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { updateSubAdminPermissions, type SubAdminPermissions, type SubAdminRecord } from '#/server/admin'
+import { updateSubAdminPermissions } from '#/server/admin'
 import { qk } from '#/utils/queryKeys'
 import { Toggle } from '#/components/shared/Toggle'
 import { useToastStore } from '#/stores/toastStore'
 import { Shield } from 'reicon-react'
-import type { SubAdminPermissionsDto } from '@sinshin/shared'
+import type { SubAdminPermissionsDto, SubAdminRecordDto } from '@sinshin/shared'
 
 interface PermissionsEditorProps {
-  admin: SubAdminRecord
+  admin: SubAdminRecordDto
 }
 
 // لیبل‌ها — ثابت بیرون کامپوننت
 // round-29 — ①canToggleTemporaryClose اضافه شد (قبلاً در UI غایب بود ولی ستون/گارد بک‌اند از round-13 موجود بود)
-// ②scope (hall/takeaway) بخش جداگانه‌ی «حوزه» شد — پایین‌تر
-const PERMISSION_LABELS: { key: keyof SubAdminPermissions; label: string }[] = [
+// ②حوزه (hall/takeaway) بخش جداگانه‌ی «حوزه» شد — پایین‌تر
+const PERMISSION_LABELS: { key: keyof SubAdminPermissionsDto; label: string }[] = [
   { key: 'productsRead', label: 'مشاهده محصولات' },
   { key: 'productsWrite', label: 'افزودن/ویرایش محصولات' },
   { key: 'usersRead', label: 'مشاهده کاربران' },
@@ -31,11 +31,13 @@ const PERMISSION_LABELS: { key: keyof SubAdminPermissions; label: string }[] = [
 export const PermissionsEditor = memo(function PermissionsEditor({ admin }: PermissionsEditorProps) {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
-  const [perms, setPerms] = useState<SubAdminPermissions>(admin.permissions)
+  const [perms, setPerms] = useState<SubAdminPermissionsDto>(admin.permissions)
 
   const mutation = useMutation({
-    mutationFn: (data: { id: string; permissions: SubAdminPermissions }) =>
-      updateSubAdminPermissions(data as { id: string; permissions: Partial<SubAdminPermissionsDto> & Record<string, boolean> }),
+    // رارد ۴۷ — بدنه‌ی PATCH حالا قراردادی است (SubAdminPermissionsPatch)؛
+    // ارسال نسخه‌ی کامل معتبر است و تبدیل نوعِ قبلی حذف شد
+    mutationFn: (data: { id: string; permissions: SubAdminPermissionsDto }) =>
+      updateSubAdminPermissions(data),
 
     onSuccess: () => {
       // ⬅ NEW: کلیدها از فکتوری مرکزی —
@@ -49,12 +51,12 @@ export const PermissionsEditor = memo(function PermissionsEditor({ admin }: Perm
     },
   })
 
-  const handleToggle = useCallback((key: keyof SubAdminPermissions) => {
+  const handleToggle = useCallback((key: keyof SubAdminPermissionsDto) => {
     setPerms(prev => ({ ...prev, [key]: !prev[key] }))
   }, [])
 
-  // round-29 — toggle حوزه: حداقل یکی باید فعال بماند؛ ادمین۲ بدون scope هیچ سفارشی نمی‌بیند
-  // (گارد بیرون از updater — updater باید pure بماند؛ setState حین render ممنوع)
+  // round-29 — تغییر وضعیت حوزه: حداقل یکی باید فعال بماند؛ ادمین۲ بدون حوزه هیچ سفارشی نمی‌بیند
+  // (گارد بیرون از updater — updater باید pure بماند؛ setState حین رندر ممنوع)
   const handleScopeToggle = useCallback((key: 'hall' | 'takeaway') => {
     const other = key === 'hall' ? 'takeaway' : 'hall'
     if (perms[key] && !perms[other]) {
@@ -78,7 +80,7 @@ export const PermissionsEditor = memo(function PermissionsEditor({ admin }: Perm
         دسترسی‌های این ادمین سطح ۲ — تغییرات فوراً پس از ذخیره اعمال می‌شوند
       </p>
 
-      {/* round-29 — حوزه (scope): تعیین اینکه این ادمین۲ سفارشات کدام حوزه را در پنل زنده می‌بیند.
+      {/* round-29 — حوزه (حوزه): تعیین اینکه این ادمین۲ سفارشات کدام حوزه را در پنل زنده می‌بیند.
           قبلاً هیچ راهی برای تغییرش وجود نداشت (روت، کلیدهای اشتباه می‌پذیرفت) */}
       <div className="mb-6 p-4 rounded-2xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c]">
         <p className="text-xs font-DanaDemiBold text-gray-600 dark:text-gray-300 mb-3">
@@ -87,11 +89,11 @@ export const PermissionsEditor = memo(function PermissionsEditor({ admin }: Perm
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#2a1015]">
             <span className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300">سفارشات سالن (سرو در محل)</span>
-            <Toggle isOn={perms.hall ?? false} onToggle={() => handleScopeToggle('hall')} />
+            <Toggle isOn={perms.hall} onToggle={() => handleScopeToggle('hall')} />
           </div>
           <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#2a1015]">
             <span className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300">سفارشات بیرون‌بر (ارسال + تحویل حضوری)</span>
-            <Toggle isOn={perms.takeaway ?? false} onToggle={() => handleScopeToggle('takeaway')} />
+            <Toggle isOn={perms.takeaway} onToggle={() => handleScopeToggle('takeaway')} />
           </div>
         </div>
         <p className="text-[11px] text-gray-400 font-DanaMedium leading-relaxed mt-3">
@@ -103,7 +105,7 @@ export const PermissionsEditor = memo(function PermissionsEditor({ admin }: Perm
         {PERMISSION_LABELS.map(({ key, label }) => (
           <div key={key} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e]">
             <span className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300">{label}</span>
-            <Toggle isOn={perms[key] ?? false} onToggle={() => handleToggle(key)} />
+            <Toggle isOn={perms[key]} onToggle={() => handleToggle(key)} />
           </div>
         ))}
       </div>

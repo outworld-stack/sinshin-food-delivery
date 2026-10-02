@@ -14,7 +14,7 @@ export interface AboutContentInput {
   teamTitle: string
   teamGradient: string
   teamAlt: string
-  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = fallback فارسی) ═══
+  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
   heroTitleAr: string
   heroTextAr: string
   teamTitleAr: string

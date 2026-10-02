@@ -41,7 +41,7 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
       '/',
       async ({ body }) => {
         const existing = (await deps.db.select().from(contentAbout).limit(1))[0]
-        // round-34 — فیلدهای عربی اختیاری؛ '' → NULL (حذف ترجمه = fallback فارسی)؛
+        // round-34 — فیلدهای عربی اختیاری؛ '' → NULL (حذف ترجمه = پشتیبان فارسی)؛
         // ذخیره‌ی دستی پرچم «خودکار» را خاموش می‌کند
         const trim = (v: string | null | undefined) => {
           const s = (v ?? '').trim()

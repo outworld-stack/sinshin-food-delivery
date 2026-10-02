@@ -30,7 +30,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     categoryId: '',
     subCategoryId: null,
     processes: [],
-    // round-34 — فیلدهای عربی (خالی = fallback فارسی)
+    // round-34 — فیلدهای عربی (خالی = پشتیبان فارسی)
     titleAr: '',
     excerptAr: '',
     contentAr: '',
@@ -76,7 +76,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
       newProcesses[existingProcessIndex].items.push(processInput.item)
       setFormData(prev => ({ ...prev, processes: newProcesses }))
     } else {
-      // round-34 — روندهای عربی موازی با ایندکس حفظ می‌شوند (ورودی خالی = fallback فارسی)
+      // round-34 — روندهای عربی موازی با ایندکس حفظ می‌شوند (ورودی خالی = پشتیبان فارسی)
       setFormData(prev => ({
         ...prev,
         processes: [...(prev.processes || []), { title: processInput.title, items: [processInput.item] }],
@@ -195,7 +195,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         <textarea name="content" value={formData.content} onChange={handleChange} rows={6} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none resize-none"></textarea>
       </div>
 
-      {/* round-34 — متن کامل عربی (fallback: خالی = همان فارسی در حالت عربی) */}
+      {/* round-34 — متن کامل عربی (پشتیبان: خالی = همان فارسی در حالت عربی) */}
       <ArField
         label="متن کامل مقاله"
         value={formData.contentAr}

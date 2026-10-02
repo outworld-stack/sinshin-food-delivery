@@ -7,8 +7,8 @@
 
 //src/index.ts
 /**
- * Composition root — all wiring lives here.
- * Hot-reload safe: infra (pg pool, redis) is stashed on globalThis.
+ * ریشه‌ی ترکیب — تمام سیم‌کشی همین‌جاست.
+ * امن در برابر بارگذاری دوباره: زیرساخت (استخر pg، ردیس) روی globalThis نگه داشته می‌شود.
  */
 import { AppConfig } from '#/infra/config/env'
 import { Database } from '#/infra/db/client'
@@ -62,7 +62,7 @@ import { buildApp } from '#/app'
 
 const config = new AppConfig()
 
-// ── infra — stashed; survives hot reloads ──
+// ── زیرساخت — ذخیره‌شده؛ از بارگذاری دوباره جان سالم به در می‌برد ──
 const g = globalThis as {
   __sinshin_infra?: { database: Database; redis: RedisService }
   __sinshin_monitor?: { metrics: MetricsService; jobRuns: JobRunRegistry }
@@ -83,8 +83,8 @@ const infra = (g.__sinshin_infra ??= {
 const { database, redis } = infra
 const db = database.db
 
-// round-18 — مانیتورینگ: همان نمونه بین hot-reload ها (شمارنده‌ها و تاریخچه‌ی
-// jobها از دست نمی‌روند؛ تایمر نمونه‌ی قبلی هم سرگردان نمی‌شود)
+// round-18 — مانیتورینگ: همان نمونه بین بارگذاری‌های دوباره (شمارنده‌ها و تاریخچه‌ی
+// کارها از دست نمی‌روند؛ تایمر نمونه‌ی قبلی هم سرگردان نمی‌شود)
 let monitor = g.__sinshin_monitor
 if (!monitor) {
   monitor = { metrics: new MetricsService(), jobRuns: new JobRunRegistry() }
@@ -92,7 +92,7 @@ if (!monitor) {
 }
 const sseHub = new SseHub(redis)
 
-// ── domain services — fresh code on every reload, same pool ──
+// ── سرویس‌های دامنه — کد تازه در هر بارگذاری دوباره، همان استخر ──
 const sms = new SmsService(config)
 const tokens = new TokenService(config)
 const otp = new OtpService({ redis, config, sms })
@@ -100,7 +100,7 @@ const sessions = new SessionService({ db, config, tokens })
 const devices = new DeviceService({ db, config })
 const settings = new SettingsService({ db, config }) // round-13 — config برای مختصات env رستوران
 const menu = new MenuService({ db, redis })
-// round-28 — سبد: batch از loadPricingBases مشترک؛ دیگر به menu نیاز ندارد
+// round-28 — سبد: دسته‌ای از loadPricingBases مشترک؛ دیگر به menu نیاز ندارد
 const cart = new CartService({ db })
 const addresses = new AddressService({ db })
 const zones = new DeliveryZoneService({ db, settings })
@@ -108,7 +108,7 @@ const coupons = new CouponService({ db })
 const termsService = new TermsService({ db })
 const orders = new OrderService({ db, config, zones, settings, coupons })
 const profile = new ProfileService({ db, config, orders, devices })
-// round-20 — idempotency چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)
+// round-20 — تکرارناپذیری چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)
 const checkoutIdempotency = new CheckoutIdempotency({ db })
 const payments = new PaymentService({ db, config, orders, hub: sseHub })
 const uploads = new UploadService(config.uploadDir)
@@ -130,7 +130,7 @@ const geo = new GeoService({ db, config, settings })
 // round-35 — صف ترجمه‌ی خودکار (مترجم آفلاین؛ برای باطل‌کردن کش منو به menu وصل است)
 const translation = new TranslationService({ db, config, menu })
 
-// ── cron — registered once ──
+// ── زمان‌بند — فقط یک‌بار ثبت می‌شود ──
 const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis, monitor.jobRuns))
 if (!g.__sinshin_cron_registered) {
   g.__sinshin_cron_registered = true
@@ -139,10 +139,10 @@ if (!g.__sinshin_cron_registered) {
   scheduler.register(new DailyReportJob({ config, db, sms, reports }))
   scheduler.register(new WeeklyReportJob({ config, db, sms, reports }))
   scheduler.register(new ReconcileJob({ config, db, reconcile }))
-  // round-16 — پاک‌سازی دوره‌ای جدول‌های لاگی/سشن (۱۸۰/۹۰ روز، حذف Bound‌شده)
+  // round-16 — پاک‌سازی دوره‌ای جدول‌های لاگی/سشن (۱۸۰/۹۰ روز، حذف سقف‌دار)
   scheduler.register(new RetentionJob({ db }))
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
-  // round-19 — دیده‌بان سلامت: پیامک قطعی/برگشت db/redis/uploads (بدون قفل — موثق در job)
+  // round-19 — دیده‌بان سلامت: پیامک قطعی/برگشت db/redis/uploads (بدون قفل — موثق در کار)
   scheduler.registerInterval(
     new HealthAlertJob({ config, db: database, redis, uploads, sms }),
   )
@@ -154,12 +154,12 @@ if (!g.__sinshin_cron_registered) {
       await geo.refresh()
     },
   })
-  // round-35 — worker صف ترجمه (claim اتمیک؛ مترجم پایین = صف pending می‌ماند)
+  // round-35 — کارگر صف ترجمه (تصرف اتمیک؛ مترجم پایین = صف در انتظار می‌ماند)
   scheduler.registerInterval(new AutoTranslateJob({ translation }))
 }
 
-// ── process-level safety net — round-16: باید «قبل از listen» ثبت شوند تا │
-// خطای بوت (مثلاً پر بودن پورت) از لایهٔ keep-alive رد نشود و پروسه بی‌صدا نمیرد ──
+// ── تورِ ایمنیِ سطح پروسه — round-16: باید «قبل از listen» ثبت شوند تا │
+// خطای بوت (مثلاً پر بودن پورت) از لایهٔ زنده‌نگه‌داری رد نشود و پروسه بی‌صدا نمیرد ──
 if (!g.__sinshin_signals) {
   g.__sinshin_signals = true
   // لاگ می‌ماند، پروسه زنده می‌ماند (restart خودش فقط برای خطاهای مهلک)
@@ -176,18 +176,18 @@ if (!g.__sinshin_signals) {
     try {
       app.stop()
     } catch {
-      /* noop */
+      /* هیچ‌کاری نمی‌کند */
     }
     try {
       redis.close()
     } catch {
-      /* noop */
+      /* هیچ‌کاری نمی‌کند */
     }
-    // phase-5: قفل‌های pool در جریان تمام شوند — exit بعد از بستنِ واقعی
+    // phase-5: قفل‌های استخر در جریان تمام شوند — خروج بعد از بستنِ واقعی
     try {
       await database.close()
     } catch {
-      /* noop */
+      /* هیچ‌کاری نمی‌کند */
     }
     process.exit(0)
   }
@@ -195,7 +195,7 @@ if (!g.__sinshin_signals) {
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
 }
 
-// ── app ──
+// ── اپلیکیشن ──
 const app = buildApp({
   config,
   db: database,
@@ -247,10 +247,10 @@ try {
   process.exit(1)
 }
 
-// phase-fix: لود بازه‌های IP ایران — fire-and-forget (fail-open تا آماده شود)
+// phase-fix: بارگذاری بازه‌های IP ایران — شلیک و رها (شکست‌باز تا آماده شود)
 geo.warmup()
 
-// ── probes ──
+// ── کاوشگرها ──
 const [dbUp, redisUp] = await Promise.all([database.connect(), redis.connect()])
 if (!dbUp) console.error('[boot] postgres unreachable — /api/health will report 503 (replica out of rotation)')
 if (!redisUp) {
@@ -258,7 +258,7 @@ if (!redisUp) {
   console.error('[boot] redis unreachable — OTP login/locks/SSE bridge degraded (site keeps serving, /api/health stays 200)')
 }
 
-// round-18 — نمونه‌گیر تاخیر حلقهٔ رویداد (idempotent بین hot-reload ها)
+// round-18 — نمونه‌گیر تاخیر حلقهٔ رویداد (تکرارناپذیر بین بارگذاری‌های دوباره)
 if (!g.__sinshin_metrics_started) {
   g.__sinshin_metrics_started = true
   monitor.metrics.start()
@@ -276,5 +276,5 @@ console.log(
   `[api] sms: ${sms.describe()} │ otp: cooldown ${config.otp.cooldownSeconds}s / ${config.otp.maxAttempts} attempts`,
 )
 
-/** for Eden — type-only export, zero runtime footprint */
+/** برای Eden — صادراتِ فقط-تایپی؛ بدون هیچ ردپایی در زمان اجرا */
 export type App = typeof app

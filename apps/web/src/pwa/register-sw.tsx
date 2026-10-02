@@ -1,10 +1,10 @@
 // src/pwa/register-sw.tsx
 // ثبت SW + بنر آپدیت (client-only) + install-prompt اندروید + راهنمای iOS
-// همه‌چیز داخل useEffect — هیچ رندر SSR نداریم → hydration mismatch صفر
+// همه‌چیز داخل useEffect — هیچ رندر SSR نداریم → ناهم‌خوانی هیدریشن صفر
 //
 // pwa-۲: بستنِ راهنمای iOS «پایدار» است (۳۰ روز، مثل اندروید) — قبلاً فقط
 // state بود و با هر رفرش دوباره برمی‌گشت و کاربر iOS را اذیت می‌کرد.
-// pwa-۳: بنر آپدیت دکمه‌ی «بعداً» دارد — بستنش فقط برای همین session است؛
+// pwa-۳: بنر آپدیت دکمه‌ی «بعداً» دارد — بستنش فقط برای همین نشست است؛
 // جلسه‌ی بعدی (reg.waiting هنوز هست) دوباره پیشنهاد می‌دهد که رفتار درستِ
 // آپدیت است.
 
@@ -29,7 +29,7 @@ function markDismissed(key: string): void {
   try {
     localStorage.setItem(key, String(Date.now()))
   } catch {
-    /* noop */
+    /* هیچ‌کاری نمی‌کند */
   }
 }
 
@@ -52,17 +52,17 @@ export function PwaRegister() {
     // ── ثبت SW ──
     if (!('serviceWorker' in navigator)) return
 
-    // dev: sw.js فقط با build:pwa تولید می‌شود (bundled توسط workbox)؛ در dev
+    // محیط توسعه: sw.js فقط با build:pwa تولید می‌شود (بسته‌بندی‌شده توسط workbox)؛ در محیط توسعه
     // وجود ندارد یا کهنه است → ثبت نکن و SW های مانده روی origin را پاک کن.
-    // (خطای «SyntaxError: import outside a module» در dev همین‌جا ریشه می‌گیرد:
-    // فایل sw با import کلاسیک register می‌شود.)
+    // (خطای «SyntaxError: import outside a module» در محیط توسعه همین‌جا ریشه می‌گیرد:
+    // فایل sw با درون‌ریزیِ کلاسیک register می‌شود.)
     if (import.meta.env.DEV) {
       navigator.serviceWorker
         .getRegistrations()
         .then((regs) => {
           for (const r of regs) void r.unregister()
         })
-        .catch(() => {/* noop */})
+        .catch(() => {/* هیچ‌کاری نمی‌کند */})
       return
     }
 
@@ -90,7 +90,7 @@ export function PwaRegister() {
         }
         reg.addEventListener('updatefound', onUpdateFound)
 
-        // reload کنترل‌شده — فقط یک‌بار (فلگ ضد loop)
+        // بارگذاری مجددِ کنترل‌شده — فقط یک‌بار (فلگ ضد حلقه)
         let reloaded = false
         const onControllerChange = () => {
           if (reloaded) return
@@ -102,10 +102,10 @@ export function PwaRegister() {
         // round-16 — پنل زنده روزها باز می‌ماند؛ مرورگر خودش به‌ندرت چک می‌کند.
         // هر ۶ ساعت reg.update() → هات‌فیکس‌ها همان روز دیده می‌شوند.
         const updateTimer = setInterval(() => {
-          void reg.update().catch(() => {/* noop */})
+          void reg.update().catch(() => {/* هیچ‌کاری نمی‌کند */})
         }, 6 * 3600_000)
 
-        // round-16 — پاک‌سازی کامل listener ها و تایمر (قبلاً فقط beforeinstallprompt پاک می‌شد)
+        // round-16 — پاک‌سازی کامل شنونده‌ها و تایمر (قبلاً فقط beforeinstallprompt پاک می‌شد)
         swCleanupFns.push(
           () => {
             clearInterval(updateTimer)
@@ -127,10 +127,10 @@ export function PwaRegister() {
     }
     window.addEventListener('beforeinstallprompt', onBeforeInstall)
 
-    // نصب شد → dismissal پاک شود (uninstall/reinstall → پرامپت برگردد)
+    // نصب شد → بسته‌شدن پاک شود (حذف/نصبِ مجدد → پرامپت برگردد)
     const onAppInstalled = () => {
       setShowInstall(false)
-      try { localStorage.removeItem(DISMISS_KEY) } catch { /* noop */ }
+      try { localStorage.removeItem(DISMISS_KEY) } catch { /* هیچ‌کاری نمی‌کند */ }
     }
     window.addEventListener('appinstalled', onAppInstalled)
 
@@ -147,7 +147,7 @@ export function PwaRegister() {
     }
   }, [])
 
-  // ── آپدیت: تأیید کاربر → skipWaiting → controllerchange → reload (یک‌بار) ──
+  // ── آپدیت: تأیید کاربر → skipWaiting → controllerchange → بارگذاری مجدد (یک‌بار) ──
   const applyUpdate = () => {
     waitingWorker?.postMessage({ type: 'SKIP_WAITING' })
   }
@@ -164,12 +164,12 @@ export function PwaRegister() {
     setShowInstall(false)
   }
 
-  // هیچ‌کدام در SSR رندر نمی‌شود — این کامپوننت فقط بعد از mount محتوا دارد
+  // هیچ‌کدام در SSR رندر نمی‌شود — این کامپوننت فقط بعد از سوار شدن محتوا دارد
   if (standalone) return null
 
   return (
     <>
-      {/* بنر آپدیت — minimal + «بعداً» (pwa-۳) */}
+      {/* بنر آپدیت — مینیمال + «بعداً» (pwa-۳) */}
       {showUpdate && (
         <div style={bannerStyle}>
           <span style={{ fontSize: 13 }}>نسخه‌ی جدید آماده است</span>
@@ -218,7 +218,7 @@ export function PwaRegister() {
   )
 }
 
-// استایل inline — بدون وابستگی به CSS پروژه؛ ساده و بی‌مزاحمت
+// استایل درون‌خطی — بدون وابستگی به CSS پروژه؛ ساده و بی‌مزاحمت
 const bannerStyle: React.CSSProperties = {
   position: 'fixed',
   bottom: 16,

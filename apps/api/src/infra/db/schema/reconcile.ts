@@ -11,11 +11,11 @@ import {
 } from 'drizzle-orm/pg-core'
 
 /**
- * یافته‌های مغایرت‌گیری — append + mutate status.
+ * یافته‌های مغایرت‌گیری — الحاق + تغییر وضعیت.
  *
- * قرارداد unique: (check_id, entity_id) — یک finding زنده per entity per check؛
- * status در همان ردیف آپدیت می‌شود (نه ردیف جدید) — وگرنه finding
- * هم‌زمان open و acknowledged می‌شود و dedup می‌شکند.
+ * قرارداد یکتایی: (check_id, entity_id) — یک یافته‌ی زنده به‌ازای هر موجودیت در هر چک؛
+ * status در همان ردیف آپدیت می‌شود (نه ردیف جدید) — وگرنه یافته
+ * هم‌زمان open و acknowledged می‌شود و حذف تکرار می‌شکند.
  *
  * resolved_at: هم برای دستی (acknowledged) هم auto_fixed پر می‌شود.
  */

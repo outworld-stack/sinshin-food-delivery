@@ -5,21 +5,6 @@
 // کامیت پیشنهادی: stage thirty-six
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 7 از 18
-// مسیر مقصد: web/src/routes/index.tsx
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-// round-36 — sinshin-food-delivery — فایل 1 از 14
-// مسیر مقصد: apps/web/src/routes/index.tsx
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty two
-// ⚠ این فایل «صفحه‌ی اصلی سایت» است (ریشه/لندینگ) — نه داشبورد ادمین!
-// ═══════════════════════════════════════════════════════════════
-
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Brand } from '#/components/Brand'
 import { LangSwitcher } from '#/components/LangSwitcher'
@@ -44,9 +29,9 @@ export const Route = createFileRoute('/')({
 	// نکته: گارد با document است نه navigator — Bun سمت سرور هم navigator دارد!
 	// کرالرها معافند تا اسکرین‌شات نتایج جستجو تمیز بماند (الگوی سئو-۱ geoGate).
 	// رارد ۴۰ — شاخه‌ی سرور به ماژول server/ssr-request.ts منتقل شد و گارد
-	// از typeof document به import.meta.env.SSR تغییر کرد: گاردِ runtime در
+	// از typeof document به import.meta.env.SSR تغییر کرد: گاردِ زمان اجرا در
 	// باندل کلاینت می‌ماند و هشدار import-protection می‌داد؛ گارد کامپایل‌تاب
-	// در بیلد کلاینت کل شاخه (با import پویا) را حذف می‌کند (الگوی geoGate).
+	// در بیلد کلاینت کل شاخه (با درون‌ریزی پویا) را حذف می‌کند (الگوی geoGate).
 	beforeLoad: () => {
 		if (import.meta.env.SSR) {
 			return (async () => {
@@ -91,11 +76,11 @@ function LandingPage({ showBanner }: { showBanner: boolean }) {
 
 	return (
 		<>
-			{/* بنر مرورگر قدیمی — رارد ۳۱. تمام استایل‌ها inline با hex ثابت و
+			{/* بنر مرورگر قدیمی — رارد ۳۱. تمام استایل‌ها درون‌خطی با hex ثابت و
           فونت Tahoma: این بنر باید در مرورگری که CSS مدرن سایت (oklch) را
           اصلاً نمی‌فهمد هم درست دیده شود؛ به همین دلیل عمداً هیچ Tailwind
           یا متغیر تم‌ای در آن نیست. display اولیه از رأی سرور می‌آید و
-          اسکریپت ES5 در head (canary/watchdog) می‌تواند روشنش کند.
+          اسکریپت ES5 در head (canary/نگهبان) می‌تواند روشنش کند.
           react-بستن دکمه هم در همان اسکریپت است تا با مرگ باندل هم کار کند. */}
 			<div
 				id="old-browser-banner"

@@ -73,7 +73,7 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
       },
       {
         body: t.Object({ phone: t.String() }),
-        // ← phase-1: rate-limit روی /auth/check — قبلاً آزاد بود
+        // ← phase-1: محدودیت نرخ روی /auth/check — قبلاً آزاد بود
         beforeHandle: ipRateLimit({
           redis: deps.redis,
           scope: 'auth-check',
@@ -106,7 +106,7 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
         // فقط همین روت — سقف IP: ۱۲۰ در دقیقه (perf-fix کار-۵: CGNAT — پشت یک
         // IP عمومی اپراتور می‌تواند صد‌ها کاربر واقعی باشد؛ ۲۰ دقیقه‌ای در ساعات
         // پیک لاگین همه را قفل می‌کرد. هزینه‌ی SMS همچنان توسط سقف‌های
-        // شماره‌محور OtpService مهار می‌شود: 60s cooldown + 5/hour + 20/day)
+        // شماره‌محور OtpService مهار می‌شود: فاصله‌ی ۶۰ثانیه‌ای + ۵ در ساعت + ۲۰ در روز)
         beforeHandle: ipRateLimit({
           redis: deps.redis,
           scope: 'otp-request',

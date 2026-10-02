@@ -9,27 +9,27 @@
 /**
  * phase-fix → round-37 — دروازه‌ی جغرافیایی سمت SSR.
  *
- * هر درخواستِ اولیه‌ی صفحه: IP واقعی از XFF (آخرین entry — نوشته‌ی Caddy)
+ * هر درخواستِ اولیه‌ی صفحه: IP واقعی از XFF (آخرین عنصر — نوشته‌ی Caddy)
  * گرفته می‌شود، یک‌بار از API پرسیده می‌شود و نتیجه در حافظه‌ی سرور کش
  * می‌شود (در پیک = صفر تماس اضافه برای بازدیدکننده‌های تکراری).
  *
  * round-37 — دو تغییر:
- *  ① verdict حالا «mode» را هم دارد (iran-only | iran-iraq | world) تا
+ *  ① رأی حالا «mode» را هم دارد (iran-only | iran-iraq | world) تا
  *     ریدایرکت به /geo-blocked?m=iran-iraq پیام درست را نشان دهد
  *     («فقط از ایران و عراق» به‌جای «اگر از ایران هستید…»).
- *  ② TTLها جهت‌دار شدند — قبلاً هر verdict ده دقیقه کش می‌شد و ادمینِ
+ *  ② TTLها جهت‌دار شدند — قبلاً هر رأی ده دقیقه کش می‌شد و ادمینِ
  *     که قفل را برمی‌داشت ۱۰ دقیقه کاربر مسدودش را مسدود نگه می‌داشت:
- *      • verdict آزاد → ۲ دقیقه (کاربرِ آزادِ خارجی بعد از قفل‌شدن حداکثر
+ *      • رأیِ آزاد → ۲ دقیقه (کاربرِ آزادِ خارجی بعد از قفل‌شدن حداکثر
  *        ۲ دقیقه بعد داخل صفحه‌ی مسدود می‌رود — قبلاً ۱۰ دقیقه بی‌قفل ماند)
- *      • verdict مسدود → ۶۰ ثانیه (بعد از بازکردن قفل/تغییر دامنه، کاربر
+ *      • رأیِ مسدود → ۶۰ ثانیه (بعد از بازکردن قفل/تغییر دامنه، کاربر
  *        حداکثر ۱ دقیقه بعد وارد می‌شود — قبلاً ۱۰ دقیقه بیرون ماند)
  *  در پیک، هر بازدیدکننده‌ی خارجی در بدترین حالت ۱ تماس در دقیقه به
- *  /geo/gate می‌زند که خودش کش ۱۵ثانیه‌ای و rate-limit دارد — بار ناچیز.
+ *  /geo/gate می‌زند که خودش کش ۱۵ثانیه‌ای و محدودیت نرخ دارد — بار ناچیز.
  *
- * fail-open: خطای API/شبکه = عبور (سایت به‌خاطر محدودیت جغرافیایی
+ * سیاستِ عبور در شکست: خطای API/شبکه = عبور (سایت به‌خاطر محدودیت جغرافیایی
  * نباید برای همه قطع شود) — با کش کوتاهِ ۳۰ ثانیه‌ای.
  * مسدود = ریدایرکت به صفحه‌ی اختصاصی /geo-blocked (با پارامتر m).
- * IPهای خصوصی/داخلی و build/prerender بدون تماس با API عبور می‌کنند.
+ * IPهای خصوصی/داخلی و بیلد/پیش‌رندر بدون تماس با API عبور می‌کنند.
  *
  * سئو-۱: کرالرهای معتبر (گوگل/بینگ/… + بات‌های پیش‌نمایش شبکه‌های اجتماعی)
  * قبل از هر بررسی IP معاف می‌شوند — منطق مشترک در @sinshin/shared
@@ -40,11 +40,11 @@ import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
 import type { GeoAccessMode, GeoGateVerdict } from '@sinshin/shared'
 import { apiBase } from '#/lib/api'
 
-/** verdict آزاد — پایدار؛ فقط بعد از قفل‌شدنِ دوباره باید نسبتاً زود منقضی شود */
+/** رأیِ آزاد — پایدار؛ فقط بعد از قفل‌شدنِ دوباره باید نسبتاً زود منقضی شود */
 const ALLOW_TTL_MS = 2 * 60_000
-/** verdict مسدود — کوتاه: بعد از بازکردن قفل/تغییر دامنه، کاربر زود وارد شود */
+/** رأیِ مسدود — کوتاه: بعد از بازکردن قفل/تغییر دامنه، کاربر زود وارد شود */
 const BLOCK_TTL_MS = 60_000
-// fail-open فقط ۳۰ ثانیه کش می‌شود — قطعیِ لحظه‌ای API نباید کاربر را
+// رأیِ عبورِ حاصل از خطا فقط ۳۰ ثانیه کش می‌شود — قطعیِ لحظه‌ای API نباید کاربر را
 // مدت طولانی «آزاد» نگه دارد (و برعکس)
 const FAIL_TTL_MS = 30_000
 const MAX_ENTRIES = 5000
@@ -56,9 +56,9 @@ const MAX_ENTRIES = 5000
 const cache = new Map<string, { verdict: GeoGateVerdict; at: number; ttl: number }>()
 
 /**
- * IP خصوصی/loopback — درخواست‌های داخلی (health-check، پاس‌های
- * build/prerender نیترو، localhost). GeoService هم این‌ها را allow می‌کرد؛
- * فقط round-trip اضافه حذف می‌شود. بدون XFF (dev بدون پروکسی) همین‌طور
+ * IP خصوصی/بازگشتی — درخواست‌های داخلی (بررسی سلامت، پاس‌های
+ * بیلد/پیش‌رندر نیترو، localhost). GeoService هم به این‌ها اجازه می‌داد؛
+ * فقط رفت‌وبرگشت اضافه حذف می‌شود. بدون XFF (محیط توسعه بدون پروکسی) همین‌طور
  * بالاتر عبور می‌شود.
  */
 function isPrivateIp(rawIp: string): boolean {
@@ -85,7 +85,7 @@ function clientIpFromRequest(): string | null {
   const request = getRequest()
   if (!request) return null
   const raw = request.headers.get('x-forwarded-for')
-  if (!raw) return null // dev بدون پروکسی — عبور
+  if (!raw) return null // محیط توسعه بدون پروکسی — عبور
   const parts = raw.split(',').map((p) => p.trim()).filter(Boolean)
   return parts.at(-1) ?? null
 }
@@ -126,7 +126,7 @@ export async function getGeoGate(): Promise<GeoGateVerdict> {
     })
     if (!res.ok) {
       const failOpen: GeoGateVerdict = { blocked: false, mode: 'world' }
-      remember(failOpen, FAIL_TTL_MS) // fail-open کوتاه
+      remember(failOpen, FAIL_TTL_MS) // عبور در شکست — کوتاه
       return failOpen
     }
     const data = (await res.json()) as { blocked?: boolean; mode?: unknown }
@@ -139,7 +139,7 @@ export async function getGeoGate(): Promise<GeoGateVerdict> {
     return verdict
   } catch {
     const failOpen: GeoGateVerdict = { blocked: false, mode: 'world' }
-    remember(failOpen, FAIL_TTL_MS) // fail-open کوتاه
+    remember(failOpen, FAIL_TTL_MS) // عبور در شکست — کوتاه
     return failOpen
   }
 }

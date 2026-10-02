@@ -23,7 +23,7 @@ interface UserCardProps {
 export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: UserCardProps) {
   const handleToggle = useCallback(() => onToggle(user.id, user.status), [onToggle, user.id, user.status])
 
-  // stage-10: حساب ادمین اصلی قابل مسدودسازی نیست — آیکون disable + توضیح
+  // stage-10: حساب ادمین اصلی قابل مسدودسازی نیست — آیکون غیرفعال + توضیح
   const isProtectedAdmin = user.role === 'admin'
 
   const displayName = user.firstName ? `${user.firstName} ${user.lastName || ''}` : 'ناشناس'

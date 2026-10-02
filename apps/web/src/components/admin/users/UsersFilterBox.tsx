@@ -2,6 +2,7 @@
 import { memo, useCallback } from 'react'
 import { SliderHorizontal } from 'reicon-react'
 import type { AdminUserFilterProps } from '#/types/shared/ui'
+import type { AmountSortDir, UserSortDir } from '#/utils/queryOptions'
 
 interface UsersFilterBoxProps extends AdminUserFilterProps {
   isMobileModal?: boolean
@@ -19,9 +20,10 @@ export const UsersFilterBox = memo(function UsersFilterBox({
   const handleSearch = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setTempSearch(e.target.value), [setTempSearch])
   const handleDevice = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempDevice(e.target.value), [setTempDevice])
   const handleStatus = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempStatus(e.target.value), [setTempStatus])
-  const handleDate = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempSortDate(e.target.value), [setTempSortDate])
-  const handleWallet = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempSortWallet(e.target.value), [setTempSortWallet])
-  const handleSpent = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempSortSpent(e.target.value), [setTempSortSpent])
+  // رارد ۴۷ — مقدار select با قرارداد enum چک می‌شود (زباله → پیش‌فرض)
+  const handleDate = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempSortDate(e.target.value as UserSortDir), [setTempSortDate])
+  const handleWallet = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempSortWallet(e.target.value as AmountSortDir), [setTempSortWallet])
+  const handleSpent = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => setTempSortSpent(e.target.value as AmountSortDir), [setTempSortSpent])
 
   const selectCls = `${INPUT_CLS} cursor-pointer`
   const labelCls = 'block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium'

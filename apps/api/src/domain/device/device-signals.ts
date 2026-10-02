@@ -1,7 +1,7 @@
 //src/domain/device/device-signals.ts
 import { sha256 } from '#/domain/shared/crypto'
 
-/** سیگنال‌های ورودی از کلاینت — قرارداد payload تأیید OTP */
+/** سیگنال‌های ورودی از کلاینت — قرارداد بدنه‌ی درخواست تأیید OTP */
 export interface DeviceSignals {
   /** لایه ۱ — uuid ماندگار کلاینت */
   clientId?: string | null
@@ -36,7 +36,7 @@ interface SignalLike {
 }
 
 // ── شباهت وزن‌دار ──
-// GPU-heavy ها سنگین‌اند چون مرورگر/VPN عوض کنی هم ثابت می‌مانند.
+// سیگنال‌های GPU-محور وزن بیشتری دارند چون مرورگر/VPN عوض کنی هم ثابت می‌مانند.
 const W = {
   canvas: 0.25,
   webgl: 0.25,
@@ -118,7 +118,7 @@ export interface RiskInput {
   userAgent: string | null
   /** شماره‌های متمایز خوشه (شامل فعلی) */
   clusterPhoneCount: number
-  /** clientId یکی ولی canvas عوض شده و webgl/audio ثابت — نشانه‌ی spoofing */
+  /** clientId یکی ولی canvas عوض شده و webgl/audio ثابت — نشانه‌ی جعل */
   canvasDrift: boolean
 }
 

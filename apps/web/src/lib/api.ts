@@ -10,7 +10,7 @@ import { treaty } from '@elysiajs/eden'
 import type { App } from '../../../api/src/app-type'
 import { langHeaders } from '#/lib/lang-header'
 
-/** base با /api — برای helperهای مسیر-محور (getJson/authJson/FileUploader) */
+/** base با /api — برای هلپرهای مسیر-محور (getJson/authJson/FileUploader) */
 export function apiBase(): string {
   if (typeof window !== 'undefined') {
     const base = import.meta.env.VITE_API_URL || window.location.origin
@@ -31,9 +31,9 @@ export function apiRoot(): string {
 }
 
 /**
- * perf-fix (کار-۳): fetchهای سمت سرور بدون timeout بودند — APIِ hang شده
- * یعنی SSR هم hang (کاربر تا timeout نیترو هیچ پاسخی نمی‌گیرد). ۱۰ ثانیه
- * سقف فقط برای SSR؛ سمت مرورگر بدون تغییر (شبکه‌ی ضعیف موبایل + retry خود مرورگر).
+ * perf-fix (کار-۳): fetchهای سمت سرور بدون زمانِ انتظار بودند — APIِ هنگ‌شده
+ * یعنی SSR هم هنگ می‌کند (کاربر تا زمانِ انتظار نیترو هیچ پاسخی نمی‌گیرد). ۱۰ ثانیه
+ * سقف فقط برای SSR؛ سمت مرورگر بدون تغییر (شبکه‌ی ضعیف موبایل + تلاش مجدد خود مرورگر).
  */
 export function ssrFetchSignal(): AbortSignal | undefined {
   return typeof window === 'undefined' ? AbortSignal.timeout(10_000) : undefined
@@ -45,7 +45,7 @@ const includeCookies = async (input: RequestInfo | URL, init?: RequestInit): Pro
     credentials: 'include',
     // round-34 — treaty عمومی هم هدر زبان می‌فرستد (کوکی sinshin-lang)
     headers: { ...(init?.headers ?? {}), ...(await langHeaders()) },
-    // signal صریح caller (اگر باشد) اولویت دارد
+    // signal صریحِ فراخواننده (اگر باشد) اولویت دارد
     signal: init?.signal ?? ssrFetchSignal(),
   })
 

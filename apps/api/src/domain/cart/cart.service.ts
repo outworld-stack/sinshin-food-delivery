@@ -7,37 +7,23 @@
 
 //src/domain/cart/cart.service.ts
 import type { Db } from '#/infra/db/client'
-import { asProductId } from '#/domain/shared/brand'
+import { asProductId, asSizeId, type ProductId } from '#/domain/shared/brand'
 import { finalPriceOf, loadPricingBases } from '#/domain/menu/menu.service'
 import { pickAr, type Lang } from '#/domain/shared/lang'
+import type { CartDetails, CartItemInput } from '@sinshin/shared'
 
-export interface CartItemInput {
-  productId: string
-  sizeId?: string | null
-  quantity: number
-}
-
-export interface CartItemDto {
-  id: string
-  sizeId: string | null
-  sizeName: string | null
-  name: string
-  profileImage: string | null
-  originalPrice: number
-  finalPrice: number
-  quantity: number
-  lineTotal: number
-}
+// رارد ۴۷ — تایپ‌های سبد از قرارداد مشترک می‌آیند (کپی‌های محلی حذف شدند):
+// ورودی شکل خام سیم است (بدون برند) و خروجی در مرز ساخت، برند می‌گیرد.
 
 /**
  * قیمت‌گذاری سبد — سروری، عین قرارداد getCartDetails فرانت:
- *  - نامعتبرها skip می‌شوند (نه خطا)
+ *  - نامعتبرها نادیده گرفته می‌شوند (نه خطا)
  *  - originalPrice و finalPrice هر دو «قیمت مؤثر» — مطابق موک فرانت
  *
- * round-28 — batch: قبلاً به‌ازای هر آیتم ۳ کوئری متوالی زده می‌شد
+ * round-28 — دسته‌ای: قبلاً به‌ازای هر آیتم ۳ کوئری متوالی زده می‌شد
  * (effectivePrice + واکشی دوباره‌ی همان محصول) — سبد ۶ آیتمی یعنی ~۱۸
  * رفت‌وبرگشت DB در یک درخواستِ عمومی. حالا کل سبد = ۲ کوئری، از همان
- * loadPricingBases ای که checkout هم می‌خواند (DRY — menu.service).
+ * loadPricingBases ای که چک‌اوت هم می‌خواند (DRY — menu.service).
  */
 export class CartService {
   constructor(private readonly deps: { db: Db }) {}
@@ -46,10 +32,10 @@ export class CartService {
   async details(
     items: CartItemInput[],
     lang: Lang = 'fa',
-  ): Promise<{ items: CartItemDto[]; total: number }> {
+  ): Promise<CartDetails> {
     const { productMap, sizesByProduct } = await loadPricingBases(this.deps.db, items)
 
-    const out: CartItemDto[] = []
+    const out: CartDetails['items'] = []
     let total = 0
 
     for (const item of items) {
@@ -73,8 +59,8 @@ export class CartService {
       const lineTotal = price * item.quantity
       total += lineTotal
       out.push({
-        id: product.id,
-        sizeId: item.sizeId ?? null,
+        id: product.id as ProductId,
+        sizeId: item.sizeId ? asSizeId(item.sizeId) : null,
         sizeName,
         name: pickAr(lang, product.nameAr, product.name),
         profileImage: product.profileImage,

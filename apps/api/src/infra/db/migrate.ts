@@ -1,9 +1,9 @@
 //src/infra/db/migrate.ts
 /**
- * Migration runner — same driver as the app (Bun.sql), no extra tooling.
+ * اجراکننده‌ی مهاجرت‌ها — همان درایورِ خود اپ (Bun.sql)، بدون ابزار اضافه.
  *
- *   bun run db:generate  # drizzle-kit (local): schema → ./drizzle
- *   bun run db:migrate   # this script: apply to the database
+ *   bun run db:generate  # drizzle-kit (محلی): اسکیما → ./drizzle
+ *   bun run db:migrate   # همین اسکریپت: اعمال روی دیتابیس
  */
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
 

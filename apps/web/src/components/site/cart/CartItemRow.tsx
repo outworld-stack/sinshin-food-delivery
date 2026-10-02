@@ -48,7 +48,7 @@ export const CartItemRow = memo(function CartItemRow({
 
 	return (
 		<div className="flex items-center gap-4 bg-white dark:bg-[#2a1015] p-4 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-			{/* عکس — profileImage یا fallback گرادیانت */}
+			{/* عکس — profileImage یا پشتیبان گرادیانت */}
 			<div
 				className="w-20 h-20 rounded-xl shrink-0 bg-cover bg-center bg-linear-to-br from-primary/20 to-dark-primary/20"
 				style={

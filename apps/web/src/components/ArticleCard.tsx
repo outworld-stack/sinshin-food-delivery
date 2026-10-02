@@ -17,7 +17,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
   return (
     <div className="flex h-fit gap-x-2.5 sm:block p-2.5 md:pb-2 bg-gray-50 dark:bg-[#2a1015]/50 border border-gray-300 dark:border-[#3a151c] hover:shadow-md hover:shadow-gray-200/50 dark:hover:shadow-black/20 rounded-2xl transition-shadow duration-300">
 
-      {/* عکس مقاله — سئو-۸: <img> واقعی به‌جای background (alt + lazy) */}
+      {/* عکس مقاله — سئو-۸: <img> واقعی به‌جای تصویر پس‌زمینه (alt + lazy) */}
       <Link
         to="/articles/$articleId"
         params={{ articleId: article.id }}

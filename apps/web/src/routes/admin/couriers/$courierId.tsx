@@ -14,7 +14,7 @@ import { CourierDetailSkeleton } from '#/components/LoadingSkeletons'
 import { formatPrice, formatDate, formatTime, faNum } from '#/utils/format'
 import { Bicycle, Phone, Route as RouteIcon, ChevronDown, ChevronUp, Package } from 'reicon-react'
 
-// --- reducer: فقط آکاردئون سفرها ---
+// --- کاهنده: فقط آکاردئون سفرها ---
 interface TripState {
   expandedTripId: string | null
 }
@@ -167,8 +167,8 @@ const CourierDetailPage = memo(function CourierDetailPage() {
 export const Route = createFileRoute('/admin/couriers/$courierId')({
   component: CourierDetailPage,
   ssr: false,
-  // ⬅ NEW: prefetch + کش مشترک — هاور روی نام پیک در لیست => دیتا در کش.
-  // نقش‌محور: ادمین۲ فقط تحویل‌های خودش را پرلیچ می‌کند (همان کلید کامپوننت)
+  // ⬅ NEW: پیش‌واکشی + کش مشترک — هاور روی نام پیک در لیست => دیتا در کش.
+  // نقش‌محور: ادمین۲ فقط تحویل‌های خودش را پیش‌واکشی می‌کند (همان کلید کامپوننت)
   loader: async ({ context, params }) => {
     await ensureAuthHydrated()
     const { role, admin2Id } = useAuthStore.getState()

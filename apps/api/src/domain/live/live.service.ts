@@ -37,12 +37,15 @@ export interface LiveOrderView {
 	courierArrivedAt: Date | null;
 	courierSecurityEnabled: boolean;
 	internalNote: string | null;
-	createdAt: Date;
 }
+
+// رارد ۴۷ — createdAt از نمای زنده حذف شد: هیچ مصرف‌کننده‌ای در فرانت
+// نمی‌خواندش (نمای زنده تاریخش را از date می‌گیرد) و قرارداد LiveOrderDto
+// آن را اعلام نکرده بود — سیم حالا آینه‌ی قرارداد است.
 
 /**
  * پنل سفارشات زنده — چند ادمین۲ هم‌زمان.
- * «صف» = PAID بدون confirmedBy — هر ادمین داخل scope خودش می‌بیند.
+ * «صف» = PAID بدون confirmedBy — هر ادمین داخل حوزه خودش می‌بیند.
  * مالکیت با تایید — confirmedBy.
  */
 export class LiveService {
@@ -57,8 +60,8 @@ export class LiveService {
 
 	/**
 	 * round-13 — لیست زنده، نقش‌آگاه:
-	 *  • ادمین۲: صفِ scope خودش + CONFIRMED/ON_THE_WAY های خودش
-	 *  • ادمین اصلی: کل صف (هر دو scope) + همهٔ سفارشات CONFIRMED/ON_THE_WAY
+	 *  • ادمین۲: صفِ حوزه خودش + CONFIRMED/ON_THE_WAY های خودش
+	 *  • ادمین اصلی: کل صف (هر دو حوزه) + همهٔ سفارشات CONFIRMED/ON_THE_WAY
 	 *    (نظارت کامل — می‌تواند پیک سفارشِ تاییدشده‌ی ادمین۲ را هم عوض کند)
 	 */
 	async liveOrders(
@@ -73,7 +76,7 @@ export class LiveService {
 			return { orders: [], total: 0 };
 		}
 
-		// PAID (صفِ scope) ∪ CONFIRMED/ON_THE_WAY — ادمین اصلی: مالِ همه، ادمین۲: مالِ خودش
+		// PAID (صفِ حوزه) ∪ CONFIRMED/ON_THE_WAY — ادمین اصلی: مالِ همه، ادمین۲: مالِ خودش
 		const scopeSql =
 			scope.hall && scope.takeaway
 				? sql`true`
@@ -120,14 +123,19 @@ export class LiveService {
 				.from(orders)
 				.where(mine)
 				.then((r) => r[0]),
+			// رارد ۴۷ — userName اضافه شد: قرارداد قبلاً LiveOrderDto کامل قائل
+			// بود ولی سیم فقط ۴ فیلد می‌فرستاد و نام در داشبورد خالی می‌افتاد؛
+			// حالا ردیف نازک قرارداد با همان منطق نامِ toViews پر می‌شود.
 			this.deps.db
 				.select({
 					id: orders.displayId,
+					userName: sql<string>`coalesce(nullif(trim(${users.name}), ''), ${users.phone})`,
 					amount: orders.totalAmount,
 					date: orders.createdAt,
 					status: orders.status,
 				})
 				.from(orders)
+				.innerJoin(users, eq(users.id, orders.userId))
 				.where(mine)
 				.orderBy(desc(orders.createdAt))
 				.limit(5),
@@ -180,7 +188,7 @@ export class LiveService {
 	 * تایید سفارش — قلب پنل:
 	 *  - نکته‌ی دیده‌نشده → رد
 	 *  - PAID + داخل scope → CONFIRMED + مالکیت + پیک (فقط DELIVERY) + صف چاپ
-	 *  - round-13: ادمین اصلی = scope کامل (سالن + بیرون‌بر)
+	 *  - round-13: ادمین اصلی = حوزه‌ی کامل (سالن + بیرون‌بر)
 	 */
 	async confirmOrder(
 		adminUserId: string,
@@ -201,7 +209,7 @@ export class LiveService {
 				message: "ابتدا نکته مشتری را ببینید و تیک بزنید",
 			};
 		}
-		// scope قبل از status — پیام درست برای ادمینِ خارج از حوزه
+		// حوزه قبل از status — پیام درست برای ادمینِ خارج از حوزه
 		if (viewerRole !== "admin") {
 			const scope = await this.deps.admin2.scopeOf(adminUserId);
 			if (!scope) return { success: false, message: "دسترسی scope ندارید" };
@@ -356,7 +364,7 @@ export class LiveService {
 			await this.deps.db.select().from(users).where(eq(users.id, row.userId))
 		)[0]!;
 
-		// امن-۳: ادمین۲ فقط مالک خودش یا صفِ PAID داخل scope را می‌بیند.
+		// امن-۳: ادمین۲ فقط مالک خودش یا صفِ PAID داخل حوزه را می‌بیند.
 		// قبلاً سفارش‌های PAID بدون چک scope برای همه‌ی ادمین‌های۲ باز بود.
 		if (viewerRole === "admin2") {
 			await this.assertViewable(viewerUserId, row);
@@ -463,7 +471,7 @@ export class LiveService {
 						.from(admin2Profiles)
 						.where(inArray(admin2Profiles.userId, confirmerIds.map(asUserId)))
 				: [],
-			// round-13 — fallback اسم تاییدکننده: ادمین اصلی admin2_profiles ندارد؛
+			// round-13 — نامِ پشتیبانِ تاییدکننده: ادمین اصلی admin2_profiles ندارد؛
 			// به‌علاوه پروفایل حذف‌شده‌ها را هم users پوشش می‌دهد. اولویت: پروفایل ادمین۲.
 			confirmerIds.length
 				? this.deps.db
@@ -503,7 +511,6 @@ export class LiveService {
 				courierArrivedAt: o.courierArrivedAt,
 				courierSecurityEnabled: o.courierSecurityEnabled,
 				internalNote: o.internalNote,
-				createdAt: o.createdAt,
 			};
 		});
 	}

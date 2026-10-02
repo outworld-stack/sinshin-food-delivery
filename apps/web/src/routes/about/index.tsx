@@ -47,7 +47,7 @@ const AboutPage = memo(function AboutPage() {
 					</div>
 				</section>
 
-				{/* TEAM */}
+				{/* تیم */}
 				<section className="py-14 lg:py-24">
 					<h2 className="font-DanaDemiBold text-4xl text-center text-gray-800 dark:text-white mb-14 font-bold">
 						{content.teamTitle}

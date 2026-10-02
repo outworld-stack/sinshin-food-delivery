@@ -15,12 +15,12 @@ export interface CourierRoutesDeps {
   sessions: SessionService
   admin2: Admin2Service
   couriers: CourierService
-  redis: RedisService // ← phase-1: rate-limit روت‌های عمومی پیک
+  redis: RedisService // ← phase-1: محدودیت نرخ روت‌های عمومی پیک
 }
 
 export const courierRoutes = (deps: CourierRoutesDeps) => {
   // ══ سمت پیک — عمومی؛ توکن/OTP خودش گارد است — ولی حالا با سقف IP ══
-  // phase-1: قبلاً این روت‌ها بدون هیچ rate-limit ای بودند
+  // phase-1: قبلاً این روت‌ها بدون هیچ محدودیت نرخی بودند
   const publicCourier = new Elysia({ prefix: '/courier', tags: ['Courier'] })
 
     .post(
@@ -113,11 +113,11 @@ export const courierRoutes = (deps: CourierRoutesDeps) => {
       },
     )
 
-  // ══ سمت پنل — phase-1: permission واقعی به‌جای «فقط role» ══
+  // ══ سمت پنل — phase-1: مجوز واقعی به‌جای «فقط نقش» ══
   // (قبلاً هر admin2 می‌توانست پیک اضافه کند — couriersWrite چک نمی‌شد)
-  // نکته: read و write در دو instance جداوند چون .use وسط زنجیره به روت‌های
+  // نکته: خواندن و نوشتن در دو نمونه‌ی جدا هستند چون .use وسط زنجیره به روت‌های
   // «بعدی» نشت می‌کند (همان درسی که تو ip-rate-limit نوشتی) — این‌طوری هر
-  // گروه فقط permission خودش را می‌گیرد.
+  // گروه فقط مجوز خودش را می‌گیرد.
   const adminCourierRead = new Elysia({ prefix: '/admin/couriers', tags: ['Admin / Couriers'] })
     .use(requireAdmin2Permission({ sessions: deps.sessions, admin2: deps.admin2 }, 'couriersRead'))
     .get(

@@ -25,19 +25,17 @@ import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain
 import { Err } from '#/domain/shared/errors'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
-import type { AdminOrdersData, AdminStatsDto, AdminUsersData } from '@sinshin/shared'
+import type { AdminOrdersData, AdminStatsDto, AdminUserSort, AdminUsersData } from '@sinshin/shared'
 
-export interface AdminUserSort {
-    field: 'registeredAt' | 'walletBalance' | 'totalSpent'
-    dir: 'asc' | 'desc'
-}
+// رارد ۴۷ — AdminUserSort به قرارداد مشترک رفت (کپی محلی حذف شد) —
+// فرانت و بک‌اند حالا یک union واحد برای مرتب‌سازی کاربران دارند.
 
 export class AdminService {
     constructor(private readonly deps: { db: Db }) { }
 
     // ═════════════ داشبورد ═════════════
 
-    // رارد ۴۶ — تایپ inline خروجی با قرارداد مشترک AdminStatsDto جایگزین شد
+    // رارد ۴۶ — تایپ درون‌خطی خروجی با قرارداد مشترک AdminStatsDto جایگزین شد
     // (تولیدکننده حالا تایپ‌چک می‌شود — شکل بدون تغییر)
     async getAdminStats(): Promise<AdminStatsDto> {
         const { db } = this.deps
@@ -168,7 +166,7 @@ export class AdminService {
                 phone: users.phone,
                 bannedAt: users.bannedAt,
                 createdAt: users.createdAt,
-                // stage-10: آیکون مسدودسازی ادمین اصلی در فرانت disable می‌شود
+                // stage-10: آیکون مسدودسازی ادمین اصلی در فرانت غیرفعال می‌شود
                 role: users.role,
             })
             .from(users)
@@ -307,7 +305,7 @@ export class AdminService {
                     .limit(50),
             ])
 
-        // orders count per address
+        // شمار سفارش‌ها به‌ازای آدرس
         const addressOrderCounts = await db
             .select({
                 addressId: orders.addressId,
@@ -385,7 +383,7 @@ export class AdminService {
             columns: { bannedAt: true, role: true },
         })
         // round-11 (اسکن L-3): کاربر ناموجود قبلاً بی‌صدا 200 برمی‌گرداند و
-        // روت audit فانتوم (USER_TOGGLE روی هیچ) ثبت می‌کرد — notFound صریح.
+        // روتِ ممیزیِ فانتوم (USER_TOGGLE روی هیچ) ثبت می‌کرد — notFound صریح.
         if (!user) throw Err.notFound('کاربر پیدا نشد.')
         // phase-3.5: ادمین۲ (حتی با usersWrite) فقط کاربر عادی را مسدود می‌کند
         if (actorRole === 'admin2' && user.role !== 'user') {
@@ -492,7 +490,7 @@ export class AdminService {
     }
 
 
-    /** حذف آدرس — scoped به همان کاربر (FK سفارشات SET NULL؛ snapshot می‌ماند) */
+    /** حذف آدرس — scoped به همان کاربر (FK سفارشات SET NULL؛ تصویر لحظه‌ای می‌ماند) */
     async deleteUserAddress(userId: string, addressId: string): Promise<void> {
         await this.deps.db
             .delete(addresses)
@@ -501,7 +499,7 @@ export class AdminService {
 
     // ═════════════ سفارشات ادمین ═════════════
 
-    // رارد ۴۶ — تایپ inline خروجی با قرارداد مشترک AdminOrdersData جایگزین شد؛
+    // رارد ۴۶ — تایپ درون‌خطیِ خروجی با قرارداد مشترک AdminOrdersData جایگزین شد؛
     // فیلدهای note این سرویس required بودند و در قرارداد optional اند — جهت
     // انتساب بی‌صدا مشکلی نیست (required → optional همیشه مجاز است).
     async getAdminOrders(filters: {

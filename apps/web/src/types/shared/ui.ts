@@ -1,5 +1,7 @@
 // src/types/ui.ts
 
+import type { AmountSortDir, UserSortDir } from '#/utils/queryOptions'
+
 export interface PaginationProps {
 	currentPage: number
 	totalPages: number
@@ -115,11 +117,11 @@ export interface AdminUserFilterProps {
 	setTempDevice: (val: string) => void
 	tempStatus: string
 	setTempStatus: (val: string) => void
-	tempSortDate: string
-	setTempSortDate: (val: string) => void
-	tempSortWallet: string
-	setTempSortWallet: (val: string) => void
-	tempSortSpent: string
-	setTempSortSpent: (val: string) => void
+	tempSortDate: UserSortDir
+	setTempSortDate: (val: UserSortDir) => void
+	tempSortWallet: AmountSortDir
+	setTempSortWallet: (val: AmountSortDir) => void
+	tempSortSpent: AmountSortDir
+	setTempSortSpent: (val: AmountSortDir) => void
 	applyFilters: () => void
 }

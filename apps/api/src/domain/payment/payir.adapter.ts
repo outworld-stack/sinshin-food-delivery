@@ -46,9 +46,9 @@ export class PayirAdapter implements PaymentGateway {
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
-    // امن-۴: مرجع ذخیره‌شده در DB مقدم است؛ query فقط fallback —
-    // هم‌تراز با زرین‌پال (stage two). قبلاً token کوئری مقدم بود و
-    // state جعلی می‌توانست verify را روی token دلخواه اجرا کند.
+    // امن-۴: مرجع ذخیره‌شده در DB مقدم است؛ کوئری فقط پشتیبان —
+    // هم‌تراز با زرین‌پال (stage two). قبلاً توکن کوئری مقدم بود و
+    // state جعلی می‌توانست تایید را روی توکن دلخواه اجرا کند.
     const token = input.gatewayRef ?? input.query.token ?? ''
     const res = await Bun.fetch(VERIFY_URL, {
       method: 'POST',
@@ -58,7 +58,7 @@ export class PayirAdapter implements PaymentGateway {
     })
     // round-16 — پاسخ غیر-JSON درگاه (HTML/تایم‌اوت سرویس): وضعیت «نامشخص»،
     // نه شکست قطعی — failPayment بدون اطلاع یعنی بازگشت وجه اشتباه؛
-    // job تایم‌اوت دوباره verify می‌کند (هم‌تراز با indeterminate زرین‌پال)
+    // کارِ تایم‌اوت دوباره تایید می‌کند (هم‌تراز با indeterminate زرین‌پال)
     const json = (await res.json().catch(() => null)) as {
       status?: number
       amount?: number
@@ -66,7 +66,7 @@ export class PayirAdapter implements PaymentGateway {
     if (json === null) {
       return { success: false, gatewayRef: token, indeterminate: true }
     }
-    // phase-2: چک مبلغ — پاسخ verify پی‌ایر شامل amount است؛ تطابق اجباری
+    // phase-2: چک مبلغ — پاسخ تایید پی‌ایر شامل amount است؛ تطابق اجباری
     const amountOk = json.amount === undefined || Number(json.amount) === input.amount * 10
     if (json.status === 1 && !amountOk) {
       console.error(

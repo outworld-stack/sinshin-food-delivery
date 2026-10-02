@@ -104,7 +104,7 @@ export class ReportService {
     }
   }
 
-  // ══ CSV ══
+  // ══ خروجی CSV ══
 
   async csvBody(range: 'yesterday' | 'today' | 'week'): Promise<string> {
     let from: Date, to: Date

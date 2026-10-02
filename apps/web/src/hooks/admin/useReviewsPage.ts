@@ -1,14 +1,14 @@
 // src/hooks/admin/useReviewsPage.ts
-// ⬅ NEW GENERATION: «URL as State» — تب فیلتر نظرات شهروند URL شد
+// ⬅ نسل جدید: «URL به‌عنوان وضعیت» — تب فیلتر نظرات شهروند URL شد
 //
-// چرا؟ نسخه قبلی فیلتر را در reducer نگه می‌داشت:
+// چرا؟ نسخه قبلی فیلتر را در کاهنده نگه می‌داشت:
 //   ✗ رفرش = برگشت به «در انتظار تایید» حتی اگر تب دیگری فعال بود
 //   ✗ back/forward مرورگر = بی‌اثر
 //   ✗ لینک عمیق قابل اشتراک نبود (مثلاً «نظرات ردشده» برای همکار)
 //
 // حالا: تب فعال = search param روت (validateSearch با zod)؛
-// reducer کلاً حذف شد — کل state صفحه یک فیلد URL است.
-// + مودریشن اپتیمیستیک با rollback (کلیک = فوری خروج کارت از صف انتظار)
+// کاهنده کلاً حذف شد — کل وضعیت صفحه یک فیلد URL است.
+// + مودریشن اپتیمیستیک با بازگردانی (کلیک = فوری خروج کارت از صف انتظار)
 import { useCallback, useMemo } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -33,17 +33,17 @@ export function useReviewsPage() {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
 
-  // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با query پر کرده
+  // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده
   const { data: allReviews, isLoading } = useQuery(adminReviewsOptions)
 
-  // مودریشن — ⬅ NEW: آپدیت اپتیمیستیک با rollback
-  // قبلاً: کلیک → انتظار سرور → invalidate → رفرش.
+  // مودریشن — ⬅ NEW: آپدیت اپتیمیستیک با بازگردانی
+  // قبلاً: کلیک → انتظار سرور → نامعتبرسازی → رفرش.
   // حالا: کلیک → همان لحظه بج کارت عوض می‌شود و دکمه‌های تایید/رد جمع می‌شوند؛
-  // اگر خطا شد، snapshot برمی‌گردد (و MutationCache سراسری toast می‌دهد)
+  // اگر خطا شد، تصویر لحظه‌ای برمی‌گردد (و MutationCache سراسری پیام شناور می‌دهد)
   const moderateMutation = useMutation({
     mutationFn: (data: { reviewId: string; action: 'approve' | 'reject' }) => moderateReview(data),
     onMutate: async ({ reviewId, action }) => {
-      // ریفچ در جریان را متوقف کن تا snapshot تمیز باشد
+      // ریفچ در جریان را متوقف کن تا تصویر لحظه‌ای تمیز باشد
       await queryClient.cancelQueries({ queryKey: qk.adminReviews })
       const previous = queryClient.getQueryData<AdminReview[]>(qk.adminReviews)
 
@@ -58,7 +58,7 @@ export function useReviewsPage() {
       return { previous }
     },
     onError: (_err, _data, ctx) => {
-      // rollback — کش به snapshot قبل از کلیک برمی‌گردد
+      // بازگردانی — کش به تصویر لحظه‌ایِ قبل از کلیک برمی‌گردد
       if (ctx?.previous) queryClient.setQueryData(qk.adminReviews, ctx.previous)
     },
     onSuccess: () => showToast('نظر بررسی شد'),
@@ -79,7 +79,7 @@ export function useReviewsPage() {
     }
   }, [allReviews])
 
-  // فیلتر — ⬅ NEW: از URL می‌آید (تایپ‌دار)؛ back/refresh/share حفظش می‌کنند
+  // فیلتر — ⬅ NEW: از URL می‌آید (تایپ‌دار)؛ back/refresh/اشتراک‌گذاری حفظش می‌کنند
   const filtered = useMemo(() => {
     const reviews = allReviews ?? []
     if (search.status === 'all') return reviews

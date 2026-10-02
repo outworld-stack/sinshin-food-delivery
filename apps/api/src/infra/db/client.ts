@@ -6,17 +6,10 @@
 // ⚠ بحرانی — رفع خطای 42804 سید (بولین/عدد در jsonb)
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-36 — sinshin-food-delivery — فایل 3 از 14
-// مسیر مقصد: apps/api/src/infra/db/client.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty two
-// ═══════════════════════════════════════════════════════════════
-
 //src/infra/db/client.ts
 /**
  * Database — Drizzle روی کلاینت بومی Bun (Bun.sql).
- * بدون pg، بدون پکیج postgres — pooling خودِ Bun.
+ * بدون pg، بدون پکیج postgres — استخرگذاریِ خودِ Bun.
  */
 import { SQL } from 'bun'
 import { drizzle, type BunSQLDatabase } from 'drizzle-orm/bun-sql'
@@ -48,7 +41,7 @@ import * as schema from './schema'
  *   «column "value" is of type jsonb but expression is of type boolean»
  * (نمونه‌ی واقعی: seed → settings → restaurant_open=true؛ همان خطا در
  * SettingsService.set با هر کلید بولینی مثل temporarily_closed هم رخ
- * می‌داد — یعنی باگ runtime بود، نه فقط seed.)
+ * می‌داد — یعنی باگ زمانِ اجرا بود، نه فقط seed.)
  * رفع: بولین/عدد را داخل شیئی با toJSON می‌پیچیم — Bun.sql شیءها را با
  * JSON.stringify سریال می‌کند و toJSON مقدار اصلی را برمی‌گرداند؛ نتیجه
  * درستِ jsonb اسکالر است (true / false / 42) و خواندن هم متقارن است
@@ -74,8 +67,8 @@ export type DbOrTx = Db | Tx
 
 export interface DatabaseOptions {
   /**
-   * حداکثر اتصال‌های pool (پیش‌فرض ۱۰).
-   * هر نمونه‌ی SQL یک pool کامل باز می‌کند — در اسکریپت‌های یک‌بارمصرف ۲ کافی است.
+   * حداکثر اتصال‌های استخر (پیش‌فرض ۱۰).
+   * هر نمونه‌ی SQL یک استخر کامل باز می‌کند — در اسکریپت‌های یک‌بارمصرف ۲ کافی است.
    */
   max?: number
 }
@@ -85,12 +78,12 @@ export class Database {
   readonly db: Db
 
   constructor(url: string, opts: DatabaseOptions = {}) {
-    // round-28 — تایم‌اوت‌های کوئری روی «هر اتصالِ» pool:
+    // round-28 — تایم‌اوت‌های کوئری روی «هر اتصالِ» استخر:
     // بدون این‌ها، یک قفل/کندی پستگرس (بکاپ روزانه، autovacuum سنگین، قفل
-    // FOR UPDATE) کوئری‌ها را بی‌نهایت معطل نگه می‌دارد؛ ۱۰ اتصالِ pool پر
+    // FOR UPDATE) کوئری‌ها را بی‌نهایت معطل نگه می‌دارد؛ ۱۰ اتصالِ استخر پر
     // می‌شود و «همه‌ی» روت‌ها از جمله /api/health بدون پاسخ می‌مانند (نه
     // ۵۰۳، نه کرش — فقط سکوت). با تایم‌اوت، همان کوئری خطا (۵۰۰) می‌شود و
-    // اتصال آزاد می‌ماند — هم‌قرارداد بقیه‌ی سیستم: degrade، نه deadlock.
+    // اتصال آزاد می‌ماند — هم‌قرارداد بقیه‌ی سیستم: تنزل، نه بن‌بست.
     this.client = new SQL(url, {
       max: opts.max ?? 10,
       connection: {
@@ -102,7 +95,7 @@ export class Database {
     this.db = drizzle(this.client, { schema })
   }
 
-  /** گرم‌کردن + probe اتصال. هرگز throw نمی‌کند (health گزارش می‌دهد). */
+  /** گرم‌کردن + کاوش اتصال. هرگز پرتاب نمی‌کند (health گزارش می‌دهد). */
   async connect(): Promise<boolean> {
     try {
       await this.client`select 1`
@@ -122,8 +115,8 @@ export class Database {
   }
 
   async close(): Promise<void> {
-    // round-28 — timeout (ثانیه): کوئری گیرکرده نتواند shutdown را تا ابد
-    // معطل کند؛ وگرنه compose بعد از grace-period به SIGKILL می‌رسد و لاگ
+    // round-28 — زمان انتظار (ثانیه): کوئری گیرکرده نتواند خاموشی را تا ابد
+    // معطل کند؛ وگرنه compose بعد از مهلتِ توقف به SIGKILL می‌رسد و لاگ
     // آخرین لحظه گم می‌شود
     await this.client.close({ timeout: 10 })
   }

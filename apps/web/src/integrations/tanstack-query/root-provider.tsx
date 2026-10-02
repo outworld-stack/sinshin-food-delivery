@@ -20,9 +20,9 @@ const queryClientConfig: QueryClientConfig = {
     },
   }),
 
-  // ⬅ NEW: MutationCache سراسری — هیچ میوتیشنی دیگه بی‌صدا fail نمی‌شه.
+  // ⬅ NEW: MutationCache سراسری — هیچ میوتیشنی دیگه بی‌صدا شکست نمی‌خوره.
   // قبلاً toggleUserStatus / toggleProductStatus و چند میوتیشن دیگر onError
-  // نداشتند => خطای سرور = سکوت مطلق برای کاربر. حالا یک toast سراسری.
+  // نداشتند => خطای سرور = سکوت مطلق برای کاربر. حالا یک پیام شناور سراسری.
   // میوتیشن‌هایی که خطایشان را خودشان هندل می‌کنند، meta: { silent: true } می‌گذارند.
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
@@ -34,14 +34,14 @@ const queryClientConfig: QueryClientConfig = {
   defaultOptions: {
     queries: {
       // ⬅ مهم‌ترین تغییر پروژه: staleTime پیش‌فرض صفره!
-      // یعنی هر mount جدید = ریفچ (user-profile در ۸ فایل mount می‌شه!)
-      // ۳۰s دقیقاً با defaultPreloadStaleTime روتر هم‌ترازه تا preload دوباره فچ نکنه
+      // یعنی هر سوار شدنِ جدید = ریفچ (user-profile در ۸ فایل سوار می‌شه!)
+      // ۳۰s دقیقاً با defaultPreloadStaleTime روتر هم‌ترازه تا پیش‌واکشی دوباره فچ نکنه
       staleTime: 30_000,
 
-      // بعد از unmount هم ۵ دقیقه کش می‌مونه → برگشت به صفحه‌ی قبلی آنی
+      // بعد از جدا شدن هم ۵ دقیقه کش می‌مونه → برگشت به صفحه‌ی قبلی آنی
       gcTime: 5 * 60_000,
 
-      // خطای 4xx (اعتبارسنجی/مجوز) retry نمی‌شه — فقط خطای شبکه ۲ بار
+      // خطای 4xx (اعتبارسنجی/مجوز) تلاش مجدد نمی‌شه — فقط خطای شبکه ۲ بار
       retry: (failureCount, error) => {
         const status = (error as Error & { status?: number }).status
         if (status !== undefined && status >= 400 && status < 500) return false
@@ -52,7 +52,7 @@ const queryClientConfig: QueryClientConfig = {
       refetchOnReconnect: true,
     },
     mutations: {
-      // ⬅ سفارش/پرداخت/لاگین هیچ‌وقت خودکار retry نشه — فقط با اکشن صریح کاربر
+      // ⬅ سفارش/پرداخت/لاگین هیچ‌وقت خودکار تلاش مجدد نشه — فقط با اکشن صریح کاربر
       retry: 0,
     },
   },

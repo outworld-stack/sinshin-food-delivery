@@ -6,7 +6,7 @@ import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { useI18n } from '#/i18n'
 
-// --- State: فرم پروفایل + پرچم ویرایش ---
+// --- وضعیت: فرم پروفایل + پرچم ویرایش ---
 interface UserInfoState {
   firstName: string
   lastName: string

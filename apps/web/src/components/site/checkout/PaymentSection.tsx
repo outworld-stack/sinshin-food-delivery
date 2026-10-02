@@ -1,4 +1,4 @@
-// src/components/site/checkout/PaymentSection.tsx
+// src/components/site/چک‌اوت/PaymentSection.tsx
 import { memo, useCallback } from 'react'
 import { InfoCircle, Wallet } from 'reicon-react'
 import { Toggle } from '#/components/shared/Toggle'
@@ -7,7 +7,7 @@ import { useI18n, tpl } from '#/i18n'
 
 const IS_DEV = import.meta.env.DEV
 
-// رارد ۳۲ — نام درگاه‌ها از دیکشنری (checkout.gateway.*)؛ شناسه‌ها دست‌نخورده
+// رارد ۳۲ — نام درگاه‌ها از دیکشنری (چک‌اوت.gateway.*)؛ شناسه‌ها دست‌نخورده
 const GATEWAY_IDS = IS_DEV ? ['MOCK'] : ['MELLAT', 'ZARINPAL', 'PAYIR', 'SEP']
 
 interface PaymentSectionProps {

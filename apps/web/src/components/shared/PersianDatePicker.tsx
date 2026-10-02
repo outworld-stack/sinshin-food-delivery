@@ -16,7 +16,7 @@ interface PersianDatePickerProps {
   id?: string
 }
 
-// --- reducer ---
+// --- کاهنده ---
 interface PickerState {
   viewYear: number
   viewMonth: number

@@ -1,5 +1,5 @@
 // src/server/address.ts — CRUD آدرس از API واقعی
-// ورودی‌ها برنددار — caller از UI خام با asAddressId() cast می‌کند
+// ورودی‌ها برنددار — فراخواننده از UI خام با asAddressId() تبدیل نوع می‌کند
 
 import { authJson } from '#/lib/api-fetch'
 import type { AddressId, AddressDto } from '@sinshin/shared'

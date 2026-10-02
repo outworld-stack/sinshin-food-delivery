@@ -14,7 +14,7 @@ const maskPhone = (p: string): string =>
 
 /**
  * نظرات — سه‌حالته با مودریشن.
- * ثبت: فقط بعد از DELIVERED + فقط محصولِ همان سفارش + یک‌بار (unique).
+ * ثبت: فقط بعد از DELIVERED + فقط محصولِ همان سفارش + یک‌بار (ضدتکرار).
  */
 export class ReviewService {
   constructor(private readonly deps: { db: Db }) { }

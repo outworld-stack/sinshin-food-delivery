@@ -20,16 +20,16 @@ const VERIFY_URL = 'https://sep.shaparak.ir/api/v1/Payment/VerifyPayment'
  *   ۱) init → InitPayment (مبلغ ریال؛ ResNum = شناسه‌ی پرداخت ما) → Token؛
  *      کاربر به PaymentPage?Token=… می‌رود.
  *   ۲) برگشت مرورگر به callback با State/ResNum/RefNum/TraceNo در query.
- *   ۳) verify → VerifyPayment سمت سرور با RefNum + TerminalId — مرجع قطعی.
+ *   ۳) تایید → VerifyPayment سمت سرور با RefNum + TerminalId — مرجع قطعی.
  *
  * نکته‌ی gatewayRef — عمداً null در init و RefNum بعد از callback:
  *   توکن سامان فقط برای ساخت صفحه‌ی پرداخت است (کوتاه‌عمر)؛ شناسه‌ی
  *   ماندگارِ تراکنش RefNum است که فقط در callback می‌رسد. پس:
  *   • callback قطعی → RefNum با finalize ذخیره می‌شود؛
  *   • callback نامشخص (خطای گذرای بانک) → سرویس RefNum را همان‌جا
- *     ذخیره می‌کند تا job تایم‌اوت بدون query هم بتواند دوباره verify کند؛
- *   • هیچ callback ای نرسید → gatewayRef=null می‌ماند و job تایم‌اوت
- *     مسیرِ بدون gatewayRef را قطعاً fail می‌کند — همان رفتار
+ *     ذخیره می‌کند تا کارِ تایم‌اوت بدون کوئری هم بتواند دوباره تایید کند؛
+ *   • هیچ callback ای نرسید → gatewayRef=null می‌ماند و کارِ تایم‌اوت
+ *     مسیرِ بدون gatewayRef را قطعاً شکست می‌دهد — همان رفتار
  *     پذیرفته‌شده برای پرداختِ رهاشده (هم‌تراز ریسک زرین‌پال).
  */
 export class SepAdapter implements PaymentGateway {
@@ -85,8 +85,8 @@ export class SepAdapter implements PaymentGateway {
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
-    // امن-۴: مرجع ذخیره‌شده در DB مقدم است؛ query فقط fallback —
-    // هم‌تراز زرین‌پال/پی‌ایر (callback جعلی نتواند verify را روی RefNum دلخواه بگذارد).
+    // امن-۴: مرجع ذخیره‌شده در DB مقدم است؛ کوئری فقط پشتیبان —
+    // هم‌تراز زرین‌پال/پی‌ایر (callback جعلی نتواند تایید را روی RefNum دلخواه بگذارد).
     // gatewayRef اینجا همیشه null (قبل از callback) یا RefNum (بعد از آن) است.
     const refNum =
       input.gatewayRef ??
@@ -95,8 +95,8 @@ export class SepAdapter implements PaymentGateway {
       input.query.refnum ??
       null
 
-    // نه RefNum ذخیره‌شده داریم نه در query رسیده:
-    //   • query خالی = job تایم‌اوت روی پرداختِ بدون callback → رهاشده؛
+    // نه RefNum ذخیره‌شده داریم نه در کوئری رسیده:
+    //   • کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback → رهاشده؛
     //   • یا callback با State=لغو/خطا که RefNum ندارد («Canceled By User»، NOK).
     // هر دو = شکست قطعی؛ سفارش/کوپن/کیف پول آزاد می‌شوند.
     if (!refNum) return { success: false, gatewayRef: null }
@@ -113,7 +113,7 @@ export class SepAdapter implements PaymentGateway {
       })
 
       // پاسخ غیرقابل‌فهم/شکل ناشناخته (صفحه‌ی خطای بانک، قطعی گذرا) —
-      // قطعی نیست؛ سرویس RefNum را ذخیره می‌کند و job تایم‌اوت دوباره
+      // قطعی نیست؛ سرویس RefNum را ذخیره می‌کند و کارِ تایم‌اوت دوباره
       // می‌کوشد (هم‌تراز indeterminate زرین‌پال/پی‌ایر) — failPayment
       // بدون اطلاع یعنی بازگشت وجه اشتباه.
       const json = (await res.json().catch(() => null)) as {
@@ -126,7 +126,7 @@ export class SepAdapter implements PaymentGateway {
         return { success: false, gatewayRef: refNum, indeterminate: true }
       }
 
-      // چک مبلغ — پاسخ verify سامان شامل Amount (ریال) است؛ تطابق اجباری
+      // چک مبلغ — پاسخ تایید سامان شامل Amount (ریال) است؛ تطابق اجباری
       const amount = json.Amount ?? json.amount
       const amountOk = amount === undefined || Number(amount) === input.amount * 10
       const ok = (json.IsSuccess ?? json.isSuccess) === true

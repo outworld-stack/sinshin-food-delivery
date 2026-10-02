@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-three
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 49 از 49
-// مسیر مقصد: apps/web/src/server/admin.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
-// ═══════════════════════════════════════════════════════════════
-
 // src/server/admin.ts — داشبورد + کاربران + سفارشات + پیک‌ها + ادمین۲ + پنل زنده + تنظیمات — تماماً API
 // تمام تایپ‌ها از @sinshin/shared — بدون تعریف local
 
@@ -23,43 +16,29 @@ import type {
         AdminUserDetailsDto,
         AdminUsersData,
         CourierDetailDto,
+        CourierListRowDto,
         CourierOptionDto,
         GeoStatusDto,
-        LiveOrderDto,
         LiveOrderDetailDto,
         LiveOrdersDataDto,
         OutsideScope,
         RestaurantStatusDto,
         StaffInvoice,
         StaffInvoiceItem,
-        SubAdminPermissionsDto,
+        SubAdminPermissionsPatch,
         SubAdminRecordDto,
 } from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
 import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
 
-// ─── Alias‌های قدیمی فرانت ───
-export type LiveOrder = LiveOrderDto
-export type SubAdminPermissions = SubAdminPermissionsDto
-export type SubAdminRecord = SubAdminRecordDto
-export type CourierRecord = {
-        id: string
-        name: string
-        phone: string
-        trips: CourierDetailDto['trips']
-}
-export type AdminUserDetails = AdminUserDetailsDto
-export type AdminSession = Admin2SessionDto['admin'] extends null
-        ? never
-        : NonNullable<Admin2SessionDto['admin']> extends never
-                ? never
-                : { loginAt: Date; logoutAt: Date | null; wasActive: boolean }
-export type CourierOption = CourierOptionDto
+// رارد ۴۷ — نام‌های مستعارِ قدیمی فرانت حذف شدند (تکمیل خوشه‌ی رارد ۴۶): هر
+// مصرف‌کننده حالا مستقیم از @sinshin/shared می‌خواند؛ CourierRecord که
+// createdAt را جا انداخته بود هم با قرارداد CourierListRowDto جایگزین شد.
 
 // round-12 — دیتای فاکتور چاپی (اشپزخانه + فروش) — قرارداد GET /live/orders/:id/invoice
 // رارد ۴۶ — StaffInvoice( Item)? به قرارداد مشترک منتقل شد و خروجی
 // invoiceForStaff بک‌اند هم با همان تایپ annotate شد؛ re-export برای
-// پایداری مسیر import invoicePrint است (شکل بدون تغییر).
+// پایداری مسیر درون‌ریزیِ invoicePrint است (شکل بدون تغییر).
 export type { StaffInvoice, StaffInvoiceItem }
 
 // ═════════════ داشبورد ═════════════
@@ -174,6 +153,8 @@ export async function getAdminOrders(filters: {
         return authJson<AdminOrdersData>(`/admin/orders?${params}`, 'GET')
 }
 
+// رارد ۴۷ — پارامتر adminId حذف شد: هرگز به کوئری اضافه نمی‌شد (امضای
+// دروغین) — محدودسازی به سفارشات خودِ ادمین۲ سمت سرور با توکن انجام می‌شود.
 export async function getSubAdminOrders(filters: {
         page: number
         limit: number
@@ -181,7 +162,6 @@ export async function getSubAdminOrders(filters: {
         status?: string
         sortDate?: string
         sortAmount?: string
-        adminId: string
 }): Promise<AdminOrdersData> {
         const params = new URLSearchParams()
         params.set('page', String(filters.page))
@@ -215,7 +195,7 @@ export async function getCourierOptions(): Promise<
 }
 
 export async function getOrderDetailsByRole(input: {
-        data: { orderId: string; adminId?: string }
+        data: { orderId: string }
 }): Promise<LiveOrderDetailDto | null> {
         return authJson<LiveOrderDetailDto | null>(
                 `/live/orders/${input.data.orderId}`,
@@ -252,7 +232,7 @@ export async function getAdminCouriers(filters: {
         search?: string
         dateFrom?: string
         dateTo?: string
-}): Promise<{ couriers: CourierRecord[]; total: number }> {
+}): Promise<{ couriers: CourierListRowDto[]; total: number }> {
         const params = new URLSearchParams()
         params.set('page', String(filters.page))
         params.set('limit', String(filters.limit))
@@ -262,7 +242,7 @@ export async function getAdminCouriers(filters: {
         const to = jalaliBoundary(filters.dateTo, true)
         if (from) params.set('dateFrom', from)
         if (to) params.set('dateTo', to)
-        return authJson<{ couriers: CourierRecord[]; total: number }>(
+        return authJson<{ couriers: CourierListRowDto[]; total: number }>(
                 `/admin/couriers?${params}`,
                 'GET',
         )
@@ -309,7 +289,7 @@ export async function addSubAdmin(input: {
         phone: string
         firstName: string
         lastName: string
-        /** round-29 — scope انتخابی در فرم؛ قبلاً همیشه 'takeaway' هاردکد بود و ادمین۲ جدید
+        /** round-29 — حوزه‌ی انتخابی در فرم؛ قبلاً همیشه 'takeaway' هاردکد بود و ادمین۲ جدید
          * هرگز سفارشات سالن (DINE_IN) را نمی‌دید */
         scope: 'hall' | 'takeaway' | 'both'
 }): Promise<{ success: boolean; message?: string }> {
@@ -331,7 +311,7 @@ export async function toggleSubAdmin(id: string): Promise<void> {
 
 export async function updateSubAdminPermissions(input: {
         id: string
-        permissions: Partial<SubAdminPermissionsDto> & Record<string, boolean>
+        permissions: SubAdminPermissionsPatch
 }): Promise<void> {
         await authJson<unknown>(
                 `/admin/admins/${input.id}/permissions`,
@@ -422,7 +402,7 @@ export async function setLiveTrackingEnabled(input: {
 
 // phase-fix — محدودیت دسترسی «فقط ایران» (پیش‌فرض روشن)
 export async function getIranOnlyAccess(): Promise<boolean> {
-        // پاسخ API شیء { enabled } است؛ قبلاً مستقیم cast می‌شد → سوییچ همیشه روشن دیده می‌شد
+        // پاسخ API شیء { enabled } است؛ قبلاً مستقیم تبدیل نوع می‌شد → سوییچ همیشه روشن دیده می‌شد
         const d = await authJson<{ enabled: boolean }>(
                 '/admin/settings/iran-only',
                 'GET',
@@ -455,8 +435,7 @@ export async function setOutsideScope(input: {
 }
 
 /** رارد ۳۷ — وضعیت زنده‌ی دروازه برای کارت تنظیمات (رنج‌ها/منبع/به‌روزرسانی) —
- *  رارد ۴۶: GeoStatusResponse با قرارداد مشترک GeoStatusDto یکی شد (شکل بدون تغییر) */
-export type GeoStatusResponse = GeoStatusDto
+ *  رارد ۴۷: نام مستعار قدیمی GeoStatusResponse حذف شد — صفر مصرف‌کننده داشت. */
 
 export async function getGeoStatus(): Promise<GeoStatusDto> {
         return authJson<GeoStatusDto>('/geo/status', 'GET')
@@ -481,12 +460,11 @@ export async function setRestaurantOpen(input: {
 
 // ============= round-13 — بسته/باز موقت با علت (هر دو نقش) =============
 
-// رارد ۴۶ — RestaurantFullStatus با قرارداد مشترک RestaurantStatusDto یکی شد
+// رارد ۴۷ — نام مستعار قدیمی RestaurantFullStatus حذف شد — صفر مصرف‌کننده داشت.
 // (تولیدکننده‌ی بک‌اند هم با همان تایپ annotate شد — شکل بدون تغییر)
-export type RestaurantFullStatus = RestaurantStatusDto
 
-export async function getRestaurantStatusFull(): Promise<RestaurantFullStatus> {
-        return authJson<RestaurantFullStatus>(
+export async function getRestaurantStatusFull(): Promise<RestaurantStatusDto> {
+        return authJson<RestaurantStatusDto>(
                 '/admin/settings/restaurant/status',
                 'GET',
         )
@@ -497,7 +475,7 @@ export async function setTemporaryClose(input: {
 }): Promise<{ success: boolean }> {
         await authJson<unknown>('/admin/settings/temporary-close', 'POST', {
                 ...input.data,
-                // round-34 — علت عربی ('' → null = حذف ترجمه = fallback فارسی)
+                // round-34 — علت عربی ('' → null = حذف ترجمه = بازگشت به فارسی)
                 reasonAr: input.data.reasonAr?.trim() || null,
         })
         return { success: true }

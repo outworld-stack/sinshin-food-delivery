@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-six
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 10 از 18
-// مسیر مقصد: web/src/routes/articles/index.tsx
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
-// ═══════════════════════════════════════════════════════════════
-
 // src/routes/articles/index.tsx
 import { createFileRoute } from '@tanstack/react-router'
 import { memo, useCallback } from 'react'
@@ -95,9 +88,9 @@ const ArticlesPage = memo(function ArticlesPage() {
 									article={{
 										...article,
 										profileImage: article.profileImage ?? null,
-										publishedAt: article.publishedAt
-											? new Date(article.publishedAt)
-											: new Date(),
+										// رارد ۴۷ — publishedAt قراردادِ required شد؛
+										// پشتیبانِ «امروز» برای تاریخ گمشده حذف شد
+										publishedAt: new Date(article.publishedAt),
 									}}
 								/>
 							))

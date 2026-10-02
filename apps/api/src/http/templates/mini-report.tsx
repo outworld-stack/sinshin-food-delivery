@@ -1,5 +1,5 @@
 // src/http/templates/mini-report.ts
-// phase-4 — string-builder (همان قرارداد؛ JSX حذف برای cross-package typing)
+// phase-4 — سازنده‌ی رشته (همان قرارداد؛ JSX حذف برای تایپ‌دهیِ بین‌پکیجی)
 import { esc, Page, Stat, Table } from './theme'
 
 export interface MiniReportViewModel {

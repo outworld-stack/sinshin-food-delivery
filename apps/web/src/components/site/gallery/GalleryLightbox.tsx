@@ -10,7 +10,7 @@ interface GalleryLightboxProps {
 	onClose: () => void
 }
 
-// Lightbox — کنترل‌شده از reducer والد، Escape + کلیک-بیرون می‌بنده
+// Lightbox — کنترل‌شده از کاهنده والد، Escape + کلیک-بیرون می‌بنده
 export const GalleryLightbox = memo(function GalleryLightbox({
 	src,
 	alt,
@@ -24,7 +24,7 @@ export const GalleryLightbox = memo(function GalleryLightbox({
 		[onClose],
 	)
 
-	// Escape — mount فقط وقتی بازه (والد شرطی رندر می‌کنه → effect فقط اون‌موقع life داره)
+	// Escape — سوار شدن فقط وقتی بازه (والد شرطی رندر می‌کنه → effect فقط اون‌موقع life داره)
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') onClose()

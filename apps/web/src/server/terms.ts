@@ -17,7 +17,7 @@ export async function getTerms(): Promise<TermsContentDto> {
 // ─── ادمین — هر ذخیره نسخه جدید ───
 export async function updateTerms(input: {
   sections: { title: string; items: string[] }[]
-  /** round-34 — بندهای عربی (ساختار موازی sections؛ خالی = fallback فارسی) */
+  /** round-34 — بندهای عربی (ساختار موازی sections؛ خالی = بازگشت به فارسی) */
   sectionsAr?: { title: string; items: string[] }[] | null
 }): Promise<{ success: boolean; version: number }> {
   return authJson<{ success: boolean; version: number }>('/admin/terms', 'POST', {

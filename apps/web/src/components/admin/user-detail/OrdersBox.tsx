@@ -4,10 +4,10 @@ import { Link } from '@tanstack/react-router'
 import { Pagination } from '#/components/Pagination'
 import { formatPrice } from '#/utils/format'
 import { useAppliedFilters } from '#/hooks/shared/useAppliedFilters'
-import type { AdminUserDetails } from '#/server/admin'
+import type { AdminUserDetailsDto } from '@sinshin/shared'
 
-type OrderRow = AdminUserDetails['orders'][number]
-type AddressRow = AdminUserDetails['addresses'][number]
+type OrderRow = AdminUserDetailsDto['orders'][number]
+type AddressRow = AdminUserDetailsDto['addresses'][number]
 
 const DEFAULT_FILTERS = {
   search: '',

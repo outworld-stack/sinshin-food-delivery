@@ -44,9 +44,9 @@ export const orderStatusEnum = pgEnum("order_status", [
 
 /**
  * سه نوع تحویل — قرارداد جدید:
- *  DELIVERY → پیک (آبی در پنل)         → scope takeaway
- *  PICKUP   → بسته‌بندی، بردن با خود (بنفش) → scope takeaway
- *  DINE_IN  → سرو در سالن (سبز)          → scope hall
+ *  DELIVERY → پیک (آبی در پنل)         → حوزه‌ی بیرون‌بر
+ *  PICKUP   → بسته‌بندی، بردن با خود (بنفش) → حوزه‌ی بیرون‌بر
+ *  DINE_IN  → سرو در سالن (سبز)          → حوزه‌ی سالن
  */
 export const deliveryTypeEnum = pgEnum("delivery_type", [
 	"DELIVERY",
@@ -100,7 +100,7 @@ export const orders = pgTable(
 		breakdown: jsonb("breakdown").$type<OrderBreakdown>().notNull(),
 		couponId: uuid("coupon_id").$type<CampaignId>(),
 
-		/** snapshot لحظه‌ی ثبت — سفارش‌های قبل از فعال‌سازی ردیابی نمی‌گیرند */
+		/** تصویر لحظه‌ای هنگام ثبت — سفارش‌های قبل از فعال‌سازی ردیابی نمی‌گیرند */
 		trackingEnabled: boolean("tracking_enabled").notNull().default(false),
 		courierLocation: jsonb("courier_location").$type<{
 			lat: number;
@@ -132,7 +132,7 @@ export const orders = pgTable(
 		/** پنل زنده: لیست صف بر اساس (status, deliveryType) */
 		index("orders_live_idx").on(t.status, t.deliveryType),
 		/** round-16 — سفارش‌های مشتری (myOrders/myOrdersLight/پروفایل):
-		 *  where user_id=… order by created_at desc — ایندکس تک‌ستونی user مجبور به sort کل ردیف‌های کاربر می‌کرد */
+		 *  where user_id=… order by created_at desc — ایندکس تک‌ستونی user مجبور به مرتب‌سازی کل ردیف‌های کاربر می‌کرد */
 		index("orders_user_created_idx").on(t.userId, t.createdAt),
 		/** round-17 — «صف» پنل زنده: PAID بدون تاییدکننده. ایندکس جزئی
 		 *  فقط ردیف‌های صف را نگه می‌دارد (همیشه کوچک و داغ) — شمارش

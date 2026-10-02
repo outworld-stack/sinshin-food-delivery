@@ -4,13 +4,13 @@ export function sha256(input: string): string {
   return new Bun.CryptoHasher('sha256').update(input).digest('hex')
 }
 
-/** توکن تصادفی امن (refresh token) — web crypto بانی */
+/** توکن تصادفی امن (توکن نوسازی) — Web Crypto بانی */
 export function randomToken(bytes = 48): string {
   const buf = crypto.getRandomValues(new Uint8Array(bytes))
   return Buffer.from(buf).toString('base64url')
 }
 
-/** مقایسه‌ی زمان-ثابت — جلوگیری از timing attack */
+/** مقایسه‌ی زمان-ثابت — جلوگیری از حمله‌ی زمان‌سنجی */
 export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false
   let diff = 0
@@ -18,7 +18,7 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-/** کد عددی OTP — بدون bias (ردیف‌های >250 دور ریخته می‌شوند) */
+/** کد عددی OTP — بدون سوگیری (ردیف‌های >250 دور ریخته می‌شوند) */
 export function randomOtpCode(length = 4): string {
   let out = ''
   while (out.length < length) {

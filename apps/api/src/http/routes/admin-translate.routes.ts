@@ -64,11 +64,11 @@ export const adminTranslateRoutes = (deps: AdminTranslateRoutesDeps) =>
       },
     )
 
-    // ── صف‌کردن یک موجودیت (dedupe روی pending) ──
+    // ── صف‌کردن یک موجودیت (حذف تکرار با موارد در انتظار) ──
     .post('/', async ({ body }) => deps.translation.enqueue(body.entityType, body.entityId), {
       body: t.Object({
         entityType: EntityTypeSchema,
-        // 'terms' مقدار ویژه‌ی 'latest' را هم می‌پذیرد (در سرویس resolve می‌شود)
+        // 'terms' مقدار ویژه‌ی 'latest' را هم می‌پذیرد (در سرویس تفسیر می‌شود)
         entityId: t.String({ minLength: 1, maxLength: 64 }),
       }),
       detail: { summary: 'افزودن یک موجودیت به صف ترجمه' },
@@ -91,7 +91,7 @@ export const adminTranslateRoutes = (deps: AdminTranslateRoutesDeps) =>
       detail: { summary: 'وضعیت صف ترجمه و سلامت مترجم' },
     })
 
-    // ── jobهای اخیر (جدول کارت) ──
+    // ── کارهای اخیر (جدول کارت) ──
     .get(
       '/jobs',
       async ({ query }) => ({ jobs: await deps.translation.jobs(query.limit ?? 15) }),

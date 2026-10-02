@@ -57,7 +57,7 @@ function Metric({
   )
 }
 
-/** ردیف job — وضعیت آخرین اجرا + خطای کوتاه */
+/** ردیفِ کار — وضعیت آخرین اجرا + خطای کوتاه */
 function JobRow({ job }: { job: JobRunDto }) {
   const state = job.runningNow ? (
     <span className="text-amber-500 font-DanaDemiBold text-xs">در حال اجرا…</span>

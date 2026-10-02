@@ -15,12 +15,12 @@ import { devices } from './devices'
 import type { DeviceId, SessionId, UserId } from '#/domain/shared/brand'
 
 /**
- * نشست‌ها — یک نشست به ازای هر «ورود دستگاه» (خانواده‌ی refresh token).
+ * نشست‌ها — یک نشست به ازای هر «ورود دستگاه» (خانواده‌ی توکنِ تجدید).
  *
- * refresh_hash: sha256 توکن refresh «فعلی» — با هر چرخش به‌روز می‌شود.
+ * refresh_hash: sha256 توکنِ تجدید «فعلی» — با هر چرخش به‌روز می‌شود.
  * previous_refresh_hash: هشِ توکنِ قبلاً-چرخیده —
  *   ارائه‌ی دوباره‌ی همان توکن قدیمی = «استفاده‌ی مجدد» (نشانه‌ی سرقت)
- *   → کل نشست فوراً باطل می‌شود (reuse detection / ابطال خانواده).
+ *   → کل نشست فوراً باطل می‌شود (تشخیص استفاده‌ی مجدد / ابطال خانواده).
  */
 export const sessions = pgTable(
   'sessions',

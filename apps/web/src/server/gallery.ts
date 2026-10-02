@@ -9,7 +9,7 @@
 import { authJson, getJson } from '#/lib/api-fetch'
 import type { GalleryImageDto, GallerySpan } from '@sinshin/shared'
 
-// رارد ۴۶ — دو یونیون inline «wide | normal» در امضاهای ادمین با
+// رارد ۴۶ — دو یونیون درون‌خطی «wide | normal» در امضاهای ادمین با
 // GallerySpan قراردادی جایگزین شدند (شکل بدون تغییر).
 
 // ─── عمومی ───
@@ -25,7 +25,7 @@ export async function getAdminGalleryImages(): Promise<GalleryImageDto[]> {
 export async function addGalleryImage(input: {
   src: string
   alt: string
-  /** round-34 — متن جایگزین عربی ('' → null = fallback فارسی) */
+  /** round-34 — متن جایگزین عربی ('' → null = بازگشت به فارسی) */
   altAr?: string | null
   span: GallerySpan
 }): Promise<{ success: boolean }> {

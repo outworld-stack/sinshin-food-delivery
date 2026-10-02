@@ -7,7 +7,7 @@ interface ThemeState {
   toggle: () => void
 }
 
-// helper — سینک cookie با استور (سرور می‌خونتش)
+// هلپر — سینک کوکی با استور (سرور می‌خونتش)
 function syncCookie(isDark: boolean) {
   if (typeof document !== 'undefined') {
     document.cookie = `sinshin-theme=${isDark ? 'dark' : 'light'}; path=/; max-age=31536000; samesite=lax`
@@ -20,7 +20,7 @@ export const useThemeStore = create<ThemeState>()(
       isDark: false,
       toggle: () => set((s) => {
         const next = !s.isDark
-        syncCookie(next)  // ⬅️ هر تغییر → cookie آپدیت
+        syncCookie(next)  // ⬅️ هر تغییر → کوکی آپدیت
         if (typeof document !== 'undefined') {
           document.documentElement.classList.toggle('dark', next)
         }
@@ -30,12 +30,12 @@ export const useThemeStore = create<ThemeState>()(
     {
       name: 'sinshin-theme',
       skipHydration: true,
-      // استور persist هم بمونه (localStorage) — ولی cookie منبع SSRئه
+      // استور persist هم بمونه (localStorage) — ولی کوکی منبع SSRئه
     }
   )
 )
 
-// سمت کلاینت — بعد از mount: کلاس از استور
+// سمت کلاینت — بعد از سوار شدن: کلاس از استور
 export function applyThemeClass(isDark: boolean) {
   if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('dark', isDark)

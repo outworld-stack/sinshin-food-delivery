@@ -5,29 +5,16 @@
 // کامیت پیشنهادی: stage thirty-five
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-37 — sinshin-food-delivery — فایل 13 از 17
-// مسیر مقصد: apps/web/src/utils/queryKeys.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-three
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 25 از 31
-// مسیر مقصد: apps/web/src/utils/queryKeys.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
-// ═══════════════════════════════════════════════════════════════
-
 // src/utils/queryKeys.ts
 // کارخانه‌ی مرکزی کلیدها — منبع واحد حقیقت
 // قانون طلایی: هیچ رشته‌ی خام queryKey خارج از این فایل نوشته نشه؛
-// invalidation همیشه از همین‌جا تا scope دقیق باشه
+// نامعتبرسازی همیشه از همین‌جا تا حوزه‌ی دقیق باشه
+import type { CartItemInput } from '@sinshin/shared'
 
 export const qk = {
   // --- کاربر ---
   userProfile: ['user-profile'] as const,
-  // کار-۶: پروفایل سبک — زیرمجموعه‌ی همین پریفکس تا invalidateهای موجود
+  // کار-۶: پروفایل سبک — زیرمجموعه‌ی همین پریفکس تا نامعتبرسازی‌های موجود
   // (آدرس جدید، سفارش، ویرایش پروفایل، ...) به‌طور خودکار این را هم رفرش کنند
   userProfileLight: ['user-profile', 'light'] as const,
   productReviews: (productId: string) => ['product-reviews', productId] as const,
@@ -52,7 +39,7 @@ export const qk = {
   articleCategories: ['article-categories'] as const,
   articles: (category: string, subCategory: string) =>
     ['articles', category, subCategory] as const,
-  // رارد ۳۹ — پریفکس لیست مقالات؛ برای invalidation زبان‌محور (همه‌ی
+  // رارد ۳۹ — پریفکس لیست مقالات؛ برای نامعتبرسازیِ زبان‌محور (همه‌ی
   // category/subCategoryهای کش‌شده یکجا) — خودِ فراخوانی‌ها تغییری نمی‌کنند
   articlesAll: ['articles'] as const,
 
@@ -76,7 +63,7 @@ export const qk = {
 
   // --- ادمین۲ (لایو) ---
   admin2Session: ['admin2-session'] as const,
-  // پریفکس بدون adminId — برای invalidate از بیرون پنل (مثلاً چک‌اوت بعد از ثبت سفارش)
+  // پریفکس بدون adminId — برای نامعتبرسازی از بیرون پنل (مثلاً چک‌اوت بعد از ثبت سفارش)
   // چون adminId تو کلاینت چک‌اوت در دسترس نیست — پیشوند همه‌ی adminIdها رو می‌گیره
   admin2LiveOrdersPrefix: ['admin2-live-orders'] as const,
   admin2LiveOrders: (adminId: string) => ['admin2-live-orders', adminId] as const,
@@ -85,11 +72,12 @@ export const qk = {
   // --- سبد خرید ---
   // آیتم‌ها مستقیم داخل کلید می‌شینن (hash ساختاری — بدون JSON.stringify)؛
   // مثل checkoutDetails: ترتیب فیلدها مهم نیست، آبجکت مستقیم hash می‌شه
+  // رارد ۴۷ — آیتم‌ها با CartItemInput قراردادی (کپی درون‌خطی حذف شد)
   cartDetails: (
-    items: ReadonlyArray<{ productId: string; sizeId: string | null; quantity: number }>,
+    items: ReadonlyArray<CartItemInput>,
   ) => ['cart-details', items] as const,
   // رارد ۳۹ — پریفکس جزئیات سبد؛ نام محصول/سایز سمت سرور COALESCE عربی/فارسی
-  // می‌شود → با تعویض زبان باید invalidate شود (هر ترکیب آیتم‌ها یکجا)
+  // می‌شود → با تعویض زبان باید نامعتبرسازی شود (هر ترکیب آیتم‌ها یکجا)
   cartDetailsAll: ['cart-details'] as const,
 
   // --- پنل ادمین ---
@@ -118,7 +106,7 @@ export const qk = {
   adminProductDetails: (productId: string) => ['admin-product-details', productId] as const,
 
   // --- تنظیمات پنل ---
-  // پرچم‌های صفحه‌ی تنظیمات — بعد از ذخیره invalidate می‌شن
+  // پرچم‌های صفحه‌ی تنظیمات — بعد از ذخیره نامعتبرسازی می‌شن
   settingsTracking: ['settings-tracking'] as const,
   settingsRestaurant: ['settings-restaurant'] as const,
   // round-13 — وضعیت کامل (بسته موقت + علت) برای کارت بسته/باز موقت
@@ -142,7 +130,7 @@ export const qk = {
   courierOptions: ['courier-options'] as const,
 
   // ⬅ NEW: جزئیات ادمین سطح ۲ (صفحه‌ی $adminId + ادیتور دسترسی‌ها)
-  // ادیتور با پریفکس invalidate می‌کنه تا هر صفحه‌ی بازِ ادمین۲ رفرش شه
+  // ادیتور با پریفکس نامعتبرسازی می‌کنه تا هر صفحه‌ی بازِ ادمین۲ رفرش شه
   subAdminDetails: (adminId: string) => ['sub-admin-details', adminId] as const,
   subAdminDetailsAll: ['sub-admin-details'] as const,
 
@@ -164,7 +152,7 @@ export const qk = {
     sortDate: string; sortWallet: string; sortSpent: string;
   }) => ['admin-users', f.page, f.limit, f.search, f.device, f.status,
     f.sortDate, f.sortWallet, f.sortSpent] as const,
-  // پریفکس — بعد از toggle وضعیت/ویرایش، همه‌ی فیلترها رفرش می‌شن
+  // پریفکس — بعد از تغییر وضعیت/ویرایش، همه‌ی فیلترها رفرش می‌شن
   adminUsersAll: ['admin-users'] as const,
 
   // نقش هم داخل کلیده — کش ادمین و ادمین۲ جدا (دیتاشون فرق داره)
@@ -215,7 +203,7 @@ export const qk = {
 // staleTime (۳۰ تا ۳۰۰ ثانیه) + رفرش/رفکوس، زبانِ قبلی را نشان می‌داد —
 // دقیقاً همان «اسم غذاها و توضیحات با تأخیر زیاد عربی/فارسی می‌شوند».
 //
-// راه‌حل: I18nProvider.setLang این فهرست را cancel + invalidate می‌کند
+// راه‌حل: I18nProvider.setLang این فهرست را لغو + نامعتبرسازی می‌کند
 // (فایل i18n/index.tsx) تا داده‌ی زبانِ تازه همان لحظه بیاید. پنل ادمین
 // عمداً خارج این فهرست است — ادمین/ادمین₂/پیک فارسیِ خالص می‌مانند و
 // ستون‌های عربیه‌شان را جداگانه در فرم‌ها می‌بینند (قرارداد رارد ۳۴).

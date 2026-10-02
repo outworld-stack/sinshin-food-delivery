@@ -1,14 +1,15 @@
 // src/components/admin/user-detail/AddressesBox.tsx
 import { memo, useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { deleteUserAddress, type AdminUserDetails } from '#/server/admin'
+import { deleteUserAddress } from '#/server/admin'
+import type { AdminUserDetailsDto } from '@sinshin/shared'
 import { Pagination } from '#/components/Pagination'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
 import { Trash2 } from 'reicon-react'
 
-type AddressRow = AdminUserDetails['addresses'][number]
+type AddressRow = AdminUserDetailsDto['addresses'][number]
 
 interface AddressesBoxProps {
   addresses: AddressRow[]

@@ -5,7 +5,7 @@ import type { IntervalJob } from '#/workers/scheduler'
 /**
  * phase-2 — تایم‌اوت/ری-وریفای پرداخت‌های PENDING:
  * مشتری درگاه را باز کرد ولی ریدایرکت برگشت نرسید → سفارش تا ابد PENDING
- * نمی‌ماند: ری-وریفای درگاه؛ وگرنه fail (بازگشت کیف پول + آزادسازی کوپن).
+ * نمی‌ماند: ری-وریفای درگاه؛ وگرنه شکست (بازگشت کیف پول + آزادسازی کوپن).
  */
 export class PaymentTimeoutJob implements IntervalJob {
   readonly name = 'payment-timeout'

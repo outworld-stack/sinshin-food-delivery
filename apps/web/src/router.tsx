@@ -13,7 +13,7 @@ export function getRouter() {
     context,
     scrollRestoration: true,
     defaultPreload: 'intent',
-    // ⬅ با staleTime پیش‌فرض QueryClient (۳۰s) هم‌تراز — preload ریفچ نمی‌کنه
+    // ⬅ با staleTime پیش‌فرض QueryClient (۳۰s) هم‌تراز — پیش‌واکشی ریفچ نمی‌کنه
     defaultPreloadStaleTime: 30_000,
     defaultPendingMs: 300,
     defaultPendingMinMs: 500,
@@ -22,9 +22,9 @@ export function getRouter() {
     // ⬅ NEW: ترنزیشن نرم بین روت‌ها (React 19 View Transitions API)
     defaultViewTransition: true,
 
-    // ⬅ NEW: pending و 404 پیش‌فرضِ سراسری —
+    // ⬅ NEW: حالتِ در انتظار و 404 پیش‌فرضِ سراسری —
     // روت‌هایی که pendingComponent/notFoundComponent خودشان را تعریف کرده‌اند
-    // همان نسخه‌ی اختصاصی‌شان نمایش داده می‌شود (این فقط fallback روت‌های ساده است)
+    // همان نسخه‌ی اختصاصی‌شان نمایش داده می‌شود (این فقط پشتیبانِ روت‌های ساده است)
     defaultPendingComponent: RootPendingFallback,
     defaultNotFoundComponent: RouteNotFound,
   })

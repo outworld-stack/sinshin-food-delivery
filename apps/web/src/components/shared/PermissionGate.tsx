@@ -57,7 +57,7 @@ export const PermissionGate = memo(function PermissionGate({
   return <>{children ?? null}</>
 })
 
-// gate render — مخفی/نمایش بخش‌های کوچک (دکمه‌ها)
+// gate رندر — مخفی/نمایش بخش‌های کوچک (دکمه‌ها)
 export const Can = memo(function Can({
   allowed, children,
 }: {

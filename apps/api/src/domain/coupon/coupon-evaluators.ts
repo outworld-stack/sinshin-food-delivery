@@ -5,10 +5,10 @@ import type { Db } from '#/infra/db/client'
 
 /**
  * ۹ ارزیاب شرط کوپن — SQL خالص ایندکس‌دار.
- * هر ارزیاب یک subquery قابل‌استفاده در expression بزرگ‌تر برمی‌گرداند.
+ * هر ارزیاب یک زیرکوئری قابل‌استفاده در عبارت بزرگ‌تر برمی‌گرداند.
  *
  * قرارداد params (jsonb) برای هر نوع — در کامنت enum ثبت شده.
- * همیشه با placeholders — هیچ رشته‌ی کاربر در SQL نمی‌نشیند.
+ * همیشه با جای‌نگهدار — هیچ رشته‌ی کاربر در SQL نمی‌نشیند.
  */
 
 export interface EvaluatorContext {
@@ -185,7 +185,7 @@ export function evaluateCondition(
 /**
  * ترکیب شرط‌های یک کوپن برای یک کاربر:
  * satisfied = همه‌ی شرط‌ها + unsatisfied = همه منهای یکی.
- * خروجی: عبارت SQL که روی ردیف users (aliased u) قابل JOIN است.
+ * خروجی: عبارت SQL که روی ردیف users (با نام مستعار u) قابل جوین است.
  */
 export function buildUserCondition(
   ctx: EvaluatorContext,

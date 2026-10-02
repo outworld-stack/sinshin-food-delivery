@@ -31,7 +31,7 @@ import type { AdminReportQuery, AdminReportResult } from '@sinshin/shared'
  *  coupons — ریز کوپن‌ها (مصرف/گیرنده/وضعیت)
  *  users   — کاربران با آمار خرید
  *  user    — یک کاربر خاص (موبایل) — سفارشات + کیف پول
- *  audit   — لاگ ممیزی عملیات ادمین اصلی
+ *  ممیزی   — لاگ ممیزی عملیات ادمین اصلی
  *
  * رارد ۴۶ — سه تایپی که همین‌جا تعریف می‌شدند (ReportQueryType/
  * ReportQueryInput/ReportResultDto) به قرارداد مشترک منتقل شدند

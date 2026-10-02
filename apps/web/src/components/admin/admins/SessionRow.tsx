@@ -1,11 +1,11 @@
 // src/components/admin/admins/SessionRow.tsx
 import { memo } from 'react'
-import type { AdminSession } from '#/server/admin'
+import type { AdminSessionDto } from '@sinshin/shared'
 import { formatDate, formatTime, faNum } from '#/utils/format'
 import { Eye, EyeOff } from 'reicon-react'
 
 interface SessionRowProps {
-  session: AdminSession
+  session: AdminSessionDto
 }
 
 // ردیف سشن — گزارش حضور (تفکیک حضور واقعی/لاگین خالی)

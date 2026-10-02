@@ -23,27 +23,18 @@ import { Err } from '#/domain/shared/errors'
 import { asUserId } from '#/domain/shared/brand'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
-import type { AdminSessionDto, SubAdminRecordDto } from '@sinshin/shared'
+import type { AdminSessionDto, SubAdminPermissionsDto, SubAdminPermissionsPatch, SubAdminRecordDto } from '@sinshin/shared'
 
-/** ساختار scope — از دو ستون boolean */
+/** ساختار حوزه — از دو ستون boolean */
 export interface Admin2Scope {
     hall: boolean
     takeaway: boolean
 }
 
-export interface Admin2Permissions extends Admin2Scope {
-    productsRead: boolean
-    productsWrite: boolean
-    usersRead: boolean
-    usersWrite: boolean
-    couriersRead: boolean
-    couriersWrite: boolean
-    mainCategoriesRead: boolean
-    mainCategoriesWrite: boolean
-    orderDetailsRead: boolean
-    canToggleTemporaryClose: boolean
-    canEditPackagingFee: boolean
-}
+// رارد ۴۷ — دسترسی‌های ادمین۲ = قرارداد مشترک (کپی محلی حذف شد؛
+// پاسخ همیشه همه‌ی ۱۴ کلید را پر می‌فرستد — نسخه‌ی درخواستِ جزئی،
+// SubAdminPermissionsPatch است).
+export type Admin2Permissions = SubAdminPermissionsDto
 
 /** round-16 — TTL کش درون‌پروسه‌ای پروفایل ادمین۲ (permissionsOf/scopeOf) */
 const PROFILE_CACHE_TTL_MS = 15_000
@@ -52,7 +43,7 @@ const PROFILE_CACHE_TTL_MS = 15_000
  * سرویس ادمین سطح ۲ — بدون تک‌نشست (چند ادمین هم‌زمان).
  *
  * لاگین: فقط با بسته‌بودنِ «ساعتی» رد می‌شود (موقت آزاد است).
- * لاگین موفق → ردیف admin2Sessions + رویداد LOGIN + اطلاعِ صفِ داخل scope.
+ * لاگین موفق → ردیف admin2Sessions + رویداد LOGIN + اطلاعِ صفِ داخل حوزه.
  */
 export class Admin2Service {
     /** round-16 — userId → { at, profile|null } — ایندکس‌شده با TTL ۱۵s */
@@ -80,7 +71,7 @@ export class Admin2Service {
         }
     }
 
-    /** بعد از لاگین موفق — سشن + رویداد + اطلاع صفِ scope */
+    /** بعد از لاگین موفق — سشن + رویداد + اطلاع صفِ حوزه */
     async onLogin(user: UserRow): Promise<{ queueCount: number }> {
         if (user.role !== 'admin2') return { queueCount: 0 }
         const profile = await this.profile(user.id)
@@ -91,7 +82,7 @@ export class Admin2Service {
         } as typeof admin2Sessions.$inferInsert)
         await this.log(user.id, 'LOGIN', null, {})
 
-        // صفِ داخل scope او — «تخصیص» نیست؛ فقط نمایش
+        // صفِ داخل حوزه او — «تخصیص» نیست؛ فقط نمایش
         const queueCount = await this.queueCountFor(user.id)
         return { queueCount }
     }
@@ -118,7 +109,7 @@ export class Admin2Service {
 
     // ── صف ──
 
-    /** «صف» = PAID بدون confirmedBy — داخل scope ادمین؛ ادمین اصلی: کل صف */
+    /** «صف» = PAID بدون confirmedBy — داخل حوزه ادمین؛ ادمین اصلی: کل صف */
     async queueCountFor(adminUserId: string, viewerRole?: string): Promise<number> {
         if (viewerRole === 'admin') {
             return this.deps.db
@@ -338,12 +329,13 @@ export class Admin2Service {
 
     async setPermissions(
         adminUserId: string,
-        perms: Partial<Admin2Permissions>,
+        // رارد ۴۷ — بدنه‌ی PATCH = قرارداد مشترک (نسخه‌ی جزئیِ دسترسی‌ها)
+        perms: SubAdminPermissionsPatch,
     ): Promise<void> {
         const uid = asUserId(adminUserId)
         // round-29 — کلیدهای قرارداد (hall/takeaway) → ستون‌های دیتابیس
         // (scopeHall/scopeTakeaway). قبلاً spread مستقیم یعنی کلیدهای قرارداد به
-        // کوئری نمی‌رسیدند و scope از پنل قابل ویرایش نبود.
+        // کوئری نمی‌رسیدند و حوزه از پنل قابل ویرایش نبود.
         const { hall, takeaway, ...rest } = perms
         const patch: Partial<typeof admin2Profiles.$inferInsert> = {
             ...rest,
@@ -386,7 +378,7 @@ export class Admin2Service {
         closed: boolean,
         reason?: string | null,
         reopenTime?: string | null,
-        /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = fallback فارسی) */
+        /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = پشتیبان فارسی) */
         reasonAr?: string | null,
     ): Promise<void> {
         const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
@@ -448,7 +440,7 @@ export class Admin2Service {
         else this.profileCache.clear()
     }
 
-    /** شرط scope روی deliveryType */
+    /** شرط حوزه روی deliveryType */
     private scopeClause(scope: Admin2Scope) {
         if (scope.hall && scope.takeaway) return sql`true`
         if (scope.hall) return eq(orders.deliveryType, 'DINE_IN')

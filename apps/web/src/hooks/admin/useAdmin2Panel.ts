@@ -2,7 +2,7 @@
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import {
-  subAdminLogout, viewOrderNote, type LiveOrder,
+  subAdminLogout, viewOrderNote,
 } from '#/server/admin'
 import { useNavigate } from '@tanstack/react-router'
 import { onUnauthorized, getAccessToken } from '#/lib/auth-session'
@@ -10,18 +10,19 @@ import { apiBase } from '#/lib/api'
 import { admin2SessionOptions, admin2LiveOrdersOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
+import type { LiveOrderDto } from '@sinshin/shared'
 
-// --- State ---
+// ── وضعیت ──
 interface Admin2State {
-  noteModalOrder: { orderId: string; note: string; deliveryType: LiveOrder['deliveryType'] } | null
-  confirmOrder: { orderId: string; courierId: string | null; isReassign: boolean; deliveryType: LiveOrder['deliveryType'] } | null
+  noteModalOrder: { orderId: string; note: string; deliveryType: LiveOrderDto['deliveryType'] } | null
+  confirmOrder: { orderId: string; courierId: string | null; isReassign: boolean; deliveryType: LiveOrderDto['deliveryType'] } | null
   soundEnabled: boolean
 }
 
 type Admin2Action =
-  | { type: 'OPEN_NOTE_MODAL'; payload: { orderId: string; note: string; deliveryType: LiveOrder['deliveryType'] } }
+  | { type: 'OPEN_NOTE_MODAL'; payload: { orderId: string; note: string; deliveryType: LiveOrderDto['deliveryType'] } }
   | { type: 'CLOSE_NOTE_MODAL' }
-  | { type: 'SET_CONFIRM'; payload: { orderId: string; courierId: string | null; isReassign: boolean; deliveryType: LiveOrder['deliveryType'] } }
+  | { type: 'SET_CONFIRM'; payload: { orderId: string; courierId: string | null; isReassign: boolean; deliveryType: LiveOrderDto['deliveryType'] } }
   | { type: 'CLEAR_CONFIRM' }
   | { type: 'TOGGLE_SOUND' }
 
@@ -75,12 +76,12 @@ export function useAdmin2Panel() {
 
   const adminId = session?.admin?.userId ?? '';
 
-  // ⬅ NEW: polling تطبیقی — فاصله‌ی ریفچ بر اساس دیتای آخرین poll:
+  // ⬅ NEW: پول تطبیقی — فاصله‌ی ریفچ بر اساس دیتای آخرین پول:
   //   * سفارش PAID در صف → هر ۲.۵ ثانیه (جهت تایید سریع)
   //   * صف بدون PAID → هر ۱۰ ثانیه (آرام)
   // قبلاً ثابت ۵s بود؛ این حالت هم پاسخ‌گوتره هم کم‌هزینه‌تر.
   // ux-۱: refetchIntervalInBackground روشن شد — این پنل «قلب رستوران» است؛
-  // تب مخفی هم باید سفارشِ پول‌خورده را ببیند (قبلاً در تب مخفی polling
+  // تب مخفی هم باید سفارشِ پول‌خورده را ببیند (قبلاً در تب مخفی پول
   // می‌ایستاد و سفارش جدید دیده نمی‌شد تا بازگشت به تب)
   // ⬅ round-16 — وضعیت SSE (قبل از کوئری تعریف می‌شود تا closure پول به آن دسترسی داشته باشد)
   const [sseConnected, setSseConnected] = useState(false)
@@ -96,7 +97,7 @@ export function useAdmin2Panel() {
     refetchIntervalInBackground: true,
   })
 
-  // ⬅ round-16 — اتصال SSE به کانال orders:new (توکن در query — EventSource
+  // ⬅ round-16 — اتصال SSE به کانال orders:new (توکن در کوئری — EventSource
   // هدر نمی‌تواند بفرستد؛ requireAuth سمت سرور ?token= را می‌پذیرد)
   useEffect(() => {
     if (!session?.isAdmin2LoggedIn) return
@@ -121,8 +122,8 @@ export function useAdmin2Panel() {
       const token = getAccessToken()
       if (!token) {
         // round-29 — قبلاً اینجا return خالی بود: اگر توکن در لحظه‌ی connect آماده
-        // نبود، SSE بدون هیچ retry برای همیشه خاموش می‌ماند (فقط پول ۲.۵/۱۰s می‌ماند).
-        // حالا: تلاش مجدد کوتاه‌مدت تا توکن برسد؛ cleanup تایمر را می‌بندد.
+        // نبود، SSE بدون هیچ تلاش مجدد برای همیشه خاموش می‌ماند (فقط پول ۲.۵/۱۰s می‌ماند).
+        // حالا: تلاش مجدد کوتاه‌مدت تا توکن برسد؛ پاک‌سازیِ تایمر را می‌بندد.
         if (!retryTimer) {
           retryTimer = setTimeout(() => {
             retryTimer = null
@@ -162,14 +163,14 @@ export function useAdmin2Panel() {
 
   // دینگ سفارش جدید
   // round-29 — قبلاً شرط prevCountRef.current > 0 یعنی پنلِ خالی هرگز برای
-  // «اولین» سفارش دینگ/توست نمی‌زد. حالا فقط اولین لودِ داده بی‌صدا baseline
+  // «اولین» سفارش دینگ/توست نمی‌زد. حالا فقط اولین لودِ داده بی‌صدا مبنای شمارش
   // می‌شود (چه خالی چه پُر) و هر رشد بعدی — حتی از صفر — اعلان می‌دهد.
   const prevCountRef = useRef(0)
   const firstLoadRef = useRef(true)
   const orders = liveData?.orders ?? []
   useEffect(() => {
     if (firstLoadRef.current) {
-      // اولین پاسخ موفق → فقط baseline؛ دینگِ لود اولیه نمی‌خواهیم
+      // اولین پاسخ موفق → فقط مبنای شمارش؛ دینگِ لود اولیه نمی‌خواهیم
       if (liveData !== undefined) {
         firstLoadRef.current = false
         prevCountRef.current = orders.length
@@ -183,7 +184,7 @@ export function useAdmin2Panel() {
     prevCountRef.current = orders.length
   }, [liveData, orders.length, state.soundEnabled, showToast])
 
-  // --- لاگ‌اوت: revoke سرور + پاک‌سازی کامل (phase-3) ---
+  // --- لاگ‌اوت: ابطال سشن سمت سرور + پاک‌سازی کامل (phase-3) ---
   // subAdminLogout → POST /auth/logout (برای admin2 سشن + لاگ فعالیت هم بسته می‌شود)
   const navigate = useNavigate()
   const logoutMutation = useMutation({
@@ -207,7 +208,7 @@ export function useAdmin2Panel() {
   // round-26 — deliveryType همراه سفارش می‌آید تا بعد از تیک نکته، مودال تایید
   // بداند پیک دارد یا نه (سرو در محل / تحویل حضوری)
   const viewNoteMutation = useMutation({
-    mutationFn: (input: { orderId: string; deliveryType: LiveOrder['deliveryType'] }) =>
+    mutationFn: (input: { orderId: string; deliveryType: LiveOrderDto['deliveryType'] }) =>
       viewOrderNote({ data: { orderId: input.orderId } }),
     onSuccess: (res, input) => {
       dispatch({ type: 'OPEN_NOTE_MODAL', payload: { orderId: input.orderId, note: res.note ?? '', deliveryType: input.deliveryType } })
@@ -215,14 +216,14 @@ export function useAdmin2Panel() {
     },
   })
 
-  const handleOpenNote = useCallback((orderId: string, deliveryType: LiveOrder['deliveryType']) => {
+  const handleOpenNote = useCallback((orderId: string, deliveryType: LiveOrderDto['deliveryType']) => {
     viewNoteMutation.mutate({ orderId, deliveryType })
   }, [viewNoteMutation])
 
   const handleCloseNote = useCallback(() => dispatch({ type: 'CLOSE_NOTE_MODAL' }), [])
 
   // --- تایید / تغییر پیک ---
-  const handleRequestConfirm = useCallback((orderId: string, courierId: string | null, isReassign: boolean, deliveryType: LiveOrder['deliveryType']) => {
+  const handleRequestConfirm = useCallback((orderId: string, courierId: string | null, isReassign: boolean, deliveryType: LiveOrderDto['deliveryType']) => {
     dispatch({ type: 'SET_CONFIRM', payload: { orderId, courierId, isReassign, deliveryType } })
   }, [])
 

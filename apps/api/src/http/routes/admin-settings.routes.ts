@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-three
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 21 از 49
-// مسیر مقصد: apps/api/src/http/routes/admin-settings.routes.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
-// ═══════════════════════════════════════════════════════════════
-
 // src/http/routes/admin-settings.routes.ts
 import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
@@ -33,9 +26,9 @@ export interface AdminSettingsRoutesDeps {
 }
 
 export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
-  // ══ خواندن + عملیاتِ permission-دار — ادمین اصلی + ادمین۲ فعال ══
-  // (temporary-close: permission داخل service چک می‌شود)
-  // stage-10: packaging-fee حذف شد — بسته‌بندی per-product در فرم محصول است.
+  // ══ خواندن + عملیاتِ مجوزدار — ادمین اصلی + ادمین۲ فعال ══
+  // (temporary-close: مجوز داخل سرویس چک می‌شود)
+  // stage-10: packaging-fee حذف شد — بسته‌بندی هر محصول در فرم محصول است.
   const shared = new Elysia({ prefix: '/admin/settings', tags: ['Admin / Settings'] })
     .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
 
@@ -89,7 +82,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           reason: t.String({ minLength: 3, maxLength: 120 }),
           /** round-29 — زمان باز شدن مجدد (اختیاری؛ فقط هنگام بستن معنا دارد) — در چک‌اوت به‌جای ساعت کاری اصلی نمایش داده می‌شود */
           reopenTime: t.Optional(t.String({ maxLength: 40 })),
-          /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = fallback فارسی) */
+          /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = پشتیبان فارسی) */
           reasonAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
         }),
         detail: {
@@ -102,8 +95,8 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
 
   // ══ phase-1: تنظیمات سراسری/پولی — فقط ادمین اصلی ══
   // قبلاً هر admin2 می‌توانست: ساعات کاری را ببند/باز کند، ناحیه‌های
-  // ارسال (قیمت ارسال!) را تغییر دهد، ردیابی سراسری را toggle کند.
-  // (دو instance جدا — .use وسط زنجیره به روت‌های بعدی نشت می‌کند)
+  // ارسال (قیمت ارسال!) را تغییر دهد، ردیابی سراسری را تغییر وضعیت دهد.
+  // (دو نمونه‌ی جدا — .use وسط زنجیره به روت‌های بعدی نشت می‌کند)
   const ownerOnly = new Elysia({ prefix: '/admin/settings', tags: ['Admin / Settings'] })
     .use(requireAdmin(deps.sessions))
 

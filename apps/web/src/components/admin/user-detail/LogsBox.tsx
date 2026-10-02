@@ -3,9 +3,9 @@ import { memo, useState, useCallback, useMemo } from 'react'
 import { Pagination } from '#/components/Pagination'
 import { formatDate } from '#/utils/format'
 import { useAppliedFilters } from '#/hooks/shared/useAppliedFilters'
-import type { AdminUserDetails } from '#/server/admin'
+import type { AdminUserDetailsDto } from '@sinshin/shared'
 
-type LogRow = AdminUserDetails['logs'][number]
+type LogRow = AdminUserDetailsDto['logs'][number]
 
 // مقادیر اولیه — بیرون کامپوننت (هویت پایدار)
 const DEFAULT_FILTERS = { type: 'all', sortBy: 'newest' as 'newest' | 'oldest' }

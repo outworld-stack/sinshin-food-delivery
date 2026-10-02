@@ -7,11 +7,11 @@ import { useToastStore } from '#/stores/toastStore'
 
 /**
  * phase-3 — لاگ‌اوت «واقعی» (مرگ لاگ‌اوت دکوری):
- *  ۱) POST /auth/logout → سشن سمت سرور revoke + کوکی httpOnly پاک می‌شود
+ *  ۱) POST /auth/logout → سشن سمت سرور ابطال و کوکی httpOnly پاک می‌شود
  *     (برای admin2: بستن سشن + لاگ فعالیت هم همین‌جا انجام می‌شود)
  *  ۲) onUnauthorized (داخل apiLogout) → توکن ماژول-گلوبال + authStore پاک
  *  ۳) queryClient.clear() → داده‌ی شخصی از کش نمی‌ماند
- *  ۴) navigate با replace — دکمه‌ی Back، صفحه‌ی قبلیِ احرازشده را برنمی‌گرداند
+ *  ۴) پیمایش با replace — دکمه‌ی بازگشت، صفحه‌ی قبلیِ احرازشده را برنمی‌گرداند
  */
 export function useRealLogout(redirectTo: '/' | '/login' = '/') {
   const navigate = useNavigate()

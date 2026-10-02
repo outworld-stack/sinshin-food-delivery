@@ -22,9 +22,9 @@ export function absoluteUrl(u?: string | null): string | undefined {
 
 /**
  * سئو-۴: JSON-LD امن برای درج داخل <script>.
- * JSON.stringify اسلش را escape نمی‌کند؛ نام/توصیف محصول می‌تواند
- * «</script><script>…» را تزریق کند (breakout از تگ = XSS).
- * جایگزینی < با \u003c برای پارسر JS شفاف است ولی HTML parser دیگر
+ * JSON.stringify اسلش را گریز نمی‌کند؛ نام/توصیف محصول می‌تواند
+ * «</script><script>…» را تزریق کند (خروج از تگ = XSS).
+ * جایگزینی < با \u003c برای پارسر JS شفاف است ولی پارسر HTML دیگر
  * تگ پایانی نمی‌بیند — روش استاندارد JSON-LD در React.
  */
 export function jsonLdScript(obj: unknown): string {

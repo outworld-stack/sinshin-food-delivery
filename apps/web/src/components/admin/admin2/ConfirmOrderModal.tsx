@@ -7,9 +7,9 @@ import { Toggle } from '#/components/shared/Toggle'
 import {
 	confirmLiveOrder,
 	getStaffOrderInvoice,
-	type LiveOrder,
 	reassignCourier,
 } from '#/server/admin'
+import type { LiveOrderDto } from '@sinshin/shared'
 import { useToastStore } from '#/stores/toastStore'
 import { printOrderInvoices } from '#/utils/invoicePrint'
 import { qk } from '#/utils/queryKeys'
@@ -22,7 +22,7 @@ interface ConfirmOrderModalProps {
 	courierId: string | null
 	isReassign: boolean
 	/** round-26 — نوع تحویل سفارش: سلکت پیک و سوییچ QR فقط برای DELIVERY */
-	deliveryType: LiveOrder['deliveryType']
+	deliveryType: LiveOrderDto['deliveryType']
 	onDone: () => void
 	onCancel: () => void
 }
@@ -74,7 +74,7 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 
 	// round-12 — چاپ واقعی فاکتورها (قبلاً فقط ادعای متنی بود): پس از موفقیت،
 	// دیتای فاکتور گرفته می‌شود و سند مستقل (printDocument) چاپ می‌شود.
-	// خطای چاپ جریان تایید را نمی‌شکند — فقط toast.
+	// خطای چاپ جریان تایید را نمی‌شکند — فقط پیام شناور.
 	// round-14 — فرمت رسیدی 80mm (پرینتر ستونی مغازه).
 	const printInvoices = useCallback(
 		async (orderId: string, kinds: ('kitchen' | 'sales')[]) => {

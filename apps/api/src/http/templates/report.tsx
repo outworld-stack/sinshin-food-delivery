@@ -1,5 +1,5 @@
 // src/http/templates/report.ts
-// phase-4 — string-builder به‌جای JSX (آخرین فایل JSX بک‌اند)
+// phase-4 — سازنده‌ی رشته به‌جای JSX (آخرین فایل JSX بک‌اند)
 import { esc, Page, Stat, Table } from './theme'
 
 export interface ReportViewModel {

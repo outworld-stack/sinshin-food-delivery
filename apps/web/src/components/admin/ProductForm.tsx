@@ -42,7 +42,7 @@ export function ProductForm({
                 ingredients: [],
                 sizes: [],
                 sizesEnabled: false, // ⬅ پیش‌فرض خاموش (پرسش ۱)
-                // round-34 — فیلدهای عربی (خالی = fallback فارسی)
+                // round-34 — فیلدهای عربی (خالی = پشتیبان فارسی)
                 nameAr: '',
                 descriptionAr: '',
                 ingredientsArText: '',

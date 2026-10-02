@@ -6,7 +6,7 @@ import type { DailyJob } from '#/workers/scheduler'
 
 /**
  * مغایرت‌گیری مالی — ۰۳:۰۰ تهران.
- * Flags per-check در env (RECONCILE_AUTO_R1 و ...) — پیش‌فرض همه report-only.
+ * پرچم‌های به‌ازای هر چک در env (RECONCILE_AUTO_R1 و ...) — پیش‌فرض همه فقط گزارش.
  */
 export class ReconcileJob implements DailyJob {
   readonly name = 'reconcile'

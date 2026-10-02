@@ -2,7 +2,7 @@
 import type { AppConfig } from '#/infra/config/env'
 /**
  * آداپتر پیامک — تنها نقطه‌ی ارسال SMS در کل سیستم.
- * console = فقط لاگ (dev بدون اعتبارنامه) | real = درگاه با Bun.fetch
+ * console = فقط لاگ (محیط توسعه بدون اعتبارنامه) | real = درگاه با Bun.fetch
  */
 export class SmsService {
   constructor(private readonly config: AppConfig) {}

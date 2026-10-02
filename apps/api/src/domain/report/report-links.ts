@@ -32,7 +32,7 @@ export class ReportLinks {
     return Buffer.from(s, 'base64url').toString('utf8')
   }
 
-  // ── cron ──
+  // ── زمان‌بند ──
 
   cronToken(kind: 'daily' | 'weekly'): string {
     return `c.${kind}.${this.hash(`cron:${kind}`)}`

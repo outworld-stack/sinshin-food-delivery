@@ -12,7 +12,7 @@
 //    با @page و فونت خودش و thead تکرارشونده در صفحه‌بندی.
 //  • مرز «از» = ابتدای روز (قبلاً ظهر روز اول بود و نیمهٔ اول روزِ اول
 //    از همهٔ گزارش‌ها حذف می‌شد).
-//  • دراپ‌داون ادمین فقط برای گزارش «کار ادمین‌های سطح ۲» — audit خودش
+//  • دراپ‌داون ادمین فقط برای گزارش «کار ادمین‌های سطح ۲» — ممیزی خودش
 //    لاگ ادمین اصلی است و فیلتر ادمین بی‌معنا بود.
 //  • پریست‌های سریع بازه + شمار ردیف‌ها + انتخاب خودکار landscape برای
 //    جدول‌های پهن (سفارشات ۱۱ ستونه در A4 عمودی بریده می‌شد).
@@ -138,7 +138,7 @@ function presetRange(key: PresetKey): { from: string; to: string } {
 	}
 }
 
-// ── state ──
+// ── وضعیت ──
 interface ReportsState {
 	type: AdminReportType
 	fromJalali: string | null
@@ -248,7 +248,7 @@ export const ReportsBox = memo(function ReportsBox() {
 	const [committed, setCommitted] = useState<ReportsState | null>(null)
 	const showToast = useToastStore((s) => s.showToast)
 
-	// round-14 — قالب چاپ (ستونی/موبایل ↔ دسکتاپ) — پس از mount از localStorage
+	// round-14 — قالب چاپ (ستونی/موبایل ↔ دسکتاپ) — پس از سوار شدن از localStorage
 	const [printMode, setPrintMode] = useState<PrintPaper>('a4')
 	useEffect(() => {
 		setPrintMode(loadPrintMode())
@@ -258,11 +258,11 @@ export const ReportsBox = memo(function ReportsBox() {
 		try {
 			localStorage.setItem(PRINT_MODE_KEY, mode)
 		} catch {
-			/* noop */
+			/* هیچ‌کاری نمی‌کند */
 		}
 	}, [])
 
-	// دراپ‌داون‌ها — ادمین‌های سطح ۲ فقط برای گزارشِ کارشان؛ audit لاگِ
+	// دراپ‌داون‌ها — ادمین‌های سطح ۲ فقط برای گزارشِ کارشان؛ ممیزی لاگِ
 	// ادمین اصلی است و فیلتر ادمین رویش بی‌معنا بود (round-12 حذف شد)
 	const needsAdmins = state.type === 'admin2'
 	const needsCouriers = state.type === 'couriers'

@@ -182,7 +182,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
               <input value={form.name} onChange={(e) => set({ name: e.target.value })} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" />
             </div>
 
-            {/* round-34 — نام عربی دسته (خالی = fallback فارسی) */}
+            {/* round-34 — نام عربی دسته (خالی = پشتیبان فارسی) */}
             <ArField
               label="نام دسته"
               value={form.nameAr}

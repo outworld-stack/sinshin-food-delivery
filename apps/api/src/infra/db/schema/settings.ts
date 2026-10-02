@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-three
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 6 از 49
-// مسیر مقصد: apps/api/src/infra/db/schema/settings.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
-// ═══════════════════════════════════════════════════════════════
-
 //src/infra/db/schema/settings.ts
 import { boolean, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core'
 
@@ -45,7 +38,7 @@ export const SETTING_KEYS = {
   /** مختصات مبدأ ارسال */
   restaurantLocation: 'restaurant_location', // { lat, lng }
   // round-11: کلید packagingFee حذف شد — stage-10 هزینهٔ بسته‌بندی
-  // per-product (ستون products.packaging_cost) شد و این کلید مرده بود.
+  // به‌ازای هر محصول (ستون products.packaging_cost) شد و این کلید مرده بود.
 
   iranOnlyAccess: 'iran_only_access', // boolean
   /**
@@ -64,7 +57,7 @@ export const contentAbout = pgTable('content_about', {
   teamTitle: text('team_title').notNull(),
   teamGradient: text('team_gradient').notNull(),
   teamAlt: text('team_alt').notNull(),
-  /** round-34 — محتوای عربی (NULL = fallback فارسی؛ گرادیانت‌ها ترجمه نمی‌شوند) */
+  /** round-34 — محتوای عربی (NULL = پشتیبان فارسی؛ گرادیانت‌ها ترجمه نمی‌شوند) */
   heroTitleAr: text('hero_title_ar'),
   heroTextAr: text('hero_text_ar'),
   teamTitleAr: text('team_title_ar'),
@@ -81,7 +74,7 @@ export const terms = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     version: integer('version').notNull(),
     sections: jsonb('sections').$type<{ title: string; items: string[] }[]>().notNull(),
-    /** round-34 — بندهای عربی (NULL = fallback فارسی؛ ساختار موازی sections) */
+    /** round-34 — بندهای عربی (NULL = پشتیبان فارسی؛ ساختار موازی sections) */
     sectionsAr: jsonb('sections_ar').$type<{ title: string; items: string[] }[]>(),
     /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
     arAuto: boolean('ar_auto').notNull().default(false),

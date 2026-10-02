@@ -4,7 +4,7 @@ import { safeEqual } from '#/domain/shared/crypto'
 
 /**
  * state امضاشده‌ی پرداخت — paymentId + HMAC(secret).
- * جعل‌ناپذیر: ساخت فقط با secret سرور؛ مرز serde این فایل تنها نقطه‌ی cast است.
+ * جعل‌ناپذیر: ساخت فقط با کلید رمزِ سرور؛ مرز serde این فایل تنها نقطه‌ی تبدیل نوع است.
  */
 export function signState(paymentId: PaymentId, secret: string): string {
   const h = new Bun.CryptoHasher('sha256').update(`gwstate:${paymentId}:${secret}`)

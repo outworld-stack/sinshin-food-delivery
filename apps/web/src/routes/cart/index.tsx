@@ -7,7 +7,6 @@
 
 // src/routes/cart/index.tsx
 
-import { asProductId, asSizeId } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useMemo } from 'react'
@@ -44,17 +43,18 @@ function CartPage() {
                 isError,
                 refetch,
         } = useQuery({
+                // رارد ۴۷ — تایپ درخواست سبد خام شد (قرارداد)؛ تبدیل‌های نوعِ برند حذف
                 ...cartDetailsOptions(
                         items.map((i) => ({
-                                productId: asProductId(i.productId),
-                                sizeId: i.sizeId ? asSizeId(i.sizeId) : null,
+                                productId: i.productId,
+                                sizeId: i.sizeId ?? null,
                                 quantity: i.quantity,
                         })),
                 ),
                 enabled: items.length > 0,
         })
 
-        // round-12 — ردیف‌هایی که سرور drop کرده (ناموجود/حذف‌شده) ولی هنوز در
+        // round-12 — ردیف‌هایی که سرور حذف کرده (ناموجود/حذف‌شده) ولی هنوز در
         // استور هستند: با ردیف «ناموجود» + دکمهٔ حذف رندر می‌شوند تا صاحب
         // ردیف و راه خروج داشته باشند (قبلاً: تعداد می‌ماند، ردیف و حذف نبود)
         const unavailableItems = useMemo(() => {
@@ -71,7 +71,7 @@ function CartPage() {
         }, [items, cartData])
 
         // آمار مشتق‌شده — round-12: تعداد هم از پاسخ سرور (فقط اقلام واقعی
-        // سفارش‌پذیر)؛ قبلاً تعداد از استور بود و با drop شدن آیتم‌ها «۱ عدد /
+        // سفارش‌پذیر)؛ قبلاً تعداد از استور بود و با حذف شدن آیتم‌ها «۱ عدد /
         // ۰ تومان» رندر می‌شد
         const cartStats = useMemo(() => {
                 const totalItems =

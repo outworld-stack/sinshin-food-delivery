@@ -40,9 +40,9 @@ export class DeviceService {
   /**
    * حل کردن دستگاه از سیگنال‌ها — ترتیب:
    *  ۱) clientId (لایه ۱ — قوی‌ترین)
-   *  ۲) هش مرکب exact
-   *  ۳) شباهت با دستگاه‌های اخیر → new + link
-   * بعد: امتیاز ریسک، autoblock، تصمیم REFERRAL_BLOCK.
+   *  ۲) هش مرکبِ دقیق
+   *  ۳) شباهت با دستگاه‌های اخیر → ساخت + پیوند
+   * بعد: امتیاز ریسک، انسداد خودکار، تصمیم REFERRAL_BLOCK.
    */
   async resolve(
     signals: DeviceSignals,
@@ -63,7 +63,7 @@ export class DeviceService {
         where: eq(devices.clientId, signals.clientId),
       })
       if (device) {
-        // دفاع ضد canvas-spoofing: canvas عوض شده ولی GPU-signals ثابت
+        // دفاع ضد جعلِ canvas: canvas عوض شده ولی سیگنال‌های GPU ثابت
         canvasDrift =
           device.canvasHash !== signals.canvasHash &&
           device.webglHash === signals.webglHash &&
@@ -71,7 +71,7 @@ export class DeviceService {
       }
     }
 
-    // ── ۲) هش مرکب exact ──
+    // ── ۲) هش مرکبِ دقیق ──
     if (!device) {
       device = await db.query.devices.findFirst({
         where: eq(devices.fingerprintHash, composite),
@@ -79,7 +79,7 @@ export class DeviceService {
     }
 
     if (device) {
-      // دستگاه شناخته‌شده — سیگنال‌های تازه را به‌روز کن (browser update / drift)
+      // دستگاه شناخته‌شده — سیگنال‌های تازه را به‌روز کن (به‌روزرسانی مرورگر / تغییر تدریجی)
       const [updated] = await db
         .update(devices)
         .set({
@@ -105,7 +105,7 @@ export class DeviceService {
         .returning()
       device = updated ?? device
     } else {
-      // ── ۳) شباهت با پنجره‌ی اخیر → new + link ──
+      // ── ۳) شباهت با پنجره‌ی اخیر → ساخت + پیوند ──
       const since = new Date(Date.now() - config.device.similarityWindowDays * 86_400_000)
       const candidates = await db
         .select()
@@ -190,7 +190,7 @@ export class DeviceService {
       }
     }
 
-    // ── autoblock: امولاتور/فارم ──
+    // ── انسداد خودکار: امولاتور/فارم ──
     if (score >= config.device.autoblockScore && !device.isBlocked) {
       const [blocked] = await db
         .update(devices)
@@ -474,7 +474,7 @@ export class DeviceService {
   }
 
   /**
-   * round-12 — چک REFERRAL_BLOCK برای دستگاهِ مشخص (bind معرف پس از ثبت‌نام).
+   * round-12 — چک REFERRAL_BLOCK برای دستگاهِ مشخص (پیوند معرف پس از ثبت‌نام).
    * همان قاعدهٔ signup: اگر خوشهٔ این دستگاه به تعداد زیادی شمارهٔ متفاول
    * وصل شده، معرفیِ شمارهٔ تازه فقط از همین خوشه پاداش نمی‌گیرد (ضد فارم).
    */

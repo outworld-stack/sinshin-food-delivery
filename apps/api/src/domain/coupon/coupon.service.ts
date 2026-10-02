@@ -13,6 +13,9 @@ import { buildUserCondition, type ConditionType } from './coupon-evaluators'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
+// رارد ۴۷ — شکل سیم این خروجی = CouponWithConditionsDto در قرارداد مشترک؛
+// ردیف خام دیتابیس مستقیم برمی‌گردد (createdAt هم روی سیم هست و از رارد ۴۷
+// در قرارداد دیده می‌شود) و تاریخ‌ها پس از سریال‌سازی ISO می‌شوند.
 export interface CouponWithConditions {
   coupon: typeof coupons.$inferSelect
   conditions: Array<{ id: string; type: ConditionType; params: Record<string, unknown> }>
@@ -26,8 +29,8 @@ export class CouponService {
   // ══ اعطا ══
 
   /**
-   * اعطای لحظه‌ای — در settle هر سفارش صدا می‌شود (همان tx).
-   * برای هر کوپن خصوصیِ فعال: همه‌ی شرط‌ها → grant (یک‌بار، unique).
+   * اعطای لحظه‌ای — در تسویه هر سفارش صدا می‌شود (همان tx).
+   * برای هر کوپن خصوصیِ فعال: همه‌ی شرط‌ها → grant (یک‌بار، یکتا).
    */
   async grantIfEligible(tx: DbOrTx, userId: string): Promise<number> {
     const active = await tx
@@ -118,7 +121,7 @@ export class CouponService {
  * phase-fix — رزرو گرنت کوپن خصوصی، در همان tx چک‌اوت.
  * اتمیک: UPDATE ... WHERE consumedAt IS NULL — فقط یکی از دو چک‌اوت
  * موازی برنده می‌شود؛ بازنده خطا می‌گیرد (نه اینکه هر دو تخفیف ببرند).
- * آزادسازی در failPayment / refund انجام می‌شود.
+ * آزادسازی در failPayment / بازپرداخت انجام می‌شود.
  */
   async reserveGrant(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<boolean> {
     const rows = await tx
@@ -135,7 +138,7 @@ export class CouponService {
     return rows.length > 0
   }
 
-  /** آزادسازی گرنت — در failPayment / refund (برگرداندن به قابل‌استفاده) */
+  /** آزادسازی گرنت — در failPayment / بازپرداخت (برگرداندن به قابل‌استفاده) */
   async releaseGrant(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<void> {
     await tx
       .update(couponGrants)
@@ -149,7 +152,7 @@ export class CouponService {
   }
 
 
-  /** مصرف گرنت — در settle؛ اتمیک با پول */
+  /** مصرف گرنت — در تسویه؛ اتمیک با پول */
   async consumeGrant(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<void> {
     await tx
       .update(couponGrants)
@@ -229,7 +232,7 @@ export class CouponService {
     return out
   }
 
-  /** phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی ادمین (deep-link بدون وابستگی به کش لیست) */
+  /** phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی ادمین (پیوند مستقیم بدون وابستگی به کش لیست) */
   async get(id: string): Promise<CouponWithConditions> {
     if (!UUID_RE.test(id)) throw Err.validation('شناسه‌ی کوپن معتبر نیست')
     const row = (
@@ -359,7 +362,7 @@ export class CouponService {
 
   /**
    * phase-fix — حذفِ سخت ممنوع: سفارش‌های در پرواز (PENDING_PAYMENT) به
-   * couponId اشاره می‌کنند و درج redemption در settle با FK می‌شکند و
+   * couponId اشاره می‌کنند و درج redemption در تسویه با FK می‌شکند و
    * سفارشِ «پول‌گرفته‌شده» برای همیشه گیر می‌کند. حذف = غیرفعال‌سازی.
    */
   async remove(id: string): Promise<{ success: boolean; message?: string }> {

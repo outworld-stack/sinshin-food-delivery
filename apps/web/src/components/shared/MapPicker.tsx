@@ -9,7 +9,7 @@ interface MapPickerProps {
 }
 
 /**
- * round-13 — fallback دستی مختصات وقتی کلید نقشه (VITE_NESHAN_API_KEY)
+ * round-13 — پشتیبان دستی مختصات وقتی کلید نقشه (VITE_NESHAN_API_KEY)
  * تنظیم نشده است: بدون آن، قبلاً ذخیره‌ی آدرس (و سفارش تست ارسالی)
  * عملاً غیرممکن بود. محدوده‌ها مثل API: lat ±90 / lng ±180.
  */

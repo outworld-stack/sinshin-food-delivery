@@ -1,14 +1,14 @@
 // src/routes/dashboard/orders/$orderId.tsx
-// ⬅ NEW: loader و صفحه حالا «یک کش مشترک» دارند (query)
+// ⬅ NEW: loader و صفحه حالا «یک کش مشترک» دارند (کوئری)
 //
 // چرا؟ قبلاً loader مستقیم دیتا برمی‌گردوند و کلاینت با useQuery(orderDetailsOptions)
 // پول می‌کرد — یعنی:
 //   ✗ دو فچ جدا برای یک دیتا (لودر SSR + کوئری کلاینت)
-//   ✗ invalidate در میوتیشن «تایید تحویل» به کشِ خالی اشاره می‌کرد —
+//   ✗ نامعتبرسازی در میوتیشن «تایید تحویل» به کشِ خالی اشاره می‌کرد —
 //     qk.orderDetails پر نبود => رفرش واقعی رخ نمی‌داد
 //
 // حالا: loader ← query(فکتوری) ← useQuery(همان فکتوری)
-// + polling یکجا: refetchInterval به‌صورت callback — فقط سفارش‌های ارسالیِ
+// + پولینگ یکجا: refetchInterval به‌صورت callback — فقط سفارش‌های ارسالیِ
 //   در جریان؛ با DELIVERED/CANCELED خودش خاموش می‌شود (دو کوئری یکی شد)
 
 import { useQuery } from '@tanstack/react-query'
@@ -43,7 +43,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
         const setActiveOrderId = useAuthStore((s) => s.setActiveOrderId)
 
         // ⬅ داده‌ی سفارش — «یک کوئری واحد»؛ دیتای اولیه از کشِ پرشده توسط loader
-        // (همان کلید qk.orderDetails). polling فقط برای سفارش‌های ارسالیِ در جریان؛
+        // (همان کلید qk.orderDetails). پولینگ فقط برای سفارش‌های ارسالیِ در جریان؛
         // refetchInterval به‌صورت callback تا با تغییر وضعیت خودش خاموش شود
         const { data: order } = useQuery({
                 ...orderDetailsOptions(orderId),
@@ -51,7 +51,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
                         const o = query.state.data
                         if (!o) return false
                         // ⬅ phase-3: در انتظار نتیجه‌ی پرداخت — برگشت از درگاه قبل از رسیدن
-                        // callback، یا پوشش job تایم‌اوت (PENDING → PAID/CANCELED را می‌گیرد)
+                        // callback، یا پوشش کارِ تایم‌اوت (PENDING → PAID/CANCELED را می‌گیرد)
                         if (o.status === 'PENDING_PAYMENT') return 3000
                         // round-12: پولینگ برای همه‌ی سفارش‌های در جریان — قبلاً فقط DELIVERY
                         // بود و تغییر وضعیت سفارش حضوری (تایید آشپزخانه) بدون رفرش دیده نمی‌شد
@@ -87,7 +87,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
         }, [order, orderId, clearCart, setActiveOrderId])
 
         // دیتا فقط لحظه‌ی اول (بدون لودر) undefined است؛ لودر تضمینش کرده.
-        // بعد از invalidate دیتای قبلی حفظ می‌شود (فقط رفرش در پس‌زمینه)
+        // بعد از نامعتبرسازی دیتای قبلی حفظ می‌شود (فقط رفرش در پس‌زمینه)
         if (!order) {
                 return <OrderDetailSkeleton />
         }

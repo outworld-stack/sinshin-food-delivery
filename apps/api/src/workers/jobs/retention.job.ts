@@ -99,8 +99,8 @@ export class RetentionJob implements DailyJob {
         `,
       },
       {
-        // round-28 — نامزدهای nudge کوپن: coupon-scan شبانه پرش می‌کند
-        // (unique per user/coupon/day) و تا حالا هیچ مسیر پاک‌سازی نداشت →
+        // round-28 — نامزدهای یادآورِ کوپن: coupon-scan شبانه پرش می‌کند
+        // (یکتا به‌ازای کاربر/کوپن/روز) و تا حالا هیچ مسیر پاک‌سازی نداشت →
         // رشد بی‌سقف (حداقل ~۷۳k ردیف/سال؛ با چند کوپن خیلی بیشتر).
         // ۹۰ روز برای عیب‌یابی/گزارش کافی است؛ nudges_pending_idx روی
         // scan_date هست و پاک‌سازی با آن ایندکس می‌خوابد.
@@ -120,7 +120,7 @@ export class RetentionJob implements DailyJob {
       try {
         await this.deps.db.execute(t.stmt)
       } catch (err) {
-        // یک جدول شکست بخورد → بقیه ادامه می‌یابند؛ خطا در لاگ cron دیده می‌شود
+        // یک جدول شکست بخورد → بقیه ادامه می‌یابند؛ خطا در لاگِ زمان‌بند دیده می‌شود
         console.error(`[retention] "${t.label}" cleanup failed:`, err)
       }
     }

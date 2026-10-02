@@ -6,9 +6,9 @@ import { formatDate } from '#/utils/format'
 import { useToastStore } from '#/stores/toastStore'
 import { useAppliedFilters } from '#/hooks/shared/useAppliedFilters'
 import { RowHorizontal, Copy } from 'reicon-react'
-import type { AdminUserDetails } from '#/server/admin'
+import type { AdminUserDetailsDto } from '@sinshin/shared'
 
-type ReferralRow = AdminUserDetails['referrals'][number]
+type ReferralRow = AdminUserDetailsDto['referrals'][number]
 
 const DEFAULT_FILTERS = {
   searchPhone: '',

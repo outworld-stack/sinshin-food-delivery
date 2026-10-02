@@ -6,7 +6,8 @@ import type { DeviceService } from '#/domain/device/device.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2, requireAdmin2Permission } from '#/http/hooks/require-admin2'
-import type { AdminService, AdminUserSort } from '#/domain/admin/admin.service'
+import type { AdminService } from '#/domain/admin/admin.service'
+import type { AdminUserSort } from '@sinshin/shared'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { Err } from '#/domain/shared/errors'
 import { asUserId } from '#/domain/shared/brand'
@@ -126,7 +127,7 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
       '/users/:id/toggle',
       async ({ params, user }) => {
         // stage-10: ادمین اصلی خودش را غیرفعال نکند — گارد سروری
-        // (آیکون فرانت هم disable می‌شود؛ این لایه‌ی دوم است)
+        // (آیکون فرانت هم غیرفعال می‌شود؛ این لایه‌ی دوم است)
         if (user.role === 'admin' && user.id === params.id) {
           throw Err.forbidden('ادمین اصلی نمی‌تواند حساب خودش را غیرفعال کند.')
         }
@@ -166,7 +167,7 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
     .delete(
       '/users/:id/devices/:deviceId',
       async ({ params }) => {
-        // revokeIdentity مالکیت را با phone چک می‌کند — همان موتور self-service
+        // revokeIdentity مالکیت را با phone چک می‌کند — همان موتور مسیرهای خودِ کاربر
         const phone = await deps.admin.getUserPhone(params.id)
         if (!phone) throw Err.notFound('کاربر پیدا نشد.')
         const ok = await deps.devices.revokeIdentity(
@@ -191,7 +192,7 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
       },
     )
 
-  // ═══ سفارشات — ادمین اصلی + ادمین۲ (scope خودکار) ═══
+  // ═══ سفارشات — ادمین اصلی + ادمین۲ (حوزه خودکار) ═══
   const ordersRoutes = new Elysia({ prefix: '/admin', tags: ['Admin'] })
     .use(requireAdmin2(guards))
     .get(

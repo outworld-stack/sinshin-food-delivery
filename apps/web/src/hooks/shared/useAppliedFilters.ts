@@ -2,7 +2,7 @@
 import { useState, useCallback } from 'react'
 
 // الگوی «موقت → اعمال» — مشترک همه‌ی فیلترها (به‌جای جفت‌های temp/applied پراکنده)
-// نکته: مقادیر اولیه (defaults) را بیرون کامپوننت تعریف کن تا هویت پایدار بماند
+// نکته: مقادیر اولیه (پیش‌فرض‌ها) را بیرون کامپوننت تعریف کن تا هویت پایدار بماند
 export function useAppliedFilters<T extends Record<string, unknown>>(
   defaults: T,
   onApply?: () => void,

@@ -29,7 +29,7 @@ export interface ReconcileReport {
  * مغایرت‌گیری مالی — ۱۱ چک، شغل ۰۳:۰۰ تهران.
  *
  * Flags per-check: RECONCILE_AUTO_R1..R10 (on/off) — پیش‌فرض همه off.
- * حالت off = report-only (R1 findings را می‌سازد ولی settle نمی‌زند؛
+ * حالت off = report-only (R1 findings را می‌سازد ولی تسویه نمی‌زند؛
  * wouldFix می‌شمارد برای تصمیم).
  * (R11 همیشه report-only است — auto-fix ندارد.)
  *
@@ -71,12 +71,12 @@ export class ReconcileService {
     // ═══════════ R1: payment=SUCCESS اما order=PENDING_PAYMENT ═══════════
 
     /**
-     * شرط‌های اعتماد قبل از settle مجدد:
+     * شرط‌های اعتماد قبل از تسویه مجدد:
      *  - فقط یک payment موفق برای این order (چک R5 هم می‌بیند، اینجا پیش‌شرط)
      *  - مبلغ payment == order.breakdown.amountPaidOnline (integer)
      *  - payment.user == order.user
-     * Flag on → settle با claim اتمیک (settlePayment خودش idempotent است:
-     *   WHERE status='PENDING_PAYMENT' — رقابت = no-op).
+     * Flag on → تسویه با تصرف اتمیک (settlePayment خودش تکرارناپذیر است:
+     *   WHERE status='PENDING_PAYMENT' — رقابت = بی‌اثر).
      */
     private async r1PaymentSuccessOrderPending(): Promise<CheckResult> {
         const rows = (await this.deps.db.execute(sql`
@@ -196,9 +196,9 @@ export class ReconcileService {
      *  • یافته‌ها در reconcile_findings با کلید (checkId, entityId)
      *    upsert می‌شوند و برای همیشه می‌مانند — یافته‌ی قدیمی نیازی به
      *    دوباره‌دیده‌شدن ندارد.
-     *  • هر دو طرف مقایسه بعد از settle تغییرناپذیرند: breakdown در
-     *    checkout نوشته می‌شود و ردیف WITHDRAW اتمیک با settle.
-     *  • یعنی مغایرت یا از لحظه‌ی settle وجود دارد یا هرگز — سفارشِ
+     *  • هر دو طرف مقایسه بعد از تسویه تغییرناپذیرند: breakdown در
+     *    چک‌اوت نوشته می‌شود و ردیف WITHDRAW اتمیک با تسویه.
+     *  • یعنی مغایرت یا از لحظه‌ی تسویه وجود دارد یا هرگز — سفارشِ
      *    داخل پنجره = تمام یافته‌های ممکنِ جدید.
      * پنجره با RECONCILE_R3_WINDOW_DAYS قابل تنظیم است (الگوی
      * RECONCILE_AUTO_*؛ پیش‌فرض ۱۲۰ روز — رارد ۴۵: خواندنش به کلاس

@@ -18,7 +18,7 @@ const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 const sizeInput = t.Object({
   name: t.String({ minLength: 1, maxLength: 60 }),
-  // round-34 — نام عربی سایز (اختیاری؛ خالی = fallback فارسی)
+  // round-34 — نام عربی سایز (اختیاری؛ خالی = پشتیبان فارسی)
   nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
   price: t.Number({ minimum: 0 }),
 })
@@ -32,7 +32,7 @@ export interface AdminMenuRoutesDeps {
 }
 
 export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
-  // ══ phase-1: سیم‌کیری permission — قبلاً کل منو فقط requireAdmin بود ══
+  // ══ phase-1: سیم‌کیریِ مجوز — قبلاً کل منو فقط requireAdmin بود ══
   // ساختار منو (mains + دسته‌ها) → mainCategoriesRead/Write
   // محصولات → productsRead/Write
   // چهار instance جدا چون .use به روت‌های «بعدی» نشت می‌کند.
@@ -54,7 +54,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 60 }),
           slug: t.String({ minLength: 1, maxLength: 60 }),
-          // round-34 — نام عربی (اختیاری؛ خالی = fallback فارسی)
+          // round-34 — نام عربی (اختیاری؛ خالی = پشتیبان فارسی)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
         }),
         detail: { summary: 'Create main category (inactive by default)' },
@@ -202,7 +202,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 120 }),
           description: t.String({ maxLength: 2000 }),
-          // round-34 — محتوای عربی (اختیاری؛ خالی = fallback فارسی)
+          // round-34 — محتوای عربی (اختیاری؛ خالی = پشتیبان فارسی)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
           descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
@@ -240,7 +240,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 120 }),
           description: t.String({ maxLength: 2000 }),
-          // round-34 — محتوای عربی (اختیاری؛ خالی = fallback فارسی)
+          // round-34 — محتوای عربی (اختیاری؛ خالی = پشتیبان فارسی)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
           descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),

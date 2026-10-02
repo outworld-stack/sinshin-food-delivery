@@ -11,7 +11,7 @@ import type { DailyJob } from '#/workers/scheduler'
 /**
  * اسکن شبانه‌ی شایستگی کوپن — ۰۲:۰۰ تهران.
  * کاربرانی که «همه‌ی شرط‌ها به‌جز یکی» دارند و گرنت ندارند → coupon_nudges.
- * اعطای واقعی: لحظه‌ی settle سفارش.
+ * اعطای واقعی: لحظه‌ی تسویه سفارش.
  */
 export class CouponScanJob implements DailyJob {
   readonly name = 'coupon-eligibility-scan'

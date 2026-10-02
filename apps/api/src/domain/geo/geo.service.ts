@@ -43,7 +43,7 @@ import type { GeoAccessMode, GeoStatusDto, OutsideScope } from '@sinshin/shared'
 
 /** کش ۱۵ ثانیه‌ای تاگل پنل (داخلی) */
 const TOGGLE_TTL_MS = 15_000
-/** round-37 — کش دیسک دوکشوره؛ نام قدیمی برای خواندنِ fallback نگه داشته شد */
+/** round-37 — کش دیسک دوکشوره؛ نام قدیمی برای خواندنِ پشتیبان نگه داشته شد */
 const CACHE_FILENAME = '.geo-ranges-cache.json'
 const LEGACY_CACHE_FILENAME = '.geo-ir-cache.json'
 
@@ -121,20 +121,20 @@ function isPrivateIp(ip: string): boolean {
     const b0 = v4 >>> 24
     const b1 = (v4 >>> 16) & 0xff
     if (b0 === 10 || b0 === 127) return true // خصوصی + لوکال
-    if (b0 === 169 && b1 === 254) return true // link-local
+    if (b0 === 169 && b1 === 254) return true // پیوندمحلی
     if (b0 === 172 && b1 >= 16 && b1 <= 31) return true // خصوصی
     if (b0 === 192 && b1 === 168) return true // خصوصی
     // round-28 — CGNAT 100.64.0.0/10
     if (b0 === 100 && b1 >= 64 && b1 < 128) return true // CGNAT داخلی (100.64/10)
     return false
   }
-  // IPv6 — لوکال/unique-local + نگاشتِ IPv4 خصوصی
+  // IPv6 — محلی/یکتامحلی + نگاشتِ IPv4 خصوصی
   const v6 = ipv6ToBig(ip)
   if (v6 === null) return true // ناپارسپذیر = داخلی تلقی می‌شود (عبور)
   if (v6 === 0n) return true // ::
   if (v6 === 1n) return true // ::1
-  if ((v6 >> 120n) === 0xfcn) return true // fc00::/7 — unique-local
-  if ((v6 >> 120n) === 0xfen) return true // fe80::/10 — link-local
+  if ((v6 >> 120n) === 0xfcn) return true // fc00::/7 — یکتامحلی
+  if ((v6 >> 120n) === 0xfen) return true // fe80::/10 — پیوندمحلی
   if ((v6 >> 32n) === 0xffffn) {
     // ::ffff:a.b.c.d — نگاشت IPv4؛ بخش v4 را چک کن
     const embedded = Number(v6 & 0xffffffffn) >>> 0

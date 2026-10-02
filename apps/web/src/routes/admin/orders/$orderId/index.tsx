@@ -1,9 +1,9 @@
 // src/routes/admin/orders/$orderId/index.tsx
 // ⬅ NEW: رفع باگ رفرش — قبلاً loader مستقیماً دیتا برمی‌گرداند (بدون کش) و
 // کامپوننت از Route.useLoaderData می‌خواند؛ یعنی تایید/تغییر پیک در پنل زنده
-// هیچ ریفچی روی این صفحه نمی‌ساخت (snapshot کهنه می‌ماند).
+// هیچ ریفچی روی این صفحه نمی‌ساخت (تصویر لحظه‌ای کهنه می‌ماند).
 // حالا: loader و کامپوننت یک کش مشترک دارند (adminOrderDetailsOptions) =>
-// invalidate های پنل زنده، واقعاً این صفحه را به‌روز می‌کنند + پری‌فچ روی هاور.
+// نامعتبرسازی‌های پنل زنده، واقعاً این صفحه را به‌روز می‌کنند + پیش‌واکشی روی هاور.
 //
 // round-12: ①حضوری‌ها «پیک هنوز تخصیص نیافته»/باکس اسکن پیک نمی‌بینند
 // ②QR واقعی به‌جای لینک متنی
@@ -39,8 +39,8 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 	const viewAdmin2Id = role === 'admin2' ? (admin2Id ?? undefined) : undefined
 
 	// ⬅ NEW: اشتراک در کش مشترک با loader (فکتوری مرکزی) —
-	// همان کلیدی که loader با query پر کرده؛
-	// invalidate از ConfirmOrderModal (تایید/تغییر پیک) اینجا واقعاً می‌نشیند
+	// همان کلیدی که loader با کوئری پر کرده؛
+	// نامعتبرسازی از ConfirmOrderModal (تایید/تغییر پیک) اینجا واقعاً می‌نشیند
 	const { data: order } = useQuery(
 		adminOrderDetailsOptions(orderId, viewAdmin2Id),
 	)
@@ -49,7 +49,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 	const canSeeBreakdown = isMainAdmin || permissions.orderDetailsRead
 
 	if (!order) {
-		// در حال ریفچ بعد از invalidate یا سفارش خارج از دسترس نقش
+		// در حال ریفچ بعد از نامعتبرسازی یا سفارش خارج از دسترس نقش
 		return <RouteNotFound />
 	}
 
@@ -286,7 +286,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 			)}
 
 			{/* ⬅ ریز مبلغ فاکتور — ادمین اصلی همیشه / ادمین۲ با پرمیشن (بعد از هیدریشن — بدون mismatch) */}
-			{/* round-29 — breakdown حالا از orderDetail می‌آید (LiveOrderDetailDto) — بدون cast */}
+			{/* round-29 — breakdown حالا از orderDetail می‌آید (LiveOrderDetailDto) — بدون تبدیل نوع */}
 			{hydrated && order.breakdown && canSeeBreakdown && (
 				<OrderBreakdownCard
 					breakdown={order.breakdown}
@@ -355,7 +355,7 @@ export const Route = createFileRoute('/admin/orders/$orderId/')({
 	ssr: false,
 	component: OrderDetailPage,
 
-	// ⬅ NEW: prefetch — هاور روی شناسه سفارش در لیست/داشبورد => دیتا در کش؛
+	// ⬅ NEW: پیش‌واکشی — هاور روی شناسه سفارش در لیست/داشبورد => دیتا در کش؛
 	// ناوبری به جزئیات بدون حتی یک اسکلتون.
 	// نقش‌محور: ادمین۲ فقط سفارش خودش را پرلیچ می‌کند (همان کلید کامپوننت)
 	loader: async ({ context, params }) => {

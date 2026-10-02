@@ -35,7 +35,7 @@ export const Route = createFileRoute('/checkout/')({
 	component: CheckoutPage,
 
 	// فقط دیتای سروری — وضعیت رستوران (آیتم ۲۲)
-	// از طریق query cache: هم SSR می‌شه، هم با staleTime ۳۰s بین ناوبری‌ها کش می‌شه
+	// از طریق کش کوئری: هم SSR می‌شه، هم با staleTime ۳۰s بین ناوبری‌ها کش می‌شه
 	loader: ({ context }) => context.queryClient.query(restaurantStatusOptions),
 
 	pendingComponent: CheckoutPageSkeleton,
@@ -47,7 +47,7 @@ export const Route = createFileRoute('/checkout/')({
 
 function CheckoutPage() {
 	const navigate = useNavigate()
-	// خودِ وضعیت — loaderData مستقیم دیتای query است
+	// خودِ وضعیت — loaderData مستقیم دیتای کوئری است
 	const restaurantStatus = Route.useLoaderData()
 	const hasHydrated = useHydrated()
 	const { t } = useI18n()
@@ -65,7 +65,7 @@ function CheckoutPage() {
 	// ⬅ هوک صاحب کوئری جزئیات — آدرس و نوع تحویل و آیتم‌ها → هزینه‌ی ناحیه‌ای زنده
 	const page = useCheckoutPage({ items, isAuthenticated })
 
-	// ریدایرکت سبد خالی — با useEffect نه navigate وسط رندر (SSR-safe)
+	// ریدایرکت سبد خالی — با useEffect نه پیمایش وسط رندر (SSR-safe)
 	useEffect(() => {
 		if (hasHydrated && items.length === 0) {
 			navigate({ to: '/cart', replace: true })

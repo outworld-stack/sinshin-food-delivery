@@ -110,7 +110,7 @@ export const QrScannerDialog = memo(function QrScannerDialog({
                                 if (cancelled) return
                                 const messageKey =
                                         err instanceof DOMException &&
-                                        (err.name === 'NotAllowedError' || err.name === 'SecurityError')
+                                                (err.name === 'NotAllowedError' || err.name === 'SecurityError')
                                                 ? 'qr.cameraDenied'
                                                 : err instanceof DOMException && err.name === 'NotFoundError'
                                                         ? 'qr.cameraNotFound'
@@ -126,7 +126,7 @@ export const QrScannerDialog = memo(function QrScannerDialog({
                 }
         }, [open, onDecode, stopCamera])
 
-        // fallback: بارگذاری عکس کد — همان decoder، تک‌فریمی
+        // پشتیبان: بارگذاری عکس کد — همان decoder، تک‌فریمی
         const handleFile = useCallback(
                 async (e: React.ChangeEvent<HTMLInputElement>) => {
                         const file = e.target.files?.[0]

@@ -156,7 +156,7 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
   const handleSave = useCallback(() => {
     if (!form.name.trim()) { showToast('لطفا نام دسته را وارد کنید', 'error'); return }
     if (!form.mainCategoryId) { showToast('دسته اصلی را انتخاب کنید', 'error'); return }
-    // round-34 — آرایه‌ی عربی موازی با sizeNames؛ سرور جفت خالی را نادیده می‌گیرد (fallback)
+    // round-34 — آرایه‌ی عربی موازی با sizeNames؛ سرور جفت خالی را نادیده می‌گیرد (پشتیبان)
     const sizeNamesAr = form.sizeTagsAr.map(s => s.trim())
     const payload = {
       name: form.name.trim(),
@@ -216,7 +216,7 @@ export const CategoryManager = memo(function CategoryManager({ categories }: Cat
               <input value={form.name} onChange={(e) => set({ name: e.target.value })} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" />
             </div>
 
-            {/* round-34 — نام عربی دسته (خالی = fallback فارسی) */}
+            {/* round-34 — نام عربی دسته (خالی = پشتیبان فارسی) */}
             <ArField
               label="نام دسته"
               value={form.nameAr}

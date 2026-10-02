@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty two
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 12 از 31
-// مسیر مقصد: apps/api/src/domain/translation/translation.service.ts
-// وضعیت: فایل جدید (قبلاً وجود نداشت)
-// کامیت پیشنهادی: stage thirty one
-// ═══════════════════════════════════════════════════════════════
-
 // src/domain/translation/translation.service.ts
 /**
  * round-35 — ارکستراتور ترجمه‌ی خودکار محتوا (فارسی → عربی).
@@ -20,7 +13,7 @@
  *  ۱) preview (روت ادمین): متن می‌گیرد، ترجمه‌ی پیشنهادی برمی‌گرداند —
  *     «هیچ» چیزی در DB نمی‌نویسد؛ فرم پر می‌شود و ادمین بازبینی/ذخیره
  *     می‌کند (ذخیره‌ی دستی = arAuto=false طبق قرارداد رارد ۳۴).
- *  ۲) صف (worker): jobها از جدول translation_jobs claim اتمیک می‌شوند
+ *  ۲) صف (worker): کارها از جدول translation_jobs تصرف اتمیک می‌شوند
  *     (FOR UPDATE SKIP LOCKED — امن بین رپلیکاها) و نتیجه مستقیم در
  *     ستون‌های ar با arAuto=true نوشته می‌شود (بج «خودکار» در پنل).
  *
@@ -29,9 +22,9 @@
  * جایگزین می‌شود. arAuto=true فقط وقتی می‌نشیند که هیچ فیلد دستی‌ای
  * از قلم نیفتاده باشد.
  *
- * پایداری: خطای مترجم = retry با backoff (۳۰s × تلاش²) تا maxAttempts؛
+ * پایداری: خطای مترجم = تلاش مجدد با backoff (۳۰s × تلاش²) تا maxAttempts؛
  * «مترجم پایین» تلاش را نمی‌سوزاند (۵ دقیقه بعد، attempts بازگردانده).
- * خطای نهایی = ستون ar همان NULL می‌ماند → کاربر عربی fallback فارسی
+ * خطای نهایی = ستون ar همان NULL می‌ماند → کاربر عربی پشتیبان فارسی
  * می‌بیند (COALESCE رارد ۳۴) — سایت هرگز از این بابت نمی‌ایستد.
  */
 import { and, count, desc, eq, isNotNull, isNull, max, or, sql, type AnyColumn, type SQL } from 'drizzle-orm'
@@ -139,7 +132,7 @@ export class TranslationService {
     return this.translateTexts(cleaned)
   }
 
-  /** چند متن → چند متن؛ هرکدام plan خودش را دارد و همه در batch واحد می‌روند */
+  /** چند متن → چند متن؛ هرکدام plan خودش را دارد و همه در دسته‌ای واحد می‌روند */
   private async translateTexts(texts: string[]): Promise<string[]> {
     const plans = texts.map((t) => planText(t))
     const flat = plans.flatMap((p) => p.segments)
@@ -178,7 +171,7 @@ export class TranslationService {
 
   // ═══════════════════════ مسیر ۲: صف ترجمه (worker) ═══════════════════════
 
-  /** claim اتمیک یک job — FOR UPDATE SKIP LOCKED بین رپلیکاها */
+  /** تصرف اتمیک یک کار — FOR UPDATE SKIP LOCKED بین رپلیکاها */
   private async claim(): Promise<ClaimedJob | null> {
     const rows = await this.deps.db
       .update(translationJobs)
@@ -225,7 +218,7 @@ export class TranslationService {
 
   /**
    * پردازش یک job. خروجی برای حلقه‌ی worker:
-   * 'empty' صف خالی | 'done' موفق | 'failed' شکست (retry یا نهایی) |
+   * 'empty' صف خالی | 'done' موفق | 'failed' شکست (تلاش مجدد یا نهایی) |
    * 'translator-down' مترجم در دسترس نبود — حلقه را می‌بندد
    */
   async processNext(): Promise<'empty' | 'done' | 'failed' | 'translator-down'> {
@@ -408,7 +401,7 @@ export class TranslationService {
     return null
   }
 
-  // ── article: title/excerpt/content (Markdown) + processes ──
+  // ── مقاله: عنوان/خلاصه/محتوا (مارک‌داون) + مراحل ──
   private async runArticle(entityId: string): Promise<string | null> {
     const { db } = this.deps
     const [a] = await db.select().from(articles).where(eq(articles.id, entityId))
@@ -508,7 +501,7 @@ export class TranslationService {
     return null
   }
 
-  // ── gallery: alt ──
+  // ── گالری: متن جایگزین ──
   private async runGallery(entityId: string): Promise<string | null> {
     const { db } = this.deps
     const gid = asGalleryImageId(entityId)
@@ -618,7 +611,7 @@ export class TranslationService {
     }
   }
 
-  // ═══════════════════════ enqueue / bulk / status / jobs ═══════════════════════
+  // ═══════════════════════ صف‌گذاری / دسته‌ای / وضعیت / کارها ═══════════════════════
 
   /** افزودن یک موجودیت به صف (dedupe روی pending) */
   async enqueue(entityType: TranslationEntityType, entityId: string): Promise<{ queued: boolean }> {

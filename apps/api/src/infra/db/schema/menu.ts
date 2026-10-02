@@ -27,7 +27,7 @@ export const mainCategories = pgTable(
   'main_categories',
   {
     id: uuid('id').primaryKey().defaultRandom().$type<MainCategoryId>(), name: varchar('name', { length: 60 }).notNull(),
-    /** round-34 — نام عربی (NULL = fallback فارسی) */
+    /** round-34 — نام عربی (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
     /** انگلیسی — در URL: /products?tab=restaurant */
     slug: varchar('slug', { length: 60 }).notNull(),
@@ -53,7 +53,7 @@ export const categories = pgTable(
       .references(() => mainCategories.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 60 }).notNull(),
     slug: varchar('slug', { length: 60 }).notNull(),
-    /** round-34 — نام عربی دسته (NULL = fallback فارسی) */
+    /** round-34 — نام عربی دسته (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
     /** سایزبندی برای این دسته فعال است؟ (پیتزا) */
     hasSizes: boolean('has_sizes').notNull().default(false),
@@ -83,7 +83,7 @@ export const products = pgTable(
       .references(() => categories.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 120 }).notNull(),
     description: text('description'),
-    /** round-34 — محتوای عربی (NULL = fallback فارسی) */
+    /** round-34 — محتوای عربی (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 120 }),
     descriptionAr: text('description_ar'),
     /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
@@ -96,7 +96,7 @@ export const products = pgTable(
      * stage-10: هزینه بسته‌بندی هر محصول (تومان) — به‌ازای هر واحد.
      * فقط در تحویل پیک (DELIVERY) و بیرون‌بر (PICKUP) جمع می‌شود؛
      * سرو در محل (DINE_IN) بسته‌بندی ندارد. مثل هزینه ارسال،
-     * مشمول سود معرفی هم نیست (در settle از پایه کسر می‌شود).
+     * مشمول سود معرفی هم نیست (در تسویه از پایه کسر می‌شود).
      */
     packagingCost: integer('packaging_cost').notNull().default(0),
     ingredients: jsonb('ingredients').$type<string[]>().default([]),
@@ -127,7 +127,7 @@ export const productSizes = pgTable(
       .$type<ProductId>()
       .references(() => products.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 60 }).notNull(),
-    /** round-34 — نام عربی سایز (NULL = fallback فارسی) */
+    /** round-34 — نام عربی سایز (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
     price: integer('price').notNull(),
     sortOrder: integer('sort_order').notNull().default(0),

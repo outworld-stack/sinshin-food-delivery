@@ -3,6 +3,7 @@
 
 import type {
 	AddressDto,
+	AdminReviewDto,
 	ProductId,
 	ProductReviewDto,
 	UserOrder,
@@ -19,14 +20,9 @@ export type {
 	ProductReviewDto,
 	ProductId,
 }
-export type {
-	AddressDto as UserAddress,
-	DeviceDto as UserDevice,
-	OrderBreakdown,
-	ReferralRowDto as UserReferral,
-	UserOrderItem as OrderItem,
-	WalletTransactionDto as WalletTransaction,
-} from '@sinshin/shared'
+export type { OrderBreakdown, UserOrderItem as OrderItem } from '@sinshin/shared'
+// رارد ۴۷ — نام‌های مستعارِ بدون مصرف‌کننده (UserAddress/UserDevice/WalletTransaction/
+// UserReferral) حذف شدند؛ هر مصرف‌کننده‌ی آینده مستقیم از @sinshin/shared می‌خواند.
 
 // ─── پروفایل ───
 
@@ -54,7 +50,7 @@ export async function updateUserProfile(input: {
 	lastName?: string
 	email?: string
 }): Promise<{ success: boolean }> {
-	// phase-3 — واقعی: فرانت first/last دارد، مدل سرور name تک‌فیلدی؛ join اینجا
+	// phase-3 — واقعی: فرانت first/last دارد، مدل سرور name تک‌فیلدی؛ الحاق همین‌جا
 	const name =
 		[input.firstName?.trim(), input.lastName?.trim()]
 			.filter(Boolean)
@@ -153,18 +149,10 @@ export async function getApprovedProductReviews(input: {
 
 // ─── مودریشن ادمین (پیام ۵ با API) ───
 
-export interface AdminReview {
-	id: string
-	orderId: string
-	productId: ProductId
-	productName: string
-	firstName?: string | null
-	lastName?: string | null
-	phone: string
-	comment: string
-	date: Date
-	status: 'pending' | 'approved' | 'rejected'
-}
+// رارد ۴۷ — ردیف مودریشن ادمین = قرارداد مشترک (کپی محلی حذف شد)؛
+// orderId این‌جا displayId است (برخلاف اندپوینت عمومی که UUID خام می‌فرستد)
+// و productName همیشه پر است — تفاوت‌های عمدیِ دو اندپوینت، حالا در قرارداد مستند.
+export type AdminReview = AdminReviewDto
 
 export async function getAdminReviews(): Promise<AdminReview[]> {
 	return authJson<AdminReview[]>('/admin/reviews', 'GET')

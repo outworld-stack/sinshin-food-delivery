@@ -2,7 +2,7 @@
 import type { Database } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
 
-/** نتیجهٔ probe با مدت‌اندیشی — منبع مشترک /health، /health/metrics و job هشدار */
+/** نتیجهٔ کاوشگر با مدت‌اندیشی — منبع مشترک /health، /health/metrics و کارِ هشدار */
 export interface ProbeResult {
   dbUp: boolean
   dbMs: number
@@ -11,8 +11,8 @@ export interface ProbeResult {
 }
 
 /**
- * round-19 — probe مشترک db+redis (قبلاً کپی خصوصیِ health.routes بود).
- * مسیرهای سلامت و job هشدارِ پیامک هر دو همین یک تابع را می‌سنجند تا
+ * round-19 — کاوشگر مشترک db+redis (قبلاً کپی خصوصیِ health.routes بود).
+ * مسیرهای سلامت و کارِ هشدارِ پیامک هر دو همین یک تابع را می‌سنجند تا
  * «آلارم» و «وضعیت گزارش‌شده» هرگز از هم واگرا نشوند (DRY).
  *
  * غیر-پرتاب: هر دو ping خطای خود را قورت می‌دهند (false برمی‌گردانند).

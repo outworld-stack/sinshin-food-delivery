@@ -8,47 +8,38 @@
 // src/types/site/checkout.ts
 
 // رارد ۴۶ — DeliveryType از قرارداد مشترک می‌آید (قبلاً کپی محلی بود)؛
-// re-export برای پایداری مسیر import مصرف‌کننده‌های فعلی است.
-import type { DeliveryType } from '@sinshin/shared'
+// re-export برای پایداری مسیر درون‌ریزیِ مصرف‌کننده‌های فعلی است.
+import type {
+  CheckoutInput,
+  DeliveryType,
+  OrderBreakdown,
+  RestaurantStatusDisplay,
+} from '@sinshin/shared'
 
 export type { DeliveryType }
 
 export type CouponStatus = 'NONE' | 'HAVE'
 
-// آیتم ۲۲: وضعیت رستوران
-export interface RestaurantStatus {
-  isOpen: boolean
-  nextOpenTime: string
-  /** round-13 — علت بسته‌شدن موقت (فقط وقتی موقتاً بسته باشد) */
-  closeReason?: string | null
-}
+// رارد ۴۷ — وضعیت نمایشی رستوران = قرارداد مشترک (view-model عمدی چک‌اوت:
+// ادغام بسته‌ی ساعتی/موقت — مبدل در server/checkout). قبلاً کپی محلی بود
+// و closeReason را اختیاری می‌خواند در حالی که همیشه ارسال می‌شود.
+export type RestaurantStatus = RestaurantStatusDisplay
 
 // رارد ۴۳ — InvoiceData مرده بود و حذف شد؛ تایپ‌های پیش‌نمایش
 // چک‌اوت به قرارداد مشترک منتقل شدند و از @sinshin/shared
-// import می‌شوند.
+// درون‌ریزی می‌شوند.
 
-// محاسبات نمایشی — همه از breakdown سرور مشتق می‌شوند
-export interface CheckoutCalculation {
-  foodTotal: number
-  discount: number
+// رارد ۴۷ — محاسبات نمایشی مشتقِ OrderBreakdown قرارداد است (نه کپی):
+// payableFood فقط سمت فرانت می‌سازد و total همان totalAmount با نام نمایشی.
+export type CheckoutCalculation = Omit<OrderBreakdown, 'totalAmount'> & {
   payableFood: number
-  walletDeduction: number
-  deliveryFee: number
-  packagingFee: number // ← phase-3: PICKUP
   total: number
-  amountPaidOnline: number
 }
 
-// پیلود ثبت سفارش
-export interface CheckoutSubmitPayload {
-  items: { productId: string; sizeId?: string | null; quantity: number }[]
-  deliveryType: DeliveryType
-  useWallet: boolean
-  addressId: string | null
-  customerNote: string
-  couponCode: string | null
-  gatewayId?: string | null
-}
+// رارد ۴۷ — پیلود ثبت سفارش = شکل خام سیم (قرارداد مشترک). قبلاً
+// addressId/customerNote/couponCode را الزامی می‌خواند که «دروغ سفید»
+// بود — PICKUP/DINE_IN آدرس نمی‌فرستند و پیلود همیشه کامل می‌سازد.
+export type CheckoutSubmitPayload = CheckoutInput
 
 /** phase-3 — پرچم «این سفارش همین‌تب ثبت شده»؛ صفحه‌ی سفارش با SUCCESS سبد را پاک می‌کند */
 export const PENDING_CHECKOUT_KEY = 'sinshin:pending-checkout'

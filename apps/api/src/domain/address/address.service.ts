@@ -8,6 +8,8 @@ import { asAddressId } from '#/domain/shared/brand'
 export class AddressService {
   constructor(private readonly deps: { db: Db }) {}
 
+  // رارد ۴۷ — ردیف خام مستقیم روی سیم می‌رود؛ شکلش = AddressDto قرارداد
+  // (userId و createdAt/updatedAt همیشه حاضرند — قرارداد از این رارد صادق است).
   async list(userId: string): Promise<AddressRow[]> {
     return this.deps.db
       .select()
@@ -32,7 +34,7 @@ export class AddressService {
     id: string,
     input: { title: string; address: string; lat: number; lng: number },
   ): Promise<AddressRow | null> {
-    // cast در مرز ورودی — تنها نقطه‌ی مجاز (قرارداد brand.ts)
+    // تبدیل نوع در مرز ورودی — تنها نقطه‌ی مجاز (قرارداد brand.ts)
     const addressId = asAddressId(id)
     const [updated] = await this.deps.db
       .update(addresses)

@@ -8,7 +8,7 @@
 // src/types/forms.ts
 
 // فیلدهای الزامی — فرم‌ها همیشه مقدار اولیه‌ی کامل می‌سازن؛
-// optional بودن تاریخی بود و مانع تایپ‌شدن mutation ها (data: any) می‌شد.
+// اختیاری بودن تاریخی بود و مانع تایپ‌شدن میوتیشن‌ها (data: any) می‌شد.
 // نتیجه: createArticle/createAdminProduct الان ورودی کاملاً تایپ‌دار می‌گیرن.
 import type { Product } from '@sinshin/shared'
 
@@ -20,11 +20,11 @@ export interface ArticleFormData {
   profileImage: string;
   galleryImages: string[];
   categoryId: string;
-  // تایپ Article این فیلد رو optional داره؛ فرم همیشه null می‌ذاره —
+  // تایپ Article این فیلد رو اختیاری داره؛ فرم همیشه null می‌ذاره —
   // مسیرها موقع ارسال با ?? null نرمال می‌کنن (اسکیمای سرور null می‌خواد)
   subCategoryId?: string | null;
   processes: { title: string, items: string[] }[];
-  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = fallback فارسی) ═══
+  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
   titleAr: string;
   excerptAr: string;
   contentAr: string;
@@ -53,10 +53,10 @@ export interface ProductFormData {
   sizesEnabled: boolean;
   ingredients: string[];
   sizes: { name: string, nameAr: string, price: number }[];
-  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = fallback فارسی) ═══
+  // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
   nameAr: string;
   descriptionAr: string;
-  /** هر خط = یک ماده اولیه (مثل ادیتور قوانین) — خالی = fallback فارسی */
+  /** هر خط = یک ماده اولیه (مثل ادیتور قوانین) — خالی = بازگشت به فارسی */
   ingredientsArText: string;
 }
 

@@ -1,14 +1,14 @@
 /**
- * SSE hub — fan-out محلی + پل Redis pub/sub بین رپلیکاها.
+ * هابِ SSE — پخشِ محلی + پل Redis pub/sub بین رپلیکاها.
  *
- * امروز (یک رپلیکای api): publish() همان‌جا fan-out می‌کند.
- * فردا (پشت LB، N رپلیکا): هر رپلیکا پیام را هم به Redis می‌فرستد؛
+ * امروز (یک رپلیکای api): publish() همان‌جا پخش می‌کند.
+ * فردا (پشت توزیع‌کننده‌ی بار، N رپلیکا): هر رپلیکا پیام را هم به Redis می‌فرستد؛
  * هر رپلیکایی که مشترکِ محلی دارد از Redis دریافت و به مشتریانِ خودش می‌رساند.
  * تحویل تکراری ندارد: هر پیام Redis با src (شناسه‌ی همین نمونه) می‌آید.
  *
  * کانال‌ها: demo:* (تست) | orders:new | orders:{displayId|uuid}
  *
- * phase-1: refcount — آخرین مشترکِ محلیِ یک کانال، اشتراک Redis را هم می‌بندد.
+ * phase-1: شمارش ارجاع — آخرین مشترکِ محلیِ یک کانال، اشتراک Redis را هم می‌بندد.
  * قبلاً اشتراک Redis برای همیشه باز می‌ماند؛ با کانال‌های orders:{id}
  * (یکی به‌ازای هر سفارش) این یعنی نشتیِ بی‌سقف.
  */
@@ -45,7 +45,7 @@ export class SseHub {
       void this.redis.subscribe(`sse:${channel}`, (raw) => {
         try {
           const msg = JSON.parse(raw) as SsePayload & { src?: string }
-          if (msg.src === INSTANCE_ID) return // خودمان local رساندیم
+          if (msg.src === INSTANCE_ID) return // خودمان به‌صورت محلی رساندیم
           this.fanout(channel, { event: msg.event, data: msg.data })
         } catch (err) {
           console.error('[sse] پیام خراب از redis:', err)
@@ -55,7 +55,7 @@ export class SseHub {
           this.relayed.delete(channel) // مشترک بعدی دوباره تلاش می‌کند
           return
         }
-        // race-guard: اگر در فاصله‌ی resolve شدن subscribe، آخرین مشترک محلی رفته باشد
+        // گاردِ هم‌زمانی: اگر در فاصله‌ی تفسیر شدنِ subscribe، آخرین مشترک محلی رفته باشد
         if (!this.channels.has(channel)) {
           this.relayed.delete(channel)
           this.redis.unsubscribe(`sse:${channel}`)
@@ -63,7 +63,7 @@ export class SseHub {
       })
     }
 
-    // ── phase-1: refcount ──
+    // ── phase-1: شمارش ارجاع ──
     return () => {
       const s = this.channels.get(channel)
       s?.delete(subscriber)
@@ -72,7 +72,7 @@ export class SseHub {
         // round-28 — unsubscribe بی‌قید: قبلاً مشروط به relayed بود؛ اگر
         // subscribe قبلاً در قطعی ردیس شکست خورده بود، relayed خالی است و
         // مدخلِ سمت redis تا ابد می‌ماند (هر بازدید صفحه‌ی ردیابی سفارش در
-        // قطعی ردیس یک مدخل همیشگی می‌ساخت). unsubscribe خودش idempotent است.
+        // قطعی ردیس یک مدخل همیشگی می‌ساخت). unsubscribe خودش تکرارناپذیر است.
         this.relayed.delete(channel)
         this.redis.unsubscribe(`sse:${channel}`)
       }
@@ -82,7 +82,7 @@ export class SseHub {
   publish(channel: string, payload: SsePayload): void {
     // ۱) فوری برای مشترکان همین رپلیکا
     this.fanout(channel, payload)
-    // ۲) پل برای بقیه‌ی رپلیکاها — fire-and-forget
+    // ۲) پل برای بقیه‌ی رپلیکاها — شلیک و رها
     void this.redis.publish(
       `sse:${channel}`,
       JSON.stringify({ src: INSTANCE_ID, event: payload.event, data: payload.data }),

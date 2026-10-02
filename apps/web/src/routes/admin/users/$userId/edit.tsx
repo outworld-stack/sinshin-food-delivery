@@ -92,7 +92,7 @@ const AdminUserEditPage = memo(function AdminUserEditPage() {
 export const Route = createFileRoute('/admin/users/$userId/edit')({
   ssr: false,
   component: AdminUserEditPage,
-  // ⬅ NEW: prefetch — دیتای کاربر معمولاً از قبل در کش است (نavigation از
+  // ⬅ NEW: پیش‌واکشی — دیتای کاربر معمولاً از قبل در کش است (ناوبری از
   // صفحه‌ی جزئیات)؛ این loader فقط برای deep-link/رفرش مستقیم تضمین می‌کند
   loader: async ({ context, params }) => {
     await context.queryClient.query(adminUserDetailsOptions(params.userId))

@@ -3,7 +3,7 @@ import { useReducer, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { galleryImagesOptions } from '#/utils/queryOptions'
 
-// --- state: فقط lightbox ---
+// --- وضعیت: فقط lightbox ---
 interface GalleryState {
   lightboxSrc: string | null
   lightboxAlt: string

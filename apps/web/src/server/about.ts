@@ -22,7 +22,7 @@ export async function updateAboutContent(input: {
   teamTitle: string
   teamGradient: string
   teamAlt: string
-  /** round-34 — محتوای عربی ('' → null = حذف ترجمه = fallback فارسی) */
+  /** round-34 — محتوای عربی ('' → null = حذف ترجمه = بازگشت به فارسی) */
   heroTitleAr: string
   heroTextAr: string
   teamTitleAr: string

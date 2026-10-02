@@ -1,10 +1,11 @@
 // src/routes/admin/admins/index.tsx
-// ⬅ NEW: کوئری از فکتوری مرکزی (subAdminsOptions) + loader پری‌فچ روی هاور
-// + toggle اپتیمیستیک با rollback + pendingComponent/errorComponent + head noindex
+// ⬅ NEW: کوئری از فکتوری مرکزی (subAdminsOptions) + پیش‌واکشی در loader روی هاور
+// + تغییر وضعیت اپتیمیستیک با بازگردانی + pendingComponent/errorComponent + head noindex
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { memo, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toggleSubAdmin, type SubAdminRecord } from '#/server/admin'
+import { toggleSubAdmin } from '#/server/admin'
+import type { SubAdminRecordDto } from '@sinshin/shared'
 import { AddAdminModal } from '#/components/admin/admins/AddAdminModal'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { useToastStore } from '#/stores/toastStore'
@@ -23,29 +24,29 @@ const AdminsPage = memo(function AdminsPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [confirmToggle, setConfirmToggle] = useState<string | null>(null)
 
-  // ⬅ NEW: کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با query
+  // ⬅ NEW: کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری
   // پر کرده => هاور روی «ادمین‌ها» در سایدبار، ناوبری را آنی می‌کند
   const { data: admins, isLoading } = useQuery(subAdminsOptions)
 
-  // ⬅ NEW: toggle اپتیمیستیک با rollback
-  // قبلاً: تایید → انتظار سرور → invalidate → رفرش.
+  // ⬅ NEW: تغییر وضعیت اپتیمیستیک با بازگردانی
+  // قبلاً: تایید → انتظار سرور → نامعتبرسازی → رفرش.
   // حالا: تایید → همان لحظه آیکن/رنگ کارت فلیپ می‌شود → سرور تأیید می‌کند؛
-  // اگر خطا شد، snapshot برمی‌گردد (و MutationCache سراسری toast می‌دهد)
+  // اگر خطا شد، تصویر لحظه‌ای برمی‌گردد (و MutationCache سراسری پیام شناور می‌دهد)
   const toggleMutation = useMutation({
     mutationFn: (id: string) => toggleSubAdmin(id),
     onMutate: async (id) => {
-      // ریفچ در جریان را متوقف کن تا snapshot تمیز باشد
+      // ریفچ در جریان را متوقف کن تا تصویر لحظه‌ای تمیز باشد
       await queryClient.cancelQueries({ queryKey: qk.subAdmins })
-      const previous = queryClient.getQueryData<SubAdminRecord[]>(qk.subAdmins)
+      const previous = queryClient.getQueryData<SubAdminRecordDto[]>(qk.subAdmins)
 
       // فلیپ اپتیمیستیک isActive
-      queryClient.setQueryData<SubAdminRecord[]>(qk.subAdmins, (old) =>
+      queryClient.setQueryData<SubAdminRecordDto[]>(qk.subAdmins, (old) =>
         old ? old.map(a => (a.userId === id ? { ...a, isActive: !a.isActive } : a)) : old)
 
       return { previous }
     },
     onError: (_err, _id, ctx) => {
-      // rollback — کش به snapshot قبل از کلیک برمی‌گردد
+      // بازگردانی — کش به تصویر لحظه‌ایِ قبل از کلیک برمی‌گردد
       if (ctx?.previous) queryClient.setQueryData(qk.subAdmins, ctx.previous)
     },
     onSuccess: () => {
@@ -172,7 +173,7 @@ const AdminsPage = memo(function AdminsPage() {
 
 export const Route = createFileRoute('/admin/admins/')({
   ssr: false,
-  // ⬅ NEW: prefetch — هاور روی لینک «ادمین‌ها» در سایدبار => این loader در کلاینت
+  // ⬅ NEW: پیش‌واکشی — هاور روی لینک «ادمین‌ها» در سایدبار => این loader در کلاینت
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context }) => {

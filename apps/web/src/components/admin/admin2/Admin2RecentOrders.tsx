@@ -1,10 +1,10 @@
 // src/components/admin/admin2/Admin2RecentOrders.tsx
 import { memo } from 'react'
 import { formatPrice, formatDate } from '#/utils/format'
-import type { LiveOrder } from '#/server/admin'
+import type { Admin2RecentOrderRowDto } from '@sinshin/shared'
 
 interface Admin2RecentOrdersProps {
-  orders: LiveOrder[]
+  orders: Admin2RecentOrderRowDto[]
 }
 
 // سفارشات اخیر — فقط خود ادمین (بدون کاربران اخیر — درخواست کارفرما)

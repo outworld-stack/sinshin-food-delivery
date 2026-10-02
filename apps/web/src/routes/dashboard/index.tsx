@@ -1,6 +1,6 @@
 // src/routes/dashboard/index.tsx
-// ⬅ NEW: loader پری‌فچ + pendingComponent/errorComponent + head
-// (اسکلتونِ inline قبلی استخراج شد تا pendingComponent هم همان را نشان دهد)
+// ⬅ NEW: پیش‌واکشی در loader + pendingComponent/errorComponent + head
+// (اسکلتونِ درون‌خطی قبلی استخراج شد تا pendingComponent هم همان را نشان دهد)
 //
 // رارد ۳۳ — دوزبانه: همه‌ی رشته‌ها از دیکشنری (t) و همه‌ی اعداد/تاریخ‌ها از
 // فرمترهای چندزبانه (fmt) — فارسی همان خروجی قبلی، عربی قرینه‌ی ar-EG.

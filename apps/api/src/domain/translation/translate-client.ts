@@ -15,8 +15,8 @@
  * یک جهت اینجا هاردکد شده و قرارداد بیرونی ساده می‌ماند.
  *
  * خطاها:
- *  • ۴xx از مترجم = ورودی بد → AppError اعتبارسنجی (بدون retry)
- *  • قطعی/تایم‌اوت/۵xx → ۲ بار retry با فاصله؛ سپس SERVICE_UNAVAILABLE
+ *  • ۴xx از مترجم = ورودی بد → AppError اعتبارسنجی (بدون تلاش مجدد)
+ *  • قطعی/تایم‌اوت/۵xx → ۲ بار تلاش مجدد با فاصله؛ سپس SERVICE_UNAVAILABLE
  *    (صف ترجمه این خطا را «مترجم پایین» تفسیر می‌کند و تلاش را
  *    نمی‌سوزاند — نگاه کنید به translation.service.ts)
  */
@@ -91,7 +91,7 @@ export class TranslateClient {
           body: JSON.stringify({ texts: batch, source: SRC, target: TGT }),
           signal: AbortSignal.timeout(TIMEOUT_MS),
         })
-        // ورودی بد — retry بی‌فایده است
+        // ورودی بد — تلاش مجدد بی‌فایده است
         if (res.status === 400 || res.status === 422) {
           throw Err.validation('متن ارسالی برای مترجم معتبر نیست.')
         }
@@ -103,7 +103,7 @@ export class TranslateClient {
         }
         return out.map((v) => (typeof v === 'string' ? v : ''))
       } catch (err) {
-        // AppError عمدی (اعتبارسنجی) را بالا بده — retry نشود
+        // AppError عمدی (اعتبارسنجی) را بالا بده — تلاش مجدد نشود
         if (err instanceof AppError) throw err
         lastError = err
       }

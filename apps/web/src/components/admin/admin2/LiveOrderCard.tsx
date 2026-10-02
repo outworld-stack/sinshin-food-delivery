@@ -3,15 +3,15 @@ import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { formatPrice, formatDate } from '#/utils/format'
 import { Bell, Stickynote, Check, Printer, Phone, Bicycle, Refresh, File } from 'reicon-react'
-import type { LiveOrder } from '#/server/admin'
+import type { LiveOrderDto } from '@sinshin/shared'
 import { StatusBadge } from '#/components/shared/StatusBadge'
 
 
 interface LiveOrderCardProps {
-  order: LiveOrder
+  order: LiveOrderDto
   // round-26 — deliveryType همیشه همراه سفارش می‌آید تا مودال تایید بداند پیک دارد یا نه
-  onRequestConfirm: (orderId: string, courierId: string | null, isReassign: boolean, deliveryType: LiveOrder['deliveryType']) => void  // ⬅️
-  onOpenNote: (orderId: string, deliveryType: LiveOrder['deliveryType']) => void
+  onRequestConfirm: (orderId: string, courierId: string | null, isReassign: boolean, deliveryType: LiveOrderDto['deliveryType']) => void  // ⬅️
+  onOpenNote: (orderId: string, deliveryType: LiveOrderDto['deliveryType']) => void
 }
 
 

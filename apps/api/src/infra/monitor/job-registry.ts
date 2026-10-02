@@ -1,6 +1,6 @@
 // src/infra/monitor/job-registry.ts
 /**
- * round-18 — ثبت آخرین اجرای هر job زمان‌بندی‌شده.
+ * round-18 — ثبت آخرین اجرای هر کارِ زمان‌بندی‌شده.
  * CronScheduler در begin/end اجرا را اعلام می‌کند؛ این رجیستری فقط
  * تاریخچه‌ی «آخرین وضعیت» را نگه می‌دارد (نه صف، نه تکرار — حافظهٔ O(jobs)).
  */
@@ -39,7 +39,7 @@ export class JobRunRegistry implements JobRunRecorder {
   define(job: { name: string; kind: 'daily' | 'interval'; schedule: string }): void {
     const existing = this.jobs.get(job.name)
     if (existing) {
-      // register دوباره (مثلاً پس از hot-reload) — فقط تعریف به‌روز شود
+      // ثبتِ دوباره (مثلاً پس از بارگذاری دوباره) — فقط تعریف به‌روز شود
       existing.kind = job.kind
       existing.schedule = job.schedule
       return

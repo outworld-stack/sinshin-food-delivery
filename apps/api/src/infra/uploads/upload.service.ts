@@ -16,7 +16,7 @@ export class UploadService {
   private dirError: unknown = null
 
   constructor(private readonly dir: string) {
-    // Bun-native — بدون node:fs؛ یک‌بار در عمر سرویس
+    // بومیِ Bun — بدون node:fs؛ یک‌بار در عمر سرویس
     // round-16: خطای mkdir می‌ماند و در save با خطای شفاف ۵۰۳ سرو می‌شود
     this.ready = Bun.$`mkdir -p ${this.dir}`
       .then(() => {})
@@ -26,7 +26,7 @@ export class UploadService {
       })
   }
 
-  /** round-16 — برای health route: پوشهٔ آپلود قابل نوشتن است؟ */
+  /** round-16 — برای روت سلامت: پوشهٔ آپلود قابل نوشتن است؟ */
   get storageReady(): boolean {
     return this.dirError === null
   }

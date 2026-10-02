@@ -14,7 +14,7 @@ async function authenticateRequest(sessions: SessionService, request: Request) {
   return sessions.authenticate(token)
 }
 
-/** گارد احراز — `auth` و `user` را به scope اضافه می‌کند */
+/** گارد احراز — `auth` و `user` را به حوزه اضافه می‌کند */
 export const requireAuth = (sessions: SessionService) =>
   new Elysia({ name: 'require-auth' })
     .resolve({ as: 'scoped' }, async ({ request }) => {

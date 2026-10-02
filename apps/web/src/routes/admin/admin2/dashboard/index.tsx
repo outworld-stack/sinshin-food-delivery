@@ -81,7 +81,7 @@ const Admin2Dashboard = memo(function Admin2Dashboard() {
 export const Route = createFileRoute('/admin/admin2/dashboard/')({
   component: Admin2Dashboard,
   ssr: false,
-  // ⬅ NEW: prefetch زنجیره‌ای — هاور روی «داشبورد من» در سایدبار =>
+  // ⬅ NEW: پیش‌واکشی زنجیره‌ای — هاور روی «داشبورد من» در سایدبار =>
   // اول سشن در کش پر می‌شود؛ اگر ادمین۲ لاگین است، آمارش هم همین‌جا پر می‌شود
   // => ناوبری بدون حتی یک اسکلتون.
   loader: async ({ context }) => {

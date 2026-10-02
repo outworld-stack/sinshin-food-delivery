@@ -1,6 +1,6 @@
 // src/utils/deviceFingerprint.ts
 // جمع‌آوری سیگنال‌های دستگاه — دو لایه:
-//   لایه ۱: clientId ماندگار (localStorage + cookie + sessionStorage — evercookie-lite)
+//   لایه ۱: clientId ماندگار (localStorage + کوکی + sessionStorage — evercookie-lite)
 //   لایه ۲: هش‌های canvas/webgl/audio/fonts + سیگنال‌های خام
 // خروجی دقیقاً قرارداد device در POST /api/auth/otp/verify است.
 // رارد ۳۱ — label حالا نام و نسخه‌ی مرورگر را هم دارد (خواسته‌ی کاربر:
@@ -26,9 +26,9 @@ export function getClientId(): string {
     id = crypto.randomUUID()
   }
   // هر بار همه‌ی مخزن‌ها را تازه کن — یکی پاک شه، بقیه زنده‌اند
-  try { localStorage.setItem(DID_KEY, id) } catch { /* private mode */ }
-  try { sessionStorage.setItem(DID_KEY, id) } catch { /* noop */ }
-  try { writeCookie(DID_KEY, id) } catch { /* noop */ }
+  try { localStorage.setItem(DID_KEY, id) } catch { /* حالت خصوصی */ }
+  try { sessionStorage.setItem(DID_KEY, id) } catch { /* هیچ‌کاری نمی‌کند */ }
+  try { writeCookie(DID_KEY, id) } catch { /* هیچ‌کاری نمی‌کند */ }
   return id
 }
 
@@ -167,7 +167,7 @@ export interface DeviceSignalsPayload {
   label: string
 }
 
-/** جمع‌آوری کامل — قبل از فراخوانی verify */
+/** جمع‌آوری کامل — قبل از فراخوانیِ تایید */
 export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
   const [canvasHash, webglHash, audioHash, fontsHash] = await Promise.all([
     sha256Hex(canvasSignal()),

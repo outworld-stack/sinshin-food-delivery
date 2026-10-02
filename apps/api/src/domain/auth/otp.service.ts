@@ -10,16 +10,16 @@ const K = {
   code: (p: string) => `otp:code:${p}`,
   cooldown: (p: string) => `otp:cd:${p}`,
   attempts: (p: string) => `otp:att:${p}`,
-  /** round-28 — پنجره‌ی مستقل خطای verify (بین کدها؛ با کد جدید ریست «نمی‌شود») */
+  /** round-28 — پنجره‌ی مستقل خطای تایید (بین کدها؛ با کد جدید ریست «نمی‌شود») */
   vfails: (p: string) => `otp:vf:${p}`,
   hour: (p: string) => `otp:h:${p}`,
   day: (p: string) => `otp:d:${p}`,
 }
 
-/** round-28 — سقف کل خطاهای verify در پنجره‌ی ثابت، مستقل از چرخه‌ی کد:
+/** round-28 — سقف کل خطاهای تایید در پنجره‌ی ثابت، مستقل از چرخه‌ی کد:
  *  قبلن هر «کد جدید» شمارنده‌ی تلاش‌ها را صفر می‌کرد؛ حمله می‌توانست با
  *  چرخه‌ی کد-جدید/حدس‌های-موازی بی‌نهایت حدس جمع کند. این پنجره با کد
- *  جدید ریست نمی‌شود — فقط verify موفق آن را پاک می‌کند. */
+ *  جدید ریست نمی‌شود — فقط تایید موفق آن را پاک می‌کند. */
 const VERIFY_FAIL_WINDOW_S = 15 * 60
 const VERIFY_FAIL_CAP = 10
 
@@ -37,7 +37,7 @@ export class OtpService {
     const { ttlSeconds, cooldownSeconds, maxPerHourPerPhone, maxPerDayPerPhone } =
       this.deps.config.otp
 
-    // ۱) سقف ساعتی و روزانه هر شماره — read-only، ردِ سریع
+    // ۱) سقف ساعتی و روزانه هر شماره — فقط‌خواندنی، ردِ سریع
     // (قبل از گیت می‌آیند تا ردِ سقف، گیتِ کول‌داون را نگرفته باشد)
     const hourCount = Number((await redis.get(K.hour(phone))) ?? 0)
     if (hourCount >= maxPerHourPerPhone) {
@@ -51,7 +51,7 @@ export class OtpService {
     // ۲) فاصله‌ی بین دو درخواست — گیت اتمیک (امن-۲)
     // قبلاً exists-بعد-set بود: دو درخواست هم‌زمان هر دو از exists رد می‌شدند
     // → دو پیامک + بازنویسی کد. SET NX فقط به یکی اجازه می‌دهد.
-    // null (ردیس در دسترس نیست) = fail-open مثل بقیه‌ی محدودیت‌ها.
+    // null (ردیس در دسترس نیست) = در خطا باز می‌گذارد، مثل بقیه‌ی محدودیت‌ها.
     const gate = await redis.setNx(K.cooldown(phone), '1', { ex: cooldownSeconds })
     if (gate === false) {
       throw Err.rateLimited(
@@ -62,7 +62,7 @@ export class OtpService {
 
     // ۳) کد + هش (خود کد هرگز ذخیره نمی‌شود)
     // round-28 — ۶ رقم: کد ۴رقمی فضای ۱۰هزارتایی دارد؛ با شمارنده‌ی اتمیک و
-    // سقف‌های جدید، ۶رقمی (یک میلیون) brute-force را عملاً بی‌معنا می‌کند.
+    // سقف‌های جدید، ۶رقمی (یک میلیون) حمله‌ی جست‌وجوی فراگیر را عملاً بی‌معنا می‌کند.
     const code = randomOtpCode(6)
     const codeHash = sha256(`${code}:${phone}`)
 
@@ -87,7 +87,7 @@ export class OtpService {
       await redis.del(K.cooldown(phone))
       throw Err.internal('ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.')
     }
-    // در dev یا provider=console کد در پاسخ هم هست تا بدون پنل تست کنی
+    // در محیط توسعه یا provider=console کد در پاسخ هم هست تا بدون پنل تست کنی
     const reveal = !this.deps.config.isProd
     return { cooldownSeconds, ...(reveal ? { devCode: code } : {}) }
   }
@@ -99,7 +99,7 @@ export class OtpService {
    *  • شمارنده‌ی تلاش «اتمیک»: قبلاً get→check→incr بود؛ N درخواست موازی
    *    همه attempts=0 می‌دیدند و هر کدام یک حدس می‌گرفتند. حالا INCR اول
    *    بالا می‌رود، بعد سقف چک می‌شود — هر حدس دقیقاً یکی شمرده می‌شود.
-   *  • سقف مستقل ۱۵دقیقه‌ای: خطاهای verify بین کدها هم جمع می‌شوند؛
+   *  • سقف مستقل ۱۵دقیقه‌ای: خطاهای تایید بین کدها هم جمع می‌شوند؛
    *    چرخه‌ی «کد جدید بگیر تا شمارنده صفر شود» دیگر حدس اضافه نمی‌دهد.
    */
   async verify(phone: string, code: string): Promise<void> {

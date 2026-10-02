@@ -83,8 +83,8 @@ export const Route = createFileRoute('/products/')({
 
 	// ⬅ NEW: SSR دیتا — قبل از رندر، کوئری‌ها در کش هستن.
 	// نتیجه: HTML کامل برای کرالر + هیدریشن بدون فلیک اسکلتون.
-	// با defaultPreload: 'intent' → hover روی لینک منو، همین loader پیش‌fetch می‌شه!
-	// (query خودش دیتا رو برمی‌گردونه — گت‌دیتای جدا لازم نیست)
+	// با defaultPreload: 'intent' → hover روی لینک منو، همین loader پیش‌واکشی می‌شه!
+	// (کوئری خودش دیتا رو برمی‌گردونه — گت‌دیتای جدا لازم نیست)
 	loader: async ({ context, deps }) => {
 		const mains = await context.queryClient.query(activeMainCategoriesOptions)
 		const activeMain = resolveActiveMain(mains, deps.tab)

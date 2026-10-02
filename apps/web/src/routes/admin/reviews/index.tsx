@@ -135,7 +135,7 @@ export const Route = createFileRoute('/admin/reviews/')({
   // ⬅ NEW: قرارداد URL — تب فعال در search param؛ رفرش/back/اشتراک‌گذاری حفظش می‌کنند
   validateSearch: adminReviewsSearchSchema,
 
-  // ⬅ NEW: prefetch — هاور روی لینک «نظرات» در سایدبار => این loader در کلاینت
+  // ⬅ NEW: پیش‌واکشی — هاور روی لینک «نظرات» در سایدبار => این loader در کلاینت
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context }) => {

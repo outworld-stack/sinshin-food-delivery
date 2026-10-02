@@ -53,7 +53,7 @@ export const termsRoutes = (deps: TermsRoutesDeps) => {
             items: t.Array(t.String({ maxLength: 1000 })),
           }),
         ),
-        // round-34 — بندهای عربی (اختیاری؛ ساختار موازی؛ خالی = fallback فارسی)
+        // round-34 — بندهای عربی (اختیاری؛ ساختار موازی؛ خالی = پشتیبان فارسی)
         sectionsAr: t.Optional(t.Nullable(t.Array(
           t.Object({
             title: t.String({ maxLength: 200 }),

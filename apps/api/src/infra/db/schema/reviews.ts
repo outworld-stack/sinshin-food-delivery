@@ -9,7 +9,7 @@ import type { OrderId, ProductId, ReviewId, UserId } from '#/domain/shared/brand
 export const reviewStatusEnum = pgEnum('review_status', ['pending', 'approved', 'rejected'])
 
 /**
- * نظر روی «محصولِ داخل سفارش» — یک نظر به‌ازای هر محصول در هر سفارش (unique).
+ * نظر روی «محصولِ داخل سفارش» — یک نظر به‌ازای هر محصول در هر سفارش (یکتا).
  * فقط بعد از DELIVERED. تاییدشده → صفحه‌ی محصول.
  */
 export const reviews = pgTable(

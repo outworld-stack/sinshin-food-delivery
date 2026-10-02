@@ -1,8 +1,15 @@
 // src/stores/authStore.ts
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { Role } from '@sinshin/shared'
 
-export type UserRole = 'user' | 'admin' | 'admin2' | null;
+// رارد ۴۷ — union نقش از قرارداد مشترک می‌آید (قبلاً کپی محلی بود)؛
+// هنگام زنده‌سازی از localStorage هم پاکسازی می‌شود (مثل sanitizeItems سبد):
+// نقشِ خراب/قدیمی = خروج از حساب — گاردهای روت‌ها هرگز مقدار ناشناخته نمی‌بینند.
+export type UserRole = Role | null;
+
+/** نقش‌های مجاز انبار — هر چیز دیگر در زنده‌سازی بی‌اعتبار می‌شود */
+const KNOWN_ROLES: readonly Role[] = ['user', 'admin', 'admin2']
 
 interface AuthState {
   isAuthenticated: boolean
@@ -31,6 +38,14 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'sinshin-auth',
       skipHydration: true,
+      // رارد ۴۷ — پاکسازی هنگام خواندن از انبار: نقش ناشناخته → خروج
+      merge: (persisted, current) => {
+        const p = persisted as Partial<AuthState> | undefined
+        if (p?.role && !KNOWN_ROLES.includes(p.role)) {
+          return { ...current }
+        }
+        return { ...current, ...p }
+      },
     }
   )
 )

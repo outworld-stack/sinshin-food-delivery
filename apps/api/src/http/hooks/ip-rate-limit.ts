@@ -12,13 +12,13 @@ export interface RateLimitOptions {
 
 /**
  * محدودیت IP — به‌صورت beforeHandle «اختصاصی هر روت».
- * (نسخه‌ی plugin با .use وسط زنجیره، به روت‌های بعدی هم نشت می‌کرد و
+ * (نسخه‌ی افزونه با .use وسط زنجیره، به روت‌های بعدی هم نشت می‌کرد و
  *  سقف‌ها روی هم جمع می‌شدند — این نسخه فقط روتِ خودش را می‌شمارد.)
  * پنجره‌ی لغزان: هر درخواستِ مجاز TTL را تمدید می‌کند.
  *
  * phase-1:
- *   • IP = آخرین entry های XFF (نوشته‌ی Caddy؛ اولین entry جعلی است)
- *   • fail-closed: قطعی Redis = رد درخواست. بدون rate-limit، روت‌های OTP
+ *   • IP = آخرین ورودی‌های XFF (نوشته‌ی Caddy؛ اولین ورودی جعلی است)
+ *   • شکست‌بسته: قطعی Redis = رد درخواست. بدون محدودیت نرخ، روت‌های OTP
  *     در معرض هزینه‌ی SMS و brute-force اند؛ خاموشیِ بی‌صدا ممنوع.
  */
 export const ipRateLimit = (opts: RateLimitOptions) => {
@@ -30,11 +30,11 @@ export const ipRateLimit = (opts: RateLimitOptions) => {
     try {
       count = await opts.redis.incr(key)
     } catch {
-      // RedisService خطا را پرتاب کرد → fail-closed
+      // RedisService خطا را پرتاب کرد → شکست‌بسته
       throw Err.serviceUnavailable()
     }
     if (!Number.isFinite(count) || count < 1) {
-      // RedisService خطا را قورت داده و مقدار بی‌معنا برگردانده → fail-closed
+      // RedisService خطا را قورت داده و مقدار بی‌معنا برگردانده → شکست‌بسته
       // (incr همیشه ≥ 1 برمی‌گرداند؛ هر چیز دیگر یعنی خرابی)
       throw Err.serviceUnavailable()
     }
@@ -45,7 +45,7 @@ export const ipRateLimit = (opts: RateLimitOptions) => {
       }
     } catch {
       // expire خطا خورد — درخواست را می‌گذریم؛ اگر Redis واقعاً مرده باشد
-      // incr بالا قبل از این‌جا fail-closed کرده است
+      // incr بالا قبل از این‌جا شکست‌بسته کرده است
     }
 
     if (count > opts.limit) {

@@ -27,7 +27,7 @@ import type { CouponWithConditionsDto } from '@sinshin/shared'
 import { memo, useState, useCallback } from 'react'
 
 // --- کارت کوپن — سه چیدمان (موبایل/تبلت/دسکتاپ) ---
-// stage-10: آیکون وضعیت toggle شد — Ban برای غیرفعال‌سازی (با تایید)،
+// stage-10: آیکون وضعیت تغییر کرد — Ban برای غیرفعال‌سازی (با تایید)،
 // Check برای فعال‌سازی مجدد. کوپن منقضی فقط از صفحه‌ی خودش (ویرایش انقضا).
 const CouponCard = memo(function CouponCard({
   coupon: row, onEdit, onToggle, onOpen,
@@ -58,7 +58,7 @@ const CouponCard = memo(function CouponCard({
     e.stopPropagation()
     onEdit(c.id as string)
   }, [onEdit, c.id])
-  // stage-10: toggle — مسیر را صفحه تعیین می‌کند (فعال → تایید حذف؛ غیرفعال → فعال‌سازی)
+  // stage-10: تغییر وضعیت — مسیر را صفحه تعیین می‌کند (فعال → تایید حذف؛ غیرفعال → فعال‌سازی)
   const handleToggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
     onToggle(row)
@@ -231,7 +231,7 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
     },
   })
 
-  // stage-10: فعال‌سازی مجدد — مستقیم (بدون مودال)؛ خطا (مثل انقضای گذشته) toast می‌شود
+  // stage-10: فعال‌سازی مجدد — مستقیم (بدون مودال)؛ خطا (مثل انقضای گذشته) پیام شناور می‌شود
   const activateMut = useMutation({
     mutationFn: (id: string) => setCouponActive(id, true),
     onSuccess: (res) => {
@@ -332,7 +332,7 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
 
 export const Route = createFileRoute('/admin/coupons/')({
   ssr: false,
-  // prefetch — هاور روی لینک «کوپن‌ها» در سایدبار => این loader در کلاینت
+  // پیش‌واکشی — هاور روی لینک «کوپن‌ها» در سایدبار => این loader در کلاینت
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   loader: async ({ context }) => {
     await context.queryClient.query(adminCouponsOptions)

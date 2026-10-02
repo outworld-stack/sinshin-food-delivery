@@ -4,6 +4,7 @@ import { InfoCircle } from 'reicon-react'
 import { Skeleton } from '#/components/LoadingSkeletons'
 import type { DeliveryType } from '#/types/site/checkout'
 import { useI18n, tpl } from '#/i18n'
+import type { RestaurantStatusDisplay } from '@sinshin/shared'
 
 interface OrderSummaryProps {
 	subtotal: number
@@ -18,7 +19,8 @@ interface OrderSummaryProps {
 	isSubmitBlocked: boolean
 	isSubmitting: boolean
 	onSubmit: () => void
-	restaurantStatus: { isOpen: boolean; nextOpenTime: string; closeReason?: string | null }
+	// رارد ۴۷ — تایپ درون‌خطی وضعیت رستوران با قرارداد RestaurantStatusDisplay یکی شد
+	restaurantStatus: RestaurantStatusDisplay
 }
 
 export const OrderSummary = memo(function OrderSummary({

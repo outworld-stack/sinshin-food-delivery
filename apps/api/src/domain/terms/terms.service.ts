@@ -11,19 +11,16 @@ import { desc, eq } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import { terms } from '#/infra/db/schema'
 import type { Lang } from '#/domain/shared/lang'
-import type { TermsSection } from '@sinshin/shared'
+import type { TermsContentDto, TermsSection } from '@sinshin/shared'
 
-// رارد ۴۶ — TermsSection به قرارداد مشترک (@sinshin/shared) منتقل شد؛
-// TermsContent این‌جا می‌ماند چون updatedAt آن قبل از سریال‌سازی Date است
-// (نسخه‌ی سیم قرارداد string دارد — مرز serde عمدی).
-
-export interface TermsContent {
-  sections: TermsSection[]
-  /** round-34 — بندهای عربی خام (برای فرم دوزبانه ادمین؛ NULL = fallback فارسی) */
+// رارد ۴۶ — TermsSection به قرارداد مشترک (@sinshin/shared) منتقل شد.
+// رارد ۴۷ — TermsContent حالا «مشتقِ» قرارداد است، نه کپیِ ناشناس: همه‌ی
+// فیلدها از TermsContentDto می‌آیند و فقط updatedAt (مرز سریال‌سازی) Date
+// می‌ماند — اگر قرارداد فیلدی عوض کند، این‌جا بلافاصله خطای تایپ می‌دهد.
+export type TermsContent = Omit<TermsContentDto, 'updatedAt'> & {
+  /** round-34 — بندهای عربی خام (برای فرم دوزبانه ادمین؛ NULL = پشتیبان فارسی) */
   sectionsAr?: TermsSection[] | null
-  /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ */
-  arAuto?: boolean
-  version: number
+  /** پیش از سریال‌سازی Date است؛ روی سیم ISO string (قرارداد) */
   updatedAt: Date
 }
 
@@ -43,7 +40,7 @@ export class TermsService {
       return { sections: [], sectionsAr: null, arAuto: false, version: 0, updatedAt: new Date() }
     }
     // round-34 — بندهای عربی: ساختار موازی sections؛ هم‌ترازی با ایندکس حیاتی است —
-    // بخشِ بدون ترجمه‌ی عربی per-section به همان فارسی برمی‌گردد (COALESCE per-item)
+    // بخشِ بدون ترجمه‌ی عربی به همان فارسی برمی‌گردد (COALESCE به‌ازای هر مورد)
     const sections =
       lang === 'ar' && row.sectionsAr && row.sectionsAr.length > 0
         ? row.sections.map((s, i) => {
@@ -66,7 +63,7 @@ export class TermsService {
       where: eq(terms.version, version),
     })
     if (!row) return null
-    // round-34 — همان COALESCE per-section نسخه‌ی خاص (ارجاع تاریخی)
+    // round-34 — همان COALESCE بخش‌به‌بخشِ نسخه‌ی خاص (ارجاع تاریخی)
     const sections =
       lang === 'ar' && row.sectionsAr && row.sectionsAr.length > 0
         ? row.sections.map((s, i) => {
@@ -86,7 +83,7 @@ export class TermsService {
   /** ذخیره — هر ذخیره = نسخه جدید (ادمین اصلی) */
   async update(
     sections: TermsSection[],
-    /** round-34 — بندهای عربی (اختیاری؛ ساختار موازی؛ خالی = NULL = fallback فارسی) */
+    /** round-34 — بندهای عربی (اختیاری؛ ساختار موازی؛ خالی = NULL = پشتیبان فارسی) */
     sectionsAr?: TermsSection[] | null,
   ): Promise<{ version: number }> {
     if (sections.length === 0) {

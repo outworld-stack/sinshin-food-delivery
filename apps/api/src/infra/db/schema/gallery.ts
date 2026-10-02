@@ -15,7 +15,7 @@ export const galleryImages = pgTable(
     id: uuid('id').primaryKey().defaultRandom().$type<GalleryImageId>(),
     src: text('src').notNull(),
     alt: text('alt').notNull(),
-    /** round-34 — متن جایگزین عربی (NULL = fallback فارسی) */
+    /** round-34 — متن جایگزین عربی (NULL = پشتیبان فارسی) */
     altAr: text('alt_ar'),
     /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
     arAuto: boolean('ar_auto').notNull().default(false),

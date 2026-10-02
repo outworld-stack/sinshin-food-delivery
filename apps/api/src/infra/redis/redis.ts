@@ -1,7 +1,7 @@
 //src/infra/redis/redis.ts
 /**
  * Redis — کلاینت بومی Bun (RedisClient).
- * timeout-guard روی همه‌ی عملیات: قطعی ردیس = degrade، نه deadlock.
+ * گاردِ زمانِ انتظار روی همه‌ی عملیات: قطعی ردیس = تنزل، نه بن‌بست.
  */
 import { RedisClient } from 'bun'
 
@@ -11,7 +11,7 @@ export class RedisService {
   private readonly client: RedisClient
   private subscriber: RedisClient | null = null
   private readonly subscribed = new Set<string>()
-  /** round-16 — کانال→هندلر برای re-subscribe دوره‌ای (drift guard پس از قطعی ردیس) */
+  /** round-16 — کانال→هندلر برای اشتراکِ دوباره‌ی دوره‌ای (گاردِ انحراف پس از قطعی ردیس) */
   private readonly subHandlers = new Map<string, (message: string) => void>()
   private resubTimer: ReturnType<typeof setInterval> | null = null
 
@@ -65,7 +65,7 @@ export class RedisService {
   /**
    * SET ... NX — برای قفل‌ها.
    * true = گرفته شد | false = کسی دیگر دارد | null = ردیس در دسترس نیست
-   * (تفکیک null از false تا caller ها بتوانند fail-open انتخاب کنند)
+   * (تفکیک null از false تا فراخوان‌ها بتوانند شکست‌باز را انتخاب کنند)
    */
   async setNx(key: string, value: string, opts: { ex: number }): Promise<boolean | null> {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -76,7 +76,7 @@ export class RedisService {
           timer = setTimeout(() => resolve(undefined), OP_TIMEOUT_MS)
         }),
       ])
-      if (res === undefined) return null // timeout — ردیس معلق
+      if (res === undefined) return null // زمان انتظار — ردیس معلق
       return res === 'OK'
     } catch {
       return null // خطا — ردیس پایین
@@ -123,7 +123,7 @@ export class RedisService {
     return Number(raw) === 1
   }
 
-  // ── pub/sub ──
+  // ── انتشار/اشتراک ──
   async publish(channel: string, message: string): Promise<number> {
     return this.t<number>(this.client.publish(channel, message), 0)
   }
@@ -149,20 +149,20 @@ export class RedisService {
     } catch (err) {
       // round-28 — مسیر شکست هم پاک کند: وگرنه کانال‌هایی که در قطعی ردیس
       // subscribe شان شکست خورده برای همیشه در subHandlers می‌مانند و
-      // حلقه‌ی resub هر ۶۰ ثانیه برایشان تلاش می‌کند (نشتی بی‌سقف).
-      // گاردِ «همان هندلر» برای race با subscribe دوباره‌ی موازی.
+      // حلقه‌ی اشتراکِ دوباره هر ۶۰ ثانیه برایشان تلاش می‌کند (نشتی بی‌سقف).
+      // گاردِ «همان هندلر» برای هم‌زمانی با subscribe دوباره‌ی موازی.
       if (this.subHandlers.get(channel) === handler) this.subHandlers.delete(channel)
       console.error(`[redis] subscribe(${channel}) failed:`, err)
       return false
     } finally {
-      // round-16 — تایمر timeout پس از settle پاک شود (نشت تایمر)
+      // round-16 — تایمرِ زمان انتظار پس از تسویه پاک شود (نشت تایمر)
       if (timer) clearTimeout(timer)
     }
   }
 
   /**
-   * round-16 — drift guard: بعد از قطعی/ری‌کانکت ردیس، اتصال pub/sub ممکن است
-   * بدون سابسکریپتون برگردد؛ SUBSCRIBE ایدمپوتنت است، پس هر ۶۰ ثانیه برای همهٔ
+   * round-16 — گاردِ انحراف: بعد از قطعی/ری‌کانکت ردیس، اتصال pub/sub ممکن است
+   * بدون سابسکریپتون برگردد؛ SUBSCRIBE تکرارناپذیر است، پس هر ۶۰ ثانیه برای همهٔ
    * کانال‌های ثبت‌شده دوباره صادر می‌شود (خطا بی‌صدا — تیک بعدی دوباره می‌کوشد).
    */
   private startResubscribeLoop(): void {
@@ -174,7 +174,7 @@ export class RedisService {
         try {
           void Promise.resolve(sub.subscribe(channel, handler)).catch(() => {})
         } catch {
-          /* noop — تیک بعدی */
+          /* هیچ‌کاری نمی‌کند — تیک بعدی */
         }
       }
     }, 60_000)
@@ -184,7 +184,7 @@ export class RedisService {
     try {
       this.subscriber?.unsubscribe(channel)
     } catch {
-      /* noop */
+      /* هیچ‌کاری نمی‌کند */
     }
     this.subscribed.delete(channel)
     this.subHandlers.delete(channel)
@@ -198,12 +198,12 @@ export class RedisService {
     try {
       this.client.close()
     } catch {
-      /* noop */
+      /* هیچ‌کاری نمی‌کند */
     }
     try {
       this.subscriber?.close()
     } catch {
-      /* noop */
+      /* هیچ‌کاری نمی‌کند */
     }
   }
 }

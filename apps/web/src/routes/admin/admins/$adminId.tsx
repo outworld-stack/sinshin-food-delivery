@@ -1,9 +1,9 @@
 // src/routes/admin/admins/$adminId.tsx
 // ⬅ NEW: رفع باگ رفرش — قبلاً loader مستقیماً دیتا برمی‌گرداند (بدون کش)؛
 // یعنی ذخیره‌ی دسترسی‌ها در PermissionsEditor هیچ ریفچی روی همین صفحه‌ی باز
-// نمی‌ساخت (snapshot کهنه می‌ماند).
+// نمی‌ساخت (تصویر لحظه‌ای کهنه می‌ماند).
 // حالا: loader و کامپوننت یک کش مشترک دارند (subAdminDetailsOptions) =>
-// invalidate واقعی + پری‌فچ روی هاورِ کارت ادمین در لیست.
+// نامعتبرسازی واقعی + پیش‌واکشی روی هاورِ کارت ادمین در لیست.
 import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { memo, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -34,7 +34,7 @@ const SubAdminDetailPage = memo(function SubAdminDetailPage() {
   const { adminId } = Route.useParams()
 
   // ⬅ NEW: اشتراک در کش مشترک با loader (فکتوری مرکزی) —
-  // بعد از ذخیره‌ی دسترسی‌ها در PermissionsEditor (invalidate پریفکس)،
+  // بعد از ذخیره‌ی دسترسی‌ها در PermissionsEditor (نامعتبرسازی پریفکس)،
   // همین کوئری ریفچ می‌شود و آمار/عنوان صفحه به‌روز می‌ماند
   const { data: admin } = useQuery(subAdminDetailsOptions(adminId))
 
@@ -54,7 +54,7 @@ const SubAdminDetailPage = memo(function SubAdminDetailPage() {
   }, [admin])
 
   if (!admin) {
-    // در حال ریفچ بعد از invalidate یا ادمین ناموجود
+    // در حال ریفچ بعد از نامعتبرسازی یا ادمین ناموجود
     return <RouteNotFound />
   }
 
@@ -123,7 +123,7 @@ const SubAdminDetailPage = memo(function SubAdminDetailPage() {
 export const Route = createFileRoute('/admin/admins/$adminId')({
   component: SubAdminDetailPage,
     ssr: false,
-  // ⬅ NEW: prefetch — هاور روی کارت ادمین در لیست => دیتا در کش؛
+  // ⬅ NEW: پیش‌واکشی — هاور روی کارت ادمین در لیست => دیتا در کش؛
   // ناوبری به جزئیات بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context, params }) => {

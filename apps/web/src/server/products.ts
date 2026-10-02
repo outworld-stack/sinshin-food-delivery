@@ -67,7 +67,7 @@ export async function getCartDetails(
   })
 }
 
-// ─── قیمت مؤثر — نمایشی کلاینت (سرور مرجع نهایی در checkout) ───
+// ─── قیمت مؤثر — نمایشی کلاینت (سرور مرجع نهایی در چک‌اوت) ───
 
 export function getEffectivePrice(
   product: Product,
@@ -113,7 +113,7 @@ export async function createMainCategory(input: {
   return authJson<AdminMutationResult>('/admin/menu/mains', 'POST', {
     name: input.data.name,
     slug: input.data.slug,
-    // round-34 — نام عربی ('' → null = fallback فارسی)
+    // round-34 — نام عربی ('' → null = بازگشت به فارسی)
     nameAr: input.data.nameAr?.trim() || null,
   })
 }
@@ -208,7 +208,7 @@ function parseLines(text: string): string[] {
     .filter(Boolean)
 }
 
-/** round-34 — payload عربیِ مشترک create/update ('' → null = حذف ترجمه = fallback فارسی) */
+/** round-34 — بدنه‌ی عربیِ مشترکِ create/update ('' → null = حذف ترجمه = بازگشت به فارسی) */
 function productArPayload(data: ProductFormData) {
   return {
     nameAr: data.nameAr.trim() || null,

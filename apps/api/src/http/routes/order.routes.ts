@@ -31,9 +31,9 @@ export interface OrderRoutesDeps {
   profile: ProfileService
   settings: SettingsService
   payments: PaymentService
-  /** فقط perUserLimit — سقف ضد-اسپم با fallback ردیس */
+  /** فقط perUserLimit — سقف ضد-اسپم با پشتیبان ردیس */
   redis: RedisService
-  /** round-20 — claim اتمیک روی PK مرکب؛ مقیم DB، مستقل از ردیس */
+  /** round-20 — تصرف اتمیک روی PK مرکب؛ مقیم DB، مستقل از ردیس */
   idempotency: CheckoutIdempotency
   /** round-16 — چک‌اوت تمام-کیف‌پول: سفارش PAID بلافاصله به پنل زنده اعلام شود */
   hub: SseHub
@@ -42,7 +42,7 @@ export interface OrderRoutesDeps {
 export const orderRoutes = (deps: OrderRoutesDeps) => {
   /**
    * phase-fix — سقف هر «کاربر» (نه IP — CGNAT ایرانی: ده‌ها کاربر پشت یک IP).
-   * fail-open: قطعی Redis = عبور؛ این سقف ضد سوءاستفاده است نه ضد پیک.
+   * شکست‌باز: قطعی Redis = عبور؛ این سقف ضد سوءاستفاده است نه ضد پیک.
    */
   const perUserLimit = async (
     userId: string,
@@ -98,7 +98,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       },
     )
 
-    // phase-3 — ویرایش پروفایل (name/email) — فرانت تا امروز stub بود
+    // phase-3 — ویرایش پروفایل (name/email) — فرانت تا امروز صرفاً نمایشی بود
     .patch(
       '/profile',
       ({ user, body }) =>
@@ -140,9 +140,9 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         // phase-fix: سقف هر کاربر — ۱۰ چک‌اوت در دقیقه (ضد اسپم سفارش/کوپن)
         await perUserLimit(user.id, 'checkout', 10, 60)
 
-        // ── phase-2 → round-20: idempotency مقیم در DB ──
+        // ── phase-2 → round-20: تکرارناپذیری مقیم در DB ──
         // فرانت برای هر «نیت خرید» یک UUID در هدر Idempotency-Key می‌فرستد؛
-        // retry شبکه همان پاسخ قبلی را می‌گیرد، نه سفارش دوم. claim اتمیک
+        // تلاش مجددِ شبکه همان پاسخ قبلی را می‌گیرد، نه سفارش دوم. تصرف اتمیک
         // روی PK مرکب (user_id, key) است و برخلاف نسخهٔ Redis در قطعی و
         // ری‌استارت ردیس هم پابرجا می‌ماند (مسیر پول از ردیس جدا شد).
         const idemKey = headers['idempotency-key']
@@ -153,7 +153,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
           const claim = await deps.idempotency.claim(user.id, idemKey)
           // replay: همان پاسخ قبلی — بدون ساخت سفارش
           if (claim.kind === 'replay') return claim.response
-          // claim زندهٔ دیگری (درخواست موازی/تاخیرافتن) — 409؛ retry با
+          // تصرف زندهٔ دیگری (درخواست موازی/تاخیرافتن) — 409؛ تلاش مجدد با
           // کلید تازه بی‌درنگ موفق می‌شود
           if (claim.kind === 'in-flight') {
             throw Err.conflict('درخواست قبلی هنوز در حال پردازش است — چند لحظه صبر کنید.')
@@ -173,7 +173,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
                 data: { id: r.displayId },
               })
             } catch {
-              /* noop */
+              /* هیچ‌کاری نمی‌کند */
             }
           }
           response = !r.requiresPayment || !r.paymentId
@@ -197,7 +197,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
               breakdown: r.breakdown,
             }
         } catch (e) {
-          // شکست چک‌اوت — claim آزاد شود تا retry ممکن باشد
+          // شکست چک‌اوت — تصرف آزاد شود تا تلاش مجدد ممکن باشد
           if (idemKey) await deps.idempotency.release(user.id, idemKey)
           throw e
         }

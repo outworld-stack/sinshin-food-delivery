@@ -7,38 +7,50 @@
 
 // packages/shared/src/contracts.ts
 // قراردادهای API — منبع واحد حقیقت برای هر دو اپ
-// همه‌ی ID ها برنددار — mirror دقیق schema بک‌اند
+// ID های پاسخ برنددار — mirror دقیق schema بک‌اند؛ تایپ‌های درخواست
+// (چک‌اوت/سبد) استثنا هستند: شکل خام سیم (رارد ۴۷)
 // تغییر API → اینجا آپدیت → هر دو طرف type-error می‌گیرند
 //
 // ─── phase-0: حذف تعریف‌های تکراری ───
 // نکته: اینترفیس‌های هم‌نام در TS «مرج» می‌شوند (نه ارور) و نوع
 // فرانکن‌شتاین بی‌صدا می‌سازند. تکراری‌ها حذف و مترادف‌ها alias شدند.
 
+// ─── قرارداد تاریخ (رارد ۴۷) ───
+// فیلدهای Date در قراردادها «نوع منطقی»‌اند: تولیدکننده‌ی بک‌اند شیء Date
+// می‌سازد و سریال‌ساز HTTP آن را روی سیم به رشته‌ی ISO تبدیل می‌کند؛
+// مصرف‌کننده‌ی وب با fmt.date (هر دو شکل را می‌فهمد) یا new Date(...) در
+// مرز می‌خواند. رشته‌ی ISO مستقیم فقط جایی است که خودِ تولیدکننده
+// toISOString زده است (قوانین/درباره/مقالات/گزارشات).
+
 import type {
   AddressId, CampaignId, CategoryId, ConditionId, CourierId, DeviceId,
   MainCategoryId, OrderId, ProductId, SizeId, UserId,
 } from './brand'
 
-// ═══════════ Lang ═══════════
+// ═══════════ زبان ═══════════
 
 /** رارد ۴۶ — زبان محتوا (fa پیش‌فرض؛ ar = لایه‌ی دوزبانه‌ی round-34).
  *  قبلاً در web/i18n و api/domain/shared/lang دو کپی مستقل بود؛ حالا منبع واحد. */
 export type Lang = 'fa' | 'ar'
 
-// ═══════════ Auth ═══════════
+// ═══════════ احراز هویت ═══════════
+
+/** رارد ۴۷ — نقش کاربر روی سیم — منبع واحد؛ قبلاً سیم رشته‌ی آزاد بود
+ *  و انبار فرانت union محلی داشت. مقادیر مجاز = ستون role دیتابیس. */
+export type Role = 'user' | 'admin' | 'admin2'
 
 export interface AuthUser {
   id: UserId
   phone: string
   name: string | null
-  role: string
+  role: Role
   referralCode: string | null
   createdAt: Date
   lastLoginAt: Date | null
 }
 
 /** round-28 — role حذف شد: چکِ قبل از احراز هویت نباید نقش کاربر را فاش کند؛
- *  نقش فقط در پاسخ verify (VerifyOtpResponse.user.role) برمی‌گردد. */
+ *  نقش فقط در پاسخ تایید (VerifyOtpResponse.user.role) برمی‌گردد. */
 export interface CheckPhoneResponse {
   isNewUser: boolean
   needsTerms: boolean
@@ -59,12 +71,12 @@ export interface VerifyOtpResponse {
   device: { id: DeviceId; name?: string | null }
 }
 
-// ═══════════ Menu ═══════════
+// ═══════════ منو ═══════════
 
 export interface MainCategory {
   id: MainCategoryId
   name: string
-  /** round-34 — نام عربی (NULL = fallback فارسی)؛ فقط ادمین پر می‌کند */
+  /** round-34 — نام عربی (NULL = پشتیبان فارسی)؛ فقط ادمین پر می‌کند */
   nameAr?: string | null
   slug: string
   isActive: boolean
@@ -76,7 +88,7 @@ export interface Category {
   id: CategoryId
   mainCategoryId: MainCategoryId
   name: string
-  /** round-34 — نام عربی (NULL = fallback فارسی) */
+  /** round-34 — نام عربی (NULL = پشتیبان فارسی) */
   nameAr?: string | null
   slug: string
   hasSizes: boolean
@@ -89,7 +101,7 @@ export interface ProductSize {
   id: SizeId
   name: string
   price: number
-  /** round-34 — نام عربی سایز (فقط پاسخ ادمین؛ NULL = fallback فارسی) */
+  /** round-34 — نام عربی سایز (فقط پاسخ ادمین؛ NULL = پشتیبان فارسی) */
   nameAr?: string | null
 }
 
@@ -126,11 +138,13 @@ export interface MainData {
   categories: Category[]
 }
 
-// ═══════════ Cart ═══════════
+// ═══════════ سبد ═══════════
 
+/** رارد ۴۷ — شکل خام سیم (شناسه‌های رشته‌ای) — هم‌شکل اسکیمای روت و
+ *  کپی سرویس بک‌اند؛ قبلاً برنددار بود و مرز سرور فرانت مجبور به تبدیل نوع بود. */
 export interface CartItemInput {
-  productId: ProductId
-  sizeId?: SizeId | null
+  productId: string
+  sizeId?: string | null
   quantity: number
 }
 
@@ -151,19 +165,21 @@ export interface CartDetails {
   total: number
 }
 
-// ═══════════ Address ═══════════
+// ═══════════ آدرس ═══════════
 
 export interface AddressDto {
   id: AddressId
+  /** رارد ۴۷ — همیشه روی سیم است (ردیف خام دیتابیس)؛ مالک آدرس = خودِ کاربر */
+  userId: UserId
   title: string
   address: string
   lat: number
   lng: number
-  createdAt?: string
-  updatedAt?: string
+  createdAt: string
+  updatedAt: string
 }
 
-// ═══════════ Checkout / Order ═══════════
+// ═══════════ چک‌اوت / سفارش ═══════════
 
 export type DeliveryType = 'DELIVERY' | 'PICKUP' | 'DINE_IN'
 
@@ -189,16 +205,19 @@ export interface OrderBreakdown {
 }
 
 export interface CheckoutItemInput {
-  productId: ProductId
-  sizeId?: SizeId | null
+  productId: string
+  sizeId?: string | null
   quantity: number
 }
 
+/** رارد ۴۷ — شکل خام سیم: هم‌شکل اسکیمای روت، سرویس بک‌اند و پیلود فرانت؛
+ *  optional ها آینه‌ی روت‌اند (PICKUP/DINE_IN آدرس نمی‌فرستند). قبلاً
+ *  برنددار بود و پیلود فرانت فیلدهایی را required کرده بود که سیم optional دارد. */
 export interface CheckoutInput {
   items: CheckoutItemInput[]
   deliveryType: DeliveryType
   useWallet: boolean
-  addressId?: AddressId | null
+  addressId?: string | null
   customerNote?: string | null
   couponCode?: string | null
   gatewayId?: string | null
@@ -206,7 +225,7 @@ export interface CheckoutInput {
 
 /**
  * رارد ۴۳ — عمداً با «نوع» تعریف شده نه «اینترفیس»: پاسخ چک‌اوت در
- * جدول idempotency مانند رکورد JSON ذخیره می‌شود؛ فقط نوعِ شیء‌محور
+ * جدول تکرارناپذیری مانند رکورد JSON ذخیره می‌شود؛ فقط نوعِ شیء‌محور
  * امضای ایندکس ضمنی دارد و مستقیم قابل انتساب است — اینترفیس نه.
  */
 export type CheckoutResult = {
@@ -264,7 +283,7 @@ export interface UserOrder {
   queued: boolean
 }
 
-// ═══════════ Wallet ═══════════
+// ═══════════ کیف پول ═══════════
 
 export type WalletTxType = 'DEPOSIT' | 'WITHDRAW'
 
@@ -286,7 +305,7 @@ export interface ReferralRowDto {
   myProfit: number
 }
 
-// ═══════════ Profile ═══════════
+// ═══════════ پروفایل ═══════════
 
 export interface DeviceDto {
   id: DeviceId
@@ -317,24 +336,43 @@ export interface UserProfileDto {
   walletTransactions: WalletTransactionDto[]
 }
 
-// ═══════════ Review ═══════════
+// ═══════════ نظر ═══════════
 
 export type ReviewStatus = 'pending' | 'approved' | 'rejected'
 
 export interface ProductReviewDto {
   id: string
+  /** شناسه‌ی UUID سفارش — این اندپوینت عمومی است و خام می‌فرستد؛
+   *  نسخه‌ی ادمین (AdminReviewDto) displayId می‌فرستد */
   orderId: OrderId
   productId: ProductId
-  productName?: string | null
-  firstName?: string | null
-  lastName?: string | null
+  /** عمومی همیشه null می‌فرستد (نام نمایشی از firstName/lastName ساخته می‌شود) */
+  productName: string | null
+  firstName: string | null
+  lastName: string | null
+  /** ماسک‌شده در اندپوینت عمومی؛ کامل فقط در AdminReviewDto */
   phone: string
   comment: string
   date: Date
   status: ReviewStatus
 }
 
-// ═══════════ Coupons ═══════════
+/** رارد ۴۷ — ردیف مودریشن ادمین (GET /admin/reviews) — جدا از نسخه‌ی عمومی:
+ *  orderId این‌جا displayId است، productName همیشه پر است و شماره کامل است. */
+export interface AdminReviewDto {
+  id: string
+  orderId: string
+  productId: ProductId
+  productName: string
+  firstName: string | null
+  lastName: string | null
+  phone: string
+  comment: string
+  date: Date
+  status: ReviewStatus
+}
+
+// ═══════════ کوپن‌ها ═══════════
 
 export type CouponConditionType =
   | 'MIN_ORDERS_COUNT'
@@ -358,7 +396,7 @@ export interface CouponRule {
 export interface ArticleSubCategoryDto {
   id: string
   name: string
-  /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = fallback فارسی) */
+  /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = پشتیبان فارسی) */
   nameAr?: string | null
   slug: string
 }
@@ -366,11 +404,12 @@ export interface ArticleSubCategoryDto {
 export interface ArticleCategoryDto {
   id: string
   name: string
-  /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = fallback فارسی) */
+  /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = پشتیبان فارسی) */
   nameAr?: string | null
   slug: string
   hasSubCategories: boolean
-  subCategories?: ArticleSubCategoryDto[]
+  /** رارد ۴۷ — همیشه آرایه است (شاید خالی)؛ قبلاً optional بود و با تولیدکننده دریفت داشت */
+  subCategories: ArticleSubCategoryDto[]
 }
 
 export interface ArticleDto {
@@ -386,11 +425,13 @@ export interface ArticleDto {
   processes: { title: string; items: string[] }[]
   views: number
   status: string
-  publishedAt?: string
-  categorySlug?: string
-  categoryName?: string
-  subCategorySlug?: string
-  subCategoryName?: string
+  /** رارد ۴۷ — تولیدکننده همیشه می‌فرستد (toISOString)؛ قبلاً optional بود */
+  publishedAt: string
+  /** رارد ۴۷ — دسته/زیردسته ممکن است نباشد: null نه undefined (آینه‌ی تولیدکننده) */
+  categorySlug: string | null
+  categoryName: string | null
+  subCategorySlug: string | null
+  subCategoryName: string | null
   /** ═══ round-34 — لایه محتوای دوزبانه (فقط پاسخ ادمین پر می‌کند) ═══ */
   titleAr?: string | null
   excerptAr?: string | null
@@ -409,7 +450,7 @@ export type ArticleSummaryDto = Omit<
   'content' | 'processes' | 'galleryImages'
 >
 
-// ═══════════ Settings / Restaurant ═══════════
+// ═══════════ تنظیمات / رستوران ═══════════
 
 export interface RestaurantStatusDto {
   isOpen: boolean
@@ -419,6 +460,15 @@ export interface RestaurantStatusDto {
   temporaryReopenTime: string
   nextOpenTime: string
   anyClosed: boolean
+}
+
+/** رارد ۴۷ — نمای نمایشی وضعیت رستوران در چک‌اوت — view-model عمدی:
+ *  «بسته‌ی ساعتی» و «بسته‌ی موقت» (round-29) در یک isOpen ادغام می‌شوند و
+ *  علت/زمانِ موقت بر ساعت اصلی مقدم است. مبدل در server/checkout فرانت است. */
+export interface RestaurantStatusDisplay {
+  isOpen: boolean
+  nextOpenTime: string
+  closeReason: string | null
 }
 
 // ═══════════ Geo (رارد ۳۷ — قفل جغرافیایی) ═══════════
@@ -457,7 +507,7 @@ export interface GeoStatusDto {
   bypassIps: number
 }
 
-// ═══════════ Delivery Zones ═══════════
+// ═══════════ نواحی ارسال ═══════════
 
 /** رارد ۴۶ — ناحیه‌ی ارسال (شعاع + نرخ) — قبلاً سه کپی: سرویس بک‌اند،
  *  لایه‌ی سرور فرانت و رابط کامپوننت مدیر؛ حالا منبع واحد */
@@ -472,23 +522,23 @@ export interface DeliveryZonesData {
   origin?: { lat: number; lng: number }
 }
 
-// ═══════════ Payments / Checkout API ═══════════
+// ═══════════ پرداخت / رابط چک‌اوت ═══════════
 
 // phase-0: قبلاً کپیِ تکراری از CheckoutInput/Result بودند
 export type CheckoutRequest = CheckoutInput
 export type CheckoutResponse = CheckoutResult
 
-// ═══════════ Gallery ═══════════
+// ═══════════ گالری ═══════════
 
 /** رارد ۴۶ — پهنای تصویر در گرید گالری — قبلاً در تایپ‌های محلی فرانت
- *  و دو امضای inline سرور تکرار می‌شد؛ حالا منبع واحد */
+ *  و دو امضای درون‌خطی سرور تکرار می‌شد؛ حالا منبع واحد */
 export type GallerySpan = 'wide' | 'normal'
 
 export interface GalleryImageDto {
   id: string
   src: string
   alt: string
-  /** round-34 — متن جایگزین عربی (NULL = fallback فارسی) */
+  /** round-34 — متن جایگزین عربی (NULL = پشتیبان فارسی) */
   altAr?: string | null
   /** پرچم «ترجمه خودکار» — رارد ۳۵ */
   arAuto?: boolean
@@ -497,7 +547,7 @@ export interface GalleryImageDto {
   isActive: boolean
 }
 
-// ═══════════ Terms ═══════════
+// ═══════════ قوانین ═══════════
 
 export interface TermsSection {
   title: string
@@ -506,7 +556,7 @@ export interface TermsSection {
 
 export interface TermsContentDto {
   sections: TermsSection[]
-  /** round-34 — بندهای عربی (NULL = fallback فارسی)؛ ساختار موازی sections */
+  /** round-34 — بندهای عربی (NULL = پشتیبان فارسی)؛ ساختار موازی sections */
   sectionsAr?: TermsSection[] | null
   /** پرچم «ترجمه خودکار» — رارد ۳۵ */
   arAuto?: boolean
@@ -514,7 +564,7 @@ export interface TermsContentDto {
   updatedAt: string
 }
 
-// ═══════════ About ═══════════
+// ═══════════ درباره ═══════════
 
 export interface AboutContentDto {
   id: number
@@ -534,7 +584,7 @@ export interface AboutContentDto {
   updatedAt: string
 }
 
-// ═══════════ Coupons (Admin) ═══════════
+// ═══════════ کوپن‌ها (ادمین) ═══════════
 
 export interface CouponWithConditionsDto {
   coupon: {
@@ -548,6 +598,8 @@ export interface CouponWithConditionsDto {
     isActive: boolean
     startsAt: string
     endsAt: string | null
+    /** رارد ۴۷ — همیشه روی سیم است (ردیف خام دیتابیس)؛ قبلاً در قرارداد جا افتاده بود */
+    createdAt: string
   }
   conditions: Array<{ id: ConditionId; type: CouponConditionType; params: Record<string, unknown> }>
   /**
@@ -557,7 +609,14 @@ export interface CouponWithConditionsDto {
   recipientsCount: number
 }
 
-// ═══════════ Admin: Users (ادغام — نسخه‌ی rich با firstName/lastName) ═══════════
+// ═══════════ ادمین: کاربران (ادغام — نسخه‌ی غنی با firstName/lastName) ═══════════
+
+/** رارد ۴۷ — مرتب‌سازی لیست کاربران ادمین — منبع واحد؛ فقط اولین معیار
+ *  اعمال می‌شود (رفتار موجود سرویس). قبلاً union محلی سرویس بود. */
+export interface AdminUserSort {
+  field: 'registeredAt' | 'walletBalance' | 'totalSpent'
+  dir: 'asc' | 'desc'
+}
 
 export interface AdminUserRow {
   id: UserId
@@ -617,7 +676,7 @@ export interface AdminUserDetailsDto {
   chartData: RangeCharts
 }
 
-// ═══════════ Admin: Sessions / SubAdmins / Couriers / Live ═══════════
+// ═══════════ ادمین: نشست‌ها / ادمین‌های۲ / پیک‌ها / زنده ═══════════
 
 export interface AdminSessionDto {
   loginAt: Date
@@ -635,12 +694,17 @@ export interface SubAdminPermissionsDto {
   mainCategoriesRead: boolean
   mainCategoriesWrite: boolean
   orderDetailsRead: boolean
-  canToggleTemporaryClose?: boolean
-  canEditPackagingFee?: boolean
+  canToggleTemporaryClose: boolean
+  canEditPackagingFee: boolean
   /** stage-15 — نام واقعی روی سیم (قبلاً scopeHall/scopeTakeaway بود که API هرگز نمی‌فرستاد) */
-  hall?: boolean
-  takeaway?: boolean
+  hall: boolean
+  takeaway: boolean
 }
+
+/** رارد ۴۷ — بدنه‌ی PATCH دسترسی‌ها — به‌روزرسانی جزئی: همه‌ی کلیدها اختیاری.
+ *  پاسخ GET همیشه همه‌ی کلیدها را پر می‌فرستد (نسخه‌ی Dto کامل)؛ قبلاً
+ *  یک تایپ هم شکلِ درخواست و هم پاسخ بود و مصرف‌کننده مجبور به دفاع ?? false بود. */
+export type SubAdminPermissionsPatch = Partial<SubAdminPermissionsDto>
 
 export interface SubAdminRecordDto {
   userId: UserId
@@ -683,6 +747,16 @@ export interface CourierDetailDto {
   totalDeliveries: number
   totalAmount: number
   chartData: RangeCharts
+}
+
+/** رارد ۴۷ — ردیف لیست پیک‌ها (GET /admin/couriers) — createdAt همیشه روی
+ *  سیم است؛ کپی محلی فرانت آن را جا انداخته بود. trips زیرمجموعه‌ی سیم است. */
+export interface CourierListRowDto {
+  id: string
+  name: string
+  phone: string
+  createdAt: Date
+  trips: CourierTripDto[]
 }
 
 export interface Admin2SessionDto {
@@ -737,12 +811,26 @@ export interface Admin2StatsDto {
   totalOrders: number
   totalAmount: number
   chartData: RangeCharts
-  recentOrders: LiveOrderDto[]
+  recentOrders: Admin2RecentOrderRowDto[]
 }
 
-// ═══════════ Admin: Orders (ادغام) ═══════════
+/** رارد ۴۷ — ردیف سفارش اخیر داشبورد ادمین۲ — فقط پنج فیلد؛ قبلاً به‌اشتباه
+ *  LiveOrderDto کامل اعلام می‌شد (تولیدکننده فقط ۴ فیلد می‌فرستاد) و userName
+ *  در رابط کاربری خالی رندر می‌شد — تولیدکننده حالا userName هم می‌فرستد. */
+export interface Admin2RecentOrderRowDto {
+  id: string
+  userName: string
+  amount: number
+  date: Date
+  status: string
+}
 
-export interface OrderRow {
+// ═══════════ ادمین: سفارشات (ادغام) ═══════════
+
+/** رارد ۴۷ — از «OrderRow» تغییر نام کرد: ردیف خام دیتابیس هم‌نام بود و
+ *  معنای id فرق می‌کرد (اینجا id = displayId قابل‌نمایش، آنجا UUID) — هم‌نامیِ
+ *  دو نوع ناهم‌معنا خطر ادغامِ بی‌صدا داشت. */
+export interface AdminOrderRowDto {
   id: string
   userPhone: string
   userName: string
@@ -755,11 +843,11 @@ export interface OrderRow {
 }
 
 export interface AdminOrdersData {
-  orders: OrderRow[]
+  orders: AdminOrderRowDto[]
   total: number
 }
 
-// ═══════════ Admin: Staff Invoice (فاکتور چاپی — round-12) ═══════════
+// ═══════════ ادمین: فاکتور پرسنلی (فاکتور چاپی — round-12) ═══════════
 
 /** رارد ۴۶ — قرارداد GET /live/orders/:id/invoice — قبلاً فقط در server/admin
  *  فرانت تعریف شده بود و خروجی invoiceForStaff بک‌اند بی‌نام بود؛ حالا منبع واحد */
@@ -790,7 +878,7 @@ export interface StaffInvoice {
   breakdown: OrderBreakdown
 }
 
-// ═══════════ Admin: Dashboard Stats ═══════════
+// ═══════════ ادمین: آمار داشبورد ═══════════
 
 export interface AdminStatsDto {
   totalUsers: number
@@ -803,7 +891,7 @@ export interface AdminStatsDto {
   latestUsers: { id: UserId; phone: string; name: string; device: string; registeredAt: Date }[]
 }
 
-// ═══════════ Admin: Reports (stage-10 — باکس گزارشات داشبورد) ═══════════
+// ═══════════ ادمین: گزارشات (stage-10 — باکس گزارشات داشبورد) ═══════════
 
 /** رارد ۴۶ — قرارداد موتور گزارشات — قبلاً report-query.service بک‌اند و
  *  server/reports فرانت دو نام‌گذاری موازی داشتند؛ حالا منبع واحد.
@@ -883,7 +971,7 @@ export interface SseMetricsDto {
   subscribers: number
 }
 
-/** آخرین اجرای یک job زمان‌بندی‌شده — از JobRunRegistry */
+/** آخرین اجرای یک کار زمان‌بندی‌شده — از JobRunRegistry */
 export interface JobRunDto {
   name: string
   kind: 'daily' | 'interval'
@@ -926,10 +1014,10 @@ export type TranslationEntityType =
   | 'terms'
   | 'about'
 
-/** وضعیت job صف ترجمه */
+/** وضعیت کار صف ترجمه */
 export type TranslationJobStatus = 'pending' | 'running' | 'done' | 'failed'
 
-/** یک job صف ترجمه — GET /admin/translate/jobs */
+/** یک کار صف ترجمه — GET /admin/translate/jobs */
 export interface TranslationJobDto {
   id: string
   entityType: TranslationEntityType
@@ -952,7 +1040,7 @@ export interface TranslationStatusDto {
   translatorUp: boolean
   /** نام مدل مترجم — از /health کانتینر */
   translatorModel: string
-  /** ISO — آخرین job تمام‌شده */
+  /** ISO — آخرین کار تمام‌شده */
   lastFinishedAt: string | null
 }
 

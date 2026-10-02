@@ -21,13 +21,13 @@ export const Route = createFileRoute('/admin/articles/$articleId/edit')({
 })
 
 /**
- * 编辑文章页面组件
- * 用于管理员编辑已有文章的页面
+ * کامپوننت صفحه‌ی ویرایش مقاله
+ * صفحه‌ای که ادمین برای ویرایش مقاله‌ی موجود استفاده می‌کند
  */
 function EditArticlePage() {
-  // 从路由参数中获取文章ID
+  // گرفتن شناسه‌ی مقاله از پارامتر مسیر
   const { articleId } = Route.useParams()
-  // 用于页面导航的钩子
+  // قلاب پیمایش صفحه
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const showToast = useToastStore((state) => state.showToast)
@@ -57,7 +57,7 @@ function EditArticlePage() {
       <ArticleForm initialData={{
         ...article,
         profileImage: article.profileImage ?? '',
-        // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = fallback فارسی)
+        // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = پشتیبان فارسی)
         titleAr: article.titleAr ?? '',
         excerptAr: article.excerptAr ?? '',
         contentAr: article.contentAr ?? '',

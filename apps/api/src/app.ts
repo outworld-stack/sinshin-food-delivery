@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-three
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 17 از 31
-// مسیر مقصد: apps/api/src/app.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
-// ═══════════════════════════════════════════════════════════════
-
 //src/app.ts
 import { Elysia, NotFoundError, ParseError, ValidationError } from 'elysia'
 
@@ -103,7 +96,7 @@ export interface AppDeps {
   settings: SettingsService
   orders: OrderService
   profile: ProfileService
-  /** round-20 — claim اتمیک idempotency چک‌اوت (مقیم DB) */
+  /** round-20 — تصرف اتمیک تکرارناپذیری چک‌اوت (مقیم DB) */
   checkoutIdempotency: CheckoutIdempotency
   payments: PaymentService
   uploads: UploadService
@@ -163,7 +156,7 @@ export const buildApp = (deps: AppDeps) => {
           error: {
             code: 'GEO_BLOCKED',
             message,
-            /** round-37 — حالت دروازه برای لایه‌های بالاتر (web error-map) */
+            /** round-37 — حالت دروازه برای لایه‌های بالاتر (نگاشت خطای وب) */
             policy: mode,
           },
         }),
@@ -274,7 +267,7 @@ export const buildApp = (deps: AppDeps) => {
   //
   // round-18 — سنجه‌های HTTP: ثبت شروع در onRequest و پایان/وضعیت در
   // onAfterResponse. دو نکته‌ای که با تست ران‌تایم تأیید شد:
-  //  • set.status در onAfterResponse همیشه normalize شده (پیش‌فرض ۲۰۰)
+  //  • set.status در onAfterResponse همیشه مقدارِ نرمال‌شده دارد (پیش‌فرض ۲۰۰)
   //  • پاسخِ مستقیمِ Response از onRequest (مثل geo-block) onAfterResponse
   //    را کاملاً رد می‌کند — چنین درخواست‌هایی فقط از نظر شمارش غایبند،
   //    نه هیچ شاخصی را خراب نمی‌کنند.
@@ -284,7 +277,7 @@ export const buildApp = (deps: AppDeps) => {
       // metrics اول (همه‌چیز شمرده شود)، بعد دروازه‌ی ژئو — پاسخ مستقیم از
       // onRequest روی onAfterResponse می‌پرد (مستند round-18)؛ ترتیب همین است.
       // return الزامی است: بدون آن Responseِ بلاک دور ریخته می‌شود و گیت
-      // no-op می‌شود (اشکالی که تست زنده‌ی round-28 گرفت).
+      // بی‌اثر می‌شود (اشکالی که تست زنده‌ی round-28 گرفت).
       deps.metrics.observeRequest(request)
       return await geoGate(request)
     })

@@ -25,7 +25,7 @@ export interface SessionIssue {
 
 export class SessionService {
   /**
-   * round-16 — throttle نوشتن lastUsedAt: حداکثر یک UPDATE در ۶۰ ثانیه برای هر
+   * round-16 — محدودسازی نوشتن lastUsedAt: حداکثر یک UPDATE در ۶۰ ثانیه برای هر
    * نشست (قبلاً «هر» درخواستِ احراز یک UPDATE مستقل می‌نوشت — تقویت نوشتاری
    * بی‌مص روی WAL/vacuum؛ پنل زنده با پول ۲.۵ ثانیه‌ای یعنی ~۲۴ نویت در دقیقه).
    */
@@ -35,7 +35,7 @@ export class SessionService {
     private readonly deps: { db: Db; config: AppConfig; tokens: TokenService },
   ) {}
 
-  /** نشست تازه روی دستگاه فیزیکیِ resolve-شده */
+  /** نشست تازه روی دستگاه فیزیکیِ تفسیرشده */
   async createSession(
     user: UserRow,
     deviceId: string,
@@ -68,7 +68,7 @@ export class SessionService {
     return { user, accessToken, refreshToken, device: { id: deviceId } }
   }
 
-  /** چرخش refresh + تشخیص استفاده‌ی مجدد (reuse detection) */
+  /** چرخش توکن نوسازی + تشخیص استفاده‌ی مجدد */
   async rotateSession(
     token: string,
     ip?: string | null,
@@ -120,13 +120,13 @@ export class SessionService {
     throw Err.unauthorized('نشست شما منقضی شده است؛ دوباره وارد شوید.')
   }
 
-  /** احراز access token + اعتبارسنجی دیتابیسی */
+  /** احراز توکن دسترسی + اعتبارسنجی دیتابیسی */
   async authenticate(token: string): Promise<{ user: UserRow; ctx: AuthContext }> {
     const { db } = this.deps
     const claims = await this.deps.tokens.verify(token)
     if (!claims) throw Err.unauthorized('نشست شما منقضی شده است؛ دوباره وارد شوید.')
 
-    // round-16 — user + session با یک JOIN (قبلاً دو کوئری پشت‌سرهم در هر درخواست)
+    // round-16 — کاربر + نشست با یک جوین (قبلاً دو کوئری پشت‌سرهم در هر درخواست)
     const rows = await db
       .select({ user: users, session: sessions })
       .from(sessions)
@@ -156,7 +156,7 @@ export class SessionService {
             .set({ lastUsedAt: new Date() })
             .where(eq(sessions.id, session.id))
         } catch {
-          /* noop */
+          /* هیچ‌کاری نمی‌کند */
         }
       })()
     }

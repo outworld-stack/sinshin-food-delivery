@@ -5,20 +5,6 @@
 // کامیت پیشنهادی: stage thirty-six
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-39 — sinshin-food-delivery — فایل 3 از 5
-// مسیر مقصد: apps/web/src/lib/seo.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-five
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 3 از 18
-// مسیر مقصد: web/src/lib/seo.ts
-// وضعیت: فایل جدید — ایجاد شود
-// کامیت پیشنهادی: stage thirty-four
-// ═══════════════════════════════════════════════════════════════
-
 // src/lib/seo.ts
 // رارد ۳۸ — سئوی دوزبانه: منطق ساخت تگ‌های head (بدون هیچ متن هاردکد).
 //
@@ -81,7 +67,7 @@ export interface HeadFnCtx {
  * دوباره اجرا می‌کند ولی beforeLoad ریشه را نه → matches[0].context.lang
  * زبانِ لحظه‌ی لود صفحه می‌ماند؛ بدون این، بعد از سوییچِ بدون ناوبری،
  * عنوان/برند/canonical صفحه یک زبان عقب می‌ماندند (setLang کوکی را همان
- * لحظه می‌نویسد و head بعد از invalidate دوباره ارزیابی می‌شود → زبانِ
+ * لحظه می‌نویسد و head بعد از نامعتبرسازی دوباره ارزیابی می‌شود → زبانِ
  * تازه بی‌درنگ اعمال می‌شود). سمت سرور بدون تغییر: context قبل‌لود ریشه
  * (?lang= > کوکی درخواست) — کرالرها کوکی کلاینت ندارند که این شاخه چرخیده
  * باشد. الگوی regex همان lang-header.ts — بدون وابستگی جدید به i18n.
@@ -95,7 +81,7 @@ export function headLang(matches: HeadFnCtx['matches']): Lang {
     return lang === 'ar' ? 'ar' : 'fa'
 }
 
-// ── URL builders ──
+// ── سازنده‌های URL ──
 
 /** URL مطلق یک مسیر در زبان داده‌شده — fa تمیز، ar با ?lang=ar */
 export function langUrl(path: string, lang: Lang): string {
@@ -118,7 +104,7 @@ export function alternateHrefs(path: string): {
 /** لینک‌های hreflang صفحه — در هر رندر (فارسی یا عربی) هر سه زبان حاضرند.
  *  نکته (رارد ۴۰): پراپ React با فرم camelCase «hrefLang» داده می‌شود —
  *  React آن را به اتریبیوت استانداردِ حروف‌کوچکِ hreflang رندر می‌کند
- *  (خروجی HTML بایت‌به‌بایت همان است) و هشدار dev «Invalid DOM property
+ *  (خروجی HTML بایت‌به‌بایت همان است) و هشدارِ محیطِ توسعه «Invalid DOM property
  *  hreflang» که در هر بار لود در کنسول ثبت می‌شد، دیگر نمی‌گیرد. */
 export function alternateLinks(path: string) {
     const h = alternateHrefs(path)
@@ -134,7 +120,7 @@ export function withBrand(text: string, lang: Lang): string {
     return `${text} ${SEO[lang].brand}`
 }
 
-/** انتخاب محتوای عربی با fallback فارسی — همان قرارداد COALESCE رارد ۳۴ */
+/** انتخاب محتوای عربی با بازگشت به فارسی — همان قرارداد COALESCE رارد ۳۴ */
 export function localized(
     ar: string | null | undefined,
     fa: string | null | undefined,
@@ -149,7 +135,7 @@ export function localized(
  * نکته‌ی ظریف: localized() همیشه عربیِ موجود را ترجیح می‌دهد (قرارداد
  * COALESCE برای وقتی که سرور عربی خواسته)؛ در head/JSON-LD که هر دو زبان
  * ممکن‌اند، این یعنی صفحه‌ی فارسی هم عنوان عربی می‌گرفت! اینجا زبان تعیین
- * می‌کند: ar → عربی با fallback فارسی (localized)؛ fa → خودِ فیلد فارسی.
+ * می‌کند: ar → عربی با بازگشت به فارسی (localized)؛ fa → خودِ فیلد فارسی.
  */
 export function localizedFor(
     lang: Lang,
@@ -199,8 +185,8 @@ export function noindexHead(key: SeoNoindexKey) {
 
 /**
  * head ریشه — متادیتای سایت + og پایه + JSON-LD سایت، همه به زبان فعال.
- * صفحات فرزند با metaByAttribute عنوان/og خودشان را override می‌کنند
- * (تان‌استک از عمیق‌ترین مچ به بالا dedup می‌کند)؛ og:image و og:locale
+ * صفحات فرزند با metaByAttribute عنوان/og خودشان را بازنویسی می‌کنند
+ * (تان‌استک از عمیق‌ترین مچ به بالا تکراری‌ها را حذف می‌کند)؛ og:image و og:locale
  * و twitter فقط همین‌جا تعریف می‌شوند تا تکرار نشوند.
  */
 export function siteHead(ctx: HeadFnCtx) {

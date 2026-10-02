@@ -1,6 +1,6 @@
 // src/routes/admin/products/index.tsx
 // ⬅ NEW: فیلترها/صفحه‌بندی شهروند URL شدن (validateSearch + loaderDeps + loader)
-// + prefetch روی هاور (defaultPreload: 'intent' روتر)
+// + پیش‌واکشی روی هاور (defaultPreload: 'intent' روتر)
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { adminProductsSearchSchema, useAdminProductsPage } from '#/hooks/admin/useAdminProductsPage'
 import { adminProductsOptions } from '#/utils/queryOptions'
@@ -22,18 +22,18 @@ export const Route = createFileRoute('/admin/products/')({
   validateSearch: adminProductsSearchSchema,
 
   // فقط فیلترهای «گسسته» deps محسوب می‌شن — تعویض آن‌ها = اجرای دوباره loader.
-  // ⚠ search عمداً اینجا نیست: تایپ پیوسته نباید loader/pending تحریک کند؛
+  // ⚠ search عمداً اینجا نیست: تایپ پیوسته نباید لودر یا حالتِ در‌انتظار را تحریک کند؛
   // کوئریِ خود کامپوننت با placeholderData جریان را نرم نگه می‌دارد.
-  // (debounce ۳۰۰ms داخل هوک، قبل از رسیدن search به URL)
+  // (تاخیرگذاری ۳۰۰ms داخل هوک، قبل از رسیدن search به URL)
   loaderDeps: ({ search }) => ({
     page: search.page, limit: search.limit,
     status: search.status, categoryId: search.categoryId,
   }),
 
-  // ⬅ NEW: prefetch — هاور روی لینک «محصولات» در سایدبار => این loader در کلاینت
+  // ⬅ NEW: پیش‌واکشی — هاور روی لینک «محصولات» در سایدبار => این loader در کلاینت
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // نکته: کلید کامل از location.search ساخته می‌شود (نه فقط deps) تا دقیقاً همان
-  // کلیدی prefetch شود که کامپوننت مصرف می‌کند — حتی وقتی search در deps نیست.
+  // کلیدی پیش‌واکشی شود که کامپوننت مصرف می‌کند — حتی وقتی search در deps نیست.
   // (parse دوباره با zod: تایپ‌دار + strip فیلدهای روت‌های دیگر)
   loader: async ({ context, deps, location }) => {
     const { search } = adminProductsSearchSchema.parse(location.search)

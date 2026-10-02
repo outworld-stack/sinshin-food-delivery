@@ -1,14 +1,14 @@
 // src/utils/qrSvg.ts
 // round-12 — مارک‌آپ خام SVG از QRCodeSVG (qrcode.react موجود؛ صفر وابستگی جدید).
-// چرا offscreen؟ موتور چاپ (printDocument) سند HTML رشته‌ای می‌سازد — QR باید
+// چرا خارج از صفحه؟ موتور چاپ (printDocument) سند HTML رشته‌ای می‌سازد — QR باید
 // به‌صورت مارک‌آپ داخل آن درج شود. این‌جا کامپوننت در یک div جدا رندر و
-// بلافاصله outerHTML خوانده و unmount می‌شود.
+// بلافاصله outerHTML خوانده و جدا می‌شود.
 
 import { QRCodeSVG } from 'qrcode.react'
 import { createRoot } from 'react-dom/client'
 
 /**
- * QR → رشتهٔ `<svg>…</svg>` — resolve بعد از paint (ایفکت رسم canvas/svg
+ * QR → رشتهٔ `<svg>…</svg>` — تفسیر بعد از ترسیم (ایفکت رسم canvas/svg
  * qrcode.react در useLayoutEffect اجرا می‌شود؛ دوبار rAF + تایمر کوتاه
  * تضمین می‌کند که المان در DOM است).
  */

@@ -4,10 +4,10 @@ import { users } from './users'
 import type { UserId } from '#/domain/shared/brand'
 
 /**
- * دسته‌ی ادمین سطح ۲ — scope سفارشاتی که می‌بیند/تایید می‌کند:
+ * دسته‌ی ادمین سطح ۲ — حوزه‌ی سفارشاتی که می‌بیند/تایید می‌کند:
  *  hall     → فقط DINE_IN (سرو در سالن)
  *  takeaway → DELIVERY (پیک) + PICKUP (بسته‌بندی، بردن با خود)
- * هر دو = هردو scope.
+ * هر دو = هردو حوزه.
  */
 export const admin2ScopeEnum = pgEnum('admin2_scope', ['hall', 'takeaway'])
 
@@ -27,7 +27,7 @@ export const admin2Profiles = pgTable(
     scopeHall: boolean('scope_hall').notNull().default(false),
     scopeTakeaway: boolean('scope_takeaway').notNull().default(false),
 
-    // ── permissions — ۹ پرچم فرانت + ۲ جدید ──
+    // ── مجوزها — ۹ پرچم فرانت + ۲ جدید ──
     productsRead: boolean('products_read').notNull().default(false),
     productsWrite: boolean('products_write').notNull().default(false),
     usersRead: boolean('users_read').notNull().default(false),
@@ -72,7 +72,7 @@ export const admin2Sessions = pgTable(
 )
 
 /**
- * فعالیت‌های ادمین۲ — append-only audit.
+ * فعالیت‌های ادمین۲ — ممیزیِ فقط-الحاقی.
  * هر کاری که ادمین۲ می‌کند یک ردیف؛ صفحه‌ی او در پنل ادمین اصلی با فیلتر.
  */
 export const admin2Activities = pgTable(

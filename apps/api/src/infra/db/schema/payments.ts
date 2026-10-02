@@ -4,7 +4,7 @@ import type { OrderId, PaymentId } from '#/domain/shared/brand'
 import { users } from './users'
 import { orders } from './orders'
 
-/** هر تلاش پرداخت یک ردیف — audit کامل */
+/** هر تلاش پرداخت یک ردیف — ممیزی کامل */
 export const payments = pgTable(
   'payments',
   {

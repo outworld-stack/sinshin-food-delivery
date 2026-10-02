@@ -4,7 +4,7 @@ import { users } from './users'
 import type { UserId } from '@sinshin/shared'
 
 
-/** گزارش تغییرات — append-only؛ پشتیبان صفحه‌ی لاگ‌های کاربر در پنل */
+/** گزارش تغییرات — فقط-الحاقی؛ پشتیبان صفحه‌ی لاگ‌های کاربر در پنل */
 export const auditLogs = pgTable(
   'audit_logs',
   {

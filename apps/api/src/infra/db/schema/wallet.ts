@@ -18,7 +18,7 @@ export const walletTxTypeEnum = pgEnum('wallet_tx_type', ['DEPOSIT', 'WITHDRAW']
 
 /**
  * سود معرف — ۱۰٪ فقط از پرداخت آنلاینِ غذاها (بدون ارسال و بدون بخش کیف‌پولی).
- * unique (referrer, order) → ساختاری ضد تکرار.
+ * یکتایی (referrer, order) → ساختاری ضد تکرار.
  */
 export const referralProfits = pgTable(
   'referral_profits',
@@ -48,15 +48,15 @@ export const referralProfits = pgTable(
 )
 
 /**
- * تراکنش‌های کیف پول — append-only ledger؛ منبع حقیقت موجودی (SUM).
- * برداشت فقط با orderId — partial unique: هر سفارش حداکثر یک WITHDRAW.
+ * تراکنش‌های کیف پول — دفترِ فقط-الحاقی؛ منبع حقیقت موجودی (SUM).
+ * برداشت فقط با orderId — یکتاییِ جزئی: هر سفارش حداکثر یک WITHDRAW.
  *
  * perf-fix (کار-۷):
  *  • (userId, createdAt) جایگزین (userId) — لیست تاریخچه‌ی پروفایل
- *    (WHERE user_id ORDER BY created_at DESC) دیگر sort ندارد؛ پیشوندِ
+ *    (WHERE user_id ORDER BY created_at DESC) دیگر مرتب‌سازی ندارد؛ پیشوندِ
  *    user_id همغطیت (userId) قدیمی را پوشش می‌دهد.
  *  • (userId, type, amount) پوشش‌دهنده — SUM موجودی (checkout/preview/
- *    پروفایل، داغ‌ترین کوئری کیف پول) از index-only scan پاسخ داده می‌شود.
+ *    پروفایل، داغ‌ترین کوئری کیف پول) از اسکنِ فقط-ایندکسی پاسخ داده می‌شود.
  */
 export const walletTransactions = pgTable(
   'wallet_transactions',

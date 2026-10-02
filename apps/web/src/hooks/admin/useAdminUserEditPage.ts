@@ -5,7 +5,7 @@ import { updateAdminUser } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
 
-// --- State: فرم + قفل‌ها + مودال‌ها + پرچم ویرایش ---
+// --- وضعیت: فرم + قفل‌ها + مودال‌ها + پرچم ویرایش ---
 interface UserEditState {
   firstName: string
   lastName: string

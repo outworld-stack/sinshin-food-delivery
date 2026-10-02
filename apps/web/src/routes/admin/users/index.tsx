@@ -1,6 +1,6 @@
 // src/routes/admin/users/index.tsx
 // ⬅ NEW: فیلترها/صفحه‌بندی شهروند URL شدن (validateSearch + loaderDeps + loader)
-// + prefetch روی هاور (defaultPreload: 'intent' روتر)
+// + پیش‌واکشی روی هاور (defaultPreload: 'intent' روتر)
 import { createFileRoute } from '@tanstack/react-router'
 import { memo } from 'react'
 import { adminUsersSearchSchema, useAdminUsersPage } from '#/hooks/admin/useAdminUsersPage'
@@ -144,7 +144,7 @@ export const Route = createFileRoute('/admin/users/')({
     sortDate: search.sortDate, sortWallet: search.sortWallet, sortSpent: search.sortSpent,
   }),
 
-  // ⬅ NEW: prefetch — هاور روی لینک «کاربران» در سایدبار => این loader در کلاینت
+  // ⬅ NEW: پیش‌واکشی — هاور روی لینک «کاربران» در سایدبار => این loader در کلاینت
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context, deps }) => {

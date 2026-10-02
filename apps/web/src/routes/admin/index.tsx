@@ -25,7 +25,7 @@ import { adminStatsOptions } from '#/utils/queryOptions'
 export const Route = createFileRoute('/admin/')({
 	component: AdminDashboard,
 	ssr: false,
-	// ⬅ NEW: prefetch — هاور روی «داشبورد» در سایدبار => این loader در کلاینت
+	// ⬅ NEW: پیش‌واکشی — هاور روی «داشبورد» در سایدبار => این loader در کلاینت
 	// اجرا و کوئری در کش پر می‌شود. داده پشت گارد نقش است؛ سرور رندرش نمی‌کند
 	loader: async ({ context }) => {
 		await context.queryClient.query(adminStatsOptions)
@@ -44,7 +44,7 @@ export const Route = createFileRoute('/admin/')({
 
 function AdminDashboard() {
 	// آمار داشبورد — فکتوری مرکزی (کلید + staleTime ۳۰s)؛
-	// ⬅ NEW: همان کلیدی که loader روت با query پر کرده
+	// ⬅ NEW: همان کلیدی که loader روت با کوئری پر کرده
 	const { data: stats, isLoading } = useQuery(adminStatsOptions)
 
 	if (isLoading || !stats) {

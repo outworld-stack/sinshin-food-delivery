@@ -1,6 +1,6 @@
 // src/routes/admin/orders/index.tsx
 // ⬅ NEW: فیلترها/صفحه‌بندی شهروند URL شدن (validateSearch + loaderDeps + loader)
-// + prefetch روی هاور (defaultPreload: 'intent' روتر)
+// + پیش‌واکشی روی هاور (defaultPreload: 'intent' روتر)
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { memo, useMemo } from 'react'
 import { adminOrdersSearchSchema, useAdminOrdersPage } from '#/hooks/admin/useAdminOrdersPage'
@@ -13,12 +13,12 @@ import { AdminOrdersPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { formatPrice, formatDate } from '#/utils/format'
 import { Eye } from 'reicon-react'
-import type { OrderRow } from '@sinshin/shared'
+import type { AdminOrderRowDto } from '@sinshin/shared'
 import { BottomSheet } from '#/components/shared/BottomSheet'
 
 
 // --- کارت سفارش — موبایل وسط‌چین + دسکتاپ تک‌ردیف ---
-const OrderCard = memo(function OrderCard({ order }: { order: OrderRow }) {
+const OrderCard = memo(function OrderCard({ order }: { order: AdminOrderRowDto }) {
   return (
     <div className="border border-gray-300 dark:border-white/10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] p-4">
 
@@ -76,7 +76,7 @@ const OrderCard = memo(function OrderCard({ order }: { order: OrderRow }) {
 const AdminOrdersPage = memo(function AdminOrdersPage() {
   const page = useAdminOrdersPage()
 
-  const orders: OrderRow[] = page.data?.orders ?? []
+  const orders: AdminOrderRowDto[] = page.data?.orders ?? []
   const total = page.data?.total ?? 0
   const totalPages = Math.ceil(total / page.state.limit)
 
@@ -205,7 +205,7 @@ export const Route = createFileRoute('/admin/orders/')({
     admin2: search.admin2, courier: search.courier,
   }),
 
-  // ⬅ NEW: prefetch — هاور روی لینک «سفارشات» در سایدبار => این loader در کلاینت
+  // ⬅ NEW: پیش‌واکشی — هاور روی لینک «سفارشات» در سایدبار => این loader در کلاینت
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // نکته: دیتا نقش‌محور است — نقش از استور zustand خوانده می‌شود (نه هدر سرور)؛
   // گارد والد (/admin) قبل از این loader اجرا شده و ریدایرکت لازم را انجام داده.

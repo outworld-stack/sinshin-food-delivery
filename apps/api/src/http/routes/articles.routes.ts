@@ -30,7 +30,7 @@ const articleBody = t.Object({
   categoryId: t.String({ pattern: UUID_PATTERN }),
   subCategoryId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
   processes: t.Optional(t.Array(processSchema, { maxItems: 10 })),
-  // round-34 — محتوای عربی (اختیاری؛ خالی = حذف ترجمه = fallback فارسی)
+  // round-34 — محتوای عربی (اختیاری؛ خالی = حذف ترجمه = پشتیبان فارسی)
   titleAr: t.Optional(t.Nullable(t.String({ maxLength: 160 }))),
   excerptAr: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
   contentAr: t.Optional(t.Nullable(t.String({ maxLength: 100000 }))),

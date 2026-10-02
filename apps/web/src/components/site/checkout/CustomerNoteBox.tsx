@@ -11,7 +11,7 @@ interface CustomerNoteBoxProps {
 export const CustomerNoteBox = memo(function CustomerNoteBox({ value, onChange }: CustomerNoteBoxProps) {
   const { t, fmt } = useI18n()
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onChange(e.target.value) // برش ۳۰۰ کاراکتری داخل reducer
+    onChange(e.target.value) // برش ۳۰۰ کاراکتری داخل کاهنده
   }, [onChange])
 
   return (

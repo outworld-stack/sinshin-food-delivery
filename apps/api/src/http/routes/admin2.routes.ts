@@ -92,7 +92,7 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
       },
     )
 
-    // ── permissions ──
+    // ── مجوزها ──
     .patch(
       '/:id/permissions',
       ({ params, body }) => deps.admin2.setPermissions(params.id, body),
@@ -101,8 +101,8 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
         body: t.Object({
           /** round-29 — کلیدهای قرارداد مشترک (SubAdminPermissionsDto): hall/takeaway؛
            * قبلاً روت فقط scopeHall/scopeTakeaway می‌پذیرفت ولی وب hall/takeaway
-           * می‌فرستاد و Elysia کلیدهای ناشناس را بی‌صدا حذف می‌کرد → scope از پنل
-           * هرگز قابل ویرایش نبود. سرویس به ستون‌های دیتابیس map می‌کند. */
+           * می‌فرستاد و Elysia کلیدهای ناشناس را بی‌صدا حذف می‌کرد → حوزه از پنل
+           * هرگز قابل ویرایش نبود. سرویس به ستون‌های دیتابیس نگاشت می‌کند. */
           hall: t.Optional(t.Boolean()),
           takeaway: t.Optional(t.Boolean()),
           productsRead: t.Optional(t.Boolean()),

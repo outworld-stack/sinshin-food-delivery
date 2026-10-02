@@ -22,7 +22,7 @@ export const adminOrderRoutes = (deps: AdminOrderRoutesDeps) =>
       async ({ params, body, user }) => {
         await deps.orders.refund(params.displayId, body.reason)
         // round-11 (اسکن M-2-api): بازگشت وجه حساس‌ترین عمل پولی پنل است —
-        // بدون audit می‌ماند در حالی که بقیهٔ عملیات ثبت می‌شوند.
+        // بدون ممیزی می‌ماند در حالی که بقیهٔ عملیات ثبت می‌شوند.
         await deps.audit.log({
           actorId: user.id,
           action: 'REFUND',

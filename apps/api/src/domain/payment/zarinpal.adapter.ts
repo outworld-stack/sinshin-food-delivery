@@ -15,7 +15,7 @@ import type {
 const PROD_HOST = 'https://payment.zarinpal.com'
 const SANDBOX_HOST = 'https://sandbox.zarinpal.com'
 
-/** زرین‌پال — مستقیم (ریدایرکت + verify در callback) */
+/** زرین‌پال — مستقیم (ریدایرکت + تایید در callback) */
 export class ZarinpalAdapter implements PaymentGateway {
   readonly id = 'ZARINPAL'
   readonly mode = 'direct' as const
@@ -61,7 +61,7 @@ export class ZarinpalAdapter implements PaymentGateway {
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
-    // phase-fix: مرجع ذخیره‌شده در DB مقدم است؛ query فقط fallback.
+    // phase-fix: مرجع ذخیره‌شده در DB مقدم است؛ کوئری فقط پشتیبان است.
     const authority = input.gatewayRef ?? input.query.authority ?? ''
     const res = await Bun.fetch(this.verifyUrl, {
       method: 'POST',
@@ -75,11 +75,11 @@ export class ZarinpalAdapter implements PaymentGateway {
     })
     const json = (await res.json().catch(() => null)) as { data?: { code?: number } } | null
     const code = json?.data?.code
-    // 100 = موفق ، 101 = قبلاً verify شده (idempotent)
+    // 100 = موفق ، 101 = قبلاً تایید شده (تکرارناپذر)
     if (code === 100 || code === 101) {
       return { success: true, gatewayRef: authority }
     }
-    // phase-fix: فقط کدهای «قطعاً پرداخت‌نشده» fail می‌کنند؛
+    // phase-fix: فقط کدهای «قطعاً پرداخت‌نشده» به شکست می‌روند؛
     // بقیه (خطای بانک/سرویس/نامشخص) = indeterminate — پول ممکن است گرفته
     // شده باشد؛ قطعی‌سازی به‌عنوان FAILED یعنی بازگشت وجه اشتباه.
     //   -9  ورودی نامعتبر (پولی گرفته نشده)

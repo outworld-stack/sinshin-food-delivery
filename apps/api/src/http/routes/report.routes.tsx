@@ -28,7 +28,7 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
           kind === 'daily'
             ? await deps.reports.dailyViewModel(query.range === 'today' ? 'today' : 'yesterday')
             : await deps.reports.weeklyViewModel()
-        // phase-4: JSX → string-builder؛ html() برای رشته content-type ست می‌کند
+        // phase-4: JSX → سازنده‌ی رشته؛ html() برای رشته‌ی content-type ست می‌کند
         return ReportPage(vm)
       },
       {

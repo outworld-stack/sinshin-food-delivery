@@ -5,28 +5,13 @@
 // کامیت پیشنهادی: stage thirty-six
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 5 از 18
-// مسیر مقصد: web/src/lib/lang-header.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
-// ⚠ حیاتی — بدون این، داده‌ی SSR صفحات ?lang=ar فارسی می‌ماند
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 24 از 49
-// مسیر مقصد: apps/web/src/lib/lang-header.ts
-// وضعیت: فایل جدید
-// کامیت پیشنهادی: stage thirty
-// ═══════════════════════════════════════════════════════════════
-
 // src/lib/lang-header.ts
 /**
  * round-34 — تزریق هدر x-sinshin-lang به همه‌ی تماس‌های API.
  *
  * منبع حقیقت همان کوکی sinshin-lang است (رارد ۳۱):
  *  • مرورگر: document.cookie
- *  • SSR: هدر cookie درخواستِ ورودی — از طریق getRequest() تان‌استک
+ *  • SSR: هدرِ کوکیِ درخواستِ ورودی — از طریق getRequest() تان‌استک
  *
  * round-38 — اولویتِ جدید ?lang= (سئوی دوزبانه): پارامتر URL بالاتر از
  * کوکی خوانده می‌شود — دقیقاً همان قرارداد beforeLoad ریشه. کرالری که
@@ -35,9 +20,9 @@
  *
  * round-40 — شاخه‌ی SSR به ماژول سرور server/ssr-request.ts منتقل شد.
  * این فایل در گراف کلاینت است (از مسیر api-fetch ← server/* ← routes)
- * و import پویای مستقیمِ `@tanstack/react-start/server` در هر ماژولِ
- * گراف کلاینت، هشدار import-protection می‌داد (حتی داخل گاردِ runtime).
- * الگوی جدید همان geoGate است: گارد import.meta.env.SSR + import پویای
+ * و درون‌ریزیِ پویای مستقیمِ `@tanstack/react-start/server` در هر ماژولِ
+ * گراف کلاینت، هشدار import-protection می‌داد (حتی داخل گاردِ زمانِ اجرا).
+ * الگوی جدید همان geoGate است: گارد import.meta.env.SSR + درون‌ریزی پویای
  * ماژول محلی که هرگز به باندل/گراف کلاینت راه نمی‌یابد.
  *
  * فقط حالت 'ar' هدر می‌فرستد — fa پیش‌فرضِ سرور است و بدون هدر
@@ -47,7 +32,7 @@
  * ادمین زبان نمی‌پرسند — بی‌اثر و بی‌خطر.
  */
 
-/** کوکی sinshin-lang را از رشته‌ی cookie بیرون می‌کشد */
+/** کوکی sinshin-lang را از رشته‌ی کوکی بیرون می‌کشد */
 function parseLangCookie(cookie: string): 'fa' | 'ar' {
 	return /(?:^|;\s*)sinshin-lang=ar(?:;|$)/.test(cookie) ? 'ar' : 'fa'
 }
@@ -57,8 +42,8 @@ export async function resolveRequestLang(): Promise<'fa' | 'ar'> {
 	if (!import.meta.env.SSR) {
 		return parseLangCookie(document.cookie)
 	}
-	// SSR — الگوی geoGate: ماژول سرور فقط داخل این گارد پویا import می‌شود؛
-	// در بیلد کلاینت import.meta.env.SSR=false → کل شاخه (با import) حذف.
+	// SSR — الگوی geoGate: ماژول سرور فقط داخل این گارد پویا درون‌ریزی می‌شود؛
+	// در بیلد کلاینت import.meta.env.SSR=false → کل شاخه (با درون‌ریزی) حذف.
 	try {
 		const { ssrRequestLang } = await import('#/server/ssr-request')
 		return ssrRequestLang()
@@ -68,7 +53,7 @@ export async function resolveRequestLang(): Promise<'fa' | 'ar'> {
 }
 
 /**
- * هدرهای زبان برای merge با هدرهای موجود — {} در حالت فارسی
+ * هدرهای زبان برای ادغام با هدرهای موجود — {} در حالت فارسی
  * (هیچ تماسی تغییر شکل نمی‌دهد؛ فقط ar هدر اضافه می‌کند).
  */
 export async function langHeaders(): Promise<Record<string, string>> {

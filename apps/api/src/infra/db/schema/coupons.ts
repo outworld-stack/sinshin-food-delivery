@@ -71,7 +71,7 @@ export const couponConditions = pgTable(
   (t) => [index('conditions_coupon_idx').on(t.couponId)],
 )
 
-/** مصرف کوپن روی سفارش — در settle ثبت می‌شود؛ در fail رزرو آزاد می‌شود */
+/** مصرف کوپن روی سفارش — در تسویه ثبت می‌شود؛ در شکست رزرو آزاد می‌شود */
 export const couponRedemptions = pgTable(
   'coupon_redemptions',
   {

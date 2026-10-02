@@ -31,7 +31,7 @@ export class GalleryService {
     src: string
     alt: string
     span: 'wide' | 'normal'
-    /** round-34 — متن جایگزین عربی (خالی = NULL = fallback فارسی) */
+    /** round-34 — متن جایگزین عربی (خالی = NULL = پشتیبان فارسی) */
     altAr?: string | null
   }): Promise<{ success: boolean }> {
     const max = await this.deps.db
@@ -51,7 +51,7 @@ export class GalleryService {
       alt?: string
       span?: 'wide' | 'normal'
       isActive?: boolean
-      /** round-34 — متن جایگزین عربی (خالی = NULL = fallback فارسی) */
+      /** round-34 — متن جایگزین عربی (خالی = NULL = پشتیبان فارسی) */
       altAr?: string | null
     },
   ): Promise<void> {

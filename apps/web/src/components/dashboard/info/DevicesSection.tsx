@@ -3,6 +3,9 @@ import { memo } from 'react'
 import { useI18n } from '#/i18n'
 import { Monitor } from 'reicon-react'
 
+// رارد ۴۷ — نمای نمایشی عمدی از DeviceDto قرارداد: دو تغییر نام
+// (name→deviceName و lastActiveAt→lastActive) و زیرمجموعه‌ی ۴ فیلدی؛
+// مبدل مرزی در routes/dashboard/info/index ساخته می‌شود (خوشه ۸).
 interface DeviceItem {
   id: string
   deviceName: string

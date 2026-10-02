@@ -1,7 +1,7 @@
 // src/routes/referral/$code.tsx
 // ⬅ phase-4: روت اختصاصی معرفی — /r/CODE → ذخیره → /login
 // رارد ۳۲ — دوزبانه: این روت ssr:false است (کامل کلاینت)؛ Provider بدون
-// initialLang — I18nProvider خودش موقع mount کوکی sinshin-lang را می‌خواند.
+// initialLang — I18nProvider خودش موقع سوار شدن کوکی sinshin-lang را می‌خواند.
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { storeReferralCode } from '#/utils/referralCapture'

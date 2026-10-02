@@ -15,7 +15,7 @@ interface AddAdminForm {
   firstName: string
   lastName: string
   phone: string
-  /** round-29 — scope انتخابی؛ قبلاً همیشه takeaway هاردکد بود */
+  /** round-29 — حوزه انتخابی؛ قبلاً همیشه takeaway هاردکد بود */
   scope: 'hall' | 'takeaway' | 'both'
   error: string
 }

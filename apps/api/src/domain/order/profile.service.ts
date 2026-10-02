@@ -28,9 +28,9 @@ export class ProfileService {
   ) { }
 
   /**
-   * round-12 — bind معرف پس از ثبت‌نام (اسکن QR در داشبورد کاربر).
+   * round-12 — پیوندِ معرف پس از ثبت‌نام (اسکن QR در داشبورد کاربر).
    * گاردها: یک‌بار بودن، کد خودتان نه، وجود معرف، REFERRAL_BLOCK خوشهٔ دستگاه —
-   * همان قواعد signup (auth.service) این‌جا برای کاربرِ ازقبل‌موجود تکرار می‌شود.
+   * همان قواعد ثبت‌نام (auth.service) این‌جا برای کاربرِ ازقبل‌موجود تکرار می‌شود.
    */
   async applyReferral(
     userId: string,
@@ -51,7 +51,7 @@ export class ProfileService {
       throw Err.validation('کد معرف خودتان قابل استفاده نیست.')
     }
 
-    // REFERRAL_BLOCK — همان آستانهٔ signup؛ خوشهٔ دستگاهِ فعلی کاربر
+    // REFERRAL_BLOCK — همان آستانهٔ ثبت‌نام؛ خوشهٔ دستگاهِ فعلی کاربر
     const clusterPhones = await this.deps.devices.referralBlockedForDevice(
       deviceId,
       user.phone,
@@ -88,7 +88,7 @@ export class ProfileService {
     return { referrerCode: referrer.referralCode ?? code }
   }
 
-  /** phase-3 — ویرایش name/email (مرجع: فرانت قبلاً stub no-op بود) */
+  /** phase-3 — ویرایش name/email (مرجع: فرانت قبلاً پوسته‌ی بی‌اثر بود) */
   async updateProfile(
     userId: string,
     input: { name: string | null; email: string | null },

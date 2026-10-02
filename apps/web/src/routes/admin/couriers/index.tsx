@@ -1,6 +1,6 @@
 // src/routes/admin/couriers/index.tsx
 // ⬅ NEW: فیلترها/صفحه‌بندی شهروند URL شدن (validateSearch + loaderDeps + loader)
-// + prefetch روی هاور (defaultPreload: 'intent' روتر)
+// + پیش‌واکشی روی هاور (defaultPreload: 'intent' روتر)
 import { createFileRoute } from '@tanstack/react-router'
 import { memo, useState, useCallback } from 'react'
 import { adminCouriersSearchSchema, useCouriersPage } from '#/hooks/admin/useCouriersPage'
@@ -125,7 +125,7 @@ export const Route = createFileRoute('/admin/couriers/')({
     search: search.search, dateFrom: search.dateFrom, dateTo: search.dateTo,
   }),
 
-  // ⬅ NEW: prefetch — هاور روی لینک «پیک‌ها» در سایدبار => این loader در کلاینت
+  // ⬅ NEW: پیش‌واکشی — هاور روی لینک «پیک‌ها» در سایدبار => این loader در کلاینت
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context, deps }) => {

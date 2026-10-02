@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { articleCategoriesOptions, articlesOptions } from '#/utils/queryOptions'
 import { useI18n } from '#/i18n'
 
-// --- State: فقط UI — سورتِ اعمال‌شده از URL میاد ---
+// --- وضعیت: فقط UI — سورتِ اعمال‌شده از URL میاد ---
 export type SortBy = 'newest' | 'most-viewed'
 const DEFAULT_SORT: SortBy = 'newest'
 
@@ -36,11 +36,11 @@ function articlesReducer(state: ArticlesState, action: ArticlesAction): Articles
   switch (action.type) {
     case 'SET_TEMP_SUB': return { ...state, tempSubCategory: action.payload }
     case 'SET_TEMP_SORT': return { ...state, tempSortBy: action.payload }
-    // APPLY فقط مودال رو می‌بنده — سورت/sub توسط navigate به URL رفت
+    // APPLY فقط مودال رو می‌بنده — سورت/sub توسط پیمایش به URL رفت
     case 'APPLY_FILTERS':
       return { ...state, isFilterOpen: false, visibleCount: 8 }
     case 'OPEN_FILTER':
-      // tempSub با sub فعلی URL سینک شه — payload از هندلر
+      // tempSub با sub فعلی URL سینک شه — مقدار ارسالی از هندلر
       return { ...state, isFilterOpen: true, tempSubCategory: action.payload }
     case 'CLOSE_FILTER': return { ...state, isFilterOpen: false }
     case 'RESET_COUNT': return { ...state, visibleCount: 8 }
@@ -59,10 +59,10 @@ export function useArticlesPage() {
   // از URL — منبع حقیقت
   const category: string = search.category ?? 'all'
   const subCategory: string = search.subCategory ?? 'all'
-  // ⬅ سورت اعمال‌شده = URL (قبلاً reducer بود — با رفرش گم می‌شد)
+  // ⬅ سورت اعمال‌شده = URL (قبلاً کاهنده بود — با رفرش گم می‌شد)
   const appliedSortBy: SortBy = search.sort ?? DEFAULT_SORT
 
-  // --- دیتا: گزینه‌های مرکزی — loader روت با query پرشون کرده ---
+  // --- دیتا: گزینه‌های مرکزی — loader روت با کوئری پرشون کرده ---
   const { data: categories } = useQuery(articleCategoriesOptions)
   const { data: articles, isLoading } = useQuery(articlesOptions(category, subCategory))
 
@@ -133,7 +133,7 @@ export function useArticlesPage() {
   ], [categories, category, handleCategoryClick, t])
 
   return {
-    // shape قبلی حفظ شده — appliedSortBy هم مثل قبل داخل state
+    // ساختار قبلی حفظ شده — appliedSortBy هم مثل قبل داخل وضعیت
     state: { ...state, appliedSortBy },
     isLoading,
     hasSubCategories,

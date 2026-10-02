@@ -481,7 +481,7 @@ export const fa = {
         'status.PAYMENT_FAILED': 'پرداخت ناموفق',
         'status.unknown': 'نامشخص',
 
-        // ── fallback روت (رارد ۳۳) ──
+        // ── پشتیبانِ روت (رارد ۳۳) ─ـ
         'rf.errorTitle': 'خطایی رخ داد!',
         'rf.errorUnknown': 'خطای ناشناخته',
         'rf.errorDesc': 'مشکلی در بارگذاری این صفحه پیش آمد. لطفاً دوباره تلاش کنید.',

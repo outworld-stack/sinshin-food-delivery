@@ -27,12 +27,12 @@ const MAX_QUEUE = 128 // سقف صفِ هر اتصال — بک‌پرشر: بی
 // ── round-28 — سقف تعداد اتصال SSE ──
 // auth لازم است ولی auth سقفِ «تعداد» نیست: هر کاربر لاگین‌شده می‌توانست
 // هزاران اتصال هم‌زمان باز کند (هر کدام تایمر + صف + سوکت) و بدون حتی یک
-// exception منابع را تخلیه کند. سقف per-user سوءاستفاده را می‌بندد و سقف
+// exception منابع را تخلیه کند. سقفِ به‌ازای-کاربر سوءاستفاده را می‌بندد و سقف
 // global محافظت حافظه‌ی کل پروسه است.
 const MAX_STREAMS_PER_USER = 5
 const MAX_STREAMS_TOTAL = 500
 
-// مانند index.ts — شمارنده‌ها بین hot-reload ها روی globalThis زنده می‌مانند
+// مانند index.ts — شمارنده‌ها بین بارگذاری‌های دوباره روی globalThis زنده می‌مانند
 // تا شمارش سرگردان نشود (اتصال‌های قدیمی closure خودشان را کم می‌کنند)
 const capsGlobal = globalThis as {
   __sinshin_sse_caps?: { byUser: Map<string, number>; total: number }
@@ -107,11 +107,11 @@ export const realtimeRoutes = (deps: RealtimeDeps) =>
         set.headers['cache-control'] = 'no-cache'
         set.headers['x-accel-buffering'] = 'no'
 
-        // phase-1: Bun اتصال idle را به‌صورت پیش‌فرض (~۱۰s) می‌بندد — برای SSE خاموشش کن
-        // (اگر types نسخه‌ات timeout ندارد، بهم بگو تا cast بدهم)
+        // phase-1: Bun اتصال بیکار را به‌صورت پیش‌فرض (~۱۰ ثانیه) می‌بندد — برای SSE خاموشش کن
+        // (اگر تایپ‌های نسخه‌ات زمان انتظار ندارد، بهم بگو تا تبدیل نوع بدهم)
         server?.timeout(request, 0)
 
-        // ── پل pull-based (الگوی توصیه‌شده‌ی Bun) ──
+        // ── پل کششی (الگوی توصیه‌شده‌ی Bun) ──
         // pull() فقط وقتی صدا زده می‌شود که سوکت آماده‌ی دریافت باشد
         // → بک‌پرشر طبیعی؛ صف مقید؛ مشتریِ کند = حافظه‌ی مقید، نه OOM.
         const queue: Uint8Array[] = []
@@ -169,7 +169,7 @@ export const realtimeRoutes = (deps: RealtimeDeps) =>
         })
         push(sseChunk('connected', { channel, at: new Date().toISOString() }))
 
-        // heartbeat — اتصال را زنده نگه می‌دارد و در پروکسی‌ها dead-detection می‌دهد
+        // ضربان — اتصال را زنده نگه می‌دارد و در پروکسی‌ها تشخیصِ قطع‌شدن می‌دهد
         heartbeat = setInterval(() => push(encoder.encode(': ping\n\n')), HEARTBEAT_MS)
 
         return new ReadableStream<Uint8Array>({

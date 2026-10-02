@@ -24,7 +24,7 @@ const EMPTY_FORM: AboutContentInput = {
   teamTitle: '',
   teamGradient: '',
   teamAlt: '',
-  // round-34 — محتوای عربی (خالی = fallback فارسی)
+  // round-34 — محتوای عربی (خالی = پشتیبان فارسی)
   heroTitleAr: '',
   heroTextAr: '',
   teamTitleAr: '',
@@ -57,7 +57,7 @@ export const AboutContentForm = memo(function AboutContentForm({
     const { updatedAt: _updatedAt, ...fields } = initialData
     setForm({
       ...fields,
-      // round-34 — نرمال‌سازی مقادیر عربی (null/undefined → '' = fallback فارسی)
+      // round-34 — نرمال‌سازی مقادیر عربی (null/undefined → '' = پشتیبانِ فارسی)
       heroTitleAr: fields.heroTitleAr ?? '',
       heroTextAr: fields.heroTextAr ?? '',
       teamTitleAr: fields.teamTitleAr ?? '',

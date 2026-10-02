@@ -66,10 +66,12 @@ import { getDeliveryZones } from '#/server/deliveryZones'
 import type { DeliveryType } from '#/types/site/checkout'
 import type {
   AdminOrdersData,
+  AdminUserSort,
   AdminUsersData,
+  CartItemInput,
+  CheckoutItemInput,
   MainData,
   ProductId,
-  SizeId,
 } from '@sinshin/shared'
 
 // رارد ۴۶ — MainData/AdminOrdersData از قرارداد مشترک می‌آیند؛
@@ -139,7 +141,7 @@ export const userProfileClientOptions = queryOptions({
 
 // کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).
 // همان DTO ولی بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها.
-// کلید زیر پریفکس qk.userProfile است → invalidateهای موجود این را هم می‌گیرند.
+// کلید زیر پریفکس qk.userProfile است → نامعتبرسازی‌های موجود این را هم می‌گیرند.
 export const userProfileLightOptions = queryOptions({
   queryKey: qk.userProfileLight,
   queryFn: () => getUserProfile({ light: true }),
@@ -209,8 +211,9 @@ export const restaurantStatusOptions = queryOptions({
 // جزئیات چک‌اوت — آیتم‌ها + نوع تحویل + آدرس
 // آیتم‌ها مستقیم داخل کلید می‌شینن (hash ساختاری — بدون JSON.stringify)
 // placeholderData داخل فکتوری: تعویض آدرس/نوع تحویل بدون فلیک
+// رارد ۴۷ — آیتم‌ها با CheckoutItemInput قراردادی تایپ می‌شوند (کپی درون‌خطی حذف)
 export const checkoutPreviewOptions = (
-  items: ReadonlyArray<{ productId: string; sizeId?: string | null; quantity: number }>,
+  items: ReadonlyArray<CheckoutItemInput>,
   deliveryType: DeliveryType,
   addressId: string | null,
   useWallet: boolean,
@@ -287,7 +290,7 @@ export const adminReviewsOptions = queryOptions({
 
 // ⬅ NEW: کوپن‌ها — لیست مدیریت (تعداد کم؛ بدون صفحه‌بندی)
 // قبلاً کلید خام ['admin-coupons'] داخل خود صفحه بود؛ حالا loader روت
-// هم می‌تواند همین کوئری را query کند (پری‌فچ روی هاور)
+// هم می‌تواند همین کوئری را اجرا کند (پری‌فچ روی هاور)
 export const adminCouponsOptions = queryOptions({
   queryKey: qk.adminCoupons,
   queryFn: () => getAdminCoupons(),
@@ -316,7 +319,7 @@ export const adminArticlesOptions = queryOptions({
   staleTime: 30_000,
 })
 
-// جزئیات مقاله برای فرم ویرایش — بعد از ذخیره خودش invalidate می‌شه
+// جزئیات مقاله برای فرم ویرایش — بعد از ذخیره خودش نامعتبرسازی می‌شه
 export const adminArticleDetailsOptions = (articleId: string) =>
   queryOptions({
     queryKey: qk.adminArticleDetails(articleId),
@@ -324,14 +327,14 @@ export const adminArticleDetailsOptions = (articleId: string) =>
   })
 
 // دسته‌های اصلی — مدیر دسته‌ها + سلکت والد در فرم دسته‌بندی؛
-// بعد از هر تغییر، mutation خودش invalidate می‌کنه
+// بعد از هر تغییر، میوتیشن خودش نامعتبرسازی می‌کنه
 export const adminMainCategoriesOptions = queryOptions({
   queryKey: qk.adminMainCategories,
   queryFn: () => getAdminMainCategories(),
   staleTime: 60_000,
 })
 
-// جزئیات محصول برای فرم ویرایش — بعد از ذخیره invalidate می‌شه
+// جزئیات محصول برای فرم ویرایش — بعد از ذخیره نامعتبرسازی می‌شه
 export const adminProductDetailsOptions = (productId: string) =>
   queryOptions({
     queryKey: qk.adminProductDetails(productId),
@@ -386,7 +389,7 @@ export const geoStatusOptions = queryOptions({
 })
 
 // قوانین — نسخه‌دار؛ مودال ثبت‌نام و ادیتور ادمین یک کش مشترک
-// (هر ذخیره = نسخه جدید → خودش invalidate می‌کنه)
+// (هر ذخیره = نسخه جدید → خودش نامعتبرسازی می‌کنه)
 export const termsContentOptions = queryOptions({
   queryKey: qk.termsContent,
   queryFn: () => getTerms(),
@@ -397,8 +400,9 @@ export const termsContentOptions = queryOptions({
 
 // جزئیات سبد — قیمت‌های زنده‌ی سرور؛ هر تغییر سبد = کلید تازه (hash ساختاری)
 // placeholderData: تغییر quantity بدون فلیک، مجموع قبلی تا رسیدن جواب تازه
+// رارد ۴۷ — آیتم‌های سبد هم شکل خام سیم شدند (قرارداد)؛ برند لازم ندارد
 export const cartDetailsOptions = (
-  items: ReadonlyArray<{ productId: ProductId; sizeId: SizeId | null; quantity: number }>,
+  items: ReadonlyArray<CartItemInput>,
 ) =>
   queryOptions({
     queryKey: qk.cartDetails(items),
@@ -411,29 +415,35 @@ export const cartDetailsOptions = (
 // ═══════════════════════════════════════════════════════════════
 // ⬅ NEW: فکتوری‌های لیست‌های ادمین
 // چرا: تا حالا queryFn های این صفحات داخل هوک‌های صفحه بودند؛
-// یعنی loader نمی‌توانست همان کوئری را query کند =>
-// نه preloading روی هاور، نه اشتراک کش با بقیه مصرف‌کننده‌ها.
+// یعنی loader نمی‌توانست همان کوئری را اجرا کند =>
+// نه پیش‌بارگذاری روی هاور، نه اشتراک کش با بقیه مصرف‌کننده‌ها.
 // حالا: route loader ← query(فکتوری) ← useQuery(فکتوری)
 // ═══════════════════════════════════════════════════════════════
 
 // --- کاربران: فیلترهای اعمال‌شده از URL (validateSearch روت) ---
+// رارد ۴۷ — جهت‌های مرتب‌سازی union شدند (قبلاً رشته‌ی آزاد بودند و
+// مقدار زباله بی‌صدا asc می‌شد) — اسکیمای URL با enum+catch مقاوم شده است
+export type UserSortDir = 'newest' | 'oldest' | 'none'
+export type AmountSortDir = 'highest' | 'lowest' | 'none'
+
 export interface AdminUsersFilters {
   page: number
   limit: number
   search: string
   device: string
   status: string
-  sortDate: string
-  sortWallet: string
-  sortSpent: string
+  sortDate: UserSortDir
+  sortWallet: AmountSortDir
+  sortSpent: AmountSortDir
 }
 
 // ردیف/بسته‌ی داده‌ی کاربران — رارد ۴۳ مستقیم از قرارداد مشترک
 // (قبلاً کپی محلی با نقش اختیاری بود و با سرویس دریف می‌کرد)
 
 // sorts سرور از فیلدهای کش‌شده مشتق می‌شه — مپینگ یکجا
-function usersSorts(f: AdminUsersFilters) {
-  const arr: { field: 'registeredAt' | 'walletBalance' | 'totalSpent'; dir: 'asc' | 'desc' }[] = []
+// رارد ۴۷ — خروجی با AdminUserSort قراردادی تایپ می‌شود (منبع واحد)
+function usersSorts(f: AdminUsersFilters): AdminUserSort[] {
+  const arr: AdminUserSort[] = []
   if (f.sortDate !== 'none') arr.push({ field: 'registeredAt', dir: f.sortDate === 'newest' ? 'desc' : 'asc' })
   if (f.sortWallet !== 'none') arr.push({ field: 'walletBalance', dir: f.sortWallet === 'highest' ? 'desc' : 'asc' })
   if (f.sortSpent !== 'none') arr.push({ field: 'totalSpent', dir: f.sortSpent === 'highest' ? 'desc' : 'asc' })
@@ -457,7 +467,7 @@ export const adminUsersOptions = (f: AdminUsersFilters) =>
     placeholderData: keepPreviousData,
   })
 
-// --- سفارشات: نقش‌محور (ادمین اصلی vs ادمین۲) ---
+// --- سفارشات: نقش‌محور (ادمین اصلی در برابر ادمین۲) ---
 export interface AdminOrdersFilters {
   page: number
   limit: number
@@ -477,15 +487,14 @@ export const adminOrdersOptions = (f: AdminOrdersFilters) =>
     queryFn: async (): Promise<AdminOrdersData> => {
       // ادمین۲ → فقط سفارشات خودش
       if (f.role === 'admin2' && f.admin2Id) {
+        // رارد ۴۷ — adminId از امضا حذف شد: سمت HTTP هرگز ارسال نمی‌شد؛
+        // محدودکردن به سفارشات خودِ ادمین۲ از طریق توکن احراز هویت انجام می‌شود
         return getSubAdminOrders({
-
           page: f.page, limit: f.limit,
           search: f.search || undefined,
           status: f.status,
           sortDate: f.sortDate || undefined,
           sortAmount: f.sortAmount || undefined,
-          adminId: f.admin2Id,
-
         })
       }
       // ادمین اصلی — با فیلتر ادمین۲/پیک
@@ -551,9 +560,9 @@ export const adminProductsOptions = (f: AdminProductsFilters) =>
   })
 
 // --- جزئیات کاربر (صفحه $userId) ---
-// قبلاً loader مستقیم دیتا برمی‌گردوند و invalidate در میوتیشن‌ها
-// به query cacheِ خالی اشاره می‌کرد (رفرش واقعی رخ نمی‌داد).
-// حالا loader و صفحه یک کش مشترک دارند → invalidate واقعاً کار می‌کنه.
+// قبلاً loader مستقیم دیتا برمی‌گردوند و نامعتبرسازی در میوتیشن‌ها
+// به کشِ کوئریِ خالی اشاره می‌کرد (رفرش واقعی رخ نمی‌داد).
+// حالا loader و صفحه یک کش مشترک دارند → نامعتبرسازی واقعاً کار می‌کنه.
 export const adminUserDetailsOptions = (userId: string) =>
   queryOptions({
     queryKey: qk.adminUserDetails(userId),
@@ -567,7 +576,7 @@ export const admin2StatsOptions = (adminId: string) =>
     queryFn: () => getAdmin2Stats({ data: { adminId } }),
   })
 
-// --- سفارشات لایو (پنل ادمین۲) — polling ---
+// --- سفارشات لایو (پنل ادمین۲) — نظارت دوره‌ای ---
 export const admin2LiveOrdersOptions = (adminId: string) =>
   queryOptions({
     queryKey: qk.admin2LiveOrders(adminId),
@@ -603,7 +612,7 @@ export const couriersAssignmentOptions = queryOptions({
 
 // --- جزئیات ادمین سطح ۲ — صفحه‌ی $adminId ---
 // قبلاً loader مستقیم دیتا برمی‌گردوند و کامپوننت از useLoaderData می‌خواند؛
-// حالا loader و کامپوننت یک کش مشترک دارند => invalidate واقعاً رفرش می‌کنه
+// حالا loader و کامپوننت یک کش مشترک دارند => نامعتبرسازی واقعاً رفرش می‌کنه
 export const subAdminDetailsOptions = (adminId: string) =>
   queryOptions({
     queryKey: qk.subAdminDetails(adminId),
@@ -615,7 +624,8 @@ export const subAdminDetailsOptions = (adminId: string) =>
 export const adminOrderDetailsOptions = (orderId: string, admin2Id?: string) =>
   queryOptions({
     queryKey: qk.adminOrderDetails(orderId, admin2Id),
-    queryFn: () => getOrderDetailsByRole({ data: { orderId, adminId: admin2Id } }),
+    // رارد ۴۷ — adminId مرده حذف شد (سرور نقش را از توکن می‌خواند)
+    queryFn: () => getOrderDetailsByRole({ data: { orderId } }),
   })
 
 // --- جزئیات پیک — نقش‌محور ---

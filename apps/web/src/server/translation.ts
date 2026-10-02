@@ -34,7 +34,7 @@ export async function getTranslationStatus(): Promise<TranslationStatusDto> {
 	return authJson<TranslationStatusDto>('/admin/translate/status', 'GET')
 }
 
-/** آخرین jobهای صف — جدیدترین اول */
+/** آخرین کارهای صف — جدیدترین اول */
 export async function getTranslationJobs(
 	limit = 15,
 ): Promise<{ jobs: TranslationJobDto[] }> {
@@ -46,7 +46,7 @@ export async function getTranslationJobs(
 
 /**
  * صف‌کردن همه‌ی رکوردهای ناقص (همه‌ی انواع یا یک نوع خاص).
- * بدون entityType → بدنه‌ی {} = همه‌ی انواع؛ سرور dedupe می‌کند.
+ * بدون entityType → بدنه‌ی {} = همه‌ی انواع؛ سرور تکراری‌ها را حذف می‌کند.
  */
 export async function enqueueBulkTranslation(
 	entityType?: TranslationEntityType,

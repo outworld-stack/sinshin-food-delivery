@@ -34,7 +34,7 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
         body: t.Object({
           src: t.String({ minLength: 1, maxLength: 500 }),
           alt: t.String({ maxLength: 200 }),
-          // round-34 — متن جایگزین عربی (خالی = fallback فارسی)
+          // round-34 — متن جایگزین عربی (خالی = پشتیبان فارسی)
           altAr: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
           span: t.Union([t.Literal('wide'), t.Literal('normal')]),
         }),
@@ -49,7 +49,7 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
         body: t.Object({
           src: t.Optional(t.String({ maxLength: 500 })),
           alt: t.Optional(t.String({ maxLength: 200 })),
-          // round-34 — متن جایگزین عربی (خالی = حذف ترجمه = fallback فارسی)
+          // round-34 — متن جایگزین عربی (خالی = حذف ترجمه = پشتیبان فارسی)
           altAr: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
           span: t.Optional(t.Union([t.Literal('wide'), t.Literal('normal')])),
           isActive: t.Optional(t.Boolean()),

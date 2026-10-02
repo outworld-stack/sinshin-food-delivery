@@ -69,7 +69,7 @@ function findNowruz(jy: number): Date {
                 const j = gregorianToJalali(cand)
                 if (j.year === jy && j.month === 1 && j.day === 1) return cand
         }
-        return new Date(gy, 2, 21, 12, 0, 0) // fallback
+        return new Date(gy, 2, 21, 12, 0, 0) // پشتیبان
 }
 
 // شمسی → Date

@@ -44,8 +44,8 @@ import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.servic
 import type { SettingsService } from "#/domain/settings/settings.service";
 import type { CouponService } from "../coupon/coupon.service";
 import type {
+	CheckoutInput,
 	CheckoutPreviewData,
-	DeliveryType,
 	OrderBreakdown,
 	StaffInvoice,
 } from "@sinshin/shared";
@@ -64,19 +64,9 @@ function underMaxUses(maxUses: number) {
 	return maxUses === 0 ? sql`true` : sql`${coupons.usedCount} < ${maxUses}`;
 }
 
-// رارد ۴۶ — DeliveryType به قرارداد مشترک (@sinshin/shared) منتقل شد؛
-// کپی موازی تایپ‌های فرانت هم با همان منبع بسته شد (شکل بدون تغییر).
-
-/** ورودی چک‌اوت — id ها خامِ HTTP؛ cast فقط داخل سرویس */
-export interface CheckoutInput {
-	items: { productId: string; sizeId?: string | null; quantity: number }[];
-	deliveryType: DeliveryType;
-	useWallet: boolean;
-	addressId?: string | null;
-	customerNote?: string | null;
-	couponCode?: string | null;
-	gatewayId?: string | null;
-}
+// رارد ۴۷ — ورودی چک‌اوت (DeliveryType و کل شکل) از قرارداد مشترک
+// می‌آید — شکل خام سیم بدون برند؛ اسکیمای روت، سرویس و فرانت حالا
+// یک تعریف واحد دارند (کپی محلی حذف شد).
 
 /** نتیجه داخلی سرویس — قرارداد پاسخ HTTP در بسته‌ی مشترک تعریف شده است */
 export interface CheckoutServiceResult {
@@ -112,8 +102,8 @@ export class OrderService {
 	/**
 	 * چک‌اوت — کل محاسبه و ثبت در یک تراکنش:
 	 *  قیمت‌ها سروری (سایز/تخفیف/کوپن/ناحیه/بسته‌بندی)، رزرو کوپن اتمیک زیر قفل،
-	 *  کیف پول با قفلِ کاربر serialize می‌شود.
-	 *  amountPaidOnline === 0 → settle فوری (تمام-کیف‌پول).
+	 *  کیف پول با قفلِ کاربر سریالی می‌شود.
+	 *  amountPaidOnline === 0 → تسویه فوری (تمام-کیف‌پول).
 	 */
 	async checkout(
 		userId: string,
@@ -123,7 +113,7 @@ export class OrderService {
 		if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
 
 		return db.transaction(async (tx) => {
-			// ── قفل کاربر — serialize برداشت‌های کیف پول ──
+			// ── قفل کاربر — سریالی‌کردنِ برداشت‌های کیف پول ──
 			const [user] = await tx
 				.select()
 				.from(users)
@@ -148,9 +138,9 @@ export class OrderService {
 				}
 			}
 
-			// ── قیمت آیتم‌ها — سروری، snapshot ──
+			// ── قیمت آیتم‌ها — سروری، تصویر لحظه‌ای ──
 			// perf-fix (کار-۲): قبلاً به‌ازای هر آیتم تا ۲ کوئری (محصول + سایزها)
-			// داخل tx → سبد ۵ آیتمه = تا ۱۰ کوئری. الان: حداکثر ۲ کوئری batch.
+			// داخل tx → سبد ۵ آیتمه = تا ۱۰ کوئری. الان: حداکثر ۲ کوئریِ دسته‌ای.
 			const itemRows: {
 				productId: ProductId;
 				sizeId: SizeId | null;
@@ -161,7 +151,7 @@ export class OrderService {
 				packagingCost: number;
 			}[] = [];
 			let foodTotal = 0;
-			// stage-10: بسته‌بندی per-product — جمع (هزینه بسته‌بندی محصول × تعداد)
+			// stage-10: بسته‌بندیِ هر محصول — جمع (هزینه بسته‌بندی محصول × تعداد)
 			// فقط برای DELIVERY و PICKUP؛ DINE_IN (سرو در محل) بسته‌بندی ندارد.
 			let packagingTotal = 0;
 			const { productMap, sizesByProduct } = await loadPricingBases(
@@ -216,7 +206,7 @@ export class OrderService {
 
 			// ── کوپن — اعتبار سروری + رزرو اتمیک زیر قفل ──
 			// phase-fix: باخت رقابت (ظرفیت/گرنت) = خطای صریح، نه سقوط بی‌صدای تخفیف.
-			// فرانت فقط وقتی submit می‌کند که preview کوپن را «معتبر» دیده است؛
+			// فرانت فقط وقتی ثبتِ نهایی می‌کند که پیش‌نمایشِ کوپن را «معتبر» دیده است؛
 			// پس در چک‌اوت، null بودن کوپن یعنی رقابت/تغییر لحظه‌ای — نه غلط تایپی.
 			let discount = 0;
 			let couponId: CampaignId | null = null;
@@ -242,7 +232,7 @@ export class OrderService {
 					);
 				}
 				// phase-fix: کوپن خصوصی — رزرو گرنت همین‌جا (اتمیک با پول).
-				// قبلاً مصرف در settle بود و دو چک‌اوت موازی هر دو تخفیف می‌گرفتند.
+				// قبلاً مصرف در تسویه بود و دو چک‌اوت موازی هر دو تخفیف می‌گرفتند.
 				if (!coupon.isPublic) {
 					const grantTaken = await this.deps.coupons.reserveGrant(
 						tx,
@@ -265,7 +255,7 @@ export class OrderService {
 				? Math.min(balance, payableFood)
 				: 0;
 
-			// ── هزینه ارسال/بسته‌بندی — ناحیه‌ای برای DELIVERY؛ بسته‌بندی per-product ──
+			// ── هزینه ارسال/بسته‌بندی — ناحیه‌ای برای DELIVERY؛ بسته‌بندیِ هر محصول ──
 			// stage-10: بسته‌بندی دیگر تنظیم سراسری نیست — جمع هزینه بسته‌بندی
 			// خودِ محصولات است (ستون packaging_cost) و فقط در سرو در محل صفر می‌شود.
 			const deliveryFee =
@@ -296,13 +286,13 @@ export class OrderService {
 				amountPaidOnline,
 			};
 
-			// ── snapshot ردیابی — لحظه‌ی ثبت ──
+			// ── تصویر لحظه‌ایِ ردیابی — لحظه‌ی ثبت ──
 			const trackingEnabled = await this.deps.settings.liveTrackingEnabled();
 
 			// ── سفارش ──
 			// امن-۶: برخورد displayId با onConflictDoNothing حل می‌شود —
-			// قبلاً رد شدن unique داخل tx، کل tx را abort می‌کرد (25P02) و
-			// تلاش‌های بعدی حلقه همگی fail بودند (retry مرده). الان:
+			// قبلاً رد شدن قید یکتایی داخل tx، کل tx را لغو می‌کرد (25P02) و
+			// تلاش‌های بعدی حلقه همگی شکست می‌خوردند (تلاش مجددِ مرده). الان:
 			// ردیف خالی = همین تلاش برخورد خورد؛ تلاش بعدی با id تازه.
 			// خطای واقعی (قطعی DB و…) دیگر بلعیده نمی‌شود و همان‌جا می‌ترکد.
 			let orderRow: OrderRow | undefined;
@@ -349,9 +339,9 @@ export class OrderService {
 			);
 
 			// ── phase-2: رزرو (hold) کیف پول — در همان tx ──
-			// قبلاً برداشت در settle اتفاق می‌افتاد؛ در فاصله‌ی چک‌اوت تا settle،
+			// قبلاً برداشت در تسویه اتفاق می‌افتاد؛ در فاصله‌ی چک‌اوت تا تسویه،
 			// دو سفارش موازی همان موجودی را می‌دیدند (خرج دوباره‌ی کیف پول).
-			// حالا همین‌جا کم می‌شود و failPayment / job تایم‌اوت آن را برمی‌گردانند.
+			// حالا همین‌جا کم می‌شود و failPayment / کارِ تایم‌اوت آن را برمی‌گردانند.
 			if (walletDeduction > 0) {
 				await tx.insert(walletTransactions).values({
 					userId,
@@ -365,7 +355,7 @@ export class OrderService {
 				});
 			}
 
-			// ── تمام-کیف‌پول → settle فوری ──
+			// ── تمام-کیف‌پول → تسویه فوری ──
 			if (amountPaidOnline === 0) {
 				await this.settlePayment(tx, orderRow);
 				return {
@@ -416,7 +406,7 @@ export class OrderService {
 
 		// phase-3: آدرس در پیش‌نمایش «اختیاری» — UI قبل از انتخاب آدرس هم عدد
 		// نشان می‌دهد (نرخ ناحیه‌ی بیرونی، مثل getCheckoutDetails فعلی).
-		// اعتبارسنجی واقعی همان‌جا می‌ماند که بود: submit (checkout).
+		// اعتبارسنجی واقعی همان‌جا می‌ماند که بود: ثبتِ نهایی (چک‌اوت).
 		let addressRow: typeof addresses.$inferSelect | undefined;
 		if (input.deliveryType === "DELIVERY" && input.addressId) {
 			addressRow = (
@@ -430,8 +420,8 @@ export class OrderService {
 			}
 		}
 
-		// آیتم‌ها — همان منطق checkout (read-only)
-		// perf-fix (کار-۲): همان batch — قبلاً N+1 (بدون قفل هم بود، فقط کوئری‌های زائد)
+		// آیتم‌ها — همان منطق چک‌اوت (فقط‌خواندنی)
+		// perf-fix (کار-۲): همان دسته‌ای — قبلاً N+1 (بدون قفل هم بود، فقط کوئری‌های زائد)
 		const items: {
 			name: string;
 			sizeName: string | null;
@@ -439,7 +429,7 @@ export class OrderService {
 			quantity: number;
 		}[] = [];
 		let foodTotal = 0;
-		// stage-10: بسته‌بندی per-product — همان جمعِ checkout
+		// stage-10: بسته‌بندیِ هر محصول — همان جمعِ چک‌اوت
 		let packagingTotal = 0;
 		const { productMap, sizesByProduct } = await loadPricingBases(
 			db,
@@ -481,7 +471,7 @@ export class OrderService {
 		if (items.length === 0)
 			throw Err.validation("هیچ آیتم معتبری در سبد نیست.");
 
-		// کوپن — فقط اعتبارسنجی؛ رزرو در checkout اتمیک می‌ماند
+		// کوپن — فقط اعتبارسنجی؛ رزرو در چک‌اوت اتمیک می‌ماند
 		let discount = 0;
 		let coupon: {
 			code: string;
@@ -527,7 +517,7 @@ export class OrderService {
 						addressRow ? { lat: addressRow.lat, lng: addressRow.lng } : null,
 					)
 				: 0;
-		// stage-10: بسته‌بندی per-product — فقط سرو در محل صفر
+		// stage-10: بسته‌بندیِ هر محصول — فقط سرو در محل صفر
 		const packagingFee = input.deliveryType === "DINE_IN" ? 0 : packagingTotal;
 
 		const totalAmount = payableFood + deliveryFee + packagingFee;
@@ -550,7 +540,7 @@ export class OrderService {
 	}
 
 	/**
-	 * settle موفق — همه در همین tx:
+	 * تسویه موفق — همه در همین tx:
 	 *  PAID + برداشت کیف پول + سود معرف + DEPOSIT + redemption کوپن + queuedAt اگر بسته.
 	 * queuedAt فقط گزارشی است — هیچ سد تاییدی وجود ندارد (قرار فاز ۵).
 	 */
@@ -621,7 +611,7 @@ export class OrderService {
 			if (coupon) {
 				if (!coupon.isPublic) {
 					// سفارش‌های قدیمی‌تر از phase-fix این‌جا مصرف می‌شوند؛
-					// سفارش‌های جدید از قبل در چک‌اوت رزرو شده‌اند (no-op).
+					// سفارش‌های جدید از قبل در چک‌اوت رزرو شده‌اند (بی‌اثر).
 					await this.deps.coupons.consumeGrant(
 						tx,
 						orderRow.couponId,
@@ -683,7 +673,7 @@ export class OrderService {
 			.returning();
 		if (!updated) return;
 
-		// phase-2: پس‌گرفتن رزرو کیف پول — ledger append-only → ردیف جبرانی
+		// phase-2: پس‌گرفتن رزرو کیف پول — دفترِ فقط-افزودنی → ردیف جبرانی
 		if (orderRow.breakdown.walletDeduction > 0) {
 			await tx.insert(walletTransactions).values({
 				userId: orderRow.userId,
@@ -709,7 +699,7 @@ export class OrderService {
 	}
 
 	/**
-	 * phase-2 — refund (فقط ادمین اصلی): سفارشِ پرداخت‌شده → CANCELED +
+	 * phase-2 — بازپرداخت (فقط ادمین اصلی): سفارشِ پرداخت‌شده → CANCELED +
 	 * بازگشت «کل» مبلغ به کیف پول مشتری (wallet + online = بی‌ضرر کامل) +
 	 * فسخ سود معرف + آزادسازی کوپن. پولِ درگاهی جداگانه با PSP تسویه
 	 * می‌شود (API زرین‌پال — فاز بعدی/دستی).
@@ -745,7 +735,7 @@ export class OrderService {
 				})
 				.where(eq(orders.id, row.id));
 
-			// ۱) بازگشت کل مبلغ به کیف پول مشتری — onConflictDoNothing = idempotent
+			// ۱) بازگشت کل مبلغ به کیف پول مشتری — onConflictDoNothing = تکرارناپذر
 			const refundedAmount = row.breakdown.totalAmount;
 			if (refundedAmount > 0) {
 				await tx
@@ -762,7 +752,7 @@ export class OrderService {
 
 			// ۲) فسخ سود معرف — ردیف profit می‌ماند (FK سالم)، ردیف معکوس می‌نشیند
 			// phase-fix: orderId عمداً null است — ایندکس یونیک رزرو (WITHDRAW+
-			// orderId) نباید فسخِ سود را قالب کند؛ idempotency با ایندکس یونیک
+			// orderId) نباید فسخِ سود را قالب کند؛ تکرارناپذیری با ایندکس یونیک
 			// جدید روی referralProfitId تضمین می‌شود.
 			const profits = await tx
 				.select()
@@ -819,9 +809,9 @@ export class OrderService {
 	// ── خواندن ──
 
 	async myOrders(userId: string) {
-		// round-16 — سقف دفاعی: داشبورد مشتری پشت این endpoint است؛
-		// مشتری وفادار با صدها سفارش نباید پاسخ چندمگابایتی + fan-out آیتم‌ها بسازد.
-		// ۲۰۰ سفارش آخر + همهٔ سفارش‌های فعال (همان منطق merge پروفایل سبک).
+		// round-16 — سقف دفاعی: داشبورد مشتری پشت این اندپوینت است؛
+		// مشتری وفادار با صدها سفارش نباید پاسخ چندمگابایتی + تکثیرِ آیتم‌ها بسازد.
+		// ۲۰۰ سفارش آخر + همهٔ سفارش‌های فعال (همان منطق ادغامِ پروفایل سبک).
 		const [recent, active] = await Promise.all([
 			this.deps.db
 				.select()
@@ -851,7 +841,7 @@ export class OrderService {
 	 * perf-fix (کار-۶): سفارش‌های پروفایلِ سبک — ۱۰ سفارش آخر + همه‌ی سفارش‌های
 	 * فعال (PAID/CONFIRMED/ON_THE_WAY) حتی اگر قدیمی‌تر از ۱۰تای آخر باشند.
 	 * مصرف‌کننده: هدر/لایوت داشبورد/چک‌اوت — فقط برای تشخیص «سفارش فعال» و
-	 * recentOrders؛ merge تضمین می‌کند سفارش فعالِ گیرکرده (مثلاً ۱۰ سفارش
+	 * recentOrders؛ ادغام تضمین می‌کند سفارش فعالِ گیرکرده (مثلاً ۱۰ سفارش
 	 * جدید بعد از آن) از دید useActiveOrder گم نشود.
 	 */
 	async myOrdersLight(userId: string) {
@@ -990,7 +980,7 @@ export class OrderService {
 		if (!updated) throw Err.conflict("این سفارش قابل تایید تحویل نیست.");
 	}
 
-	/** پرچم ردیابی — snapshot ثبت سفارش، نه وضعیت فعلی تنظیمات */
+	/** پرچم ردیابی — تصویر لحظه‌ایِ ثبت سفارش، نه وضعیت فعلی تنظیمات */
 	async tracking(
 		userId: string,
 		displayId: string,
@@ -1009,7 +999,7 @@ export class OrderService {
 	// ── داخلی ──
 
 	// round-28 — loadPricingBases به menu.service منتقل شد (صادرشده؛
-	// مشترک بین checkout/preview و سبد خرید — DRY). سیاست انتخاب سایز
+	// مشترک بین چک‌اوت/پیش‌نمایش و سبد خرید — DRY). سیاست انتخاب سایز
 	// همین‌جا مانده چون چک‌اوت سخت‌گیر است (سایز حذف‌شده = خطا).
 	private async mapRows(rows: OrderRow[]) {
 		if (rows.length === 0) return [];

@@ -69,7 +69,7 @@ export const reviewRoutes = (deps: ReviewRoutesDeps) => {
       },
     )
 
-  // ── عمومی — نظرات تاییدشده‌ی محصول (داخل زنجیره /api mount می‌شود) ──
+  // ── عمومی — نظرات تاییدشده‌ی محصول (داخل زنجیره /api سوار می‌شود) ──
   const pub = new Elysia({ tags: ['Reviews'] }).get(
     '/products/:id/reviews',
     ({ params }) => deps.reviews.approvedByProduct(params.id),

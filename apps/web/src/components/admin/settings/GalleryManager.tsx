@@ -44,7 +44,7 @@ export const GalleryManager = memo(function GalleryManager({
     e.preventDefault()
     const alt = newAlt.trim()
     if (!alt || !newImage) return // عکس و alt هر دو اجباری
-    // round-34 — altAr اختیاری (خالی = fallback فارسی)
+    // round-34 — altAr اختیاری (خالی = پشتیبان فارسی)
     onAdd({ src: newImage, alt, altAr: newAltAr.trim() || null, span: newSpan })
     setNewAlt('')
     setNewAltAr('')

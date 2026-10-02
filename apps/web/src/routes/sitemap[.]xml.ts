@@ -9,7 +9,7 @@
 // سئو-۳ → رارد ۳۸ — sitemap داینامیک دوزبانه.
 // نام فایل [.] یعنی «نقطه‌ی literal» — مسیر نهایی /sitemap.xml است.
 //
-// مکانیزم: server handlers روی خودِ route (بدون کامپوننت) — قبل از SSR
+// مکانیزم: هندلرهای سروری روی خودِ روت (بدون کامپوننت) — قبل از SSR
 // پاسخ می‌دهد و Content-Type درست (application/xml) برمی‌گرداند.
 //
 // رارد ۳۸ — ساختار hreflang: هر صفحه یک <url> با هر سه واریانت زبان
@@ -22,7 +22,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 // فقط برای اعمال augmentation نوعِ گزینه‌ی `server` روی FilebaseRouteOptions —
 // بدون این، tsc نمی‌داند روت‌ها handler سرور می‌پذیرند
-import type {} from '@tanstack/react-start'
+import type { } from '@tanstack/react-start'
 import { alternateHrefs } from '#/lib/seo'
 import { getArticles } from '#/server/articles'
 import { getActiveMainCategories, getProductsByMain } from '#/server/products'

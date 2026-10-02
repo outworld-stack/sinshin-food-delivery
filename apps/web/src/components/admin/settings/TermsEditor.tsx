@@ -15,12 +15,13 @@ import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { Plus, Trash2, File } from 'reicon-react'
 import { formatDate, faNum } from '#/utils/format'
+import type { Role } from '@sinshin/shared'
 
 // فرم — هر بخش: عنوان + متن چندخطی (هر خط = یک بند)
 interface TermsFormSection {
     title: string
     itemsText: string
-    /** round-34 — عنوان عربی + بندهای عربی (هر خط = یک بند؛ خالی = fallback فارسی) */
+    /** round-34 — عنوان عربی + بندهای عربی (هر خط = یک بند؛ خالی = پشتیبان فارسی) */
     titleAr: string
     itemsTextAr: string
 }
@@ -79,7 +80,7 @@ export const TermsEditor = memo(function TermsEditor() {
 
     const saveMut = useMutation({
         mutationFn: (data: {
-            role: 'user' | 'admin' | 'admin2'
+            role: Role
             sections: { title: string; items: string[] }[]
             sectionsAr?: { title: string; items: string[] }[] | null
         }) => updateTerms(data),

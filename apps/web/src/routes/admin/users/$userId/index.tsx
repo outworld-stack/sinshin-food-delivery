@@ -1,9 +1,9 @@
 // src/routes/admin/users/$userId/index.tsx
 // ⬅ NEW: رفع باگ رفرش — قبلاً loader مستقیماً دیتا برمی‌گرداند (بدون کش) و
-// کامپوننت از Route.useLoaderData می‌خواند؛ یعنی invalidate میوتیشن ترمینیت
+// کامپوننت از Route.useLoaderData می‌خواند؛ یعنی نامعتبرسازیِ میوتیشن ترمینیت
 // هیچ ریفچی نمی‌ساخت و لیست دستگاه‌ها کهنه می‌ماند.
 // حالا: loader و کامپوننت یک کش مشترک دارند (adminUserDetailsOptions) =>
-// ترمینیت دستگاه، واقعاً UI را به‌روز می‌کند + پری‌فچ روی هاورِ لینک کاربر.
+// ترمینیت دستگاه، واقعاً UI را به‌روز می‌کند + پیش‌واکشی روی هاورِ لینک کاربر.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { terminateDevice } from '#/server/admin'
@@ -26,7 +26,7 @@ export const Route = createFileRoute('/admin/users/$userId/')({
   ssr: false,
   component: AdminUserDetailPage,
 
-  // ⬅ NEW: prefetch — هاور روی نام کاربر در لیست/داشبورد => دیتا در کش؛
+  // ⬅ NEW: پیش‌واکشی — هاور روی نام کاربر در لیست/داشبورد => دیتا در کش؛
   // ناوبری به صفحه جزئیات بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context, params }) => {
@@ -45,7 +45,7 @@ function AdminUserDetailPage() {
   const { permissions, isChecking } = usePermissions()
 
   // ⬅ NEW: اشتراک در کش مشترک با loader (فکتوری مرکزی).
-  // حالا invalidate زیر، واقعاً این useQuery را ریفچ می‌کند —
+  // حالا نامعتبرسازی زیر، واقعاً این useQuery را ریفچ می‌کند —
   // بعد از ترمینیت دستگاه، لیست همان لحظه به‌روز می‌شود
   const { data: user } = useQuery(adminUserDetailsOptions(userId))
 

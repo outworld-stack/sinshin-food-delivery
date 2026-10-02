@@ -11,7 +11,7 @@
 //
 // ایزومورفیک و خالص: نه window نه node — UA همیشه به‌عنوان ورودی داده می‌شود؛
 // همین ماژول سمت سرور (beforeLoad با getRequest) و سمت کلاینت (navigator)
-// استفاده می‌شود. مرورگر ناشناخته/بدون نسخه = بدون هشدار (fail-open —
+// استفاده می‌شود. مرورگر ناشناخته/بدون نسخه = بدون هشدار (شکست = عبور —
 // لایه‌ی canary اسکریپت head خرابیِ واقعی را می‌گیرد).
 
 export type BrowserName =
@@ -187,7 +187,7 @@ function engineAnchor(
 
 /** تخمین تاریخ انتشار سافاری — جدول دقیق major ها + ~۶۰ روز به ازای هر
  *  minor (اپل سالانه ~۵ minor می‌دهد)؛ ۱۹ تا ۲۵ هرگز وجود نداشتند
- *  (پرش اپل) → ناشناخته = fail-open؛ زیر ۱۵ برون‌یابی سالانه. */
+ *  (پرش اپل) → ناشناخته = عبور در شکست؛ زیر ۱۵ برون‌یابی سالانه. */
 function safariReleaseMs(major: number, minor: number): number | null {
 	if (major > 26) return null // از جدول جدیدتر — قطعاً مدرن
 	const base = SAFARI_RELEASES[major]
@@ -207,7 +207,7 @@ export function isBrowserOutdated(
 	if (!parsed) return false
 	// موتورهای مرده — همیشه قدیمی
 	if (parsed.name === 'ie' || parsed.name === 'edge-legacy') return true
-	if (parsed.major === null) return false // نسخه‌ی ناشناخته — fail-open
+	if (parsed.major === null) return false // نسخه‌ی ناشناخته — عبور در شکست
 
 	// سافاری: جدول اختصاصی (پرش نسخه‌ی اپل)
 	if (parsed.name === 'safari') {

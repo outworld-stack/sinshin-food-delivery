@@ -7,7 +7,7 @@ export type Brand<T, B extends string> = T & {
   readonly [__brand]: B
 }
 
-// ── Domain IDs ──
+// ── شناسه‌های دامنه ──
 export type UserId = Brand<string, 'UserId'>
 export type OrderId = Brand<string, 'OrderId'>
 export type CampaignId = Brand<string, 'CampaignId'>
@@ -28,7 +28,7 @@ export type SubAdminId = Brand<string, 'SubAdminId'>
 export type ReviewId = Brand<string, 'ReviewId'>
 export type GalleryImageId = Brand<string, 'GalleryImageId'>
 
-/** نقاط cast مجاز — برای audit مرزها grep کن */
+/** نقاط تبدیل نوع مجاز — برای ممیزی مرزها grep کن */
 export const asUserId = (v: string): UserId => v as UserId
 export const asOrderId = (v: string): OrderId => v as OrderId
 export const asCampaignId = (v: string): CampaignId => v as CampaignId

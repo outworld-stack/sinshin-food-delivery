@@ -15,9 +15,9 @@ async function authenticate(sessions: SessionService, request: Request) {
 }
 
 /**
- * phase-1 — پروفایل + isActive + permissions در یک مسیر.
+ * phase-1 — پروفایل + isActive + مجوزها در یک مسیر.
  * قبلاً: admin2ی «غیرفعال‌شده» و admin2ی بدون پروفایل از گارد رد می‌شدند و
- * کل مدل permission دکوری بود. isActive حالا داخل permissionsOf چک می‌شود.
+ * کل مدلِ مجوز دکوری بود. isActive حالا داخل permissionsOf چک می‌شود.
  */
 async function resolveAdmin2Permissions(
   admin2: Admin2Service,
@@ -30,7 +30,7 @@ async function resolveAdmin2Permissions(
 
 /**
  * گارد ادمین۲ (و ادمین اصلی — ادمین اصلی همه‌چیز می‌تواند):
- *  auth + user + admin2 (permissions یا null اگر admin اصلی)
+ *  auth + user + admin2 (مجوزها یا null اگر admin اصلی)
  */
 export const requireAdmin2 = (deps: { sessions: SessionService; admin2: Admin2Service }) =>
   new Elysia({ name: 'require-admin2' })

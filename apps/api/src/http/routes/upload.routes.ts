@@ -26,7 +26,7 @@ export const uploadRoutes = (deps: UploadRoutesDeps) => {
       },
     )
 
-  // سرو استاتیک — عمومی، cache جاودان (نام فایل uuid است)
+  // سرو استاتیک — عمومی، کشِ جاودان (نام فایل uuid است)
   const staticServe = new Elysia().get(
     '/uploads/:name',
     async ({ params, set }) => {

@@ -15,7 +15,7 @@ export const sortSchema = z.enum(SORT_KEYS)
 const DEFAULT_SORT: SortKey = 'newest'
 
 // Main فعلی — منطق مشترک بین loader (سرور) و هوک (کلاینت).
-// فقط همین تابع باید در دو جا یکسان اجرا شه — برای همین exported
+// فقط همین تابع باید در دو جا یکسان اجرا شه — برای همین صادرشده
 export function resolveActiveMain(mains: MainCategory[], tab?: string): MainCategory | null {
   if (tab) {
     const found = mains.find(m => m.slug === tab)
@@ -26,7 +26,7 @@ export function resolveActiveMain(mains: MainCategory[], tab?: string): MainCate
   return null
 }
 
-// --- State: فقط UI واقعی — سورتِ اعمال‌شده از URL میاد ---
+// --- وضعیت: فقط UI واقعی — سورتِ اعمال‌شده از URL میاد ---
 interface ProductsState {
   tempSortBy: SortKey      // سورت داخل مودال — قبل از اعمال
   isFilterOpen: boolean
@@ -50,7 +50,7 @@ const initialState: ProductsState = {
 function productsReducer(state: ProductsState, action: ProductsAction): ProductsState {
   switch (action.type) {
     case 'SET_TEMP_SORT': return { ...state, tempSortBy: action.payload }
-    // سینک با سورتِ URL — payload از هندلر میاد چون سورت در state نیست
+    // سینک با سورتِ URL — مقدار ارسالی از هندلر میاد چون سورت در وضعیت نیست
     case 'SYNC_TEMP_SORT': return { ...state, tempSortBy: action.payload, isFilterOpen: true }
     case 'CLOSE_FILTER': return { ...state, isFilterOpen: false }
     case 'APPLY_FILTERS': return { ...state, isFilterOpen: false }
@@ -73,7 +73,7 @@ function sortProducts(products: Product[], sortBy: SortKey): Product[] {
   }
 }
 
-// --- گزینه‌های سورت (صادرشده — فیلترهای دسکتاپ/موبایل import می‌کنن) ---
+// --- گزینه‌های سورت (صادرشده — فیلترهای دسکتاپ/موبایل درون‌ریزی می‌کنن) ---
 // رارد ۳۲ — برچسب‌ها به labelKey تبدیل شدند؛ کامپوننت‌ها t[option.labelKey]
 // رندر می‌کنند تا با تعویض زبان همان لحظه عربی شوند (کلید ثابت است).
 export type ProductsSortLabelKey =
@@ -115,7 +115,7 @@ export function useProductsPage() {
   const activeMainSlug = activeMain?.slug ?? null
 
   // دیتا: محصولات + دسته‌های همون Main
-  // (loader روت این کوئری رو با query پر کرده → SSR بدون فلیک)
+  // (loader روت این کوئری رو با کوئری پر کرده → SSR بدون فلیک)
   const { data: mainData, isLoading: productsLoading } = useQuery({
     ...productsByMainOptions(activeMainSlug),
     enabled: !!activeMainSlug,
@@ -195,7 +195,7 @@ export function useProductsPage() {
   ], [tabCategories, activeCategory, handleCategoryClick, t])
 
   return {
-    // shape قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
+    // ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
     state: { ...state, sortBy },
     activeMains: activeMains ?? [],
     activeMain,

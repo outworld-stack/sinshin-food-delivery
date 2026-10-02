@@ -1,16 +1,16 @@
 // src/hooks/admin/useAdminOrdersPage.ts
-// ⬅ NEW GENERATION: «URL as State» برای سفارشات ادمین
+// ⬅ نسل جدید: «URL به‌عنوان وضعیت» برای سفارشات ادمین
 // (همان الگوی موفق صفحه‌ی کاربران — دسته‌ی قبل)
 //
-// چرا؟ نسخه قبلی page/limit/فیلترها را در reducer نگه می‌داشت:
+// چرا؟ نسخه قبلی page/limit/فیلترها را در کاهنده نگه می‌داشت:
 //   ✗ رفرش = از دست رفتن فیلترها و صفحه
 //   ✗ back/forward مرورگر = بی‌اثر
 //   ✗ لینک عمیق قابل اشتراک نبود (مثلاً «سفارشات لغوشده، صفحه ۳»)
-//   ✗ queryFn داخل همین هوک بود => loader روت نمی‌توانست prefetch کند
+//   ✗ queryFn داخل همین هوک بود => loader روت نمی‌توانست پیش‌واکشی کند
 //
 // حالا: فیلترهای اعمال‌شده = search params روت (validateSearch با zod)؛
 // کوئری از فکتوری مرکزی adminOrdersOptions می‌خرد (کلید + queryFn + staleTime یکجا)؛
-// reducer فقط «درَفت فیلتر داخل مودال» و وضعیت مودال را دارد.
+// کاهنده فقط «درَفت فیلتر داخل مودال» و وضعیت مودال را دارد.
 import { useReducer, useCallback, useEffect } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -33,7 +33,7 @@ export const adminOrdersSearchSchema = z.object({
 })
 export type AdminOrdersSearch = z.infer<typeof adminOrdersSearchSchema>
 
-// --- State: فقط UI محلی — درَفت فیلتر مودال + وضعیت مودال ---
+// --- وضعیت: فقط UI محلی — درَفت فیلتر مودال + وضعیت مودال ---
 interface AdminOrdersUiState {
   // موقت (قبل از «اعمال فیلتر») — فقط داخل مودال/سایدبار زنده‌ست
   tempSearch: string
@@ -42,7 +42,7 @@ interface AdminOrdersUiState {
   tempSortAmount: string
   tempAdmin2: string
   tempCourier: string
-  // UI
+  // رابط کاربری
   isFilterModalOpen: boolean
 }
 
@@ -58,7 +58,7 @@ type AdminOrdersAction =
   | { type: 'CLOSE_FILTER' }
   | { type: 'APPLY_FILTERS' }
   // ⬅ NEW: سینک درَفت‌ها با URL بدون باز کردن مودال —
-  // برای mount اولیه (deep-link/رفرش) و back/forward؛
+  // برای سوار شدن اولیه (deep-link/رفرش) و back/forward؛
   // وگرنه باکس فیلتر دسکتاپ بعد از رفرش، پیش‌فرض‌ها را نشان می‌داد نه فیلترهای اعمال‌شده
   | { type: 'SYNC_FILTERS'; payload: Pick<AdminOrdersSearch, 'search' | 'status' | 'sortDate' | 'sortAmount' | 'admin2' | 'courier'> }
 
@@ -89,9 +89,9 @@ function adminOrdersReducer(state: AdminOrdersUiState, action: AdminOrdersAction
         tempCourier: action.payload.courier,
       }
     case 'CLOSE_FILTER': return { ...state, isFilterModalOpen: false }
-    // اعمال واقعی توسط navigate انجام می‌شه — اینجا فقط مودال بسته می‌شه
+    // اعمال واقعی توسط پیمایش انجام می‌شه — اینجا فقط مودال بسته می‌شه
     case 'APPLY_FILTERS': return { ...state, isFilterModalOpen: false }
-    // سینک خارجی (mount/back/forward) — مودال باز نمی‌شه
+    // سینک خارجی (سوار شدن/back/forward) — مودال باز نمی‌شه
     case 'SYNC_FILTERS':
       return {
         ...state,
@@ -112,7 +112,7 @@ export function useAdminOrdersPage() {
   const navigate = useNavigate({ from: '/admin/orders/' })
   const search = useSearch({ from: '/admin/orders/' })
 
-  // ⬅ NEW: سینک درَفت‌ها با URL — mount اولیه (deep-link/رفرش) و back/forward.
+  // ⬅ NEW: سینک درَفت‌ها با URL — سوار شدن اولیه (deep-link/رفرش) و back/forward.
   // بدون این، باکس فیلتر دسکتاپ بعد از رفرش پیش‌فرض‌ها را نشان می‌داد.
   // وابستگی‌ها فیلدبه‌فیلد است تا آبجکت search با هر رندر، افکت را دوباره اجرا نکند
   useEffect(() => {
@@ -130,7 +130,7 @@ export function useAdminOrdersPage() {
   const admin2Id = useAuthStore((s) => s.admin2Id)
   const isMainAdmin = role === 'admin'
 
-  // کوئری سفارشات — فکتوری مرکزی؛ همان کلیدی که loader روت با query پر کرده.
+  // کوئری سفارشات — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
   // نقش هم داخل کلیده — کش ادمین اصلی و ادمین۲ جدا (دیتایشون فرق داره)
   const { data, isLoading } = useQuery(adminOrdersOptions({
     page: search.page, limit: search.limit,
@@ -201,8 +201,8 @@ export function useAdminOrdersPage() {
   }, [navigate, search])
 
   return {
-    // shape قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
-    // page/limit دیگر از reducer نیستند؛ از URL می‌آیند (تایپ‌دار)
+    // ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
+    // page/limit دیگر از کاهنده نیستند؛ از URL می‌آیند (تایپ‌دار)
     state: { ...state, page: search.page, limit: search.limit },
     data, isLoading, isMainAdmin,
     admin2Options: admin2Options ?? [],

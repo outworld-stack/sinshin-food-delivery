@@ -1,5 +1,5 @@
 //src/domain/shared/cookies.ts
-/** پارس ساده‌ی هدر Cookie — بدون وابستگی خارجی */
+/** پارس ساده‌ی هدر کوکی — بدون وابستگی خارجی */
 export function parseCookies(request: Request): Record<string, string> {
   const header = request.headers.get('cookie')
   if (!header) return {}

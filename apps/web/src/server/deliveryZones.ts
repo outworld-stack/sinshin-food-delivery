@@ -1,6 +1,6 @@
 // src/server/deliveryZones.ts — کامل جایگزین
 // رارد ۴۶ — DeliveryZone/DeliveryZonesData از قرارداد مشترک می‌آیند؛
-// re-export برای پایداری مسیر import مصرف‌کننده‌های فعلی است.
+// re-export برای پایداری مسیر درون‌ریزیِ مصرف‌کننده‌های فعلی است.
 import type { DeliveryZone, DeliveryZonesData } from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
 

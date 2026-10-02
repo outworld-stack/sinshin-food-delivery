@@ -29,7 +29,7 @@ export function DashboardLayout() {
     enabled: isAuthenticated,
   })
 
-  // phase-fix: لاگ‌اوت واقعی — سشن سرور revoke می‌شود، توکن و کش پاک (مرگ لاگ‌اوت دکوری)
+  // phase-fix: لاگ‌اوت واقعی — سشن سرور باطل می‌شود، توکن و کش پاک (مرگ لاگ‌اوت دکوری)
   const handleLogout = useRealLogout('/')
 
   // phase-fix: سشن وسط باز کردن منقضی شد (۴۰۱) → استور پاک می‌شود ولی

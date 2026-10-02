@@ -41,7 +41,7 @@ export const ProductCard = memo(function ProductCard({
 
         return (
                 <div className="group flex flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-                        {/* سئو-۸: <img> واقعی به‌جای background — alt + lazy + دیده‌شدن در Google Images
+                        {/* سئو-۸: <img> واقعی به‌جای تصویر پس‌زمینه — alt + lazy + دیده‌شدن در Google Images
           round-12 — interactive=false (پیش‌نمایش فرم محصول): بدون Link — لینک با
           id سنتینل «preview»، preload روی هاور/فوکوس می‌ساخت و 422 پترن UUID
           می‌گرفت (نویز کنسول + RouteError روی کلیک) */}
@@ -113,11 +113,10 @@ export const ProductCard = memo(function ProductCard({
                                                                 key={size.id}
                                                                 type="button"
                                                                 onClick={() => setSelectedSizeId(size.id)}
-                                                                className={`px-2.5 py-1 rounded-lg text-[11px] font-DanaMedium transition cursor-pointer ${
-                                                                        size.id === effectiveSizeId
+                                                                className={`px-2.5 py-1 rounded-lg text-[11px] font-DanaMedium transition cursor-pointer ${size.id === effectiveSizeId
                                                                                 ? 'bg-primary dark:bg-dark-primary text-white shadow-sm'
                                                                                 : 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c]'
-                                                                }`}
+                                                                        }`}
                                                         >
                                                                 {size.name}
                                                         </button>

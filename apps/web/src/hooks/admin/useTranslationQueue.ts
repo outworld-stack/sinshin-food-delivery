@@ -7,7 +7,7 @@
 
 // src/hooks/admin/useTranslationQueue.ts
 // round-35 — داده‌ی کارت «ترجمه‌ی خودکار محتوا» روی داشبورد ادمین:
-// وضعیت صف + شمار نقص‌ها + jobهای اخیر + اکشن bulk.
+// وضعیت صف + شمار نقص‌ها + کارهای اخیر + اکشن دسته‌ای.
 // پول تطبیقی: صف فعال (pending/running > 0) → ۵ ثانیه؛ خالی → ۳۰ ثانیه.
 
 import type { TranslationEntityType } from '@sinshin/shared'
@@ -48,7 +48,7 @@ export function useTranslationQueue({ enabled = true }: Options = {}) {
 		},
 	})
 
-	// آخرین jobهای صف — همان ریتم تطبیقی از وضعیت jobهای خودش
+	// آخرین کارهای صف — همان ریتم تطبیقی از وضعیت کارهای خودش
 	const jobsQuery = useQuery({
 		queryKey: qk.translationJobs,
 		queryFn: () => getTranslationJobs(15),

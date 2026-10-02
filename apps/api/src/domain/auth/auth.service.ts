@@ -10,16 +10,11 @@ import type { SessionService, SessionIssue } from './session.service'
 import type { DeviceService } from '#/domain/device/device.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { DeviceSignals } from '#/domain/device/device-signals'
+import type { AuthUser, Role } from '@sinshin/shared'
+import { asUserId } from '#/domain/shared/brand'
 
-export interface PublicUser {
-  id: string
-  phone: string
-  name: string | null
-  role: string
-  referralCode: string | null
-  createdAt: Date
-  lastLoginAt: Date | null
-}
+// رارد ۴۷ — کاربر عمومی = قرارداد مشترک AuthUser (کپی محلی حذف شد)؛
+// برند id و union نقش در مرز ساختِ publicUser اعمال می‌شود.
 
 export interface LoginOptions {
   refCode?: string | null
@@ -48,12 +43,12 @@ export class AuthService {
     },
   ) { }
 
-  publicUser(u: UserRow): PublicUser {
+  publicUser(u: UserRow): AuthUser {
     return {
-      id: u.id,
+      id: asUserId(u.id),
       phone: u.phone,
       name: u.name,
-      role: u.role,
+      role: u.role as Role,
       referralCode: u.referralCode,
       createdAt: u.createdAt,
       lastLoginAt: u.lastLoginAt,
@@ -68,7 +63,7 @@ export class AuthService {
    * چکِ سبکِ قبل از ارسال کد — بدون هزینه‌ی پیامک.
    * round-28 — role حذف شد: این روت «قبل از احراز هویت» است و نقش را فاش
    * می‌کرد (مهاجم شماره‌ی ادمین‌ها را شناسایی و هدف‌گیری می‌کرد). نقش فقط
-   * بعد از لاگین واقعی (verify → user.role) برمی‌گردد.
+   * بعد از لاگین واقعی (پس از تایید کد، از user.role) برمی‌گردد.
    */
   async checkPhone(
     phone: string,
@@ -84,12 +79,12 @@ export class AuthService {
   /**
    * ورود با OTP — یک مسیر واحد برای همه‌ی نقش‌ها:
    *  ۱) کد چک می‌شود
-   *  ۲) دستگاه resolve (clientId → هش مرکب → شباهت+link) + ریسک + autoblock
+   *  ۲) تفسیر دستگاه (clientId → هش مرکب → شباهت+پیوند) + ریسک + انسداد خودکار
    *  ۳) دستگاه مسدود → رد
    *  ۴) کاربر پیدا/ساخته می‌شود — admin2: قواعد لاگین (ساعتی بسته → رد)
    *  ۵) سهمیه‌ی دستگاه + هویت + رویداد
    *  ۶) نشست روی دستگاه فیزیکی
-   *  ۷) admin2: onLogin → سشن + رویداد + queueCountِ scope
+   *  ۷) admin2: onLogin → سشن + رویداد + queueCountِ حوزه
    */
   async loginWithOtp(
     phone: string,

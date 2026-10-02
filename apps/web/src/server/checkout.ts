@@ -7,19 +7,20 @@
 
 // src/server/checkout.ts — تماماً API + auth
 import { getJson, authJson } from '#/lib/api-fetch'
-import { asAddressId, asProductId, asSizeId } from '@sinshin/shared'
 import type {
-  DeliveryType,
   RestaurantStatusDto,
+  CheckoutInput,
   CheckoutResponse,
-  CheckoutRequest,
   CheckoutPreviewData,
   PaymentStatus,
 } from '@sinshin/shared'
 import type { RestaurantStatus } from '#/types/site/checkout'
 
-// رارد ۴۶ — دو یونیون inline «DELIVERY | PICKUP | DINE_IN» در امضاهای
+// رارد ۴۶ — دو یونیون درون‌خطی «DELIVERY | PICKUP | DINE_IN» در امضاهای
 // پیش‌نمایش/ثبت با DeliveryType قراردادی جایگزین شدند (شکل بدون تغییر).
+// رارد ۴۷ — ورودی‌های درون‌خطی هم به CheckoutInput قراردادی وصل شدند و
+// تبدیل‌های نوعِ برنددار (asProductId و دوستان) حذف شدند — تایپ درخواست حالا
+// شکل خام سیم است و برند لازم ندارد.
 
 // ─── وضعیت رستوران ───
 export async function getRestaurantStatus(): Promise<RestaurantStatus> {
@@ -39,37 +40,25 @@ export async function getRestaurantStatus(): Promise<RestaurantStatus> {
 
 // ─── پیش‌نمایش چک‌اوت (phase-3) — قیمت‌گذاری ۱۰۰٪ سروری ───
 // جایگزین getCheckoutDetails — deliveryFee قبلاً همین‌جا «۳۵,۰۰۰ فلت» هاردکد بود!
-export async function getCheckoutPreview(input: {
-  items: { productId: string; sizeId?: string | null; quantity: number }[]
-  deliveryType: DeliveryType
-  useWallet: boolean
-  addressId?: string | null
-  couponCode?: string | null
-}): Promise<CheckoutPreviewData> {
+export async function getCheckoutPreview(
+  input: Omit<CheckoutInput, 'customerNote' | 'gatewayId'>,
+): Promise<CheckoutPreviewData> {
   return authJson<CheckoutPreviewData>('/orders/checkout/preview', 'POST', {
     items: input.items.map(i => ({
-      productId: asProductId(i.productId),
-      sizeId: i.sizeId ? asSizeId(i.sizeId) : null,
+      productId: i.productId,
+      sizeId: i.sizeId ?? null,
       quantity: i.quantity,
     })),
     deliveryType: input.deliveryType,
     useWallet: input.useWallet,
-    addressId: input.addressId ? asAddressId(input.addressId) : null,
+    addressId: input.addressId ?? null,
     couponCode: input.couponCode ?? null,
   })
 }
 
-// ─── ثبت سفارش — idempotent (phase-3) ───
+// ─── ثبت سفارش — تکرارناپذیر (phase-3) ───
 export async function processCheckout(
-  input: {
-    items: { productId: string; sizeId?: string | null; quantity: number }[]
-    deliveryType: DeliveryType
-    useWallet: boolean
-    addressId?: string | null
-    customerNote?: string | null
-    couponCode?: string | null
-    gatewayId?: string | null
-  },
+  input: CheckoutInput,
   idempotencyKey: string,
 ): Promise<{
   orderCompleted: boolean
@@ -77,22 +66,22 @@ export async function processCheckout(
   orderId?: string
   paymentUrl?: string
 }> {
-  const body: CheckoutRequest = {
+  const body: CheckoutInput = {
     items: input.items.map(i => ({
-      productId: asProductId(i.productId),
-      sizeId: i.sizeId ? asSizeId(i.sizeId) : null,
+      productId: i.productId,
+      sizeId: i.sizeId ?? null,
       quantity: i.quantity,
     })),
     deliveryType: input.deliveryType,
     useWallet: input.useWallet,
-    addressId: input.addressId ? asAddressId(input.addressId) : null,
+    addressId: input.addressId ?? null,
     customerNote: input.customerNote ?? null,
     couponCode: input.couponCode ?? null,
     gatewayId: input.gatewayId ?? null,
   }
 
   // ⚠️ تنها وابستگیِ باز: authJson باید پارامتر چهارم (headers) بپذیرد.
-  // اگر tsc اینجا خطا داد: آرگومان چهارم را موقتاً حذف کن (idempotency
+  // اگر tsc اینجا خطا داد: آرگومان چهارم را موقتاً حذف کن (تکرارناپذیری
   // خاموش می‌شود) و src/lib/api-fetch.ts را بفرست تا امضاش را دقیق بچینم.
   const res = await authJson<CheckoutResponse>('/orders/checkout', 'POST', body, {
     headers: { 'idempotency-key': idempotencyKey },
@@ -103,7 +92,7 @@ export async function processCheckout(
   }
 
   if (res.paymentUrl) {
-    // PENDING — نتیجه‌ی واقعی از mock/callback می‌آید
+    // PENDING — نتیجه‌ی واقعی از درگاه ساختگی/کال‌بک می‌آید
     return {
       orderCompleted: false,
       paymentStatus: 'PENDING',
@@ -115,12 +104,12 @@ export async function processCheckout(
   return { orderCompleted: false, paymentStatus: 'FAILED', orderId: res.orderId }
 }
 
-// ─── mock-pay (فقط dev) — paymentUrl نسبی از بک‌اند ───
+// ─── mock-pay (فقط محیط توسعه) — paymentUrl نسبی از بک‌اند ───
 export async function mockPay(
   paymentUrl: string,
   success: boolean,
 ): Promise<{ orderDisplayId: string; paymentStatus: 'SUCCESS' | 'FAILED' }> {
-  // paymentUrl از بک‌اند relative است (/api/payments/mock/...) — به بک‌اند بزن
+  // paymentUrl مسیرِ نسبیِ بک‌اند است (/api/payments/mock/...) — به بک‌اند بزن
   const base = import.meta.env.VITE_API_URL || window.location.origin
   const fullUrl = paymentUrl.startsWith('http') ? paymentUrl : base + paymentUrl
 

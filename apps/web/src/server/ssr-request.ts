@@ -11,31 +11,31 @@
  *
  * چرا این فایل وجود دارد: تا رارد ۳۹ سه مصرف‌کننده (lang-header، ریشه،
  * لندینگ) داخل ماژول‌های ایزومورفیک، مستقیماً `@tanstack/react-start/server`
- * را پویا import می‌کردند. پلاگین import-protection تان‌استک هر specifier
+ * را پویا درون‌ریزی می‌کردند. پلاگین import-protection تان‌استک هر مشخصگر
  * ممنوعه را در «هر ماژولی که به گراف کلاینت راه پیدا کند» علامت می‌زند —
- * حتی وقتی import داخل گاردِ runtime است (typeof document/window) و هرگز
+ * حتی وقتی درون‌ریزیِ پویا داخل گاردِ زمانِ اجراست (typeof document/window) و هرگز
  * در مرورگر اجرا نمی‌شود؛ نتیجه: سه هشدار [vite] (client) warning در
  * کنسولِ `bun run dev` (گزارش کاربر، رارد ۴۰).
  *
  * قرارداد — دقیقاً همان geoGate.ts که از ابتدا بی‌هشدار بود:
- *   • این ماژول فقط از داخل گارد `import.meta.env.SSR` و با import پویا
+ *   • این ماژول فقط از داخل گارد `import.meta.env.SSR` و با درون‌ریزی پویا
  *     صدا زده می‌شود:
- *       – dev: در مرورگر import.meta.env.SSR falsy است → شاخه هرگز اجرا
- *         نمی‌شود → مرورگر این فایل را request نمی‌کند → هرگز به‌عنوان
+ *       – محیط توسعه: در مرورگر import.meta.env.SSR نادرست است → شاخه هرگز اجرا
+ *         نمی‌شود → مرورگر این فایل را درخواست نمی‌کند → هرگز به‌عنوان
  *         ماژول کلاینت ترنسفورم نمی‌شود → اسکن نمی‌شود.
- *       – build کلاینت: import.meta.env.SSR → false و کل شاخه (با import)
+ *       – بیلد کلاینت: import.meta.env.SSR → false و کل شاخه (با درون‌ریزی)
  *         DCE می‌شود → این فایل وارد باندل تولیدی هم نمی‌شود.
- *   • پس import ایستای `@tanstack/react-start/server` اینجا امن و مجاز است.
+ *   • پس درون‌ریزیِ ایستای `@tanstack/react-start/server` اینجا امن و مجاز است.
  *
  * هیچ فایل ایزومورفیکی (چیزی که مسیرش به routes/… می‌رسد) نباید این
- * ماژول را import ایستا کند — فقط import پویا داخل گارد SSR.
+ * ماژول را درون‌ریزی ایستا کند — فقط درون‌ریزی پویا داخل گارد SSR.
  */
 import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
 import { getRequest, setCookie } from '@tanstack/react-start/server'
 import { LANG_COOKIE, LANG_COOKIE_RE, type Lang, langFromUrl } from '#/i18n'
 import { shouldShowOutdatedBanner } from '#/lib/browserSupport'
 
-/** کوکی بسته‌شدن بنر مرورگر قدیمی (sinshin-obs=1) در هدر cookie درخواست؟ */
+/** کوکی بسته‌شدن بنر مرورگر قدیمی (sinshin-obs=1) در هدرِ کوکیِ درخواست؟ */
 const OBS_COOKIE_RE = /(?:^|;\s*)sinshin-obs=1(?:;|$)/
 
 /**

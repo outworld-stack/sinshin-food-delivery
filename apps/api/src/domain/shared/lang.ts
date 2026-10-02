@@ -10,11 +10,11 @@
  * round-34 — لایه‌ی محتوای دوزبانه (fa/ar).
  *
  * معماری:
- *  • همه‌ی ستون‌های عربی NULLable هستند — «عربی خالی» یعنی همان متن فارسی
- *    به کاربر نمایش داده می‌شود (fallback)، نه رشته‌ی خالی.
- *  • read-path عمومی: pickAr/pickArArr — معادلِ COALESCE(ar, fa) اما
- *    تایپ‌شده و در لایه‌ی نگاشت DTO (به‌جای SELECT سنگین per-query).
- *  • write-path ادمین: nullIfEmpty — رشته‌ی خالی/فاصله → NULL (حذف ترجمه).
+ *  • همه‌ی ستون‌های عربی می‌توانند NULL باشند — «عربی خالی» یعنی همان متن فارسی
+ *    به کاربر نمایش داده می‌شود (پشتیبان)، نه رشته‌ی خالی.
+ *  • مسیر خواندنِ عمومی: pickAr/pickArArr — معادلِ COALESCE(ar, fa) اما
+ *    تایپ‌شده و در لایه‌ی نگاشت DTO (به‌جای SELECT سنگین به‌ازای هر کوئری).
+ *  • مسیر نوشتنِ ادمین: nullIfEmpty — رشته‌ی خالی/فاصله → NULL (حذف ترجمه).
  *  • arAuto (بج فرم ادمین): false = دستی، true = خودکار (رارد ۳۵ — مترجم
  *    آفلاین NLLB که مستقیم روی ردیف می‌نویسد). ذخیره‌ی دستیِ ادمین با هر
  *    مقدار عربیِ غیرخالی، پرچم را به false برمی‌گرداند.
@@ -27,10 +27,10 @@
 import type { Lang } from '@sinshin/shared'
 
 // رارد ۴۶ — تعریف Lang به قرارداد مشترک (@sinshin/shared) منتقل شد؛
-// این re-export فقط برای پایداری مسیر import مصرف‌کننده‌های فعلی است.
+// این صادرات مجدد فقط برای پایداری مسیر درون‌ریزی مصرف‌کننده‌های فعلی است.
 export type { Lang }
 
-/** هدرهای Elysia کلید lowercase دارند (مثل x-courier-token موجود) */
+/** هدرهای Elysia کلید حروف‌کوچک دارند (مثل x-courier-token موجود) */
 export function langFromHeaders(headers: Record<string, unknown>): Lang {
   return (headers as Record<string, string | undefined>)['x-sinshin-lang'] === 'ar' ? 'ar' : 'fa'
 }
@@ -45,7 +45,7 @@ export function pickArArr<T>(lang: Lang, ar: T[] | null | undefined, fa: T[]): T
   return lang === 'ar' && ar != null && ar.length > 0 ? ar : fa
 }
 
-/** write-path ادمین: '' یا فاصله → NULL (یعنی «ترجمه‌ ندارد، fallback فارسی») */
+/** مسیر نوشتن ادمین: '' یا فاصله → NULL (یعنی «ترجمه‌ ندارد، پشتیبان فارسی») */
 export function nullIfEmpty(v: string | null | undefined): string | null {
   const s = (v ?? '').trim()
   return s === '' ? null : s
@@ -56,7 +56,7 @@ export function hasAnyAr(...values: Array<string | null | undefined>): boolean {
   return values.some((v) => v != null && v !== '')
 }
 
-/** آیا کاربر عربی چیزی جز fallback فارسی می‌بیند؟ — بج «ترجمه ناقص» در پنل ادمین رارد ۳۵ */
+/** آیا کاربر عربی چیزی جز پشتیبان فارسی می‌بیند؟ — بج «ترجمه ناقص» در پنل ادمین رارد ۳۵ */
 export function arComplete(
   row: { ar: Array<string | null | undefined>; fa: Array<string | null | undefined> },
 ): boolean {

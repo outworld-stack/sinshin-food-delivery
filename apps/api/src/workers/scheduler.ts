@@ -12,7 +12,7 @@ export interface DailyJob {
   run: () => Promise<void>
 }
 
-// ── phase-2: job بازه‌ای — هر N ثانیه، بین رپلیکاها فقط یک‌بار ──
+// ── phase-2: کارِ بازه‌ای — هر N ثانیه، بین رپلیکاها فقط یک‌بار ──
 export interface IntervalJob {
   /** یکتا و پایدار — در کلید قفل و لاگ‌ها */
   name: string
@@ -20,7 +20,7 @@ export interface IntervalJob {
   everySeconds: number
   /**
    * round-19 — اجرا بدون قفل Redis (پیش‌فرض false).
-   * فقط برای jobهایی که باید خرابیِ خودِ ردیس را ببینند: قفلِ مبتنی بر ردیس،
+   * فقط برای کارهایی که باید خرابیِ خودِ ردیس را ببینند: قفلِ مبتنی بر ردیس،
    * هنگام قطعی ردیس کار را متوقف می‌کند و دیده‌بان کور می‌شود. بدون قفل،
    * هر رپلیکا مستقل اجرا و هشدار می‌دهد (امروز تک‌رپلیکا = بدون تفاوت).
    */
@@ -59,9 +59,9 @@ const tehranNow = (): { date: string; hm: string } => {
 /**
  * زمان‌بند روزانه + بازه‌ای — ساعت تهران.
  *  - Bun.cron به‌عنوان تایمر (TZ=Asia/Tehran در Docker)
- *  - قفل Redis با SET NX + کلید (job، تاریخ/پنجره) → با N رپلیکا دقیقاً یک‌بار
- *  - catchUp: job های روزانه‌ی ازدست‌رفته موقع boot اجرا می‌شوند
- *  - interval ها مستقل از Bun.cron همیشه روشن‌اند
+ *  - قفل Redis با SET NX + کلید (نام کار، تاریخ/پنجره) → با N رپلیکا دقیقاً یک‌بار
+ *  - catchUp: کارهای روزانه‌ی ازدست‌رفته موقع بوت اجرا می‌شوند
+ *  - کارهای بازه‌ای مستقل از Bun.cron همیشه روشن‌اند
  *  - اگر Bun.cron نبود → تیک ۳۰ ثانیه‌ای
  */
 export class CronScheduler {
@@ -85,7 +85,7 @@ export class CronScheduler {
     console.log(`[cron] registered "${job.name}" at ${job.time} Asia/Tehran`)
   }
 
-  /** phase-2 — ثبت job بازه‌ای؛ قبل از start() صدا شود */
+  /** phase-2 — ثبت کارِ بازه‌ای؛ قبل از start() صدا شود */
   registerInterval(job: IntervalJob): void {
     this.intervalJobs.push(job)
     this.recorder.define({
@@ -106,7 +106,7 @@ export class CronScheduler {
       )
     }
 
-    // ── جبران slot های ازدست‌رفته‌ی امروز ──
+    // ── جبران جایگاه‌های ازدست‌رفته‌ی امروز ──
     const { date, hm } = tehranNow()
     for (const job of this.jobs) {
       if (!job.catchUp || hm < job.time) continue
@@ -116,7 +116,7 @@ export class CronScheduler {
       }
     }
 
-    // ── phase-2: job های بازه‌ای — مستقل از Bun.cron، همیشه روشن ──
+    // ── phase-2: کارهای بازه‌ای — مستقل از Bun.cron، همیشه روشن ──
     for (const job of this.intervalJobs) {
       this.intervalTimers.push(
         setInterval(() => void this.fireInterval(job), job.everySeconds * 1000),
@@ -153,7 +153,7 @@ export class CronScheduler {
         try {
           j.stop()
         } catch {
-          /* noop */
+          /* هیچ‌کاری نمی‌کند */
         }
       }
       this.bunJobs = []
@@ -168,7 +168,7 @@ export class CronScheduler {
       try {
         j.stop()
       } catch {
-        /* noop */
+        /* هیچ‌کاری نمی‌کند */
       }
     }
     this.bunJobs = []
@@ -195,7 +195,7 @@ export class CronScheduler {
     void this.execute(job)
   }
 
-  /** phase-2 — قفل per-window: با N رپلیکا فقط یکی اجرا می‌شود */
+  /** phase-2 — قفل به‌ازای هر پنجره: با N رپلیکا فقط یکی اجرا می‌شود */
   private async fireInterval(job: IntervalJob): Promise<void> {
     // round-19 — noLock: بدون قفل اجرا شود (موثق در تعریف IntervalJob)
     if (!job.noLock) {
@@ -210,7 +210,7 @@ export class CronScheduler {
     try {
       return (await this.redis.setNx(lockKey, '1', { ex: LOCK_TTL_SECONDS })) === true
     } catch {
-      // ردیس پایین → fail-closed؛ تیک بعدی دوباره می‌آید
+      // ردیس پایین → شکست‌بسته؛ تیک بعدی دوباره می‌آید
       return false
     }
   }

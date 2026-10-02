@@ -36,7 +36,7 @@ function NewCouponPage() {
       showToast('کوپن ایجاد شد')
       navigate({ to: '/admin/coupons' })
     },
-    // خطا (کد تکراری/نامعتبر و…) را MutationCache سراسری toast می‌کند
+    // خطا (کد تکراری/نامعتبر و…) را MutationCache سراسری پیام شناور می‌کند
   })
 
   // کوپن‌ها فقط کار ادمین اصلی‌اند — گارد قبل از رندر فرم

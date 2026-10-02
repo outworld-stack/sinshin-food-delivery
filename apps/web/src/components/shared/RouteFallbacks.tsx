@@ -3,7 +3,7 @@ import { Link, type ErrorComponentProps } from '@tanstack/react-router'
 import { AlertCircle, Home, Refresh, Search } from 'reicon-react'
 import { useI18nSafe } from '#/i18n'
 
-// رارد ۳۳ — دوزبانه با useI18nSafe: این fallbackها روی «همه‌ی» روت‌ها نشسته‌اند
+// رارد ۳۳ — دوزبانه با useI18nSafe: این پشتیبانها روی «همه‌ی» روت‌ها نشسته‌اند
 // (ادمین/ادمین₂/پیک هم) — بیرون از Provider همان فارسیِ قبل را برمی‌گرداند.
 
 

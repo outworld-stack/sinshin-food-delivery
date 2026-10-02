@@ -3,10 +3,10 @@ import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Bicycle , Route as RouteIcon, ChevronLeft } from 'reicon-react'
 import { formatPrice, formatDate, formatTime } from '#/utils/format'
-import type { CourierRecord } from '#/server/admin'
+import type { CourierListRowDto } from '@sinshin/shared'
 
 interface CourierCardProps {
-  courier: CourierRecord
+  courier: CourierListRowDto
 }
 
 // کارت پیک — کلیک → صفحه مخصوص پیک

@@ -7,14 +7,14 @@ import type { SmsService } from '#/infra/sms/sms.service'
 import { couponNudges, users, coupons } from '#/infra/db/schema'
 import type { DailyJob } from '#/workers/scheduler'
 
-const DEADLINE_HOUR = 13 // تهران — بعد از ناهار nudge بی‌معنی است
+const DEADLINE_HOUR = 13 // تهران — بعد از ناهار یادآور بی‌معنی است
 
 /**
- * پیامک nudge پیش از ناهار (۱۱:۰۰ تهران — قبل از اوج).
- * idempotent به‌کلیت ساختار:
+ * پیامک یادآور پیش از ناهار (۱۱:۰۰ تهران — قبل از اوج).
+ * تکرارناپذیر به‌کلیت ساختار:
  *  - فقط scan_date = امروز و sms_sent_at IS NULL
- *  - اول claim (فلیپ sms_sent_at) بعد ارسال → crash-safe
- *  - unique (user, coupon, scan_date) → بدون تکرار بین رپلیکاها
+ *  - اول تصرف (فلیپ sms_sent_at) بعد ارسال → امن در برابر کرش
+ *  - یکتایی (user, coupon, scan_date) → بدون تکرار بین رپلیکاها
  *  - بعد از ۱۳:۰۰ توقف
  */
 export class CouponNudgeSmsJob implements DailyJob {
@@ -44,8 +44,8 @@ export class CouponNudgeSmsJob implements DailyJob {
 
     const { db } = this.deps
 
-    // phase-5: تاریخ امروزِ تهران یک‌جا — قبلاً pending با CURRENT_DATE
-    // (در PG یعنی UTC!) و claim با رشته‌ی تهران بود؛ ناسازگار در ۰۰:۰۰–۰۳:۳۰ تهران
+    // phase-5: تاریخ امروزِ تهران یک‌جا — قبلاً حالتِ در‌انتظار با CURRENT_DATE
+    // (در PG یعنی UTC!) و تصرف با رشته‌ی تهران بود؛ ناسازگار در ۰۰:۰۰–۰۳:۳۰ تهران
     const scanDateStr = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran',
       year: 'numeric', month: '2-digit', day: '2-digit',
@@ -68,9 +68,9 @@ export class CouponNudgeSmsJob implements DailyJob {
 
     let sent = 0
     for (const row of pending) {
-      // ── phase-5 (باگ لیست): claim «فقط همین ردیف» ──
-      // قبلاً nudgeId در WHERE نبود → دور اول همه‌ی pending های امروز را
-      // claim می‌کرد؛ فقط یک SMS می‌رفت و بقیه بی‌پیامک مارک می‌شدند!
+      // ── phase-5 (باگ لیست): تصرف «فقط همین ردیف» ──
+      // قبلاً nudgeId در WHERE نبود → دور اول همه‌ی ردیف‌های در انتظارِ امروز را
+      // تصرف می‌کرد؛ فقط یک SMS می‌رفت و بقیه بی‌پیامک مارک می‌شدند!
       const claimed = await db
         .update(couponNudges)
         .set({ smsSentAt: new Date() })

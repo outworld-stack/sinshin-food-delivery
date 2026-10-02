@@ -26,7 +26,7 @@
 //    نیست و بی‌صدا دور انداخته می‌شد (اندازهٔ کاغذ پیش‌فرض می‌افتاد).
 //
 // مرورگرها: Chrome/Edge/Firefox/Safari دسکتاپ → مسیر iframe؛
-// iOS Safari (iframe-print ندارد) → fallback پنجرهٔ جدید با همان سند.
+// iOS Safari (iframe-print ندارد) → پشتیبان: پنجرهٔ جدید با همان سند.
 
 export type PrintPaper = 'a4' | 'receipt'
 
@@ -262,8 +262,8 @@ function getPrintFrame(): HTMLIFrameElement {
 
 /**
  * round-13 — چاپ سند + انتظار برای بسته‌شدن دیالوگ.
- * Promise وقتی resolve می‌شود که afterprint روی پنجره‌ی چاپ‌شده (iframe)
- * یا پنجره‌ی والد-fire شود — یا بعد از سقف زمانی (مرورگرهایی که afterprint
+ * Promise وقتی تفسیر می‌شود که afterprint روی پنجره‌ی چاپ‌شده (iframe)
+ * یا پنجره‌ی والد اجرا شود — یا بعد از سقف زمانی (مرورگرهایی که afterprint
  * نمی‌دهند). پایه‌ی صف چاپ چندسندی است.
  *
  * round-15 — در afterprint هیچ دستی به DOM نمی‌زنیم (فریم پایدار است)؛
@@ -318,7 +318,7 @@ function printHtmlDocumentAndWait(spec: PrintDocumentSpec): Promise<void> {
                                 iframe.contentWindow?.print()
                         } finally {
                                 // afterprint روی هر دو پنجره (iframe + والد) گوش می‌دهیم —
-                                // کدام زودتر fire شد همان ملاک است؛ سقف ۹۰ ثانیه هم برای
+                                // کدام زودتر اجرا شد همان ملاک است؛ سقف ۹۰ ثانیه هم برای
                                 // مرورگرهایی که اصلاً afterprint ندارند.
                                 window.addEventListener('afterprint', done, { once: true })
                                 iframe.contentWindow?.addEventListener('afterprint', done, {
@@ -347,7 +347,7 @@ export async function printHtmlDocumentQueue(
                 await printHtmlDocumentAndWait(specs[i]!)
                 if (i < specs.length - 1) {
                         // مکث کوتاه بین دیالوگ‌ها — برخی مرورگرها برای بازسازی
-                        // activation به چند صد میلی‌ثانیه نیاز دارند
+                        // فعال‌سازی به چند صد میلی‌ثانیه نیاز دارند
                         await new Promise((r) => setTimeout(r, 400))
                 }
         }

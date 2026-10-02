@@ -75,7 +75,7 @@ export interface ArticleInput {
     categoryId: string
     subCategoryId?: string | null
     processes?: { title: string; items: string[] }[]
-    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = fallback فارسی) */
+    /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = پشتیبان فارسی) */
     titleAr?: string | null
     excerptAr?: string | null
     contentAr?: string | null
@@ -147,7 +147,7 @@ export class ArticleService {
         return rows.map(({ a, c, s }) => this.toSummary(a, c, s, lang))
     }
 
-    /** جزئیات عمومی — فقط ACTIVE + شمارش بازدید (سورت most-viewed فرانت) */
+    /** جزئیات عمومی — فقط ACTIVE + شمارش بازدید (سورتِ پربازدیدترین فرانت) */
     async byId(id: string, lang: Lang = 'fa'): Promise<ArticleView | null> {
         if (!UUID_RE.test(id)) return null
         const row = (
@@ -201,7 +201,7 @@ export class ArticleService {
                 title: input.title.trim(),
                 excerpt: input.excerpt.trim(),
                 content: input.content,
-                // round-34 — محتوای عربی: '' → NULL (fallback فارسی)؛ ذخیره‌ی دستی = «دستی»
+                // round-34 — محتوای عربی: '' → NULL (پشتیبان فارسی)؛ ذخیره‌ی دستی = «دستی»
                 titleAr: nullIfEmpty(input.titleAr),
                 excerptAr: nullIfEmpty(input.excerptAr),
                 contentAr: nullIfEmpty(input.contentAr),
@@ -393,7 +393,7 @@ export class ArticleService {
     // ── داخلی ──
 
     /**
-     * round-17 — همان join برای «لیست»‌ها، اما فقط با ستون‌های سبک:
+     * round-17 — همان جوین برای «لیست»‌ها، اما فقط با ستون‌های سبک:
      * متن کامل (content)، مراحل (processes) و گالری هرگز از DB خوانده
      * نمی‌شوند — این‌ها فقط در جزئیات خواسته می‌شوند.
      */

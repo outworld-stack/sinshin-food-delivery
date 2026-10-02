@@ -1,5 +1,5 @@
 // src/http/templates/theme.ts
-// phase-4 — string-builder به‌جای JSX: پیش‌نیاز cross-package typing
+// phase-4 — سازنده‌ی رشته به‌جای JSX: پیش‌نیاز تایپ‌دهیِ بین‌پکیجی
 // (web با react-jsx «class» را تایپ‌رد می‌کند). esc() صریح = همان امنیت XSS.
 
 const esc = (s: string): string =>

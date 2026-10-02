@@ -5,13 +5,6 @@
 // کامیت پیشنهادی: stage thirty-five
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 9 از 18
-// مسیر مقصد: web/src/routes/products/$productId.tsx
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
-// ═══════════════════════════════════════════════════════════════
-
 // src/routes/products/$productId.tsx
 
 import { asProductId } from '@sinshin/shared'
@@ -46,7 +39,7 @@ export const Route = createFileRoute('/products/$productId')({
 	component: ProductDetailPage,
 
 	loader: async ({ context, params }) => {
-		// ⬅ cast اینجا — مرز URL param → دامنه
+		// ⬅ تبدیل نوع اینجا — مرز پارامتر URL → دامنه
 		const productId = asProductId(params.productId)
 		const [product] = await Promise.all([
 			context.queryClient.query(productByIdOptions(productId)),
@@ -64,7 +57,7 @@ export const Route = createFileRoute('/products/$productId')({
 	errorComponent: RouteError,
 	notFoundComponent: RouteNotFound,
 
-	// رارد ۳۸ — سئوی داینامیک دوزبانه: نام/توضیح عربی با fallback فارسی
+	// رارد ۳۸ — سئوی داینامیک دوزبانه: نام/توضیح عربی با پشتیبان فارسی
 	// (قرارداد COALESCE رارد ۳۴)، canonical واریانت زبان، هر سه hreflang،
 	// و JSON-LD (Product + BreadcrumbList) با کلید بومی 'script:ld+json'
 	// مستقیماً در head — اسکیپ \u003c توسط خود روتر انجام می‌شود.
@@ -119,7 +112,7 @@ function ProductDetailPage() {
 	const { data: reviews } = useQuery(productReviewsOptions(product.id))
 
 	// رارد ۳۸ — JSON-LD (Product + BreadcrumbList) به head منتقل شد:
-	// دوزبانه (localized) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
+	// دوزبانه (بومی‌سازی‌شده) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
 
 	return (
 		<div className="py-10 px-4 max-w-6xl mx-auto pb-32 lg:pb-10">
