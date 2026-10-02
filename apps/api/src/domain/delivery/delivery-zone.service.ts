@@ -4,6 +4,7 @@ import { asc, eq } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import { deliveryZones } from '#/infra/db/schema'
 import type { SettingsService } from '#/domain/settings/settings.service'
+import type { DeliveryZone } from '@sinshin/shared'
 
 /** فاصله‌ی هیورساین — کیلومتر (عین فرانت) */
 export function haversineKm(
@@ -20,10 +21,8 @@ export function haversineKm(
   return 2 * R * Math.asin(Math.sqrt(h))
 }
 
-export interface DeliveryZone {
-  radiusKm: number
-  fee: number
-}
+// رارد ۴۶ — تایپ DeliveryZone به قرارداد مشترک (@sinshin/shared) منتقل شد؛
+// کپی‌های موازی لایه‌ی سرور فرانت و کامپوننت مدیر هم با همان منبع بسته شدند.
 
 /**
  * ناحیه‌های ارسال — منطق واحد نمایش و پرداخت (عین فرانت):

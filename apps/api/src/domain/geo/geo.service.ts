@@ -39,6 +39,7 @@ import type { Db } from '#/infra/db/client'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import type { SettingsService } from '#/domain/settings/settings.service'
+import type { GeoAccessMode, GeoStatusDto, OutsideScope } from '@sinshin/shared'
 
 /** کش ۱۵ ثانیه‌ای تاگل پنل (داخلی) */
 const TOGGLE_TTL_MS = 15_000
@@ -46,11 +47,8 @@ const TOGGLE_TTL_MS = 15_000
 const CACHE_FILENAME = '.geo-ranges-cache.json'
 const LEGACY_CACHE_FILENAME = '.geo-ir-cache.json'
 
-/** round-37 — دامنه‌ی ورود کاربران خارج از ایران (وقتی قفلِ فقط ایران خاموش است) */
-export type OutsideScope = 'iraq' | 'world'
-
-/** round-37 — حالت نهایی دروازه؛ ترکیب کلید + دامنه برای نمایش/پیام‌ها */
-export type GeoAccessMode = 'iran-only' | 'iran-iraq' | 'world'
+// رارد ۴۶ — OutsideScope/GeoAccessMode/GeoStatus به قرارداد مشترک
+// (@sinshin/shared) منتقل شدند؛ کپی موازی فرانت هم با همان منبع بسته شد.
 
 // ── ابزارهای IP ──
 
@@ -342,25 +340,6 @@ const SOURCES: Array<{ name: string; load: (timeoutMs: number) => Promise<DualRa
   { name: 'ripestat', load: loadRipestat },
   { name: 'ipdeny', load: loadIpdeny },
 ]
-
-export interface GeoStatus {
-  enabled: boolean
-  /** round-37 — حالت نهایی دروازه برای پنل/پیام‌ها */
-  mode: GeoAccessMode
-  /** round-37 — دامنه‌ی خارج از ایران ('iraq' | 'world') */
-  outsideScope: OutsideScope
-  rangesLoaded: boolean
-  rangesLoadedAt: string | null
-  /** آخرین منبعی که بازه‌ها را داده (برای پنل ادمین) */
-  source: string | null
-  /** round-37 — آمار به تفکیک کشور */
-  iran: { ipv4Prefixes: number; ipv6Prefixes: number }
-  iraq: { ipv4Prefixes: number; ipv6Prefixes: number }
-  /** فیلدهای قدیمی (سازگاری با مصرف‌کننده‌های قبلی) = آمار ایران */
-  ipv4Prefixes: number
-  ipv6Prefixes: number
-  bypassIps: number
-}
 
 export class GeoService {
   private irV4: Array<[number, number]> = []
@@ -755,8 +734,8 @@ export class GeoService {
     return !this.isIranIp(ip) && !this.isIraqIp(ip)
   }
 
-  /** وضعیت برای پنل ادمین */
-  async status(): Promise<GeoStatus> {
+  /** وضعیت برای پنل ادمین — قرارداد GeoStatusDto مشترک (رارد ۴۶) */
+  async status(): Promise<GeoStatusDto> {
     const [enabled, scope] = await Promise.all([this.iranOnlyEnabled(), this.outsideScope()])
     const mode: GeoAccessMode = enabled ? 'iran-only' : scope === 'world' ? 'world' : 'iran-iraq'
     return {

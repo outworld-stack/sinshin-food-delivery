@@ -13,7 +13,7 @@ import { AdminOrdersPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { formatPrice, formatDate } from '#/utils/format'
 import { Eye } from 'reicon-react'
-import type { OrderRow } from '#/types/admin/orders'
+import type { OrderRow } from '@sinshin/shared'
 import { BottomSheet } from '#/components/shared/BottomSheet'
 
 

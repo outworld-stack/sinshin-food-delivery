@@ -12,6 +12,12 @@ import { eq } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
+import type { RestaurantStatusDto } from '@sinshin/shared'
+import type { Lang } from '#/domain/shared/lang'
+
+// رارد ۴۶ — تایپ inline خروجی restaurantStatus با قرارداد مشترک
+// RestaurantStatusDto جایگزین شد (تولیدکننده حالا تایپ‌چک می‌شود)؛
+// Lang هم از منبع واحد می‌آید — هر دو بدون تغییر شکل.
 
 export interface RestaurantLocation {
   lat: number
@@ -66,15 +72,7 @@ export class SettingsService {
   /** وضعیت کامل رستوران — دو نوع بسته‌بودن
    *  round-34 — lang='ar': علت بسته‌بودن موقت از کلید موازی عربی
    *  (temporary_close_reason_ar) می‌آید؛ خالی = همان فارسی (fallback). */
-  async restaurantStatus(lang: 'fa' | 'ar' = 'fa'): Promise<{
-    isOpen: boolean
-    temporarilyClosed: boolean
-    temporaryCloseReason: string | null
-    /** round-29 — زمان باز شدن مجددِ بسته‌ی موقت ('' = ثبت نشده)؛ جدا از nextOpenTime ساعتی */
-    temporaryReopenTime: string
-    nextOpenTime: string
-    anyClosed: boolean
-  }> {
+  async restaurantStatus(lang: Lang = 'fa'): Promise<RestaurantStatusDto> {
     const [open, tempClosed, reason, reasonAr, tempReopen, nextOpenTime] = await Promise.all([
       this.get<boolean>(SETTING_KEYS.restaurantOpen, true),
       this.get<boolean>(SETTING_KEYS.temporarilyClosed, false),
@@ -123,8 +121,8 @@ export class SettingsService {
       return this.deps.config.restaurantLocation
     }
     return this.get<RestaurantLocation>(SETTING_KEYS.restaurantLocation, {
-      lat: 35.6892,
-      lng: 51.389,
+      lat: 37.4822056,
+      lng: 49.4418273,
     })
   }
 }

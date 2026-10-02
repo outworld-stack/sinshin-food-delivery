@@ -64,14 +64,16 @@ import { getTerms } from '#/server/terms'
 import { getAdminCoupons, getAdminCoupon } from '#/server/coupons'
 import { getDeliveryZones } from '#/server/deliveryZones'
 import type { DeliveryType } from '#/types/site/checkout'
-import type { OrderRow } from '#/types/admin/orders'
-import type { AdminUsersData, ProductId, SizeId } from '@sinshin/shared'
+import type {
+  AdminOrdersData,
+  AdminUsersData,
+  MainData,
+  ProductId,
+  SizeId,
+} from '@sinshin/shared'
 
-// دیتای ترکیبی منو — یک کوئری، دو درخواست موازی
-export interface MainData {
-  products: Product[]
-  categories: Category[]
-}
+// رارد ۴۶ — MainData/AdminOrdersData از قرارداد مشترک می‌آیند؛
+// کپی‌های محلی این فایل و OrderRowِ types/admin/orders حذف شدند (شکل‌ها بدون تغییر).
 
 // Mainهای فعال — در Header و MainLayout و /products مشترکه (همون کلید قبلی)
 export const activeMainCategoriesOptions = queryOptions({
@@ -467,11 +469,6 @@ export interface AdminOrdersFilters {
   courier: string
   role: string | null
   admin2Id: string | null
-}
-
-export interface AdminOrdersData {
-  orders: OrderRow[]
-  total: number
 }
 
 export const adminOrdersOptions = (f: AdminOrdersFilters) =>

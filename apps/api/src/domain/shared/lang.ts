@@ -24,8 +24,11 @@
  * کوکی sinshin-lang تزریق می‌کند، هم SSR هم مرورگر).
  */
 
-/** زبان پاسخ محتوا — fa پیش‌فرض (بدون هدر) */
-export type Lang = 'fa' | 'ar'
+import type { Lang } from '@sinshin/shared'
+
+// رارد ۴۶ — تعریف Lang به قرارداد مشترک (@sinshin/shared) منتقل شد؛
+// این re-export فقط برای پایداری مسیر import مصرف‌کننده‌های فعلی است.
+export type { Lang }
 
 /** هدرهای Elysia کلید lowercase دارند (مثل x-courier-token موجود) */
 export function langFromHeaders(headers: Record<string, unknown>): Lang {

@@ -1,5 +1,11 @@
 // src/types/dashboard/wallet.ts
 
+// رارد ۴۶ — ReferralRow و TransactionRowData به قرارداد مشترک
+// (@sinshin/shared: ReferralRowDto/WalletTransactionDto) وصل شدند —
+// قبلاً کپی موازی با همان فیلدها بودند. WalletStats و TransactionSort
+// فقط UI هستند و این‌جا می‌مانند.
+import type { ReferralRowDto, WalletTransactionDto } from '@sinshin/shared'
+
 export type TransactionSort = 'newest' | 'oldest' | 'highest' | 'lowest' | 'income' | 'expense'
 
 export interface WalletStats {
@@ -7,20 +13,6 @@ export interface WalletStats {
   referralsCount: number
 }
 
-export interface ReferralRow {
-  id: string
-  phone: string
-  registerDate: Date
-  totalOrders: number
-  totalSpent: number
-  myProfit: number
-}
+export type ReferralRow = ReferralRowDto
 
-export interface TransactionRowData {
-  id: string
-  type: 'DEPOSIT' | 'WITHDRAW'
-  amount: number
-  date: Date
-  description: string
-  orderId?: string | null  
-}
+export type TransactionRowData = WalletTransactionDto

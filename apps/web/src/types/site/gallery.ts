@@ -6,21 +6,14 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/types/site/gallery.ts
-export type GallerySpan = 'wide' | 'normal'
+// رارد ۴۶ — GallerySpan و GalleryImage از قرارداد مشترک (@sinshin/shared)
+// می‌آیند (قبلاً کپی موازی بودند)؛ ورودی‌های فرم ادمین این‌جا می‌مانند.
+import type { GalleryImageDto, GallerySpan } from '@sinshin/shared'
 
-export interface GalleryImage {
-  id: string
-  /** فعلاً موک: کلاس گرادیانت — فاز بک‌اند: آدرس فایل آپلودی */
-  src: string
-  alt: string
-  /** round-34 — متن جایگزین عربی (NULL/خالی = fallback فارسی) */
-  altAr?: string | null
-  /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ */
-  arAuto?: boolean
-  span: GallerySpan
-  sortOrder: number
-  isActive: boolean
-}
+export type { GallerySpan }
+
+/** همان GalleryImageDto قرارداد — نام قدیمی فرانت حفظ شد */
+export type GalleryImage = GalleryImageDto
 
 // ورودی‌های ادمین — جدا از مدل تا قرارداد API شفاف بماند
 export interface AddGalleryImageInput {

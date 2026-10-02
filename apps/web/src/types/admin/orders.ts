@@ -1,17 +1,7 @@
 // src/types/admin/orders.ts
 
-// ردیف سفارش — فیلدهای مشترک UI (هم AdminOrder هم LiveOrder سرور)
-export interface OrderRow {
-  id: string
-  userPhone: string
-  userName: string
-  amount: number
-  date: Date
-  status: string
-  customerNote?: string | null
-  confirmedByName?: string | null
-  courierName?: string | null
-}
+// رارد ۴۶ — OrderRow به قرارداد مشترک (@sinshin/shared) منتقل شد؛
+// مصرف‌کننده‌ها حالا مستقیم از همان منبع import می‌کنند (کپی محلی حذف شد).
 
 // گزینه فیلتر
 export interface FilterOption {

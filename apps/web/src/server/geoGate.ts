@@ -37,6 +37,7 @@
  */
 import { getRequest } from '@tanstack/react-start/server'
 import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
+import type { GeoAccessMode, GeoGateVerdict } from '@sinshin/shared'
 import { apiBase } from '#/lib/api'
 
 /** verdict آزاد — پایدار؛ فقط بعد از قفل‌شدنِ دوباره باید نسبتاً زود منقضی شود */
@@ -48,13 +49,9 @@ const BLOCK_TTL_MS = 60_000
 const FAIL_TTL_MS = 30_000
 const MAX_ENTRIES = 5000
 
-/** round-37 — همان حالت‌های GeoService بک‌اند */
-export type WebGeoMode = 'iran-only' | 'iran-iraq' | 'world'
-
-export interface GeoGateVerdict {
-  blocked: boolean
-  mode: WebGeoMode
-}
+/** رارد ۴۶ — WebGeoMode و GeoGateVerdict به قرارداد مشترک منتقل شدند
+ *  (GeoAccessMode/GeoGateVerdict در @sinshin/shared؛ روت /geo/gate بک‌اند
+ *  هم با همان تایپ annotate شد) — شکل‌ها بدون تغییر. */
 
 const cache = new Map<string, { verdict: GeoGateVerdict; at: number; ttl: number }>()
 
@@ -93,7 +90,7 @@ function clientIpFromRequest(): string | null {
   return parts.at(-1) ?? null
 }
 
-function parseMode(raw: unknown): WebGeoMode {
+function parseMode(raw: unknown): GeoAccessMode {
   return raw === 'iran-iraq' || raw === 'world' ? raw : 'iran-only'
 }
 

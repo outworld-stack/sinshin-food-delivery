@@ -18,23 +18,15 @@ import type {
   Product,
   MainData,
   CartDetails,
+  CartItemInput,
+  ProductSize,
 } from '@sinshin/shared'
 
 // ─── re-export تایپ‌ها برای صفحات (قرارداد قبلی حفظ) ───
 
-export type { MainCategory, Category, Product }
-
-export interface ProductSize {
-  id: SizeId
-  name: string
-  price: number
-}
-
-export interface CartItemInput {
-  productId: ProductId
-  sizeId?: SizeId | null
-  quantity: number
-}
+// رارد ۴۶ — ProductSize و CartItemInput از قرارداد مشترک می‌آیند؛
+// ProductSize نام‌های عربی سایز (nameAr) را هم حالا تایپ‌چک می‌کند.
+export type { MainCategory, Category, Product, ProductSize }
 
 // ─── عمومی: منو ───
 

@@ -7,7 +7,12 @@
 
 // src/types/site/checkout.ts
 
-export type DeliveryType = 'DELIVERY' | 'PICKUP' | 'DINE_IN'
+// رارد ۴۶ — DeliveryType از قرارداد مشترک می‌آید (قبلاً کپی محلی بود)؛
+// re-export برای پایداری مسیر import مصرف‌کننده‌های فعلی است.
+import type { DeliveryType } from '@sinshin/shared'
+
+export type { DeliveryType }
+
 export type CouponStatus = 'NONE' | 'HAVE'
 
 // آیتم ۲۲: وضعیت رستوران

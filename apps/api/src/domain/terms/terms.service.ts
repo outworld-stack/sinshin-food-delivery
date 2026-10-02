@@ -11,11 +11,11 @@ import { desc, eq } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import { terms } from '#/infra/db/schema'
 import type { Lang } from '#/domain/shared/lang'
+import type { TermsSection } from '@sinshin/shared'
 
-export interface TermsSection {
-  title: string
-  items: string[]
-}
+// رارد ۴۶ — TermsSection به قرارداد مشترک (@sinshin/shared) منتقل شد؛
+// TermsContent این‌جا می‌ماند چون updatedAt آن قبل از سریال‌سازی Date است
+// (نسخه‌ی سیم قرارداد string دارد — مرز serde عمدی).
 
 export interface TermsContent {
   sections: TermsSection[]

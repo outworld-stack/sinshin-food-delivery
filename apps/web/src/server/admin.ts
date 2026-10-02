@@ -24,10 +24,14 @@ import type {
         AdminUsersData,
         CourierDetailDto,
         CourierOptionDto,
+        GeoStatusDto,
         LiveOrderDto,
         LiveOrderDetailDto,
         LiveOrdersDataDto,
-        OrderBreakdown,
+        OutsideScope,
+        RestaurantStatusDto,
+        StaffInvoice,
+        StaffInvoiceItem,
         SubAdminPermissionsDto,
         SubAdminRecordDto,
 } from '@sinshin/shared'
@@ -53,32 +57,10 @@ export type AdminSession = Admin2SessionDto['admin'] extends null
 export type CourierOption = CourierOptionDto
 
 // round-12 — دیتای فاکتور چاپی (اشپزخانه + فروش) — قرارداد GET /live/orders/:id/invoice
-export interface StaffInvoiceItem {
-        name: string
-        sizeName: string | null
-        quantity: number
-        price: number
-}
-
-export interface StaffInvoice {
-        orderId: string
-        date: Date
-        status: string
-        userName: string | null
-        userPhone: string | null
-        deliveryType: 'DELIVERY' | 'PICKUP' | 'DINE_IN'
-        address: string | null
-        customerNote: string | null
-        courierId: string | null
-        courierName: string | null
-        courierPhone: string | null
-        courierSecurityEnabled: boolean
-        /** round-14 — یادداشت ادمین تاییدکننده + پرچم چاپ آن در فاکتور فروش (بیرون‌بر) */
-        internalNote: string | null
-        internalNotePrint: boolean
-        items: StaffInvoiceItem[]
-        breakdown: OrderBreakdown
-}
+// رارد ۴۶ — StaffInvoice( Item)? به قرارداد مشترک منتقل شد و خروجی
+// invoiceForStaff بک‌اند هم با همان تایپ annotate شد؛ re-export برای
+// پایداری مسیر import invoicePrint است (شکل بدون تغییر).
+export type { StaffInvoice, StaffInvoiceItem }
 
 // ═════════════ داشبورد ═════════════
 
@@ -456,8 +438,9 @@ export async function setIranOnlyAccess(input: {
 
 // ═════════════ رارد ۳۷ — قفل جغرافیایی عراق ═════════════
 
-/** رارد ۳۷ — دامنه‌ی ورود کاربران خارج از ایران (وقتی قفلِ فقط ایران خاموش است) */
-export type OutsideScope = 'iraq' | 'world'
+/** رارد ۳۷ — دامنه‌ی ورود کاربران خارج از ایران — رارد ۴۶: از قرارداد
+ *  مشترک می‌آید (کپی geo.service بک‌اند هم با همان منبع بسته شد) */
+export type { OutsideScope }
 
 export async function getOutsideScope(): Promise<OutsideScope> {
         // مثل getIranOnlyAccess — مرز serde همین‌جاست؛ هر چیز غیر از 'world' = 'iraq'
@@ -471,24 +454,12 @@ export async function setOutsideScope(input: {
         await authJson<unknown>('/admin/settings/outside-scope', 'POST', input.data)
 }
 
-/** رارد ۳۷ — وضعیت زنده‌ی دروازه برای کارت تنظیمات (رنج‌ها/منبع/به‌روزرسانی) */
-export interface GeoStatusResponse {
-        enabled: boolean
-        mode: 'iran-only' | 'iran-iraq' | 'world'
-        outsideScope: 'iraq' | 'world'
-        rangesLoaded: boolean
-        rangesLoadedAt: string | null
-        source: string | null
-        iran: { ipv4Prefixes: number; ipv6Prefixes: number }
-        iraq: { ipv4Prefixes: number; ipv6Prefixes: number }
-        /** فیلدهای قدیمی = آمار ایران */
-        ipv4Prefixes: number
-        ipv6Prefixes: number
-        bypassIps: number
-}
+/** رارد ۳۷ — وضعیت زنده‌ی دروازه برای کارت تنظیمات (رنج‌ها/منبع/به‌روزرسانی) —
+ *  رارد ۴۶: GeoStatusResponse با قرارداد مشترک GeoStatusDto یکی شد (شکل بدون تغییر) */
+export type GeoStatusResponse = GeoStatusDto
 
-export async function getGeoStatus(): Promise<GeoStatusResponse> {
-        return authJson<GeoStatusResponse>('/geo/status', 'GET')
+export async function getGeoStatus(): Promise<GeoStatusDto> {
+        return authJson<GeoStatusDto>('/geo/status', 'GET')
 }
 
 export async function getRestaurantOpen(): Promise<{
@@ -510,15 +481,9 @@ export async function setRestaurantOpen(input: {
 
 // ============= round-13 — بسته/باز موقت با علت (هر دو نقش) =============
 
-export interface RestaurantFullStatus {
-        isOpen: boolean
-        temporarilyClosed: boolean
-        temporaryCloseReason: string | null
-        /** round-29 — زمان باز شدن مجددِ بسته‌ی موقت ('' = ثبت نشده) */
-        temporaryReopenTime: string
-        nextOpenTime: string
-        anyClosed: boolean
-}
+// رارد ۴۶ — RestaurantFullStatus با قرارداد مشترک RestaurantStatusDto یکی شد
+// (تولیدکننده‌ی بک‌اند هم با همان تایپ annotate شد — شکل بدون تغییر)
+export type RestaurantFullStatus = RestaurantStatusDto
 
 export async function getRestaurantStatusFull(): Promise<RestaurantFullStatus> {
         return authJson<RestaurantFullStatus>(

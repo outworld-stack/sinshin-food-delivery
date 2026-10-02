@@ -14,11 +14,10 @@ import { useToastStore } from '#/stores/toastStore'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Plus, Trash2, Pin, Pen, Check, X } from 'reicon-react'
 import { formatPrice, faNum } from '#/utils/format'
+import type { DeliveryZone } from '@sinshin/shared'
 
-interface DeliveryZone {
-  radiusKm: number
-  fee: number
-}
+// رارد ۴۶ — اینترفیس محلی DeliveryZone حذف شد؛ از قرارداد مشترک
+// (@sinshin/shared) می‌آید — همان دو فیلد قبلی، منبع واحد با بک‌اند.
 
 // ناحیه‌های ارسال — مشترک ادمین اصلی و ادمین۲ (هر دو می‌توانند مدیریت کنند)
 export const DeliveryZonesManager = memo(function DeliveryZonesManager() {

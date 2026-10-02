@@ -9,6 +9,7 @@
 import { getJson, authJson } from '#/lib/api-fetch'
 import { asAddressId, asProductId, asSizeId } from '@sinshin/shared'
 import type {
+  DeliveryType,
   RestaurantStatusDto,
   CheckoutResponse,
   CheckoutRequest,
@@ -16,6 +17,9 @@ import type {
   PaymentStatus,
 } from '@sinshin/shared'
 import type { RestaurantStatus } from '#/types/site/checkout'
+
+// رارد ۴۶ — دو یونیون inline «DELIVERY | PICKUP | DINE_IN» در امضاهای
+// پیش‌نمایش/ثبت با DeliveryType قراردادی جایگزین شدند (شکل بدون تغییر).
 
 // ─── وضعیت رستوران ───
 export async function getRestaurantStatus(): Promise<RestaurantStatus> {
@@ -37,7 +41,7 @@ export async function getRestaurantStatus(): Promise<RestaurantStatus> {
 // جایگزین getCheckoutDetails — deliveryFee قبلاً همین‌جا «۳۵,۰۰۰ فلت» هاردکد بود!
 export async function getCheckoutPreview(input: {
   items: { productId: string; sizeId?: string | null; quantity: number }[]
-  deliveryType: 'DELIVERY' | 'PICKUP' | 'DINE_IN'
+  deliveryType: DeliveryType
   useWallet: boolean
   addressId?: string | null
   couponCode?: string | null
@@ -59,7 +63,7 @@ export async function getCheckoutPreview(input: {
 export async function processCheckout(
   input: {
     items: { productId: string; sizeId?: string | null; quantity: number }[]
-    deliveryType: 'DELIVERY' | 'PICKUP' | 'DINE_IN'
+    deliveryType: DeliveryType
     useWallet: boolean
     addressId?: string | null
     customerNote?: string | null

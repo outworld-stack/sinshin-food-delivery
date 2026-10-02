@@ -42,9 +42,13 @@ import { signedWalletAmount } from "#/domain/shared/wallet-sql";
 import { finalPriceOf, loadPricingBases } from "#/domain/menu/menu.service";
 import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.service";
 import type { SettingsService } from "#/domain/settings/settings.service";
-import type { OrderBreakdown } from "#/infra/db/schema";
 import type { CouponService } from "../coupon/coupon.service";
-import type { CheckoutPreviewData } from "@sinshin/shared";
+import type {
+	CheckoutPreviewData,
+	DeliveryType,
+	OrderBreakdown,
+	StaffInvoice,
+} from "@sinshin/shared";
 
 const DISPLAY_RE = /^ord-[a-z0-9]{8}$/;
 
@@ -60,7 +64,8 @@ function underMaxUses(maxUses: number) {
 	return maxUses === 0 ? sql`true` : sql`${coupons.usedCount} < ${maxUses}`;
 }
 
-export type DeliveryType = "DELIVERY" | "PICKUP" | "DINE_IN";
+// رارد ۴۶ — DeliveryType به قرارداد مشترک (@sinshin/shared) منتقل شد؛
+// کپی موازی تایپ‌های فرانت هم با همان منبع بسته شد (شکل بدون تغییر).
 
 /** ورودی چک‌اوت — id ها خامِ HTTP؛ cast فقط داخل سرویس */
 export interface CheckoutInput {
@@ -905,7 +910,7 @@ export class OrderService {
 	 * بدون چک مالکیت (مسیر مشتری byDisplayId گاردش را دارد)؛ شامل مشخصات
 	 * مشتری/نوع تحویل/آدرس/پیک برای فاکتور اشپزخانه + فروش (با QR پیک).
 	 */
-	async invoiceForStaff(displayId: string) {
+	async invoiceForStaff(displayId: string): Promise<StaffInvoice> {
 		if (!DISPLAY_RE.test(displayId)) throw Err.notFound("سفارش پیدا نشد.");
 		const row = (
 			await this.deps.db

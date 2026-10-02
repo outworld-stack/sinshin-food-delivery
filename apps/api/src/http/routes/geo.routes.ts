@@ -8,6 +8,7 @@
 // src/http/routes/geo.routes.ts
 import { Elysia, t } from 'elysia'
 
+import type { GeoGateVerdict } from '@sinshin/shared'
 import type { GeoService } from '#/domain/geo/geo.service'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { RedisService } from '#/infra/redis/redis'
@@ -36,7 +37,9 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
   const publicRoutes = new Elysia({ prefix: '/geo', tags: ['Geo'] })
     .get(
       '/gate',
-      async ({ query }) => ({
+      // رارد ۴۶ — پاسخ با قرارداد مشترک GeoGateVerdict annotate شد (همان
+      // شکل قبلی — قبلاً بی‌نام بود و فرانت کپی خودش را داشت)
+      async ({ query }): Promise<GeoGateVerdict> => ({
         blocked: await deps.geo.shouldBlock(query.ip),
         /** round-37 — iran-only | iran-iraq | world (برای پیام صفحه‌ی مسدود) */
         mode: await deps.geo.accessMode(),

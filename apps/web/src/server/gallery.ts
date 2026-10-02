@@ -7,7 +7,10 @@
 
 // src/server/gallery.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
-import type { GalleryImageDto } from '@sinshin/shared'
+import type { GalleryImageDto, GallerySpan } from '@sinshin/shared'
+
+// رارد ۴۶ — دو یونیون inline «wide | normal» در امضاهای ادمین با
+// GallerySpan قراردادی جایگزین شدند (شکل بدون تغییر).
 
 // ─── عمومی ───
 export async function getGalleryImages(): Promise<GalleryImageDto[]> {
@@ -24,7 +27,7 @@ export async function addGalleryImage(input: {
   alt: string
   /** round-34 — متن جایگزین عربی ('' → null = fallback فارسی) */
   altAr?: string | null
-  span: 'wide' | 'normal'
+  span: GallerySpan
 }): Promise<{ success: boolean }> {
   return authJson<{ success: boolean }>('/admin/gallery', 'POST', {
     ...input,
@@ -38,7 +41,7 @@ export async function updateGalleryImage(input: {
   alt?: string
   /** round-34 — متن جایگزین عربی (undefined = دست‌نخورده؛ '' = حذف ترجمه) */
   altAr?: string | null
-  span?: 'wide' | 'normal'
+  span?: GallerySpan
   isActive?: boolean
 }): Promise<{ success: boolean }> {
   return authJson<{ success: boolean }>(`/admin/gallery/${input.id}`, 'PATCH', {

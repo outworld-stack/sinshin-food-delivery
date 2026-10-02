@@ -18,6 +18,7 @@ import type { UserId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import type { AuditService } from '#/domain/audit/audit.service'
+import type { AdminReportQuery, AdminReportResult } from '@sinshin/shared'
 
 /**
  * stage-10 — موتور باکس گزارشات داشبورد ادمین اصلی.
@@ -31,34 +32,12 @@ import type { AuditService } from '#/domain/audit/audit.service'
  *  users   — کاربران با آمار خرید
  *  user    — یک کاربر خاص (موبایل) — سفارشات + کیف پول
  *  audit   — لاگ ممیزی عملیات ادمین اصلی
+ *
+ * رارد ۴۶ — سه تایپی که همین‌جا تعریف می‌شدند (ReportQueryType/
+ * ReportQueryInput/ReportResultDto) به قرارداد مشترک منتقل شدند
+ * (AdminReportType/AdminReportQuery/AdminReportResult در @sinshin/shared)؛
+ * کپی موازی server/reports فرانت هم با همان منبع بسته شد. شکل‌ها تغییر نکرده‌اند.
  */
-export type ReportQueryType =
-    | 'orders'
-    | 'admin2'
-    | 'couriers'
-    | 'coupons'
-    | 'users'
-    | 'user'
-    | 'audit'
-
-export interface ReportQueryInput {
-    type: ReportQueryType
-    from?: string | null
-    to?: string | null
-    status?: string | null
-    deliveryType?: string | null
-    adminUserId?: string | null
-    courierId?: string | null
-    phone?: string | null
-}
-
-export interface ReportResultDto {
-    title: string
-    subtitle: string
-    generatedAt: string
-    stats: { label: string; value: string }[]
-    tables: { title: string; head: string[]; rows: string[][] }[]
-}
 
 const faNum = (n: number) => n.toLocaleString('fa-IR')
 const faDate = (d: Date) =>
@@ -100,7 +79,7 @@ export class ReportQueryService {
         },
     ) { }
 
-    async query(input: ReportQueryInput): Promise<ReportResultDto> {
+    async query(input: AdminReportQuery): Promise<AdminReportResult> {
         const from = this.parseDate(input.from)
         const to = this.parseDate(input.to)
         const generatedAt = new Date().toISOString()
@@ -133,10 +112,10 @@ export class ReportQueryService {
     private async ordersReport(
         from: Date | undefined,
         to: Date | undefined,
-        input: ReportQueryInput,
+        input: AdminReportQuery,
         generatedAt: string,
         subtitle: string,
-    ): Promise<ReportResultDto> {
+    ): Promise<AdminReportResult> {
         const conditions = this.orderConditions(from, to, input)
 
         const rows = await this.deps.db
@@ -188,10 +167,10 @@ export class ReportQueryService {
     private async admin2Report(
         from: Date | undefined,
         to: Date | undefined,
-        input: ReportQueryInput,
+        input: AdminReportQuery,
         generatedAt: string,
         subtitle: string,
-    ): Promise<ReportResultDto> {
+    ): Promise<AdminReportResult> {
         const conditions: SQL[] = []
         if (from) conditions.push(gte(admin2Activities.createdAt, from))
         if (to) conditions.push(lte(admin2Activities.createdAt, to))
@@ -246,10 +225,10 @@ export class ReportQueryService {
     private async couriersReport(
         from: Date | undefined,
         to: Date | undefined,
-        input: ReportQueryInput,
+        input: AdminReportQuery,
         generatedAt: string,
         subtitle: string,
-    ): Promise<ReportResultDto> {
+    ): Promise<AdminReportResult> {
         const conditions: SQL[] = []
         if (from) conditions.push(gte(courierDeliveries.deliveredAt, from))
         if (to) conditions.push(lte(courierDeliveries.deliveredAt, to))
@@ -304,7 +283,7 @@ export class ReportQueryService {
         to: Date | undefined,
         generatedAt: string,
         subtitle: string,
-    ): Promise<ReportResultDto> {
+    ): Promise<AdminReportResult> {
         const conditions: SQL[] = []
         if (from) conditions.push(gte(coupons.createdAt, from))
         if (to) conditions.push(lte(coupons.createdAt, to))
@@ -380,7 +359,7 @@ export class ReportQueryService {
         to: Date | undefined,
         generatedAt: string,
         subtitle: string,
-    ): Promise<ReportResultDto> {
+    ): Promise<AdminReportResult> {
         const conditions: SQL[] = []
         if (from) conditions.push(gte(users.createdAt, from))
         if (to) conditions.push(lte(users.createdAt, to))
@@ -447,12 +426,12 @@ export class ReportQueryService {
     // ══ کاربر خاص ══
 
     private async userReport(
-        input: ReportQueryInput,
+        input: AdminReportQuery,
         generatedAt: string,
         from: Date | undefined,
         to: Date | undefined,
         subtitle: string,
-    ): Promise<ReportResultDto> {
+    ): Promise<AdminReportResult> {
         const phone = (input.phone ?? '').trim()
         if (!PHONE_RE.test(phone)) {
             throw Err.validation('موبایل کاربر را با قالب ۰۹XXXXXXXXX وارد کنید.')
@@ -551,10 +530,10 @@ export class ReportQueryService {
     private async auditReport(
         from: Date | undefined,
         to: Date | undefined,
-        input: ReportQueryInput,
+        input: AdminReportQuery,
         generatedAt: string,
         subtitle: string,
-    ): Promise<ReportResultDto> {
+    ): Promise<AdminReportResult> {
         // round-11 (اسکن L-8): مقدار غیر-UUID صریحاً رد می‌شود (نه ignore بی‌صدا)
         if (input.adminUserId && !UUID_RE.test(input.adminUserId)) {
             throw Err.validation('شناسهٔ ادمین معتبر نیست.')
@@ -603,7 +582,7 @@ export class ReportQueryService {
     private orderConditions(
         from: Date | undefined,
         to: Date | undefined,
-        input: ReportQueryInput,
+        input: AdminReportQuery,
     ): SQL[] {
         const conditions: SQL[] = []
         if (from) conditions.push(gte(orders.createdAt, from))

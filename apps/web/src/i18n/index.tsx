@@ -28,6 +28,7 @@
 // fmt: فارسی دقیقاً همان توابع utils/format موجود (رفتار صفر-تغییر)؛
 // عربی قرینه‌ی ar-EG همان‌ها. صفحاتی که ترجمه نمی‌شوند همچنان از توابع
 // قدیمی مستقیم استفاده می‌کنند — دست‌نخورده.
+import type { Lang } from '@sinshin/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import {
@@ -51,7 +52,10 @@ import { arApiErrorMessage } from './apiErrors'
 import { ar } from './ar'
 import { type Dict, fa } from './fa'
 
-export type Lang = 'fa' | 'ar'
+// رارد ۴۶ — Lang به قرارداد مشترک (@sinshin/shared) منتقل شد؛
+// کپی موازی بک‌اند هم با همان منبع بسته شد. re-export برای پایداری
+// مسیر import مصرف‌کننده‌های فعلی است.
+export type { Lang }
 export const LANG_COOKIE = 'sinshin-lang'
 
 export const DICTS: Record<Lang, Dict> = { fa, ar }

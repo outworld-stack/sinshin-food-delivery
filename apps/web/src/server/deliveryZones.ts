@@ -1,16 +1,10 @@
 // src/server/deliveryZones.ts — کامل جایگزین
+// رارد ۴۶ — DeliveryZone/DeliveryZonesData از قرارداد مشترک می‌آیند؛
+// re-export برای پایداری مسیر import مصرف‌کننده‌های فعلی است.
+import type { DeliveryZone, DeliveryZonesData } from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
 
-export interface DeliveryZone {
-  radiusKm: number
-  fee: number
-}
-
-export interface DeliveryZonesData {
-  zones: DeliveryZone[]
-  /** round-13 — مبدأ واقعی محاسبه‌ی فاصله (env > تنظیمات > پیش‌فرض) */
-  origin?: { lat: number; lng: number }
-}
+export type { DeliveryZone, DeliveryZonesData }
 
 export async function getDeliveryZones(): Promise<DeliveryZonesData> {
   return authJson<DeliveryZonesData>('/admin/settings/delivery-zones', 'GET')

@@ -17,6 +17,7 @@ import type {
 	CampaignId,
 	CourierId,
 	OrderId,
+	OrderBreakdown,
 	ProductId,
 	SizeId,
 } from "#/domain/shared/brand";
@@ -53,15 +54,8 @@ export const deliveryTypeEnum = pgEnum("delivery_type", [
 	"DINE_IN",
 ]);
 
-export type OrderBreakdown = {
-	foodTotal: number;
-	discount: number;
-	walletDeduction: number;
-	deliveryFee: number;
-	packagingFee: number;
-	totalAmount: number;
-	amountPaidOnline: number;
-};
+// رارد ۴۶ — OrderBreakdown به قرارداد مشترک (@sinshin/shared) منتقل شد؛
+// تایپ JSON ستون breakdown همان شکلِ قبلی را از منبع واحد می‌خواند.
 
 export const orders = pgTable(
 	"orders",

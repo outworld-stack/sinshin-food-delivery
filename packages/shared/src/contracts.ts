@@ -19,6 +19,12 @@ import type {
   MainCategoryId, OrderId, ProductId, SizeId, UserId,
 } from './brand'
 
+// ═══════════ Lang ═══════════
+
+/** رارد ۴۶ — زبان محتوا (fa پیش‌فرض؛ ar = لایه‌ی دوزبانه‌ی round-34).
+ *  قبلاً در web/i18n و api/domain/shared/lang دو کپی مستقل بود؛ حالا منبع واحد. */
+export type Lang = 'fa' | 'ar'
+
 // ═══════════ Auth ═══════════
 
 export interface AuthUser {
@@ -415,6 +421,57 @@ export interface RestaurantStatusDto {
   anyClosed: boolean
 }
 
+// ═══════════ Geo (رارد ۳۷ — قفل جغرافیایی) ═══════════
+// رارد ۴۶ — قبلاً geo.service بک‌اند و admin/geoGate فرانت کپی‌های موازی
+// داشتند؛ حالا قرارداد واحد (شکل‌ها بایت‌به‌بایت همان قبل — فقط جابه‌جایی تعریف).
+
+/** round-37 — دامنه‌ی ورود کاربران خارج از ایران (وقتی قفلِ فقط ایران خاموش است) */
+export type OutsideScope = 'iraq' | 'world'
+
+/** round-37 — حالت نهایی دروازه؛ ترکیب کلید + دامنه برای نمایش/پیام‌ها */
+export type GeoAccessMode = 'iran-only' | 'iran-iraq' | 'world'
+
+/** round-37 — پاسخ /geo/gate برای لایه‌ی SSR فرانت (blocked + mode پیام درست) */
+export interface GeoGateVerdict {
+  blocked: boolean
+  mode: GeoAccessMode
+}
+
+/** round-37 — وضعیت زنده‌ی دروازه برای کارت تنظیمات (رنج‌ها/منبع/به‌روزرسانی) */
+export interface GeoStatusDto {
+  enabled: boolean
+  /** round-37 — حالت نهایی دروازه برای پنل/پیام‌ها */
+  mode: GeoAccessMode
+  /** round-37 — دامنه‌ی خارج از ایران ('iraq' | 'world') */
+  outsideScope: OutsideScope
+  rangesLoaded: boolean
+  rangesLoadedAt: string | null
+  /** آخرین منبعی که بازه‌ها را داده (برای پنل ادمین) */
+  source: string | null
+  /** round-37 — آمار به تفکیک کشور */
+  iran: { ipv4Prefixes: number; ipv6Prefixes: number }
+  iraq: { ipv4Prefixes: number; ipv6Prefixes: number }
+  /** فیلدهای قدیمی (سازگاری با مصرف‌کننده‌های قبلی) = آمار ایران */
+  ipv4Prefixes: number
+  ipv6Prefixes: number
+  bypassIps: number
+}
+
+// ═══════════ Delivery Zones ═══════════
+
+/** رارد ۴۶ — ناحیه‌ی ارسال (شعاع + نرخ) — قبلاً سه کپی: سرویس بک‌اند،
+ *  لایه‌ی سرور فرانت و رابط کامپوننت مدیر؛ حالا منبع واحد */
+export interface DeliveryZone {
+  radiusKm: number
+  fee: number
+}
+
+export interface DeliveryZonesData {
+  zones: DeliveryZone[]
+  /** round-13 — مبدأ واقعی محاسبه‌ی فاصله (env > تنظیمات > پیش‌فرض) */
+  origin?: { lat: number; lng: number }
+}
+
 // ═══════════ Payments / Checkout API ═══════════
 
 // phase-0: قبلاً کپیِ تکراری از CheckoutInput/Result بودند
@@ -422,6 +479,10 @@ export type CheckoutRequest = CheckoutInput
 export type CheckoutResponse = CheckoutResult
 
 // ═══════════ Gallery ═══════════
+
+/** رارد ۴۶ — پهنای تصویر در گرید گالری — قبلاً در تایپ‌های محلی فرانت
+ *  و دو امضای inline سرور تکرار می‌شد؛ حالا منبع واحد */
+export type GallerySpan = 'wide' | 'normal'
 
 export interface GalleryImageDto {
   id: string
@@ -431,7 +492,7 @@ export interface GalleryImageDto {
   altAr?: string | null
   /** پرچم «ترجمه خودکار» — رارد ۳۵ */
   arAuto?: boolean
-  span: 'wide' | 'normal'
+  span: GallerySpan
   sortOrder: number
   isActive: boolean
 }
@@ -698,6 +759,37 @@ export interface AdminOrdersData {
   total: number
 }
 
+// ═══════════ Admin: Staff Invoice (فاکتور چاپی — round-12) ═══════════
+
+/** رارد ۴۶ — قرارداد GET /live/orders/:id/invoice — قبلاً فقط در server/admin
+ *  فرانت تعریف شده بود و خروجی invoiceForStaff بک‌اند بی‌نام بود؛ حالا منبع واحد */
+export interface StaffInvoiceItem {
+  name: string
+  sizeName: string | null
+  quantity: number
+  price: number
+}
+
+export interface StaffInvoice {
+  orderId: string
+  date: Date
+  status: string
+  userName: string | null
+  userPhone: string | null
+  deliveryType: DeliveryType
+  address: string | null
+  customerNote: string | null
+  courierId: string | null
+  courierName: string | null
+  courierPhone: string | null
+  courierSecurityEnabled: boolean
+  /** round-14 — یادداشت ادمین تاییدکننده + پرچم چاپ آن در فاکتور فروش (بیرون‌بر) */
+  internalNote: string | null
+  internalNotePrint: boolean
+  items: StaffInvoiceItem[]
+  breakdown: OrderBreakdown
+}
+
 // ═══════════ Admin: Dashboard Stats ═══════════
 
 export interface AdminStatsDto {
@@ -709,6 +801,41 @@ export interface AdminStatsDto {
   chartData: RangeCharts
   recentOrders: { id: string; user: string; amount: number; status: string; date: Date }[]
   latestUsers: { id: UserId; phone: string; name: string; device: string; registeredAt: Date }[]
+}
+
+// ═══════════ Admin: Reports (stage-10 — باکس گزارشات داشبورد) ═══════════
+
+/** رارد ۴۶ — قرارداد موتور گزارشات — قبلاً report-query.service بک‌اند و
+ *  server/reports فرانت دو نام‌گذاری موازی داشتند؛ حالا منبع واحد.
+ *  یک اندپوینت، هفت نوع گزارش — orders/admin2/couriers/coupons/users/user/audit */
+export type AdminReportType =
+  | 'orders'
+  | 'admin2'
+  | 'couriers'
+  | 'coupons'
+  | 'users'
+  | 'user'
+  | 'audit'
+
+export interface AdminReportQuery {
+  type: AdminReportType
+  /** ISO میلادی (فرانت شمسی را تبدیل می‌کند) */
+  from?: string | null
+  to?: string | null
+  status?: string | null
+  deliveryType?: string | null
+  adminUserId?: string | null
+  courierId?: string | null
+  phone?: string | null
+}
+
+/** قرارداد مشترک همه‌ی گزارش‌ها — رشته‌ای و آماده‌ی رندر/چاپ */
+export interface AdminReportResult {
+  title: string
+  subtitle: string
+  generatedAt: string
+  stats: { label: string; value: string }[]
+  tables: { title: string; head: string[]; rows: string[][] }[]
 }
 
 // ═══════════ round-18: مانیتورینگ — GET /api/health/metrics (ادمین اصلی) ═══════════

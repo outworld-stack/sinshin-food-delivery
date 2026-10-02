@@ -25,7 +25,7 @@ import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain
 import { Err } from '#/domain/shared/errors'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
-import type { AdminUsersData } from '@sinshin/shared'
+import type { AdminOrdersData, AdminStatsDto, AdminUsersData } from '@sinshin/shared'
 
 export interface AdminUserSort {
     field: 'registeredAt' | 'walletBalance' | 'totalSpent'
@@ -37,15 +37,9 @@ export class AdminService {
 
     // ═════════════ داشبورد ═════════════
 
-    async getAdminStats(): Promise<{
-        totalUsers: number
-        activeUsers: number
-        totalRevenue: number
-        totalOrders: number
-        chartData: RangeCharts
-        recentOrders: { id: string; user: string; amount: number; status: string; date: Date }[]
-        latestUsers: { id: UserId; phone: string; name: string; device: string; registeredAt: Date }[]
-    }> {
+    // رارد ۴۶ — تایپ inline خروجی با قرارداد مشترک AdminStatsDto جایگزین شد
+    // (تولیدکننده حالا تایپ‌چک می‌شود — شکل بدون تغییر)
+    async getAdminStats(): Promise<AdminStatsDto> {
         const { db } = this.deps
 
         const [totalUsers, activeUsers, totalOrdersAgg, totalRevenueAgg, recentOrders, latestUsers, chartItems] =
@@ -507,6 +501,9 @@ export class AdminService {
 
     // ═════════════ سفارشات ادمین ═════════════
 
+    // رارد ۴۶ — تایپ inline خروجی با قرارداد مشترک AdminOrdersData جایگزین شد؛
+    // فیلدهای note این سرویس required بودند و در قرارداد optional اند — جهت
+    // انتساب بی‌صدا مشکلی نیست (required → optional همیشه مجاز است).
     async getAdminOrders(filters: {
         page: number
         limit: number
@@ -516,20 +513,7 @@ export class AdminService {
         sortAmount?: string
         confirmedBy?: string
         courierId?: string
-    }): Promise<{
-        orders: Array<{
-            id: string
-            userPhone: string
-            userName: string
-            amount: number
-            date: Date
-            status: string
-            customerNote: string | null
-            confirmedByName: string | null
-            courierName: string | null
-        }>
-        total: number
-    }> {
+    }): Promise<AdminOrdersData> {
         const { db } = this.deps
         const conditions = []
 

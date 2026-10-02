@@ -1,35 +1,11 @@
 // src/server/reports.ts — stage-10: باکس گزارشات داشبورد ادمین اصلی
+import type { AdminReportQuery, AdminReportResult, AdminReportType } from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
 
-export type AdminReportType =
-	| 'orders'
-	| 'admin2'
-	| 'couriers'
-	| 'coupons'
-	| 'users'
-	| 'user'
-	| 'audit'
-
-/** قرارداد مشترک همه‌ی گزارش‌ها — رشته‌ای و آماده‌ی رندر/چاپ */
-export interface AdminReportResult {
-	title: string
-	subtitle: string
-	generatedAt: string
-	stats: { label: string; value: string }[]
-	tables: { title: string; head: string[]; rows: string[][] }[]
-}
-
-export interface AdminReportQuery {
-	type: AdminReportType
-	/** ISO میلادی (فرانت شمسی را تبدیل می‌کند) */
-	from?: string | null
-	to?: string | null
-	status?: string | null
-	deliveryType?: string | null
-	adminUserId?: string | null
-	courierId?: string | null
-	phone?: string | null
-}
+// رارد ۴۶ — سه تایپ AdminReportType/AdminReportQuery/AdminReportResult به
+// قرارداد مشترک (@sinshin/shared) منتقل شدند؛ report-query.service بک‌اند
+// هم با همان منبع بسته شد (شکل‌ها بدون تغییر). re-export برای ReportsBox.
+export type { AdminReportType }
 
 export async function queryAdminReport(
 	q: AdminReportQuery,

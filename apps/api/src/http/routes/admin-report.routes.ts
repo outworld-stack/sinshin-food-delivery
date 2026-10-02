@@ -14,7 +14,8 @@ export interface AdminReportRoutesDeps {
 
 /**
  * stage-10 — باکس گزارشات داشبورد ادمین اصلی.
- * یک اندپوینت با type — همان قرارداد ReportResultDto (عنوان/آمار/جدول).
+ * یک اندپوینت با type — همان قرارداد AdminReportResult (عنوان/آمار/جدول؛
+ * رارد ۴۶: قبلاً ReportResultDto نام داشت و به @sinshin/shared رفت).
  * تاریخ‌ها ISO میلادی‌اند؛ فرانت شمسی را خودش تبدیل می‌کند.
  */
 export const adminReportRoutes = (deps: AdminReportRoutesDeps) =>
