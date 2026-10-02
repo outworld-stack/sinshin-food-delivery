@@ -248,7 +248,8 @@ export class MellatAdapter implements PaymentGateway {
         method: 'POST',
         headers: { 'content-type': 'text/xml; charset=utf-8', soapaction: '""' },
         body: envelope,
-        signal: AbortSignal.timeout(15_000),
+        // رارد ۴۵ — مهلت از کانفیگ (PAYMENT_TIMEOUT_MS)؛ قبلاً ۱۵ ثانیه‌ی ثابت
+        signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
       })
       const xml = await res.text()
       if (/<(?:[A-Za-z][\w-]*:)?Fault[\s>]/.test(xml)) return null

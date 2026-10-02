@@ -42,9 +42,9 @@ export class ReconcileService {
     ) { }
 
     private autoFixEnabled(checkId: string): boolean {
-        const key = `RECONCILE_AUTO_${checkId}`
-        const v = (Bun.env[key] ?? '').trim().toLowerCase()
-        return v === 'on' || v === 'true' || v === '1'
+        // رارد ۴۵ — پرچم‌ها یک‌جا در کلاس کانفیگ خوانده می‌شوند؛ سرویس
+        // دیگر مستقیم از متغیرهای محیطی نمی‌خواند
+        return this.deps.config.reconcile.autoChecks.has(checkId)
     }
 
     async run(): Promise<ReconcileReport> {
@@ -201,10 +201,13 @@ export class ReconcileService {
      *  • یعنی مغایرت یا از لحظه‌ی settle وجود دارد یا هرگز — سفارشِ
      *    داخل پنجره = تمام یافته‌های ممکنِ جدید.
      * پنجره با RECONCILE_R3_WINDOW_DAYS قابل تنظیم است (الگوی
-     * RECONCILE_AUTO_*؛ پیش‌فرض ۱۲۰ روز).
+     * RECONCILE_AUTO_*؛ پیش‌فرض ۱۲۰ روز — رارد ۴۵: خواندنش به کلاس
+     * کانفیگ منتقل شد).
      */
     private async r3WalletPerOrder(): Promise<CheckResult> {
-        const since = new Date(Date.now() - this.r3WindowDays() * 24 * 60 * 60 * 1000)
+        const since = new Date(
+            Date.now() - this.deps.config.reconcile.r3WindowDays * 24 * 60 * 60 * 1000,
+        )
         // برداشتِ سفارشی = type WITHDRAW + orderId — فقط این‌ها با breakdown مقایسه می‌شوند
         const rows = (await this.deps.db.execute(sql`
       select o.id, o.display_id,
@@ -239,13 +242,6 @@ export class ReconcileService {
             }
         }
         return { checkId: 'R3', severity: 'critical', findings, wouldFix: 0 }
-    }
-
-    /** پنجره‌ی R3 از env — عدد صحیح >= ۱؛ مقدار خراب = پیش‌فرض ۱۲۰ */
-    private r3WindowDays(): number {
-        const raw = (Bun.env.RECONCILE_R3_WINDOW_DAYS ?? '').trim()
-        const n = Number(raw)
-        return raw !== '' && Number.isInteger(n) && n >= 1 ? n : 120
     }
 
     // ═══════════ R4: order موفق بدون هیچ ردیف payment ═══════════

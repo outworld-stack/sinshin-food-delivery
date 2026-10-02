@@ -23,17 +23,22 @@ export interface SmsConfig {
   baseUrl: string
   apiKey: string
   sender: string
+  /** رارد ۴۵ — مهلت فراخوانی درگاه پیامک (میلی‌ثانیه) */
+  timeoutMs: number
 }
 
 export interface GatewayConfig {
   mode: 'mock' | 'direct' | 'indirect'
   zarinpalMerchantId: string
-  zarinpalCallback: string
+  /** رارد ۴۵ — سرویس تست رسمی زرین‌پال (sandbox.zarinpal.com)؛ در production ممنوع */
+  zarinpalSandbox: boolean
   payirApiKey: string
   sepTerminalId: string
   mellatTerminalId: string
   mellatUserName: string
   mellatUserPassword: string
+  /** رارد ۴۵ — مهلت هر فراخوانی HTTP به درگاه‌ها (میلی‌ثانیه) */
+  timeoutMs: number
 }
 
 export interface RestaurantLocationConfig {
@@ -58,6 +63,22 @@ export interface HealthAlertConfig {
   repeatMinutes: number
 }
 
+/** رارد ۴۵ — پالیسی‌های دروازه‌ی جغرافیایی (منابع بازه‌های IP) */
+export interface GeoPolicyConfig {
+  /** مهلت هر منبع (میلی‌ثانیه) */
+  fetchTimeoutMs: number
+  /** فاصله‌ی تلاش مجدد بعد از شکست همه‌ی منابع (میلی‌ثانیه) */
+  retryMs: number
+}
+
+/** رارد ۴۵ — پالیسی‌های مغایرت‌گیری مالی (خواندن یک‌جای پرچم‌ها) */
+export interface ReconcileConfig {
+  /** چک‌هایی که auto-fix فعال دارند (پیش‌فرض هیچ‌کدام — report-only) */
+  autoChecks: ReadonlySet<string>
+  /** پنجره‌ی چک برداشت کیف پول (روز) */
+  r3WindowDays: number
+}
+
 const DEV_JWT_SECRET = 'dev-only-insecure-secret'
 
 /**
@@ -78,6 +99,8 @@ export class AppConfig {
 
   readonly databaseUrl: string
   readonly redisUrl: string
+  /** رارد ۴۵ — سقف اتصال‌های هم‌زمان هر نمونه‌ی API به پستگرس */
+  readonly dbPoolMax: number
   readonly jwtSecret: string
   readonly siteUrl: string
   readonly uploadDir: string
@@ -99,6 +122,15 @@ export class AppConfig {
   readonly couponNudgeTime: string
 
   readonly geoBypassIps: string[]
+
+  /** رارد ۴۵ — پالیسی‌های دروازه‌ی جغرافیایی */
+  readonly geo: GeoPolicyConfig
+
+  /** رارد ۴۵ — درصد سود معرف از پرداخت آنلاینِ غذاها (۰ تا ۱۰۰) */
+  readonly referralPercent: number
+
+  /** رارد ۴۵ — پالیسی‌های مغایرت‌گیری مالی */
+  readonly reconcile: ReconcileConfig
 
   /** round-35 — آدرس سرویس مترجم آفلاین (NLLB) در شبکه داخلی compose؛ پایین بودنش صف ترجمه را نگه می‌دارد */
   readonly translatorUrl: string
@@ -145,6 +177,8 @@ export class AppConfig {
       'postgres://sinshin:sinshin_local@localhost:5432/sinshin',
     )
     this.redisUrl = str('REDIS_URL', 'redis://localhost:6379')
+    // رارد ۴۵ — قبلاً index.ts مستقیم از Bun.env می‌خواند (بیرون کلاس کانفیگ)
+    this.dbPoolMax = num('DB_POOL_MAX', 10)
 
     this.jwtSecret = str('JWT_SECRET', DEV_JWT_SECRET)
     this.siteUrl = str('SITE_URL', 'http://localhost:3001').replace(/\/+$/, '')
@@ -166,6 +200,8 @@ export class AppConfig {
       baseUrl: str('SMS_BASE_URL'),
       apiKey: str('SMS_API_KEY'),
       sender: str('SMS_SENDER'),
+      // رارد ۴۵ — قبلاً ۱۰ ثانیه‌ی ثابت در سرویس پیامک
+      timeoutMs: num('SMS_TIMEOUT_MS', 10_000),
     }
 
     // نرخ‌ها طبق قرارداد فرانت: ۶۰ ثانیه فاصله، ۳ تلاش
@@ -181,12 +217,16 @@ export class AppConfig {
     this.gateway = {
       mode: gwMode === 'direct' || gwMode === 'indirect' ? gwMode : 'mock',
       zarinpalMerchantId: str('ZARINPAL_MERCHANT_ID'),
-      zarinpalCallback: str('ZARINPAL_CALLBACK'),
+      // رارد ۴۵ — سرویس تست رسمی زرین‌پال: فقط هاست عوض می‌شود؛ آدرس
+      // برگشت همیشه از SITE_URL ساخته می‌شود (ZARINPAL_CALLBACK حذف شد)
+      zarinpalSandbox: bool('ZARINPAL_SANDBOX', false),
       payirApiKey: str('PAYIR_API_KEY'),
       sepTerminalId: str('SEP_TERMINAL_ID'),
       mellatTerminalId: str('MELLAT_TERMINAL_ID'),
       mellatUserName: str('MELLAT_USERNAME'),
       mellatUserPassword: str('MELLAT_PASSWORD'),
+      // رارد ۴۵ — قبلاً ۱۵ ثانیه‌ی ثابت در هر ۴ آداپتر
+      timeoutMs: num('PAYMENT_TIMEOUT_MS', 15_000),
     }
 
     this.device = {
@@ -211,6 +251,32 @@ export class AppConfig {
       .split(',')
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
+
+    // رارد ۴۵ — دروازه‌ی جغرافیایی؛ قبلاً ثابت ۱۰ ثانیه / ۱۵ دقیقه در سرویس
+    this.geo = {
+      fetchTimeoutMs: num('GEO_FETCH_TIMEOUT_MS', 10_000),
+      retryMs: num('GEO_RETRY_MINUTES', 15) * 60_000,
+    }
+
+    // رارد ۴۵ — سود معرف: عدد صحیح ۰ تا ۱۰۰؛ صفر یعنی خاموش؛ خراب = پیش‌فرض
+    const referralRaw = Number(source['REFERRAL_PERCENT'])
+    this.referralPercent =
+      Number.isInteger(referralRaw) && referralRaw >= 0 && referralRaw <= 100
+        ? referralRaw
+        : 10
+
+    // رارد ۴۵ — پرچم‌های auto-fix مغایرت‌گیری که قبلاً سرویس مستقیم از
+    // Bun.env می‌خواند؛ اینجا یک‌جا خوانده و تایپ‌دار می‌شوند. R11 همیشه
+    // report-only است و پرچمی ندارد.
+    const autoChecks = new Set<string>()
+    for (let i = 1; i <= 10; i++) {
+      if (bool(`RECONCILE_AUTO_R${i}`, false)) autoChecks.add(`R${i}`)
+    }
+    const r3Raw = Number(source['RECONCILE_R3_WINDOW_DAYS'])
+    this.reconcile = {
+      autoChecks,
+      r3WindowDays: Number.isInteger(r3Raw) && r3Raw >= 1 ? r3Raw : 120,
+    }
 
     // round-35 — مترجم آفلاین؛ پیش‌فرض نام سرویس compose (بدون داکر: 127.0.0.1:8300)
     this.translatorUrl = str('TRANSLATOR_URL', 'http://translator:8300').replace(/\/+$/, '')
@@ -254,6 +320,11 @@ export class AppConfig {
     // ── درگاه پرداخت: باگ 🔴۳ — سفارش رایگان با MOCK ──
     if (this.gateway.mode === 'mock') {
       problems.push('GATEWAY_MODE=mock در production ممنوع است (پرداخت صفر تومانی).')
+    }
+
+    // ── رارد ۴۵ — سندباکس زرین‌پال در production یعنی پرداخت آزمایشی ──
+    if (this.gateway.zarinpalSandbox) {
+      problems.push('ZARINPAL_SANDBOX در production ممنوع است (پرداخت سندباکس واقعی نیست).')
     }
 
     // ── ادمین ──

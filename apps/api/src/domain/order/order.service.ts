@@ -46,7 +46,6 @@ import type { OrderBreakdown } from "#/infra/db/schema";
 import type { CouponService } from "../coupon/coupon.service";
 import type { CheckoutPreviewData } from "@sinshin/shared";
 
-const REFERRAL_PERCENT = 10;
 const DISPLAY_RE = /^ord-[a-z0-9]{8}$/;
 
 function newDisplayId(): string {
@@ -572,13 +571,15 @@ export class OrderService {
 			.returning();
 		if (!updated) return { displayId: orderRow.displayId };
 
-		// سود معرف — ۱۰٪ فقط از پرداخت آنلاینِ غذاها (بدون ارسال و بسته‌بندی)
+		// سود معرف — درصدش از کانفیگ (REFERRAL_PERCENT؛ پیش‌فرض ۱۰٪) فقط از
+		// پرداخت آنلاینِ غذاها (بدون ارسال و بسته‌بندی)
 		const referralBase = Math.max(
 			0,
 			b.amountPaidOnline - b.deliveryFee - b.packagingFee,
 		);
 		if (user.referredBy && referralBase > 0) {
-			const amount = Math.round((referralBase * REFERRAL_PERCENT) / 100);
+			const percent = this.deps.config.referralPercent;
+			const amount = Math.round((referralBase * percent) / 100);
 			if (amount > 0) {
 				const [profit] = await tx
 					.insert(referralProfits)
@@ -587,7 +588,7 @@ export class OrderService {
 						buyerId: orderRow.userId,
 						orderId: orderRow.id,
 						baseAmount: referralBase,
-						percent: REFERRAL_PERCENT,
+						percent: this.deps.config.referralPercent,
 						amount,
 					})
 					.onConflictDoNothing()

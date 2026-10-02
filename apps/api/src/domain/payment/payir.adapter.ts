@@ -36,7 +36,8 @@ export class PayirAdapter implements PaymentGateway {
         description: input.description,
         mobile: input.mobile ?? undefined,
       }),
-      signal: AbortSignal.timeout(15_000),
+      // رارد ۴۵ — مهلت از کانفیگ (PAYMENT_TIMEOUT_MS)؛ قبلاً ۱۵ ثانیه‌ی ثابت
+      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
     })
     // round-16 — پاسخ غیر-JSON درگاه نباید ۵۰۰ بدهد
     const json = (await res.json().catch(() => null)) as { token?: string } | null
@@ -53,7 +54,7 @@ export class PayirAdapter implements PaymentGateway {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ api: this.apiKey, token }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
     })
     // round-16 — پاسخ غیر-JSON درگاه (HTML/تایم‌اوت سرویس): وضعیت «نامشخص»،
     // نه شکست قطعی — failPayment بدون اطلاع یعنی بازگشت وجه اشتباه؛

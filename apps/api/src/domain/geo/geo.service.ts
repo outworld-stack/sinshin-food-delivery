@@ -40,9 +40,7 @@ import { settings, SETTING_KEYS } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import type { SettingsService } from '#/domain/settings/settings.service'
 
-/** هر منبع ۱۰ ثانیه — بدترین حالتِ هر سه منبع ≈ ۳۰s */
-const FETCH_TIMEOUT_MS = 10_000
-const RETRY_MS = 15 * 60_000
+/** کش ۱۵ ثانیه‌ای تاگل پنل (داخلی) */
 const TOGGLE_TTL_MS = 15_000
 /** round-37 — کش دیسک دوکشوره؛ نام قدیمی برای خواندنِ fallback نگه داشته شد */
 const CACHE_FILENAME = '.geo-ranges-cache.json'
@@ -187,8 +185,8 @@ function emptyRanges(): CountryRanges {
   return { v4: [], v6: [] }
 }
 
-async function fetchText(url: string): Promise<string> {
-  const res = await Bun.fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+async function fetchText(url: string, timeoutMs: number): Promise<string> {
+  const res = await Bun.fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
   if (!res.ok) throw new Error(`http ${res.status}`)
   return res.text()
 }
@@ -290,10 +288,10 @@ function parseZoneFile(text: string): CountryRanges {
  * (شکستش = پرش به منبع بعدی)؛ عراق best-effort — اگر جواب نداد ولی
  * ایران آمد، همین منبع قبول می‌شود و عراق خالی می‌ماند (با هشدار).
  */
-async function loadRipestat(): Promise<DualRanges> {
+async function loadRipestat(timeoutMs: number): Promise<DualRanges> {
   const [irRes, iqRes] = await Promise.allSettled([
-    fetchText('https://stat.ripe.net/data/country-resource-list/data.json?resource=ir&v4_format=prefix'),
-    fetchText('https://stat.ripe.net/data/country-resource-list/data.json?resource=iq&v4_format=prefix'),
+    fetchText('https://stat.ripe.net/data/country-resource-list/data.json?resource=ir&v4_format=prefix', timeoutMs),
+    fetchText('https://stat.ripe.net/data/country-resource-list/data.json?resource=iq&v4_format=prefix', timeoutMs),
   ])
   if (irRes.status === 'rejected') throw irRes.reason
   const ir = parseRipestat(irRes.value)
@@ -313,12 +311,12 @@ async function loadRipestat(): Promise<DualRanges> {
  * منبع ۳ — ipdeny: چهار فایل (ir/iq × v4/v6). v4 ایران الزامی؛
  * بقیه best-effort.
  */
-async function loadIpdeny(): Promise<DualRanges> {
+async function loadIpdeny(timeoutMs: number): Promise<DualRanges> {
   const files = await Promise.allSettled([
-    fetchText('https://ipdeny.com/ipblocks/data/countries/ir.zone'),
-    fetchText('https://ipdeny.com/ipblocks/data/countries/iq.zone'),
-    fetchText('https://ipdeny.com/ipblocks/data/countries/ir.ipv6.zone'),
-    fetchText('https://ipdeny.com/ipblocks/data/countries/iq.ipv6.zone'),
+    fetchText('https://ipdeny.com/ipblocks/data/countries/ir.zone', timeoutMs),
+    fetchText('https://ipdeny.com/ipblocks/data/countries/iq.zone', timeoutMs),
+    fetchText('https://ipdeny.com/ipblocks/data/countries/ir.ipv6.zone', timeoutMs),
+    fetchText('https://ipdeny.com/ipblocks/data/countries/iq.ipv6.zone', timeoutMs),
   ])
   const [irV4, iqV4, irV6, iqV6] = files
   if (irV4.status === 'rejected') throw irV4.reason
@@ -330,13 +328,14 @@ async function loadIpdeny(): Promise<DualRanges> {
   return out
 }
 
-const SOURCES: Array<{ name: string; load: () => Promise<DualRanges> }> = [
+const SOURCES: Array<{ name: string; load: (timeoutMs: number) => Promise<DualRanges> }> = [
   {
     name: 'ftp.ripe.net',
-    load: async () =>
+    load: async (timeoutMs) =>
       parseRipeDelegated(
         await fetchText(
           'https://ftp.ripe.net/pub/stats/ripencc/delegated-ripencc-extended-latest',
+          timeoutMs,
         ),
       ),
   },
@@ -405,7 +404,7 @@ export class GeoService {
     })()
   }
 
-  /** تازه‌سازی بازه‌ها — تک‌پرواز؛ در شکست، ۱۵ دقیقه بعد دوباره */
+  /** تازه‌سازی بازه‌ها — تک‌پرواز؛ در شکست، فاصله‌ی کانفیکی بعد دوباره */
   async refresh(): Promise<boolean> {
     if (this.loading) return this.loading
     if (this.retryTimer) return false // تایمرِ تلاش مجدد فعال است
@@ -413,10 +412,11 @@ export class GeoService {
     const ok = await this.loading
     this.loading = null
     if (!ok && !this.retryTimer) {
+      // رارد ۴۵ — فاصله‌ی تلاش مجدد از کانفیگ (GEO_RETRY_MINUTES)؛ قبلاً ۱۵ دقیقه‌ی ثابت
       this.retryTimer = setTimeout(() => {
         this.retryTimer = null
         void this.refresh()
-      }, RETRY_MS)
+      }, this.deps.config.geo.retryMs)
     }
     return ok
   }
@@ -425,7 +425,7 @@ export class GeoService {
     for (let i = 0; i < SOURCES.length; i++) {
       const src = SOURCES[i]!
       try {
-        const { ir, iq } = await src.load()
+        const { ir, iq } = await src.load(this.deps.config.geo.fetchTimeoutMs)
         if (ir.v4.length === 0) throw new Error('no IR ipv4 ranges parsed')
         this.irV4 = mergeV4(ir.v4)
         this.irV6 = mergeV6(ir.v6)

@@ -56,7 +56,8 @@ export class SepAdapter implements PaymentGateway {
         RedirectUrl: input.callbackUrl,
         CellNumber: input.mobile ?? undefined,
       }),
-      signal: AbortSignal.timeout(15_000),
+      // رارد ۴۵ — مهلت از کانفیگ (PAYMENT_TIMEOUT_MS)؛ قبلاً ۱۵ ثانیه‌ی ثابت
+      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
     })
 
     // پاسخ غیر-JSON بانک (صفحه‌ی خطا) نباید ۵۰۰ بدهد — هم‌تراز زرین‌پال/پی‌ایر
@@ -108,7 +109,7 @@ export class SepAdapter implements PaymentGateway {
           RefNum: refNum,
           TerminalId: this.terminalId,
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
       })
 
       // پاسخ غیرقابل‌فهم/شکل ناشناخته (صفحه‌ی خطای بانک، قطعی گذرا) —

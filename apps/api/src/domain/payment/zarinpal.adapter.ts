@@ -9,16 +9,27 @@ import type {
   PaymentGateway,
 } from './gateway.types'
 
-const REQUEST_URL = 'https://payment.zarinpal.com/pg/v4/payment/request.json'
-const VERIFY_URL = 'https://payment.zarinpal.com/pg/v4/payment/verify.json'
-const STARTPAY = 'https://payment.zarinpal.com/pg/StartPay'
+// رارد ۴۵ — سرویس تست رسمی زرین‌پال (مستندات: sandbox.zarinpal.com):
+// فقط هاست عوض می‌شود و مسیرها یکسان‌اند؛ authority های سندباکس با S
+// شروع می‌شوند و مرچنت آیدی هر UUID دلخواهی قبول می‌شود.
+const PROD_HOST = 'https://payment.zarinpal.com'
+const SANDBOX_HOST = 'https://sandbox.zarinpal.com'
 
 /** زرین‌پال — مستقیم (ریدایرکت + verify در callback) */
 export class ZarinpalAdapter implements PaymentGateway {
   readonly id = 'ZARINPAL'
   readonly mode = 'direct' as const
 
-  constructor(private readonly config: AppConfig) { }
+  private readonly requestUrl: string
+  private readonly verifyUrl: string
+  private readonly startPay: string
+
+  constructor(private readonly config: AppConfig) {
+    const host = config.gateway.zarinpalSandbox ? SANDBOX_HOST : PROD_HOST
+    this.requestUrl = `${host}/pg/v4/payment/request.json`
+    this.verifyUrl = `${host}/pg/v4/payment/verify.json`
+    this.startPay = `${host}/pg/StartPay`
+  }
 
   private get merchantId(): string {
     const id = this.config.gateway.zarinpalMerchantId
@@ -27,7 +38,7 @@ export class ZarinpalAdapter implements PaymentGateway {
   }
 
   async init(input: GatewayInitInput): Promise<GatewayInitResult> {
-    const res = await Bun.fetch(REQUEST_URL, {
+    const res = await Bun.fetch(this.requestUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -37,7 +48,8 @@ export class ZarinpalAdapter implements PaymentGateway {
         description: input.description,
         metadata: input.mobile ? { mobile: input.mobile } : undefined,
       }),
-      signal: AbortSignal.timeout(15_000),
+      // رارد ۴۵ — مهلت از کانفیگ (PAYMENT_TIMEOUT_MS)؛ قبلاً ۱۵ ثانیه‌ی ثابت
+      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
     })
     // round-16 — پاسخ غیر-JSON درگاه (صفحهٔ خطای HTML ساپارک) نباید ۵۰۰/کرش بدهد
     const json = (await res.json().catch(() => null)) as {
@@ -45,13 +57,13 @@ export class ZarinpalAdapter implements PaymentGateway {
     } | null
     const authority = json?.data?.authority
     if (!authority) throw Err.conflict('ایجاد پرداخت زرین‌پال ناموفق بود.')
-    return { paymentUrl: `${STARTPAY}/${authority}`, gatewayRef: authority }
+    return { paymentUrl: `${this.startPay}/${authority}`, gatewayRef: authority }
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
     // phase-fix: مرجع ذخیره‌شده در DB مقدم است؛ query فقط fallback.
     const authority = input.gatewayRef ?? input.query.authority ?? ''
-    const res = await Bun.fetch(VERIFY_URL, {
+    const res = await Bun.fetch(this.verifyUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -59,7 +71,7 @@ export class ZarinpalAdapter implements PaymentGateway {
         amount: input.amount * 10,
         authority,
       }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
     })
     const json = (await res.json().catch(() => null)) as { data?: { code?: number } } | null
     const code = json?.data?.code

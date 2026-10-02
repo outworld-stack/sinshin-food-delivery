@@ -75,7 +75,8 @@ const g = globalThis as {
 
 const infra = (g.__sinshin_infra ??= {
   database: new Database(config.databaseUrl, {
-    max: Number(Bun.env.DB_POOL_MAX ?? 10) || 10,
+    // رارد ۴۵ — سقف اتصال‌ها از کلاس کانفیگ (DB_POOL_MAX)؛ قبلاً مستقیم Bun.env
+    max: config.dbPoolMax,
   }),
   redis: new RedisService(config.redisUrl),
 })

@@ -339,14 +339,16 @@ services:
 
     command:
       - postgres
+      # رارد ۴۵ — تیونینگ پارامتری (پیش‌فرض‌ها = مقادیر قبلی، کالیبره برای
+      # سرور ۴ هسته/۸GB)؛ از ‎.env ریشه قابل تغییر — شرح: بند ۴-۲ README
       - -c
-      - max_connections=200
+      - max_connections=${PG_MAX_CONNECTIONS:-200}
       - -c
-      - shared_buffers=256MB
+      - shared_buffers=${PG_SHARED_BUFFERS:-256MB}
       - -c
-      - effective_cache_size=768MB
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-768MB}
       - -c
-      - work_mem=8MB
+      - work_mem=${PG_WORK_MEM:-8MB}
 
     volumes:
       - pg_data:/var/lib/postgresql
@@ -447,8 +449,9 @@ services:
       - redis-server
       - --appendonly
       - "yes"
+      # رارد ۴۵ — سقف حافظه‌ی ردیس از ‎.env ریشه (پیش‌فرض همان ۵۱۲ مگابایت قبلی)
       - --maxmemory
-      - 512mb
+      - ${REDIS_MAXMEMORY:-512mb}
       - --maxmemory-policy
       - noeviction
 

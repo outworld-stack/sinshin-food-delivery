@@ -31,7 +31,8 @@ export class SmsService {
           to: phone,
           text: message,
         }),
-        signal: AbortSignal.timeout(10_000),
+        // رارد ۴۵ — مهلت از کانفیگ (SMS_TIMEOUT_MS)؛ قبلاً ۱۰ ثانیه‌ی ثابت
+        signal: AbortSignal.timeout(this.config.sms.timeoutMs),
       })
       if (!res.ok) {
         console.error(`[sms] درگاه ${res.status} برای ${phone}`)
