@@ -46,15 +46,29 @@ export class SettingsService {
 
   private cache = new Map<string, { value: unknown; at: number }>()
 
+  // رارد L8 — پروازهای در-جریان (single-flight): انقضای TTL با پیک‌ترافیک
+  // یعنی ده‌ها کوئری موازی برای همان کلید؛ اولین صاحب پرواز است، بقیه می‌پیوندند.
+  private readonly inflight = new Map<string, Promise<unknown>>()
+
   async get<T>(key: string, fallback: T): Promise<T> {
     const hit = this.cache.get(key)
     if (hit && Date.now() - hit.at < SETTINGS_CACHE_TTL_MS) {
       return hit.value as T
     }
-    const row = await this.deps.db.query.settings.findFirst({ where: eq(settings.key, key) })
-    const value = row ? (row.value as T) : fallback
-    this.cache.set(key, { value, at: Date.now() })
-    return value
+    const existing = this.inflight.get(key)
+    if (existing) return existing as Promise<T>
+    const p = (async () => {
+      try {
+        const row = await this.deps.db.query.settings.findFirst({ where: eq(settings.key, key) })
+        const value = row ? (row.value as T) : fallback
+        this.cache.set(key, { value, at: Date.now() })
+        return value
+      } finally {
+        this.inflight.delete(key)
+      }
+    })()
+    this.inflight.set(key, p)
+    return p
   }
 
   async set<T>(key: string, value: T): Promise<void> {

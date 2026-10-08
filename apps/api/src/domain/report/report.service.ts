@@ -91,7 +91,15 @@ export class ReportService {
     } else {
       ; ({ from, to } = await this.yesterdayRangeTehran())
     }
-    const [orderRows] = await this.orderAndWalletRows(from, to)
+    const [allRows] = await this.orderAndWalletRows(from, to)
+    // رارد M22 — سقف دفاعی ۱۰٬۰۰۰ ردیف: رشته‌ی CSV قبلاً بی‌سقف رشد می‌کرد
+    // (حافظه + پاسخ غول‌پیکر). روز عادی ~صدها ردیف است؛ ۱۰k یعنی چیزی
+    // غیرعادی در جریان است — لاگ شود.
+    const MAX_CSV_ROWS = 10_000
+    if (allRows.length > MAX_CSV_ROWS) {
+      console.warn(`[reports] csv capped: ${allRows.length} → ${MAX_CSV_ROWS} rows`)
+    }
+    const orderRows = allRows.slice(0, MAX_CSV_ROWS)
 
     const lines = [ORDER_TABLE_HEAD.join(',')]
     for (const { o, u } of orderRows) {

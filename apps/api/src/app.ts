@@ -119,6 +119,16 @@ export interface AppDeps {
 }
 
 export const buildApp = (deps: AppDeps) => {
+  // رارد M3 — پیش‌گرم‌کردن کلید دروازه‌ی ژئو در بوت + تازه‌سازی دوره‌ای:
+  // اولین درخواستِ کاربر دیگر منتظر لودِ تنظیمات نمی‌ماند و DB هماهنگ می‌ماند.
+  void deps.geo.iranOnlyEnabled().catch(() => {
+    /* پیش‌گرم شکست خورد — مسیر lazy خودش می‌پاید */
+  })
+  const geoWarmTimer = setInterval(() => {
+    void deps.geo.iranOnlyEnabled().catch(() => {})
+  }, 60_000)
+  geoWarmTimer.unref?.()
+
   // ── دروازه‌ی جغرافیایی «فقط ایران» — round-28 ──
   // یک پیاده‌سازی برای «کل» سطح حمله، سوار روی نمونه‌ی بیرونی: قبلاً فقط
   // نمونه‌ی /api گیت داشت → /uploads/:name و POST /api/uploads و /swagger
@@ -284,7 +294,9 @@ export const buildApp = (deps: AppDeps) => {
     .onAfterResponse(({ request, set }) =>
       deps.metrics.observeResponse(request, Number(set.status ?? 200)),
     )
-    .use(openapiPlugin(deps.config))
+    // رارد L5 — defense-in-depth: سوئگر فقط dev مونت می‌شود (قبلاً در prod فقط
+    // لبه‌ی Caddy می‌بستش؛ اجرای مستقیم پورت یعنی مستندات کامل رووت‌ها عمومی)
+    .use(!deps.config.isProd ? openapiPlugin(deps.config) : new Elysia())
     .use(
       cors({
         origin: deps.config.isProd ? false : ['http://localhost:3001', 'http://localhost:3000'],

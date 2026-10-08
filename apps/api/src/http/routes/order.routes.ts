@@ -43,6 +43,26 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
    * phase-fix — سقف هر «کاربر» (نه IP — CGNAT ایرانی: ده‌ها کاربر پشت یک IP).
    * شکست‌باز: قطعی Redis = عبور؛ این سقف ضد سوءاستفاده است نه ضد پیک.
    */
+  // رارد L7 — پشتیبان در-حافظه وقتی ردیس پایین است: قبلاً fail-open یعنی
+  // بی‌سقفِ کامل؛ حالا همان سقف/پنجره با شمارنده‌ی محلی (per-instance).
+  const fallbackCounts = new Map<string, { count: number; resetAt: number }>()
+  const fallbackLimit = (key: string, limit: number, windowSeconds: number): void => {
+    const now = Date.now()
+    const entry = fallbackCounts.get(key)
+    if (!entry || entry.resetAt <= now) {
+      if (fallbackCounts.size > 10_000) fallbackCounts.clear() // سقف حافظه
+      fallbackCounts.set(key, { count: 1, resetAt: now + windowSeconds * 1000 })
+      return
+    }
+    entry.count += 1
+    if (entry.count > limit) {
+      throw Err.rateLimited(
+        'درخواست‌های شما زیاد است؛ کمی بعد دوباره تلاش کنید.',
+        Math.max(1, Math.ceil((entry.resetAt - now) / 1000)),
+      )
+    }
+  }
+
   const perUserLimit = async (
     userId: string,
     scope: string,
@@ -51,7 +71,11 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
   ): Promise<void> => {
     const key = `rl:${scope}:user:${userId}`
     const count = await deps.redis.incr(key)
-    if (!Number.isFinite(count) || count < 1) return // ردیس پایین — عبور
+    if (!Number.isFinite(count) || count < 1) {
+      // ردیس پایین — رارد L7: دیگر بی‌سقف نیستیم
+      fallbackLimit(key, limit, windowSeconds)
+      return
+    }
     if (count === 1 || count <= limit) {
       await deps.redis.expire(key, windowSeconds)
     }
@@ -161,8 +185,13 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
 
         // رارد ۴۳ — پاسخ چک‌اوت با قرارداد مشترک تایپ‌دار شد
         let response: CheckoutResponse
+        // رارد C2 — آیا سفارش COMMIT شده؟ اگر initiate بعد از commit شکست
+        // بخورد، release یعنی بمب «سفارش تکراری» (replay همان کلید → سفارش
+        // دوم + رزرو دوبل کیف/کوپن تا ۳۰ دقیقه). پس: قفل، نه آزادسازی.
+        let committed: { displayId: string; breakdown: CheckoutResponse['breakdown'] } | null = null
         try {
           const r = await deps.orders.checkout(user.id, body)
+          committed = { displayId: r.displayId, breakdown: r.breakdown }
           // round-16 — چک‌اوت تمام-کیف‌پول همین‌جا PAID می‌شود؛
           // پس از commit به پنل زنده اعلام (مسیر درگاهی در PaymentService.finalize اعلام می‌کند)
           if (!r.requiresPayment) {
@@ -196,7 +225,25 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
               breakdown: r.breakdown,
             }
         } catch (e) {
-          // شکست چک‌اوت — تصرف آزاد شود تا تلاش مجدد ممکن باشد
+          if (committed) {
+            // ✅ رارد C2: سفارش در DB ثبت شده — release ممنوع. پاسخِ قفل‌شده
+            // باعث می‌شود replayِ همان کلید دوباره سفارش نسازد؛ کاربر پرداخت
+            // را از صفحه‌ی سفارش ادامه می‌دهد (job تایم‌اوت هم آن را می‌پاید).
+            if (idemKey) {
+              await deps.idempotency.complete(user.id, idemKey, {
+                orderCompleted: false,
+                orderId: committed.displayId,
+                requiresPayment: true,
+                paymentUrl: undefined,
+                breakdown: committed.breakdown,
+              })
+            }
+            throw Err.serviceUnavailable(
+              `سفارش ${committed.displayId} ثبت شد اما اتصال به درگاه برقرار نشد؛ ` +
+                'پرداخت را از صفحه‌ی سفارش ادامه دهید.',
+            )
+          }
+          // شکستِ واقعی چک‌اوت (قبل از commit) — تصرف آزاد شود تا تلاش مجدد ممکن باشد
           if (idemKey) await deps.idempotency.release(user.id, idemKey)
           throw e
         }

@@ -187,11 +187,12 @@ export const realtimeRoutes = (deps: RealtimeDeps) =>
         })
       },
       {
-        query: t.Object({ channel: t.Optional(t.String()), token: t.Optional(t.String()) }),
+        // رارد H5 — token از query حذف شد؛ فقط هدر Authorization
+        query: t.Object({ channel: t.Optional(t.String()) }),
         detail: {
           summary: 'SSE live stream',
           description:
-            'Auth via Bearer header or ?token=. Channel authorization: demo:* = any user; orders:new = admins only; orders:{id} = admins or the order owner. Pull-based stream (backpressure-safe, bounded queue), 15s heartbeat. Connection caps: 5 per user, 500 total (round-28).',
+            'Auth via Bearer header only (fetch-based SSE on the frontend — tokens never travel in URLs). Channel authorization: demo:* = any user; orders:new = admins only; orders:{id} = admins or the order owner. Pull-based stream (backpressure-safe, bounded queue), 15s heartbeat. Connection caps: 5 per user, 500 total (round-28).',
         },
       },
     )

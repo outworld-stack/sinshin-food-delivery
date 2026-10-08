@@ -43,8 +43,11 @@ COPY package.json bun.lock bunfig.toml ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
+# رارد M20 — فقط وابستگی‌های api (+shared وابسته‌ی آن): --production در
+# ریشه‌ی workspace، prod deps «وب» را هم نصب می‌کرد (react/swiper/…)
+# بدون آنکه api هیچ‌وقت importشان کند.
 RUN --mount=type=cache,id=sinshin-bun-api-runtime,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile --production --network-concurrency 8
+    bun install --frozen-lockfile --production --filter '@sinshin/api' --network-concurrency 8
 COPY packages/shared/src packages/shared/src
 COPY apps/api apps/api
 RUN mkdir -p /data/uploads \

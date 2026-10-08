@@ -1,4 +1,5 @@
 //src/infra/db/schema/coupons.ts
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   date,
@@ -91,6 +92,11 @@ export const couponRedemptions = pgTable(
   (t) => [
     index('redemptions_coupon_idx').on(t.couponId),
     index('redemptions_user_idx').on(t.userId),
+    // رارد L11 — یک کوپن روی یک سفارش فقط یک بار ثبت مصرف می‌شود؛
+    // onConflictDoNothing در order.service حالا قید واقعی پشتش است.
+    uniqueIndex('redemptions_coupon_order_key')
+      .on(t.couponId, t.orderId)
+      .where(sql`order_id is not null`),
   ],
 )
 

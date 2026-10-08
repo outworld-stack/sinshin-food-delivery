@@ -190,13 +190,32 @@ export class PaymentService {
       try {
         let success = false
         const gwId = (p.gateway ?? '').toUpperCase()
-        if (gwId && gwId !== 'MOCK' && p.gatewayRef) {
-          const gw = this.gateways.get(gwId) // مستقیم — بدون گارد حالت
-          if (gw && gw.mode !== 'mock') {
-            const v = await gw.verify({ gatewayRef: p.gatewayRef, amount: p.amount, query: {} })
-            if (v.indeterminate) continue
-            success = v.success
+        const gw = gwId && gwId !== 'MOCK' ? this.gateways.get(gwId) : undefined
+        const isRealGateway = !!gw && gw.mode !== 'mock'
+
+        if (isRealGateway && p.gatewayRef) {
+          const v = await gw!.verify({ gatewayRef: p.gatewayRef, amount: p.amount, query: {} })
+          if (v.indeterminate) {
+            // رارد H6 — پنجره‌ی ۲۴ ساعت: پول ممکن است در PSP گرفته شده باشد.
+            // بعد از آن فقط «هشدار قطعی R12» — fail خودکار ممنوع (بازگشت وجه اشتباه).
+            const ageHours = (Date.now() - p.updatedAt.getTime()) / 3_600_000
+            if (ageHours < 24) continue
+            console.error(
+              `[payments] R12 UNRESOLVED after 24h: ${p.id} gateway=${gwId} — بررسی دستی پنل PSP لازم`,
+            )
+            continue
           }
+          success = v.success
+        } else if (isRealGateway && !p.gatewayRef) {
+          // رارد H6 — درگاه واقعی بدون callback/RefNum: همان پنجره‌ی ۲۴h + R12.
+          // قبلاً این پرداخت ۳۰ دقیقه بعد fail و کیف پول آزاد می‌شد در حالی که
+          // پولِ مشتری در PSP captured بود.
+          const ageHours = (Date.now() - p.updatedAt.getTime()) / 3_600_000
+          if (ageHours < 24) continue
+          console.error(
+            `[payments] R12 UNRESOLVED after 24h (no callback): ${p.id} gateway=${gwId} — بررسی دستی پنل PSP لازم`,
+          )
+          continue
         }
         await this.finalize(
           p.id,
@@ -239,7 +258,7 @@ export class PaymentService {
     success: boolean,
     gatewayRef: string | null | undefined,
     failInfo?: Record<string, unknown>,
-  ): Promise<{ orderDisplayId: string; paymentStatus: string }> {
+  ): Promise<{ orderDisplayId: string; paymentStatus: string; userId: string }> {
     const { db } = this.deps
 
     const result = await db.transaction(async (tx) => {
@@ -279,11 +298,15 @@ export class PaymentService {
 
       if (success) {
         await this.deps.orders.settlePayment(tx, orderRow)
-        return { orderDisplayId: orderRow.displayId, paymentStatus: 'SUCCESS' }
+        return { orderDisplayId: orderRow.displayId, paymentStatus: 'SUCCESS', userId: orderRow.userId }
       }
       await this.deps.orders.failPayment(tx, orderRow)
-      return { orderDisplayId: orderRow.displayId, paymentStatus: 'FAILED' }
+      return { orderDisplayId: orderRow.displayId, paymentStatus: 'FAILED', userId: orderRow.userId }
     })
+
+    // رارد M9 — اعطای کوپنِ «بعد از commit»: grantCouponsAfterCommit خودش
+    // try/catch دارد و هرگز مسیر پرداخت را نمی‌شکند.
+    await this.deps.orders.grantCouponsAfterCommit(result.userId)
 
     // round-16 — پس از commit (نه داخل tx): پنل زنده با SSE فوراً باخبر می‌شود.
     // موفق = سفارش جدید در صف | شکست = حذف از صف (پنل رفرش می‌کند)

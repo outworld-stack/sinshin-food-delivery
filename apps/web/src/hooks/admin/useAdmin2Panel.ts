@@ -97,13 +97,14 @@ export function useAdmin2Panel() {
     refetchIntervalInBackground: true,
   })
 
-  // ⬅ round-16 — اتصال SSE به کانال orders:new (توکن در کوئری — EventSource
-  // هدر نمی‌تواند بفرستد؛ requireAuth سمت سرور ?token= را می‌پذیرد)
+  // ⬅ round-16 → رارد H5 — SSE با fetch + هدر Authorization: توکن دیگر در
+  // URL نمی‌سفرد (هیستوری مرورگر/لاگ پروکسی‌ها). EventSource هدر نمی‌گرفت؛
+  // استریم را خودمان با ReadableStream می‌خوانیم. پول تطبیقی تور ایمنی است.
   useEffect(() => {
     if (!session?.isAdmin2LoggedIn) return
-    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
+    if (typeof window === 'undefined' || typeof AbortController === 'undefined') return
 
-    let es: EventSource | null = null
+    let abort: AbortController | null = null
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
     let disposed = false
@@ -117,46 +118,70 @@ export function useAdmin2Panel() {
       }, 400)
     }
 
-    const connect = () => {
+    // فریم SSE: «event: <name>\ndata: <json>» — فریم‌های heartbeat (: ping) نامیده نمی‌شوند
+    const parseFrame = (frame: string): void => {
+      let eventName = ''
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim()
+      }
+      if (eventName === 'connected') setSseConnected(true)
+      if ((SSE_EVENTS as readonly string[]).includes(eventName)) requestRefetch()
+    }
+
+    const connect = async (): Promise<void> => {
       if (disposed) return
       const token = getAccessToken()
       if (!token) {
-        // round-29 — قبلاً اینجا return خالی بود: اگر توکن در لحظه‌ی connect آماده
-        // نبود، SSE بدون هیچ تلاش مجدد برای همیشه خاموش می‌ماند (فقط پول ۲.۵/۱۰s می‌ماند).
-        // حالا: تلاش مجدد کوتاه‌مدت تا توکن برسد؛ پاک‌سازیِ تایمر را می‌بندد.
+        // round-29 — تلاش مجدد کوتاه‌مدت تا توکن هیدریشن‌شده برسد
         if (!retryTimer) {
           retryTimer = setTimeout(() => {
             retryTimer = null
-            connect()
+            void connect()
           }, SSE_TOKEN_WAIT_MS)
         }
         return
       }
-      es = new EventSource(
-        `${apiBase()}/realtime/stream?channel=orders:new&token=${encodeURIComponent(token)}`,
-      )
-      es.addEventListener('open', () => setSseConnected(true))
-      for (const ev of SSE_EVENTS) es.addEventListener(ev, requestRefetch)
-      es.addEventListener('error', () => {
-        // قطع/خطا: پول تطبیقی فوراً برمی‌گردد؛ ۶۰s بعد با توکن تازه دوباره
+      abort = new AbortController()
+      try {
+        const res = await fetch(`${apiBase()}/realtime/stream?channel=orders:new`, {
+          headers: { authorization: `Bearer ${token}` },
+          cache: 'no-store',
+          signal: abort.signal,
+        })
+        if (!res.ok || !res.body) throw new Error(`SSE failed (${res.status})`)
+        setSseConnected(true)
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const frames = buffer.split('\n\n')
+          buffer = frames.pop() ?? ''
+          for (const f of frames) parseFrame(f)
+        }
+        // استریم از سمت سرور بسته شد → مثل خطا: پول برمی‌گردد، تلاش مجدد
+        throw new Error('SSE stream closed')
+      } catch {
         setSseConnected(false)
-        es?.close()
-        es = null
+        abort?.abort()
+        abort = null
         if (!disposed && !retryTimer) {
           retryTimer = setTimeout(() => {
             retryTimer = null
-            connect()
+            void connect()
           }, SSE_RETRY_MS)
         }
-      })
+      }
     }
-    connect()
+    void connect()
 
     return () => {
       disposed = true
       if (debounceTimer) clearTimeout(debounceTimer)
       if (retryTimer) clearTimeout(retryTimer)
-      es?.close()
+      abort?.abort()
       setSseConnected(false)
     }
   }, [session?.isAdmin2LoggedIn, refetchLive])

@@ -6,7 +6,7 @@
 // ═════════════════════════════════════════════════════════════
 
 // src/domain/admin/admin.service.ts
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, ilike, isNull, ne, or, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import {
@@ -50,11 +50,13 @@ export class AdminService {
                 }).from(orders)
                     .where(ne(orders.status, 'CANCELED')).then((r) => r[0] ?? { count: 0 }),
                 // totalRevenue جدا:
+                // رارد C1 — ::bigint (بدون سقف)؛ Number() چون Bun.sql مقدار bigint
+                // را string برمی‌گرداند. الگو: live.service.ts خط 121.
                 db.select({
-                    revenue: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
+                    revenue: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
                 }).from(orders)
                     .where(and(eq(orders.paymentStatus, 'SUCCESS'), ne(orders.status, 'CANCELED')))
-                    .then((r) => r[0]?.revenue ?? 0),
+                    .then((r) => Number(r[0]?.revenue ?? 0)),
                 db.select({
                     id: orders.displayId,
                     user: users.phone,
@@ -133,25 +135,45 @@ export class AdminService {
 
         const where = conditions.length > 0 ? and(...conditions) : undefined
 
+        // رارد M2 — سورت روی walletBalance/totalSpent قبلاً زیرکوئریِ همبسته به‌ازای
+        // هر کاربر منطبق بود (۵ هزار کاربر = ۵ هزار SUM در هر درخواست). حالا دو
+        // تجمیعِ گروه‌بندی‌شده یک‌بار محاسبه و LEFT JOIN می‌شوند — همان الگوی
+        // usersReport در report-query.service.ts. ::bigint برای رارد C1.
+        const walletAgg = db
+            .select({
+                userId: walletTransactions.userId,
+                balance: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::bigint`.as('balance'),
+            })
+            .from(walletTransactions)
+            .groupBy(walletTransactions.userId)
+            .as('wallet_agg')
+
+        const spentAgg = db
+            .select({
+                userId: orders.userId,
+                total: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::bigint`.as('total'),
+            })
+            .from(orders)
+            .groupBy(orders.userId)
+            .as('spent_agg')
+
         // Sort
         let orderBy
         if (filters.sorts && filters.sorts.length > 0) {
             const sort = filters.sorts[0]!
             const col = sort.field === 'walletBalance'
-                ? sql`coalesce((
-            select sum(case when wt.type = 'DEPOSIT' then wt.amount else -wt.amount end)
-            from wallet_transactions wt where wt.user_id = ${users.id}
-          ), 0)`
+                ? sql`coalesce(${walletAgg.balance}, 0)`
                 : sort.field === 'totalSpent'
-                    ? sql`coalesce((
-            select sum(o.total_amount) from orders o
-            where o.user_id = ${users.id} and o.payment_status = 'SUCCESS' and o.status != 'CANCELED'
-          ), 0)`
+                    ? sql`coalesce(${spentAgg.total}, 0)`
                     : users.createdAt
             orderBy = sort.dir === 'asc' ? sql`${col} asc` : sql`${col} desc`
         } else {
             orderBy = desc(users.createdAt)
         }
+
+        // رارد M5 — سقف دفاعی: page=999999 یعنی اسکن ~۱۰۰M ردیف در PG
+        const page = Math.min(Math.max(1, filters.page || 1), 500)
+        const limit = Math.min(Math.max(1, filters.limit || 20), 100)
 
         const total = await db
             .select({ count: sql<number>`count(*)::int` })
@@ -166,46 +188,22 @@ export class AdminService {
                 phone: users.phone,
                 bannedAt: users.bannedAt,
                 createdAt: users.createdAt,
+                // رارد M2 — ستون‌های تجمیع از همان JOIN (bigint → Number پایین‌تر)
+                balance: walletAgg.balance,
+                spentTotal: spentAgg.total,
                 // stage-10: آیکون مسدودسازی ادمین اصلی در فرانت غیرفعال می‌شود
                 role: users.role,
             })
             .from(users)
+            .leftJoin(walletAgg, eq(walletAgg.userId, users.id))
+            .leftJoin(spentAgg, eq(spentAgg.userId, users.id))
             .where(where)
             .orderBy(orderBy)
-            .limit(filters.limit)
-            .offset((filters.page - 1) * filters.limit)
+            .limit(limit)
+            .offset((page - 1) * limit)
 
-        // Wallet + totalSpent برای هر کاربر (batch)
-        const userIds = rows.map((r) => r.id)
-        const walletBalances = userIds.length
-            ? await db
-                .select({
-                    userId: walletTransactions.userId,
-                    balance: sql<number>`sum(${signedWalletAmount})::int`,
-                })
-                .from(walletTransactions)
-                .where(inArray(walletTransactions.userId, userIds))
-                .groupBy(walletTransactions.userId)
-            : []
-        const balanceMap = new Map(walletBalances.map((w) => [w.userId, w.balance]))
-
-        const spentRows = userIds.length
-            ? await db
-                .select({
-                    userId: orders.userId,
-                    total: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
-                })
-                .from(orders)
-                .where(
-                    and(
-                        inArray(orders.userId, userIds),
-                        eq(orders.paymentStatus, 'SUCCESS'),
-                        ne(orders.status, 'CANCELED'),
-                    ),
-                )
-                .groupBy(orders.userId)
-            : []
-        const spentMap = new Map(spentRows.map((s) => [s.userId, s.total]))
+        // رارد M2 — موجودی و مجموع خرید از همان JOIN بالا می‌آیند؛ دو کوئریِ
+        // batch اضافی حذف شد. Number() برای bigint (رارد C1).
 
         return {
             users: rows.map((r) => {
@@ -217,8 +215,8 @@ export class AdminService {
                     phone: r.phone,
                     device: '—',
                     status: r.bannedAt ? 'SUSPENDED' : 'ACTIVE',
-                    walletBalance: balanceMap.get(r.id) ?? 0,
-                    totalSpent: spentMap.get(r.id) ?? 0,
+                    walletBalance: Number(r.balance ?? 0),
+                    totalSpent: Number(r.spentTotal ?? 0),
                     registeredAt: r.createdAt,
                     role: r.role,
                 }
@@ -536,6 +534,10 @@ export class AdminService {
 
         const where = conditions.length > 0 ? and(...conditions) : undefined
 
+        // رارد M5 — سقف دفاعی صفحه (جلوی page=999999 و limit غول‌پیکر)
+        const page = Math.min(Math.max(1, filters.page || 1), 500)
+        const limit = Math.min(Math.max(1, filters.limit || 20), 100)
+
         // ⬅ phase-3: سورت واقعی (قبلاً همیشه createdAt desc)
         const orderBy =
             filters.sortAmount === 'highest'
@@ -573,8 +575,8 @@ export class AdminService {
             .leftJoin(couriers, eq(couriers.id, orders.courierId))
             .where(where)
             .orderBy(orderBy)
-            .limit(filters.limit)
-            .offset((filters.page - 1) * filters.limit)
+            .limit(limit)
+            .offset((page - 1) * limit)
 
         return {
             orders: rows.map((r) => ({

@@ -147,13 +147,20 @@ export class ReconcileService {
 
     private async tryAutoSettle(orderId: string, displayId: string): Promise<void> {
         try {
+            // رارد M9 — userId بیرون از tx گرفته می‌شود تا اعطای کوپن
+            // «بعد از commit» اجرا شود (بیرون از قفل کاربر).
+            let settledUserId: string | null = null
             await this.deps.db.transaction(async (tx) => {
                 const order = (
                     await tx.select().from(orders).where(eq(orders.id, asOrderId(orderId)))
                 )[0]
                 if (!order || order.status !== 'PENDING_PAYMENT') return // هم‌زمان settle شد
                 await this.deps.orders.settlePayment(tx, order)
+                settledUserId = order.userId
             })
+            if (settledUserId) {
+                await this.deps.orders.grantCouponsAfterCommit(settledUserId)
+            }
             console.log(`[reconcile] R1 auto-fixed ${displayId}`)
         } catch (e) {
             console.error(`[reconcile] R1 auto-fix failed for ${displayId}:`, e)

@@ -58,6 +58,10 @@ import { UUID_RE } from '#/domain/shared/ids'
 
 const PHONE_RE = /^09[0-9]{9}$/
 
+// رارد M8 — کش کوچکِ TTL برای گزارش‌ها (۶۰s): گزارش ادمین معمولاً چند‌بار
+// پشت‌سرهم (رفرش/چاپ) صدا می‌شوند و کوئری‌های سنگینشان تکرار می‌شود.
+const reportCache = new Map<string, { at: number; value: AdminReportResult }>()
+
 export class ReportQueryService {
     constructor(
         private readonly deps: {
@@ -67,6 +71,17 @@ export class ReportQueryService {
     ) { }
 
     async query(input: AdminReportQuery): Promise<AdminReportResult> {
+        // رارد M8 — کلید کش = خودِ ورودی (قطعی و کامل)؛ TTL = ۶۰ ثانیه.
+        const cacheKey = JSON.stringify(input)
+        const hit = reportCache.get(cacheKey)
+        if (hit && Date.now() - hit.at < 60_000) return hit.value
+        const value = await this.runQuery(input)
+        if (reportCache.size > 100) reportCache.clear()
+        reportCache.set(cacheKey, { at: Date.now(), value })
+        return value
+    }
+
+    private async runQuery(input: AdminReportQuery): Promise<AdminReportResult> {
         const from = this.parseDate(input.from)
         const to = this.parseDate(input.to)
         const generatedAt = new Date().toISOString()
@@ -111,7 +126,8 @@ export class ReportQueryService {
             .innerJoin(users, eq(users.id, orders.userId))
             .where(conditions.length > 0 ? and(...conditions) : undefined)
             .orderBy(desc(orders.createdAt))
-            .limit(2000)
+            // رارد M8 — سقف ۵۰۰ ردیف (۲۰۰۰ × ردیف کاملِ orders خیلی سنگین بود)
+            .limit(500)
 
         const paid = rows.filter(({ o }) => o.status !== 'CANCELED')
         const sum = (fn: (o: typeof orders.$inferSelect) => number) =>
@@ -339,22 +355,33 @@ export class ReportQueryService {
         if (from) conditions.push(gte(users.createdAt, from))
         if (to) conditions.push(lte(users.createdAt, to))
 
+        // رارد M1 — تجمیع‌ها قبلاً بدون هیچ WHERE روی کل تاریخِ orders و
+        // wallet_transactions می‌رفتند (هر کلیک = چند اسکن کامل). حالا به
+        // بازه‌ی خودِ گزارش محدودند. رارد C1 — ::bigint + Number() در مصرف.
+        const orderAggConds: SQL[] = []
+        if (from) orderAggConds.push(gte(orders.createdAt, from))
+        if (to) orderAggConds.push(lte(orders.createdAt, to))
         const ordersAgg = this.deps.db
             .select({
                 userId: orders.userId,
                 ordersCount: sql<number>`count(*) filter (where ${orders.status} <> 'CANCELED')::int`.as('orders_count'),
-                totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::int`.as('total_spent'),
+                totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::bigint`.as('total_spent'),
             })
             .from(orders)
+            .where(orderAggConds.length > 0 ? and(...orderAggConds) : undefined)
             .groupBy(orders.userId)
             .as('orders_agg')
 
+        const walletAggConds: SQL[] = []
+        if (from) walletAggConds.push(gte(walletTransactions.createdAt, from))
+        if (to) walletAggConds.push(lte(walletTransactions.createdAt, to))
         const walletAgg = this.deps.db
             .select({
                 userId: walletTransactions.userId,
-                wallet: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::int`.as('wallet'),
+                wallet: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::bigint`.as('wallet'),
             })
             .from(walletTransactions)
+            .where(walletAggConds.length > 0 ? and(...walletAggConds) : undefined)
             .groupBy(walletTransactions.userId)
             .as('wallet_agg')
 
@@ -388,9 +415,9 @@ export class ReportQueryService {
                         u.name ?? 'ناشناس',
                         u.phone,
                         u.bannedAt ? 'مسدود' : 'فعال',
-                        faNum(ordersCount ?? 0),
-                        faNum(totalSpent ?? 0),
-                        faNum(wallet ?? 0),
+                        faNum(Number(ordersCount ?? 0)),
+                        faNum(Number(totalSpent ?? 0)),
+                        faNum(Number(wallet ?? 0)),
                         faDate(u.createdAt),
                     ]),
                 },

@@ -87,5 +87,11 @@ export const walletTransactions = pgTable(
     uniqueIndex('wallet_tx_reversal_once_key')
       .on(t.referralProfitId)
       .where(sql`type = 'WITHDRAW' and referral_profit_id is not null`),
+    // رارد L3 — مکملِ WITHDRAW: بازگشت وجه (DEPOSIT با orderId) هم تکرارناپذیر.
+    // failPayment و refund هر دو DEPOSIT با همان orderId می‌نویسند؛ این قید
+    // دوبل‌برداخت را در سطح DB می‌بندد (onConflictDoNothing حالا واقعی کار می‌کند).
+    uniqueIndex('wallet_tx_refund_once_key')
+      .on(t.orderId)
+      .where(sql`type = 'DEPOSIT' and order_id is not null`),
   ],
 )

@@ -49,6 +49,18 @@ export interface LiveOrderView {
  * مالکیت با تایید — confirmedBy.
  */
 export class LiveService {
+	// رارد M7 — کش ۱.۵ ثانیه‌ای per-viewer: پنل با پولِ ۲.۵s همه‌چیز را
+	// رفرش می‌کند و چند ادمین هم‌زمان یعنی همان کوئری‌ها در ثانیه‌ی تکراری.
+	// confirm/reassign کش را فوراً بی‌اعتبار می‌کنند.
+	private readonly liveOrdersCache = new Map<
+		string,
+		{ at: number; value: { orders: LiveOrderView[]; total: number } }
+	>();
+
+	private liveOrdersCacheInvalidate(): void {
+		this.liveOrdersCache.clear();
+	}
+
 	constructor(
 		private readonly deps: {
 			db: Db;
@@ -68,6 +80,12 @@ export class LiveService {
 		adminUserId: string,
 		viewerRole: string,
 	): Promise<{ orders: LiveOrderView[]; total: number }> {
+
+	// رارد M7 — hit کوتاه: تازگی داده‌ی پنل زنده تا ۱.۵ ثانیه کافی است
+	const cacheKey = `${adminUserId}:${viewerRole}`;
+	const hit = this.liveOrdersCache.get(cacheKey);
+	if (hit && Date.now() - hit.at < 1_500) return hit.value;
+
 		const isMainAdmin = viewerRole === "admin";
 		const scope = isMainAdmin
 			? { hall: true, takeaway: true }
@@ -98,11 +116,14 @@ export class LiveService {
 			.orderBy(desc(orders.createdAt))
 			.limit(200);
 
-		return {
+		const result = {
 			orders: await this.toViews(rows),
 			total: rows.length,
-		};
-	}
+			};
+		if (this.liveOrdersCache.size > 200) this.liveOrdersCache.clear()
+		this.liveOrdersCache.set(cacheKey, { at: Date.now(), value: result })
+		return result
+		}
 
 	/** آمار داشبورد ادمین۲ — فقط سفارشات خودش */
 	async admin2Stats(adminUserId: string) {
@@ -275,6 +296,7 @@ export class LiveService {
 		});
 		await this.deps.admin2.touchActivity(adminUserId);
 
+		this.liveOrdersCacheInvalidate(); // رارد M7
 		// پنل‌های همه‌ی ادمین‌های دیگر — سفارش از صف رفت
 		this.deps.hub.publish("orders:new", {
 			event: "order-confirmed",
@@ -331,6 +353,7 @@ export class LiveService {
 			newCourierId,
 		});
 		await this.deps.admin2.touchActivity(adminUserId);
+		this.liveOrdersCacheInvalidate(); // رارد M7
 		this.deps.hub.publish("orders:new", {
 			event: "order-updated",
 			data: { id: displayId },

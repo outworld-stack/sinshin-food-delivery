@@ -7,8 +7,10 @@ import { Err } from '#/domain/shared/errors'
 /** استخراج + احراز توکن — مشترک بین requireAuth و requireAdmin */
 export async function authenticateRequest(sessions: SessionService, request: Request) {
   const header = request.headers.get('authorization') ?? ''
-  let token = header.startsWith('Bearer ') ? header.slice(7).trim() : null
-  if (!token) token = new URL(request.url).searchParams.get('token')
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : null
+  // رارد H5 — مسیر query string حذف شد: توکن کامل در URL یعنی نشت به
+  // هیستوری مرورگر و access-log هر لایه‌ی میانی. SSE از این پس با
+  // fetch + هدر Authorization خوانده می‌شود (useAdmin2Panel.ts).
   if (!token) throw Err.unauthorized()
 
   return sessions.authenticate(token)

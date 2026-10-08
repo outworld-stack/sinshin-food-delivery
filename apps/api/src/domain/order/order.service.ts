@@ -92,11 +92,13 @@ export class OrderService {
 	async walletBalance(db: DbOrTx, userId: string): Promise<number> {
 		const rows = await db
 			.select({
-				balance: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::int`,
+				// رارد C1 — ::bigint (بدون سقف)؛ Number() چون Bun.sql مقدار bigint
+				// را string برمی‌گرداند.
+				balance: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::bigint`,
 			})
 			.from(walletTransactions)
 			.where(eq(walletTransactions.userId, userId));
-		return rows[0]?.balance ?? 0;
+		return Number(rows[0]?.balance ?? 0);
 	}
 
 	/**
@@ -112,7 +114,8 @@ export class OrderService {
 		const { db } = this.deps;
 		if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
 
-		return db.transaction(async (tx) => {
+		// رارد M9 — نتیجه‌ی tx گرفته می‌شود تا اعطای کوپن بعد از commit اجرا شود
+		const result = await db.transaction(async (tx) => {
 			// ── قفل کاربر — سریالی‌کردنِ برداشت‌های کیف پول ──
 			const [user] = await tx
 				.select()
@@ -391,6 +394,32 @@ export class OrderService {
 				breakdown,
 			};
 		});
+
+		// رارد M9 — اعطای کوپنِ «بعد از commit»: بیرون از tx و بدون قفل کاربر.
+		// خطا هرگز نباید چک‌اوتِ موفقِ قبلی را خراب کند — فقط لاگ.
+		await this.grantCouponsAfterCommit(userId);
+		return result;
+	}
+
+	/**
+	 * رارد M9 — گرنت کوپن‌های واجدشرط، بعد از commit و با tx خودش.
+	 * عمومی است چون payment.service و reconcile.service هم بعد از تسویه
+	 * صدا می‌زنند. امن: یکتایی با grants_coupon_user_key.
+	 */
+	async grantCouponsAfterCommit(userId: string): Promise<void> {
+		try {
+			const granted = await this.deps.coupons.grantIfEligibleAfterCommit(userId);
+			if (granted > 0) {
+				console.log(
+					`[order] ${granted} coupon grant(s) for user ${userId} (post-commit)`,
+				);
+			}
+		} catch (e) {
+			console.error(
+				`[order] post-commit coupon grant failed for user ${userId}:`,
+				e,
+			);
+		}
 	}
 
 	/**
@@ -633,16 +662,11 @@ export class OrderService {
 			}
 		}
 
-		// ── اعطای لحظه‌ای — شرط‌های کوپن‌های خصوصی فعال چک و گرنت ──
-		const granted = await this.deps.coupons.grantIfEligible(
-			tx,
-			orderRow.userId,
-		);
-		if (granted > 0) {
-			console.log(
-				`[order] ${orderRow.displayId}: ${granted} coupon grant(s) for user ${orderRow.userId}`,
-			);
-		}
+		// رارد M9 — اعطای کوپن از داخل tx تسویه (زیر قفل FOR UPDATE کاربر) به
+		// بعد از commit منتقل شد: ۲ کوئری به‌ازای هر کوپنِ فعالِ شرطدار دیگر
+		// قفل پول را نگه نمی‌دارد. یکتایی گرنت با unique index
+		// grants_coupon_user_key + onConflictDoNothing تضمین می‌شود.
+		// فراخوانی بعد از commit: order.routes / payment.service / reconcile.
 
 		// گزارشی: «در زمان بسته (هر نوع) ثبت شد» — بدون سد؛ ادمین۲ می‌تواند بلافاصله تایید کند
 		const status = await this.deps.settings.restaurantStatus();

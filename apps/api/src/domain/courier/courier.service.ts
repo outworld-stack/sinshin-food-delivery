@@ -116,28 +116,37 @@ export class CourierService {
 
   // ── اسکن QR — رسیدن پیک → ON_THE_WAY ──
 
+  // رارد L4 — همه‌ی مسیرهای «ناموفق اسکن» یک پیام می‌دهند تا QR-scanner
+  // نتواند بین «سفارش نیست / وضعیت اشتباه / توکن غلط» تفکیک کند (status oracle).
+  private static readonly SCAN_FAILED = 'اسکن ناموفق بود.'
+
   async scanArrival(
     displayId: string,
     courierToken: string | null,
   ): Promise<{ success: boolean; message?: string }> {
-    const row = await this.mustGet(displayId)
+    let row: OrderRow
+    try {
+      row = await this.mustGet(displayId)
+    } catch {
+      return { success: false, message: CourierService.SCAN_FAILED }
+    }
     if (row.status !== 'CONFIRMED') {
-      return { success: false, message: 'وضعیت سفارش اجازه اسکن نمی‌دهد' }
+      return { success: false, message: CourierService.SCAN_FAILED }
     }
     if (row.deliveryType !== 'DELIVERY') {
-      return { success: false, message: 'این سفارش ارسال با پیک ندارد' }
+      return { success: false, message: CourierService.SCAN_FAILED }
     }
 
     if (row.courierSecurityEnabled) {
       if (!courierToken) {
-        return { success: false, message: 'این سفارش نیاز به احراز هویت پیک دارد' }
+        return { success: false, message: CourierService.SCAN_FAILED }
       }
       const courierId = await this.courierIdFromToken(courierToken)
       if (!courierId) {
-        return { success: false, message: 'نشست پیک منقضی شده؛ دوباره کد بگیرید' }
+        return { success: false, message: CourierService.SCAN_FAILED }
       }
       if (row.courierId && courierId !== row.courierId) {
-        return { success: false, message: 'این پیک به این سفارش تخصیص نیافته' }
+        return { success: false, message: CourierService.SCAN_FAILED }
       }
     }
 
@@ -150,7 +159,7 @@ export class CourierService {
       })
       .where(and(eq(orders.id, row.id), eq(orders.status, 'CONFIRMED')))
       .returning()
-    if (!updated) return { success: false, message: 'وضعیت تغییر کرد؛ دوباره تلاش کنید' }
+    if (!updated) return { success: false, message: CourierService.SCAN_FAILED }
 
     // سفرِ پیک — باز کن اگر سشنِ بازی نیست، تحویل ثبت در confirmDelivery
     return { success: true }
@@ -260,24 +269,43 @@ export class CourierService {
       : undefined
     const visibleWhere = and(courierWhere, rangeExists)
 
-    const courierRows = await db
+    // رارد M10 — شمارش و صفحه‌بندی در SQL: قبلاً «همه‌ی» ردیف‌های پیکِ
+    // منطبق بارگذاری و در JS برش می‌شد. سقف دفاعی صفحه هم اینجاست.
+    const total = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(couriers)
+      .where(visibleWhere)
+      .then((r) => r[0]?.count ?? 0)
+
+    const page = Math.min(Math.max(1, filters.page || 1), 500)
+    const limit = Math.min(Math.max(1, filters.limit || 10), 50)
+    const pageRows = await db
       .select()
       .from(couriers)
       .where(visibleWhere)
       .orderBy(desc(couriers.createdAt))
-
-    const total = courierRows.length
-    const start = (filters.page - 1) * filters.limit
-    const pageRows = courierRows.slice(start, start + filters.limit)
+      .limit(limit)
+      .offset((page - 1) * limit)
 
     // سفرها و تحویل‌ها فقط برای همین صفحه — نه کل پیک‌ها
+    // رارد M10 — سفرها به پنجره‌ی ۹۰ روزه (یا بازه‌ی گزارش با ۱ روز مهلت)
+    // محدود شدند: قبلاً تاریخچه‌ی نامحدود هر پیک در هر بازدید لود می‌شد.
     const courierIds = pageRows.map((c) => c.id)
+    const tripsFloor = from
+      ? new Date(from.getTime() - 24 * 3600 * 1000) // مهلت ۱ روز قبل از بازه
+      : new Date(Date.now() - 90 * 24 * 3600 * 1000) // پیش‌فرض: ۹۰ روز اخیر
     const trips = courierIds.length
       ? await db
         .select()
         .from(courierTrips)
-        .where(inArray(courierTrips.courierId, courierIds))
+        .where(
+          and(
+            inArray(courierTrips.courierId, courierIds),
+            gte(courierTrips.startedAt, tripsFloor),
+          ),
+        )
         .orderBy(desc(courierTrips.startedAt))
+        .limit(600)
       : []
 
     // فیلتر بازه داخل SQL — ایندکس courier_deliveries_delivered_idx

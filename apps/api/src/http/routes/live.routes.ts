@@ -6,7 +6,7 @@ import { ALL_ADMIN2_PERMISSIONS } from "#/domain/admin2/admin2.service";
 import type { Admin2Service } from "#/domain/admin2/admin2.service";
 import type { LiveService } from "#/domain/live/live.service";
 import type { OrderService } from "#/domain/order/order.service";
-import { requireAdmin2 } from "#/http/hooks/require-admin2";
+import { requireAdmin2, requireAdmin2Permission } from "#/http/hooks/require-admin2";
 import { DISPLAY_PATTERN, UUID_PATTERN } from '#/domain/shared/ids'
 
 
@@ -66,7 +66,17 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
 			},
 		)
 
-		/** لیست زنده — صفِ حوزه + مالِ خودش؛ ادمین اصلی: کل صف + همهٔ فعال‌ها */
+						// رارد H2 — پرمیشن orderDetailsRead واقعاً اعمال شود: داده‌های
+				// سفارش فقط با مجوز؛ /session (خودِ پرمیشن‌ها) بالاتر بی‌گارد ماند.
+				// use وسط زنجیره فقط به روت‌های «بعدی» اعمال می‌شود.
+				.use(
+						requireAdmin2Permission(
+								{ sessions: deps.sessions, admin2: deps.admin2 },
+								"orderDetailsRead",
+						),
+				)
+
+/** لیست زنده — صفِ حوزه + مالِ خودش؛ ادمین اصلی: کل صف + همهٔ فعال‌ها */
 		.get("/orders", ({ user }) => deps.live.liveOrders(user.id, user.role), {
 			detail: {
 				summary:

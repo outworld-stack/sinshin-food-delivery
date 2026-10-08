@@ -111,6 +111,26 @@ app = FastAPI(
     openapi_url=None,   # سرویس داخلی؛ مستندات لازم نیست بیرون دیده شود
 )
 
+# ─── رارد M15 — shared-secret با کانتینر api ──────────────────
+# TRANSLATOR_TOKEN در env تنظیم شود (docker-compose.yml ریشه به این
+# سرویس و api هر دو پاس می‌دهد). خالی = توکن خاموش + هشدار در لاگ.
+_TRANSLATOR_TOKEN = os.environ.get('TRANSLATOR_TOKEN', '')
+if not _TRANSLATOR_TOKEN:
+    print(
+        '[translator] هشدار: TRANSLATOR_TOKEN تنظیم نشده — '
+        'endpoints بدون احراز بازند (فقط برای dev قابل قبول است)',
+        flush=True,
+)
+
+
+def _check_token(request: Request) -> None:
+    """اگر توکن فعال است، هدر x-translator-token باید دقیقاً مطابق باشد."""
+    if not _TRANSLATOR_TOKEN:
+        return
+    supplied = request.headers.get('x-translator-token', '')
+    if supplied != _TRANSLATOR_TOKEN:
+        raise HTTPException(status_code=403, detail='توکن مترجم نامعتبر است.')
+
 
 # ─── مدل‌های بدنه‌ی درخواست ─────────────────────────────────────
 
@@ -193,8 +213,10 @@ def _translate_lines(lines: list[str], flores_tgt: str) -> list[str]:
 
 
 @app.post('/translate')
-def translate(req: TranslateRequest) -> dict[str, Any]:
+def translate(req: TranslateRequest, request: Request) -> dict[str, Any]:
     """ترجمه‌ی دسته‌ای متن — پیش‌فرض و حالت اصلی: فارسی → عربی."""
+    # رارد M15 — احراز shared-secret (اگر TRANSLATOR_TOKEN فعال باشد)
+    _check_token(request)
     # ── اعتبارسنجی اندازه و طول (422 با پیام فارسی) ──
     if not (1 <= len(req.texts) <= MAX_TEXTS):
         raise HTTPException(

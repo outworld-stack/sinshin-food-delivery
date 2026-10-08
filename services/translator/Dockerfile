@@ -78,6 +78,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=converter /model /model
 COPY app.py ./
 
+# رارد M15 — اجرای غیر-root: کاربر سیستم translator؛ مالکیت‌ها
+# فقط برای خواندن لازم است (اپ چیزی روی دیسک نمی‌نویسد).
+RUN useradd --system --no-create-home --uid 1000 translator \
+    && chown -R translator:translator /app /model
+USER translator
+
 EXPOSE 8300
 
 # بیس slim نه curl دارد نه wget — چک سلامت با urllib خود پایتون

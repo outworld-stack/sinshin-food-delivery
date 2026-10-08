@@ -492,21 +492,31 @@ export class DeviceService {
   // ── داخلی ──
 
   private async clusterDeviceIds(root: DeviceId): Promise<DeviceId[]> {
+    // رارد M4 — قبلاً یک کوئری به‌ازای هر دستگاه (خوشه‌ی ۵۰تایی = تا ۵۰
+    // کوئری متوالی). حالا هر «سطح» از BFS با یک inArray خوانده می‌شود —
+    // عمق معمول ۲-۳ یعنی ~۳ کوئری با همان نتیجه‌ی دقیق و همان سقف.
     const visited = new Set<DeviceId>([root])
-    const queue: DeviceId[] = [root]
-    while (queue.length > 0 && visited.size < CLUSTER_CAP) {
-      const cur = queue.shift()!
+    let frontier: DeviceId[] = [root]
+    while (frontier.length > 0 && visited.size < CLUSTER_CAP) {
       const rows = await this.deps.db
         .select()
         .from(deviceLinks)
-        .where(or(eq(deviceLinks.deviceA, cur), eq(deviceLinks.deviceB, cur))!)
+        .where(
+          or(
+            inArray(deviceLinks.deviceA, frontier),
+            inArray(deviceLinks.deviceB, frontier),
+          )!,
+        )
+      const next: DeviceId[] = []
       for (const r of rows) {
-        const other = r.deviceA === cur ? r.deviceB : r.deviceA
-        if (!visited.has(other)) {
-          visited.add(other)
-          queue.push(other)
+        for (const other of [r.deviceA, r.deviceB]) {
+          if (!visited.has(other)) {
+            visited.add(other)
+            next.push(other)
+          }
         }
       }
+      frontier = next
     }
     return [...visited]
   }

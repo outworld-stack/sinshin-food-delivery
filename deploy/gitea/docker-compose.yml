@@ -43,8 +43,10 @@ services:
 
       # آدرس‌هایی که گیتا در رابط وب برای clone نشان می‌دهد؛
       # هر دو از SERVER_IP در ‎.env همین پوشه خوانده می‌شوند.
-      GITEA__server__ROOT_URL: http://${SERVER_IP:?در deploy/gitea/.env مقدار SERVER_IP را بگذار}:3000/
-      GITEA__server__SSH_DOMAIN: ${SERVER_IP:?}
+      # رارد C3 — HTTPS از پشت Caddy: دامنه‌ی گیت را در .env ریشه بگذار
+      # (GIT_DOMAIN=git.example.ir) و بلوک گیت در Caddyfile را فعال کن.
+      GITEA__server__ROOT_URL: https://${GIT_DOMAIN:?در .env ریشه GIT_DOMAIN را بگذار}/
+      GITEA__server__SSH_DOMAIN: ${GIT_DOMAIN:?}
       GITEA__server__SSH_PORT: "2222"
 
       # Actions (همان CI/CD) روشن
@@ -57,8 +59,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
 
     ports:
-      # رابط وب — http://SERVER_IP:3000
-      - "3000:3000"
+      # رارد C3 — رابط وب فقط از localhost: از بیرون فقط از پشت
+      # Caddy/HTTPS می‌گذرد (اعتبارنامه‌ها دیگر plaintext سفر نمی‌کنند)
+      - "127.0.0.1:3000:3000"
 
       # git push با SSH
       - "2222:22"

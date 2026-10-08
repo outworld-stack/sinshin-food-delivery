@@ -177,6 +177,36 @@ export class ArticleService {
         await this.cache.invalidate()
     }
 
+    // رارد L9 — بافر شمارش بازدید: هر بازدید یک UPDATE مستقل بود (write
+    // amplification روی WAL/vacuum). حالا در حافظه جمع و هر ۶۰ ثانیه یکجا
+    // اعمال می‌شود.
+    private readonly viewsBuffer = new Map<string, number>()
+    private viewsFlushTimer: ReturnType<typeof setInterval> | null = null
+
+    private bufferView(id: string): void {
+        this.viewsBuffer.set(id, (this.viewsBuffer.get(id) ?? 0) + 1)
+        if (this.viewsFlushTimer === null) {
+            this.viewsFlushTimer = setInterval(() => void this.flushViews(), 60_000)
+            this.viewsFlushTimer.unref?.()
+        }
+    }
+
+    private async flushViews(): Promise<void> {
+        if (this.viewsBuffer.size === 0) return
+        const pending = [...this.viewsBuffer.entries()]
+        this.viewsBuffer.clear()
+        try {
+            for (const [id, n] of pending) {
+                await this.deps.db
+                    .update(articles)
+                    .set({ views: sql`${articles.views} + ${n}` })
+                    .where(eq(articles.id, id))
+            }
+        } catch (e) {
+            console.error('[articles] views flush failed:', e)
+        }
+    }
+
     /** جزئیات عمومی — فقط ACTIVE + شمارش بازدید (سورتِ پربازدیدترین فرانت) */
     async byId(id: string, lang: Lang = 'fa'): Promise<ArticleView | null> {
         if (!UUID_RE.test(id)) return null
@@ -191,10 +221,8 @@ export class ArticleService {
         )[0]
         if (!row) return null
 
-        await this.deps.db
-            .update(articles)
-            .set({ views: sql`${articles.views} + 1` })
-            .where(eq(articles.id, id))
+        // رارد L9 — شمارش batch می‌شود (بافر + flush دوره‌ای)
+        this.bufferView(id)
 
         return this.toView(row.a, row.c, row.s, lang)
     }

@@ -573,6 +573,7 @@ CREATE UNIQUE INDEX "nudges_once_per_day" ON "coupon_nudges" USING btree ("user_
 CREATE INDEX "nudges_pending_idx" ON "coupon_nudges" USING btree ("scan_date","sms_sent_at");--> statement-breakpoint
 CREATE INDEX "redemptions_coupon_idx" ON "coupon_redemptions" USING btree ("coupon_id");--> statement-breakpoint
 CREATE INDEX "redemptions_user_idx" ON "coupon_redemptions" USING btree ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "redemptions_coupon_order_key" ON "coupon_redemptions" USING btree ("coupon_id","order_id") WHERE order_id is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "coupons_code_key" ON "coupons" USING btree ("code");--> statement-breakpoint
 CREATE INDEX "coupons_active_idx" ON "coupons" USING btree ("is_active","starts_at","ends_at");--> statement-breakpoint
 CREATE INDEX "courier_deliveries_trip_idx" ON "courier_deliveries" USING btree ("trip_id");--> statement-breakpoint
@@ -603,6 +604,7 @@ CREATE INDEX "users_token_version_idx" ON "users" USING btree ("token_version");
 CREATE UNIQUE INDEX "users_referral_code_key" ON "users" USING btree ("referral_code");--> statement-breakpoint
 CREATE INDEX "users_referred_by_idx" ON "users" USING btree ("referred_by");--> statement-breakpoint
 CREATE INDEX "users_role_idx" ON "users" USING btree ("role");--> statement-breakpoint
+CREATE INDEX "users_created_idx" ON "users" USING btree ("created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "sessions_refresh_hash_key" ON "sessions" USING btree ("refresh_hash");--> statement-breakpoint
 CREATE INDEX "sessions_prev_hash_idx" ON "sessions" USING btree ("previous_refresh_hash");--> statement-breakpoint
 CREATE INDEX "sessions_user_idx" ON "sessions" USING btree ("user_id");--> statement-breakpoint
@@ -641,6 +643,7 @@ CREATE INDEX "wallet_tx_order_idx" ON "wallet_transactions" USING btree ("order_
 CREATE INDEX "wallet_tx_created_idx" ON "wallet_transactions" USING btree ("created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "wallet_tx_withdraw_once_key" ON "wallet_transactions" USING btree ("order_id") WHERE type = 'WITHDRAW' and referral_profit_id is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "wallet_tx_reversal_once_key" ON "wallet_transactions" USING btree ("referral_profit_id") WHERE type = 'WITHDRAW' and referral_profit_id is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "wallet_tx_refund_once_key" ON "wallet_transactions" USING btree ("order_id") WHERE type = 'DEPOSIT' and order_id is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "reviews_order_product_key" ON "reviews" USING btree ("order_id","product_id");--> statement-breakpoint
 CREATE INDEX "reviews_product_status_idx" ON "reviews" USING btree ("product_id","status");--> statement-breakpoint
 CREATE INDEX "reviews_status_idx" ON "reviews" USING btree ("status");--> statement-breakpoint

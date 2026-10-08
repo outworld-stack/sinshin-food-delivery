@@ -27,11 +27,24 @@ export interface VersionedCacheOptions {
 export class VersionedCache {
   private readonly inflight = new Map<string, Promise<unknown>>()
 
+  // رارد L16 — نسخه‌ی ۵ ثانیه‌ای در حافظه: هر cached() قبلاً یک GET ردیسِ
+  // اضافه به‌ازای هر درخواست داشت. invalidate حداکثر ۵ ثانیه دیرتر می‌پاید.
+  private versionCache: { at: number; value: number } | null = null
+  private static readonly VERSION_LOCAL_TTL_MS = 5_000
+
   constructor(private readonly opts: VersionedCacheOptions) { }
 
   private async version(): Promise<number> {
+    if (
+      this.versionCache &&
+      Date.now() - this.versionCache.at < VersionedCache.VERSION_LOCAL_TTL_MS
+    ) {
+      return this.versionCache.value
+    }
     const v = await this.opts.redis.get(this.opts.versionKey)
-    return v ? Number(v) || 0 : 0
+    const value = v ? Number(v) || 0 : 0
+    this.versionCache = { at: Date.now(), value }
+    return value
   }
 
   /** مقدار null کش نمی‌شود — miss تازه می‌ماند تا پرسیده شود */
@@ -79,5 +92,6 @@ export class VersionedCache {
   /** هر write — یک بار؛ همه‌ی کلیدهای آن نسخه در دفع بعد دور می‌ریزند */
   async invalidate(): Promise<void> {
     await this.opts.redis.incr(this.opts.versionKey)
+    this.versionCache = null // رارد L16 — این instance فوراً نسخه‌ی تازه ببیند
   }
 }

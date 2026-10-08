@@ -51,7 +51,9 @@ const initialState: CheckoutState = {
   couponDraft: '',
   couponCode: null,
   useWallet: false,
-  selectedGateway: import.meta.env.DEV ? 'MOCK' : 'MELLAT',
+  // رارد L15 — حدسِ ثابت حذف شد: در prod هیچ درگاهی پیش‌فرض انتخاب نیست تا
+  // کاربر خودش انتخاب کند (MELLATِ پیکربندی‌نشده یعنی شکست اولین ثبت).
+  selectedGateway: import.meta.env.DEV ? 'MOCK' : '',
   customerNote: '',
 }
 
@@ -97,7 +99,15 @@ export function useCheckoutPage(deps: {
 
   // phase-3: تکرارناپذیری — یک کلید به‌ازای هر نیت خرید؛ تلاش مجدد شبکه همان کلید
   // را می‌فرستد → سفارش دوم ساخته نمی‌شود. فقط بعد از «شکست قطعی» تازه می‌شود.
-  const idempotencyKey = useRef<string>(newIdempotencyKey())
+  // رارد L13 — lazy-init: آرگومان useRef در هر رندر اجرا می‌شد (تولید UUID
+  // بی‌اثر و دورریختن). حالا فقط در اولین نیاز ساخته می‌شود.
+  const idempotencyKeyRef = useRef<string | null>(null)
+  const getIdempotencyKey = (): string => {
+    if (idempotencyKeyRef.current === null) {
+      idempotencyKeyRef.current = newIdempotencyKey()
+    }
+    return idempotencyKeyRef.current
+  }
 
   // ⬅ پیش‌نمایش — قیمت‌گذاری ۱۰۰٪ سروری: سایز/تخفیف/کوپن/ناحیه/بسته‌بندی/کیف پول
   const {
@@ -205,7 +215,7 @@ export function useCheckoutPage(deps: {
   // --- ثبت سفارش ---
   const checkoutMutation = useMutation({
     mutationFn: (payload: CheckoutSubmitPayload) =>
-      processCheckout(payload, idempotencyKey.current),
+      processCheckout(payload, getIdempotencyKey()),
     onSuccess: async (res) => {
       queryClient.invalidateQueries({ queryKey: qk.userProfile })
       queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
@@ -231,11 +241,11 @@ export function useCheckoutPage(deps: {
               navigate({ to: '/dashboard/orders/$orderId', params: { orderId: payResult.orderDisplayId } })
             } else {
               // شکست قطعی → کلید تازه؛ سبد «پاک نشده» — کاربر دوباره می‌زند
-              idempotencyKey.current = newIdempotencyKey()
+              idempotencyKeyRef.current = newIdempotencyKey()
               showToast(t['checkout.payFailed'], 'error')
             }
           } catch (err) {
-            idempotencyKey.current = newIdempotencyKey()
+            idempotencyKeyRef.current = newIdempotencyKey()
             showToast(err instanceof Error ? err.message : t['checkout.payError'], 'error')
           }
           return
@@ -259,6 +269,12 @@ export function useCheckoutPage(deps: {
   const handleFinalSubmit = useCallback(() => {
     if (state.deliveryType === 'DELIVERY' && !state.selectedAddressId) {
       showToast(t['checkout.pickAddress'], 'error')
+      return
+    }
+    // رارد L15 — درگاهِ انتخاب‌نشده = ثبت قفل شود (نه اینکه حدسِ MELLAT
+    // اولین ثبتِ درگاهی را با خطا بشکند). کاربر خودش درگاه را انتخاب می‌کند.
+    if (!isGatewayDisabled && state.selectedGateway === '') {
+      showToast('درگاه پرداخت را انتخاب کنید.', 'error')
       return
     }
     if (isSubmitBlocked) {

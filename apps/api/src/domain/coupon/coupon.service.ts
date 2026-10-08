@@ -108,6 +108,15 @@ export class CouponService {
     return granted
   }
 
+  /**
+   * رارد M9 — اعطای کوپن بعد از commit: با tx خودش، بیرون از قفلِ کاربرِ
+   * چک‌اوت/تسویه. یکتایی گرنت با grants_coupon_user_key + onConflictDoNothing
+   * تضمین شده است → تکرارناپذیر و بی‌خطر (صدا زدن دوباره فقط no-op است).
+   */
+  async grantIfEligibleAfterCommit(userId: string): Promise<number> {
+    return this.deps.db.transaction((tx) => this.grantIfEligible(tx, userId))
+  }
+
   // ══ اعتبار در چک‌اوت ══
 
   async findUsableCoupon(

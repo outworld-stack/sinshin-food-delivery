@@ -155,8 +155,11 @@ export class MellatAdapter implements PaymentGateway {
 
     const resCode = input.query.ResCode ?? input.query.resCode
     if (resCode === undefined) {
-      // کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback → رهاشده
-      return { success: false, gatewayRef: input.gatewayRef }
+      // رارد H6 — کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback:
+      // کاربر ممکن است در بانک پرداخته و callback نرسیده باشد → پول در PSP
+      // گرفته شده → indeterminate (پنجره‌ی ۲۴h در reconcilePending)، نه fail
+      // خودکار که یعنی بازگشت وجهِ اشتباه.
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
     if (resCode !== '0') {
       // خود بانک شکست را اعلام کرده (۱۷ = انصراف مشتری) — قطعی

@@ -35,11 +35,27 @@ export class DeliveryZoneService {
     private readonly deps: { db: Db; settings: SettingsService },
   ) {}
 
+  // رارد M9 — کش ۳۰ ثانیه‌ای: feeFor در هر چک‌اوت/پیش‌نمایش صدا می‌شود و
+  // جدول ناحیه‌ها کوچک و به‌ندرت تغییر می‌کند. تغییر → listCacheClear().
+  private listCache: { at: number; rows: DeliveryZone[] } | null = null
+  private static readonly LIST_TTL_MS = 30_000
+
+  private listCacheClear(): void {
+    this.listCache = null
+  }
+
   async list(): Promise<DeliveryZone[]> {
+    if (
+      this.listCache &&
+      Date.now() - this.listCache.at < DeliveryZoneService.LIST_TTL_MS
+    ) {
+      return this.listCache.rows
+    }
     const rows = await this.deps.db
       .select({ radiusKm: deliveryZones.radiusKm, fee: deliveryZones.fee })
       .from(deliveryZones)
       .orderBy(asc(deliveryZones.radiusKm))
+    this.listCache = { at: Date.now(), rows }
     return rows
   }
 
@@ -52,6 +68,7 @@ export class DeliveryZoneService {
     if (clash) return { success: false, message: 'ناحیه با این شعاع از قبل موجود است' }
 
     await this.deps.db.insert(deliveryZones).values({ radiusKm, fee })
+    this.listCacheClear() // رارد M9
     return { success: true }
   }
 
@@ -74,6 +91,7 @@ export class DeliveryZoneService {
       .update(deliveryZones)
       .set({ radiusKm: newRadiusKm, fee })
       .where(eq(deliveryZones.radiusKm, radiusKm))
+    this.listCacheClear() // رارد M9
     return { success: true }
   }
 
@@ -87,6 +105,7 @@ export class DeliveryZoneService {
       .where(eq(deliveryZones.radiusKm, radiusKm))
       .returning({ id: deliveryZones.id })
     if (removed.length === 0) return { success: false, message: 'ناحیه یافت نشد' }
+    this.listCacheClear() // رارد M9
     return { success: true }
   }
 

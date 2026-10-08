@@ -6,6 +6,16 @@ import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { UUID_PATTERN } from '#/domain/shared/ids'
+import { Err } from '#/domain/shared/errors'
+
+/** رارد M21 — تاریخ خراب یعنی 422، نه Invalid Date → RangeError → 500 */
+function parseDateOr422(raw: string): Date {
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) {
+    throw Err.validation('فرمت تاریخ معتبر نیست (from/to).')
+  }
+  return d
+}
 
 
 export interface Admin2RoutesDeps {
@@ -38,8 +48,8 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
         deps.admin2.activities({
           adminUserId: params.id,
           action: query.action || undefined,
-          from: query.from ? new Date(query.from) : undefined,
-          to: query.to ? new Date(query.to) : undefined,
+          from: query.from ? parseDateOr422(query.from) : undefined,
+          to: query.to ? parseDateOr422(query.to) : undefined,
           page: query.page,
           limit: query.limit,
         }),

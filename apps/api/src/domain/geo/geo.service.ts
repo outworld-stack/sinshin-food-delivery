@@ -692,7 +692,11 @@ export class GeoService {
     if (v4 !== null) return inV4Ranges(v4, this.irV4)
     const v6 = ipv6ToBig(ip)
     if (v6 !== null) return inV6Ranges(v6, this.irV6)
-    return true // ناپارسپذیر — عبور
+    // رارد L6 — IP ناپارسپذیر: قبلاً بی‌صدا «ایرانی» فرض و عبور داده می‌شد؛
+    // XFF جعلی/خراب حالا هشدار + مسدود (fail-closed). IP خصوصی قبل از
+    // این‌جا در shouldBlock رد شده است.
+    console.warn(`[geo] unparseable IP treated as non-Iran (blocked): ${ip}`)
+    return false
   }
 
   /**

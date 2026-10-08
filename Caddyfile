@@ -60,6 +60,13 @@
 
     # ── API ────────────────────────────────────────────────
     handle /api/* {
+        # رارد M18 — هدرهای امنیتی روی پاسخ‌های API
+        header {
+            +Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+            X-Content-Type-Options nosniff
+            Referrer-Policy no-referrer
+        }
+
         reverse_proxy {$API_UPSTREAMS:api:3000} {
             lb_policy round_robin
 
@@ -70,6 +77,14 @@
             lb_try_duration 5s
 
             flush_interval -1
+
+            # رارد M18 — سقف‌های انتظار: هدر پاسخِ کند = قطع (نه معلق ابدی).
+            # SSE با flush_interval -1 استریم فعال دارد و بعد از هدر اولیه
+            # از این سقف‌ها عبور نمی‌کند.
+            transport {
+                read_timeout 60s
+                response_header_timeout 15s
+            }
         }
     }
 
@@ -90,18 +105,16 @@
     }
 }
 
-# ── گیتا (اختیاری — HTTPS روی پنل گیتا) ─────────────────────
-# استک گیتا (deploy/gitea) رابط وب را روی پورت 3000 با HTTP سرو
-# می‌کند و push هم با SSH روی 2222 امن است. این بلوک فقط برای آن
-# روز است که خواستی رابط وب گیتا هم HTTPS شود:
+# ── گیتا — رارد C3: HTTPS فعال شد (قبلاً کامنت بود و پنل گیتا روی
+# HTTP خامِ اینترنت‌روشن سرو می‌شد = سرقت اعتبارنامه). گیتا حالا فقط
+# روی 127.0.0.1:3000 گوش می‌دهد (deploy/gitea/docker-compose.yml).
+# گام‌های تکمیلی اگر هنوز انجام نشده:
 #   ۱) رکورد DNS:  نوع A، نام git، مقدار IP سرور
 #   ۲) در ‎.env ریشه:  GIT_DOMAIN=git.sinshin-foodpark.ir
-#   ۳) این بلوک را از کامنت خارج کن و caddy را ری‌استارت کن:
-#      ‎docker compose restart caddy
-#   ۴) در ‎deploy/gitea/.env مقدار ROOT_URL را هم به آدرس https
-#      همان زیردامنه تغییر بده و گیتا را recreate کن.
-#
-# {$GIT_DOMAIN:git.sinshin.localhost} {
-#     encode zstd gzip
-#     reverse_proxy gitea:3000
-# }
+#   ۳) ‎docker compose restart caddy
+#   ۴) گیتا با ROOT_URL=https همان زیردامنه recreate شود
+#      (deploy/gitea/docker-compose.yml همین پکیج).
+{$GIT_DOMAIN:git.sinshin.localhost} {
+    encode zstd gzip
+    reverse_proxy gitea:3000
+}

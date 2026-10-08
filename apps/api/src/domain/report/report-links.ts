@@ -1,5 +1,17 @@
 //src/domain/report/report-links.ts
+import { timingSafeEqual } from 'node:crypto'
+
 import type { AppConfig } from '#/infra/config/env'
+
+/** رارد M13 — مقایسه‌ی زمان‌ثابت برای توکن‌ها */
+const safeEqual = (a: string, b: string): boolean => {
+  if (a.length !== b.length) return false
+  try {
+    return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'))
+  } catch {
+    return false
+  }
+}
 
 /**
  * توکن‌های امضاشده‌ی گزارش — دو خانواده:
@@ -34,15 +46,23 @@ export class ReportLinks {
 
   // ── زمان‌بند ──
 
-  cronToken(kind: 'daily' | 'weekly'): string {
-    return `c.${kind}.${this.hash(`cron:${kind}`)}`
+  // رارد M13 — توکن کرون قبلاً «بدون تاریخ» بود: یک‌بار لو رفت = برای همیشه.
+  // حالا iat (epoch) داخل توکن + انقضای ۴۸ ساعت + مقایسه‌ی زمان‌ثابت.
+  cronToken(kind: 'daily' | 'weekly', iat = Math.floor(Date.now() / 1000)): string {
+    return `c.${kind}.${iat}.${this.hash(`cron:${kind}:${iat}`)}`
   }
 
   verifyCron(token: string): 'daily' | 'weekly' | null {
     const parts = token.split('.')
-    if (parts.length !== 3 || parts[0] !== 'c') return null
-    if (this.cronToken(parts[1] as 'daily') === token) return parts[1] as 'daily'
-    return null
+    if (parts.length !== 4 || parts[0] !== 'c') return null
+    const kind = parts[1] === 'daily' || parts[1] === 'weekly' ? parts[1] : null
+    if (!kind) return null
+    const iat = Number(parts[2])
+    if (!Number.isInteger(iat) || iat <= 0) return null
+    // رارد M13 — انقضای ۴۸ ساعت؛ توکن کهنه رد
+    if (Date.now() / 1000 - iat > 48 * 3600) return null
+    if (!safeEqual(this.cronToken(kind, iat), token)) return null
+    return kind
   }
 
   // ── پنل — scope-دار ──

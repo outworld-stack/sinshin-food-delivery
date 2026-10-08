@@ -43,6 +43,8 @@ export const users = pgTable(
     uniqueIndex('users_referral_code_key').on(t.referralCode),
     index('users_referred_by_idx').on(t.referredBy),
     index('users_role_idx').on(t.role),
+    // رارد M6 — مرتب‌سازی پیش‌فرض همه‌ی لیست‌های کاربران (created_at desc)
+    index('users_created_idx').on(t.createdAt),
   ],
 )
 

@@ -52,7 +52,8 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
         }),
       {
         query: t.Object({
-          page: t.Number({ minimum: 1 }),
+          // رارد M5 — سقف page: جلوی page=999999 (اسکن ~۱۰۰M ردیف در PG)
+          page: t.Number({ minimum: 1, maximum: 500 }),
           limit: t.Number({ minimum: 5, maximum: 100 }),
           search: t.Optional(t.String({ maxLength: 40 })),
           blocked: t.Optional(t.String()),
@@ -101,7 +102,8 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
         }),
       {
         query: t.Object({
-          page: t.Number({ minimum: 1 }),
+          // رارد M5 — سقف page
+          page: t.Number({ minimum: 1, maximum: 500 }),
           limit: t.Number({ minimum: 5, maximum: 100 }),
           search: t.Optional(t.String({ maxLength: 40 })),
           device: t.Optional(t.String()),
@@ -195,6 +197,9 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
   // ═══ سفارشات — ادمین اصلی + ادمین۲ (حوزه خودکار) ═══
   const ordersRoutes = new Elysia({ prefix: '/admin', tags: ['Admin'] })
     .use(requireAdmin2(guards))
+    // رارد H2 — پرمیشن orderDetailsRead واقعاً اعمال شود (قبلاً دکوری بود:
+    // admin2 با همه‌ی پرمیشن‌های خاموش هم سفارشات حوزه‌اش را می‌دید)
+    .use(requireAdmin2Permission(guards, 'orderDetailsRead'))
     .get(
       '/orders',
       ({ query, user }) =>
@@ -211,7 +216,8 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
         }),
       {
         query: t.Object({
-          page: t.Number({ minimum: 1 }),
+          // رارد M5 — سقف page
+          page: t.Number({ minimum: 1, maximum: 500 }),
           limit: t.Number({ minimum: 5, maximum: 100 }),
           search: t.Optional(t.String({ maxLength: 40 })),
           status: t.Optional(t.String()),

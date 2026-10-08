@@ -93,10 +93,19 @@ export class SepAdapter implements PaymentGateway {
       null
 
     // نه RefNum ذخیره‌شده داریم نه در کوئری رسیده:
-    //   • کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback → رهاشده؛
-    //   • یا callback با State=لغو/خطا که RefNum ندارد («Canceled By User»، NOK).
-    // هر دو = شکست قطعی؛ سفارش/کوپن/کیف پول آزاد می‌شوند.
-    if (!refNum) return { success: false, gatewayRef: null }
+    //   • کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback — رارد H6:
+    //     کاربر ممکن است در بانک پرداخته و تب را بسته باشد → پول در PSP
+    //     گرفته شده → indeterminate، نه شکست قطعی (پنجره‌ی ۲۴h در
+    //     payment.service.reconcilePending) — fail یعنی بازگشت وجه اشتباه.
+    //   • callback رسیده با State=لغو/خطا و بدون RefNum («Canceled By User»،
+    //     NOK) = لغوی اعلام‌شده‌ی خود بانک → شکست قطعی.
+    const isTimeoutProbe = Object.keys(input.query).length === 0
+    if (!refNum) {
+      if (isTimeoutProbe) {
+        return { success: false, gatewayRef: null, indeterminate: true }
+      }
+      return { success: false, gatewayRef: null }
+    }
 
     try {
       // پاسخ غیرقابل‌فهم/شکل ناشناخته (صفحه‌ی خطای بانک، قطعی گذرا) —

@@ -6,6 +6,8 @@
 import { RedisClient } from 'bun'
 
 const OP_TIMEOUT_MS = 2_500
+// رارد M3 — نشانگر timeout برای تفکیک از null واقعی در Promise.race
+const CB_TIMEOUT = Symbol('cb-timeout')
 
 export class RedisService {
   private readonly client: RedisClient
@@ -46,8 +48,49 @@ export class RedisService {
   }
 
   // ── کش ──
+  // رارد M3 — قطع‌کننده‌ی مدارِ کش: پس از ۵ خطای پیاپی، ۳۰ ثانیه مسیر کش
+  // دور زده می‌شود (fail-fast به‌جای ۲.۵s زمان انتظار به‌ازای هر عملیات).
+  private consecutiveFailures = 0
+  private cacheOpenUntil = 0
+  private static readonly CB_THRESHOLD = 5
+  private static readonly CB_COOLDOWN_MS = 30_000
+
+  private cbIsOpen(): boolean {
+    return Date.now() < this.cacheOpenUntil
+  }
+
+  private cbRecord(ok: boolean): void {
+    if (ok) {
+      this.consecutiveFailures = 0
+      return
+    }
+    this.consecutiveFailures += 1
+    if (this.consecutiveFailures >= RedisService.CB_THRESHOLD) {
+      this.cacheOpenUntil = Date.now() + RedisService.CB_COOLDOWN_MS
+      this.consecutiveFailures = 0
+      console.warn('[redis] cache circuit opened for 30s (consecutive failures)')
+    }
+  }
+
   async get(key: string): Promise<string | null> {
-    return this.t<string | null>(this.client.get(key), null)
+    if (this.cbIsOpen()) return null // رارد M3 — مدار باز
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const res = await Promise.race([
+        this.client.get(key),
+        new Promise<symbol>((resolve) => {
+          timer = setTimeout(() => resolve(CB_TIMEOUT), OP_TIMEOUT_MS)
+        }),
+      ])
+      // null واقعی (کلید ناموجود) = موفقیت؛ فقط timeout/error خطا شمرده می‌شود
+      this.cbRecord(res !== CB_TIMEOUT)
+      return res === CB_TIMEOUT || res === null ? null : (res as string)
+    } catch {
+      this.cbRecord(false)
+      return null
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   async set(
@@ -55,11 +98,14 @@ export class RedisService {
     value: string,
     opts?: { ex?: number },
   ): Promise<string | null> {
+    if (this.cbIsOpen()) return null // رارد M3 — مدار باز
     const op =
       opts?.ex !== undefined
         ? this.client.set(key, value, 'EX', opts.ex)
         : this.client.set(key, value)
-    return this.t<string | null>(op, null)
+    const res = await this.t<string | null>(op, null)
+    this.cbRecord(res === 'OK') // رارد M3 — set هم در شمارش مدار
+    return res
   }
 
   /**
@@ -83,6 +129,21 @@ export class RedisService {
     } finally {
       if (timer) clearTimeout(timer)
     }
+  }
+
+  /**
+   * رارد H4 — شمارش اعضای متمایز (ضد SMS-bombing): SADD + EXPIRE فقط بار اول.
+   * true = عضو جدید | false = از قبل بود | null = ردیس پایین (fail-open)
+   */
+  async sAdd(key: string, member: string, ttlSeconds: number): Promise<boolean | null> {
+    const added = await this.t<number | null>(this.client.send('SADD', [key, member]), null)
+    if (added === null) return null
+    if (added === 1) await this.t(this.client.send('EXPIRE', [key, String(ttlSeconds)]), 0)
+    return added === 1
+  }
+
+  async sCard(key: string): Promise<number | null> {
+    return this.t<number | null>(this.client.send('SCARD', [key]), null)
   }
 
   async getJson<T>(key: string): Promise<T | null> {

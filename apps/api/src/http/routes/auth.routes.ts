@@ -90,9 +90,26 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
 
     .post(
       '/otp/request',
-      async ({ body, set }) => {
+      async ({ body, headers, set }) => {
         const phone = normalizePhone(body.phone)
         if (!phone) throw Err.validation('شماره موبایل معتبر نیست.')
+
+        // رارد H4 — سقف دوم: حداکثر ۸۰ شماره‌ی «متمایز» در ساعت از هر IP.
+        // کپِ تعداد کل (۱۲۰/دقیقه) بمبارِ ~۷۲۰۰ شماره/ساعت را باز می‌گذاشت —
+        // هزینه‌ی پیامک سرسام‌آور + پیامک مزاحم به بی‌گناه‌ها.
+        const MAX_DISTINCT_PHONES_PER_IP = 80
+        const ip = clientIp(headers['x-forwarded-for']) ?? 'unknown'
+        const phonesKey = `rl:otp-phones:${ip}`
+        const isNewPhone = await deps.redis.sAdd(phonesKey, phone, 3600)
+        if (isNewPhone) {
+          const distinct = await deps.redis.sCard(phonesKey)
+          if (distinct !== null && distinct > MAX_DISTINCT_PHONES_PER_IP) {
+            throw Err.rateLimited(
+              'تعداد شماره‌های درخواست‌شده از این شبکه بیش از حد مجاز است — کمی بعد دوباره تلاش کنید.',
+              3600,
+            )
+          }
+        }
 
         const r = await deps.auth.requestOtp(phone)
         set.status = 200
@@ -196,9 +213,16 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
         }
       },
       {
+        // رارد M12 — سقف IP روی چرخش: ۳۰ در دقیقه (قبلاً بدون هیچ کپی)
+        beforeHandle: ipRateLimit({
+          redis: deps.redis,
+          scope: 'auth-refresh',
+          limit: 30,
+          windowSeconds: 60,
+        }),
         detail: {
           summary: 'Rotate refresh token',
-          description: 'Refresh reuse detection revokes the whole session family.',
+          description: 'Refresh reuse detection revokes the whole session family. IP limit: 30/min.',
         },
       },
     )

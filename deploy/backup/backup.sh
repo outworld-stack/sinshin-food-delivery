@@ -80,6 +80,27 @@ run_backup() {
     ls -1t "$DIR/$PREFIX"-*.sql.gz 2>/dev/null | tail -n +"$((KEEP + 1))" | while IFS= read -r old; do
         rm -f "$old" && log "حذف نسخه‌ی قدیمی: $(basename "$old")"
     done
+
+    # ═══ رارد H7 — کپی offsite: مقصد جدا از دیسک همین هاست ═══
+    # پیش‌نیاز: BACKUP_RCLONE_REMOTE در .env (مثل b2:sinshin-backup).
+    # با BACKUP_AGE_PUBKEY فایل اول end-to-end رمزنگاری می‌شود — حتی لو
+    # رفتن مقصد ابری هم بی‌ضرر است.
+    if [ -n "${BACKUP_RCLONE_REMOTE:-}" ]; then
+        if command -v age >/dev/null 2>&1 && [ -n "${BACKUP_AGE_PUBKEY:-}" ]; then
+            if age -r "${BACKUP_AGE_PUBKEY}" "$TARGET" > "$TARGET.age" 2>/dev/null; then
+                rclone copy "$TARGET.age" "${BACKUP_RCLONE_REMOTE}/" --min-age 1s \
+                    && log "offsite (encrypted): $(basename "$TARGET").age"
+                rm -f "$TARGET.age"
+            else
+                log "هشدار: age شکست خورد — offsite بدون رمزنگاری"
+                rclone copy "$TARGET" "${BACKUP_RCLONE_REMOTE}/" --min-age 1s \
+                    && log "offsite: $(basename "$TARGET")"
+            fi
+        else
+            rclone copy "$TARGET" "${BACKUP_RCLONE_REMOTE}/" --min-age 1s \
+                && log "offsite: $(basename "$TARGET")"
+        fi
+    fi
     return 0
 }
 

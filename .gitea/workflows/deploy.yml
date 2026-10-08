@@ -42,6 +42,21 @@ jobs:
           git reset --hard origin/main
           echo "کد روی کامیت: $(git log --oneline -1)"
 
+      # ═══ رارد H1 — دروازه‌ی کیفیت: جلوی رسیدن کد خراب به production ═══
+      # typecheck هر دو اپ (اسکریپت آماده در package.json ها) + lint biome.
+      - name: دروازه‌ی کیفیت (typecheck + lint)
+        run: |
+          set -e
+          cd /opt/sinshin-food-delivery
+          bun install --frozen-lockfile
+          echo "── typecheck API ──"
+          bun run --filter '@sinshin/api' typecheck
+          echo "── typecheck Web ──"
+          cd apps/web && bunx tsc --noEmit && cd ../..
+          echo "── lint Web (biome) ──"
+          cd apps/web && bun run lint && cd ../..
+          echo "✅ دروازه‌ی کیفیت پاس شد"
+
       - name: بیلد و بالا آوردن استک
         run: |
           set -e
@@ -50,7 +65,17 @@ jobs:
             echo "فایل .env هنوز ساخته نشده — راهنما: README گام ۸"
             exit 1
           fi
-          docker compose up -d --build
+          # رارد M19 — SHA کامیت به عنوان تگ روی ایمیج‌ها (برای rollback)
+          SHA7=$(git rev-parse --short HEAD)
+          docker compose build
+          for svc in api web translator; do
+            img=$(docker compose images -q "$svc" 2>/dev/null | head -1)
+            if [ -n "$img" ]; then
+              docker tag "$img" "sinshin/$svc:$SHA7" || true
+              echo "tagged sinshin/$svc:$SHA7"
+            fi
+          done
+          docker compose up -d
 
       - name: سلامت‌سنجی
         run: |

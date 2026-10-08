@@ -138,9 +138,15 @@ export class HealthAlertJob implements IntervalJob {
       console.error(`[health-alert] گیرنده‌ای تنظیم نشده — فقط لاگ: ${message}`)
       return
     }
-    void Promise.all(phones.map((phone) => this.deps.sms.send(phone, message))).then((results) => {
-      const sent = results.filter(Boolean).length
-      console.log(`[health-alert] پیامک به ${sent}/${phones.length} گیرنده: ${message}`)
-    })
+    void Promise.all(phones.map((phone) => this.deps.sms.send(phone, message)))
+      .then((results) => {
+        const sent = results.filter(Boolean).length
+        console.log(`[health-alert] پیامک به ${sent}/${phones.length} گیرنده: ${message}`)
+      })
+      // رارد L2 — reject قبلاً unhandledRejection سطح پروسه بود (فقط لاگ،
+      // ولی نویز/هشدار کاذب در مانیتورینگ)
+      .catch((err) => {
+        console.error('[h[health-alert] ارسال پیامک هشدار شکست خورد:', err)
+      })
   }
 }

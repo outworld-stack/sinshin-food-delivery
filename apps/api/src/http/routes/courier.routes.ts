@@ -48,7 +48,9 @@ export const courierRoutes = (deps: CourierRoutesDeps) => {
       {
         body: t.Object({
           phone: t.String({ pattern: '^09[0-9]{9}$' }),
-          code: t.String({ minLength: 4, maxLength: 4 }),
+          // رارد H3 — otp-core.ts کد را با randomOtpCode(6) تولید می‌کند؛
+          // قید ۴رقمی یعنی هر verify همیشه 422 → فلوی امنیتی مرده بود.
+          code: t.String({ minLength: 6, maxLength: 6 }),
         }),
         beforeHandle: ipRateLimit({
           redis: deps.redis,

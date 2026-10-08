@@ -59,6 +59,9 @@ x-api-service: &api-service
 
     # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
     TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
+    # رارد M15 — همان shared-secret که سرویس translator چک می‌کند
+    # (translate-client هدر x-translator-token را می‌فرستد)
+    TRANSLATOR_TOKEN: ${TRANSLATOR_TOKEN:-}
 
   volumes:
     - uploads_data:/data/uploads
@@ -437,6 +440,9 @@ services:
       BACKUP_HOUR: ${BACKUP_HOUR:-5}
       BACKUP_KEEP: ${BACKUP_KEEP:-7}
       BACKUP_DIR: /backups
+      # رارد H7 — مقصد offsite (rclone) + کلید عمومی age برای رمزنگاری
+      BACKUP_RCLONE_REMOTE: ${BACKUP_RCLONE_REMOTE:-}
+      BACKUP_AGE_PUBKEY: ${BACKUP_AGE_PUBKEY:-}
 
     volumes:
       - ./deploy/backup/backup.sh:/usr/local/bin/sinshin-backup:ro
@@ -529,6 +535,11 @@ services:
     restart: unless-stopped
 
     init: true
+
+    # رارد M15 — shared-secret با API: فقط کانتینر api با این توکن
+    # می‌تواند /translate را صدا بزند (شبکه‌ی internal + توکن = دو لایه).
+    environment:
+      TRANSLATOR_TOKEN: ${TRANSLATOR_TOKEN:-}
 
     deploy:
       resources:

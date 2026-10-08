@@ -106,8 +106,14 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
 // حالا: SDK نشان (فورک OpenLayers) + کلیک واقعی → lonLat واقعی.
 
 // ⚠️ نسخه‌ی SDK را از Getting Started نشان چک کن — الگوی کد مستقل از نسخه است
-const SDK_JS = 'https://cdn.neshan.org/sdk/ol/v4.6.2/ol.js'
-const SDK_CSS = 'https://cdn.neshan.org/sdk/ol/v4.6.2/ol.css'
+// رارد L14 — self-hosted: فایل‌ها از public خود اپ سرو می‌شوند (تا قبل:
+// وابسته به cdn.neshan.org — قطعی/فیلترینگ/تغییر نسخه سمت بیرون).
+// گام نصب (یک‌بار):
+//   mkdir -p apps/web/public/sdk/ol
+//   curl -o apps/web/public/sdk/ol/ol.js  https://cdn.neshan.org/sdk/ol/v4.6.2/ol.js
+//   curl -o apps/web/public/sdk/ol/ol.css https://cdn.neshan.org/sdk/ol/v4.6.2/ol.css
+const SDK_JS = '/sdk/ol/ol.js'
+const SDK_CSS = '/sdk/ol/ol.css'
 
 const NESHAN_KEY = import.meta.env.VITE_NESHAN_API_KEY as string | undefined
 const DEFAULT_CENTER = { lat: 37.4822056, lng: 49.4418273 } // رستوران سین‌شین — بندرانزلی

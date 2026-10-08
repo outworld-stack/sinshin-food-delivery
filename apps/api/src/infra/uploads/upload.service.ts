@@ -10,6 +10,28 @@ const NAME_RE = /^[a-f0-9-]{36}\.(png|webp)$/
 /** round-18 — سقف شمارش برای usage()؛ مسیر «فقط ادمین»، نه هر درخواست */
 const USAGE_MAX_FILES = 20_000
 
+// ── رارد M14 — بررسی magic bytes + سقف ابعاد پیکسلی ──
+const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const MAX_PIXELS = 40_000_000 // ~۴۰MP — بالای هر موبایل/دوربین منطقی
+
+function hasImageMagic(head: Uint8Array, ext: string): boolean {
+  if (ext === 'png') {
+    return PNG_SIG.every((b, i) => head[i] === b)
+  }
+  // webp: "RIFF" + 4B size + "WEBP"
+  return (
+    head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 &&
+    head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50
+  )
+}
+
+/** IHDR width/height — big-endian در بایت‌های 16..24 */
+function pngWithinPixelCap(head: Uint8Array): boolean {
+  const w = ((head[16]! << 24) | (head[17]! << 16) | (head[18]! << 8) | head[19]!) >>> 0
+  const h = ((head[20]! << 24) | (head[21]! << 16) | (head[22]! << 8) | head[23]!) >>> 0
+  return w > 0 && h > 0 && w * h <= MAX_PIXELS
+}
+
 export class UploadService {
   private readonly ready: Promise<void>
   /** round-16 — خطای آماده‌سازی ذخیره‌شده تا reject خاموش (unhandledRejection) تولید نشود */
@@ -40,6 +62,18 @@ export class UploadService {
       throw Err.serviceUnavailable(
         'ذخیره‌سازی فایل در دسترس نیست — پوشهٔ آپلود سرور قابل نوشتن نیست.',
       )
+    }
+
+    // رارد M14 — magic bytes: Content-Type قابل جعل است؛ محتوای واقعی فایل
+    // چک می‌شود (PNG: امضای ۸ بایتی | WebP: RIFF....WEBP). فایل حداکثر ۲MB
+    // است و از قبل در حافظه — کل آن خوانده و ابتدایش چک می‌شود.
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const head = bytes.length > 32 ? bytes.slice(0, 32) : bytes
+    if (!hasImageMagic(head, ext)) {
+      throw Err.validation('محتوای فایل با فرمت اعلام‌شده نمی‌خواند (فقط PNG/WebP).')
+    }
+    if (ext === 'png' && head.length >= 24 && !pngWithinPixelCap(head)) {
+      throw Err.validation('ابعاد تصویر بیش از حد مجاز است (حداکثر ۴۰ مگاپیکسل).')
     }
 
     const name = `${crypto.randomUUID()}.${ext}`

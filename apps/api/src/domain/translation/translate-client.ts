@@ -44,6 +44,14 @@ interface HealthResponse {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+// رارد M15 — shared-secret سرویس مترجم: اگر TRANSLATOR_TOKEN ست شده
+// باشد هدر x-translator-token با هر درخواست ارسال می‌شود (مترجمِ
+// توکن‌دار بدون آن 403 می‌دهد). خالی = هدر ارسال نمی‌شود.
+const TRANSLATOR_TOKEN = (process.env.TRANSLATOR_TOKEN ?? '').trim()
+const authHeaders: Record<string, string> = TRANSLATOR_TOKEN
+  ? { 'content-type': 'application/json', 'x-translator-token': TRANSLATOR_TOKEN }
+  : { 'content-type': 'application/json' }
+
 export class TranslateClient {
   constructor(private readonly deps: { config: AppConfig }) {}
 
@@ -87,7 +95,7 @@ export class TranslateClient {
       try {
         const res = await fetch(`${this.base}/translate`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: authHeaders, // رارد M15 — x-translator-token وقتی فعال است
           body: JSON.stringify({ texts: batch, source: SRC, target: TGT }),
           signal: AbortSignal.timeout(TIMEOUT_MS),
         })

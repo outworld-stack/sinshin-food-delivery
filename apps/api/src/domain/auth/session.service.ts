@@ -85,7 +85,9 @@ export class SessionService {
       const user = await this.mustGetUser(current.userId)
 
       const refreshToken = randomToken(48)
-      await db
+      // رارد L1 — UPDATE با شرطِ refreshHash + returning: چرخشِ موازیِ تب دوم
+      // دیگر نتیجه‌ی تب اول را بی‌اثر رونویشی نمی‌کند (توکن یتیم).
+      const rotated = await db
         .update(sessions)
         .set({
           refreshHash: sha256(refreshToken),
@@ -94,7 +96,30 @@ export class SessionService {
           lastUsedAt: new Date(),
           ip: ip ?? current.ip,
         })
-        .where(eq(sessions.id, current.id))
+        .where(and(eq(sessions.id, current.id), eq(sessions.refreshHash, hash)))
+        .returning({ id: sessions.id })
+
+      if (rotated.length === 0) {
+        // رقابت با چرخشِ هم‌زمان: اگر همین الان (۱۰ ثانیه) چرخیده و ما
+        // previousِ آن هستیم → 401 نرم «دوباره تلاش» (کلاینت refresh را
+        // تکرار می‌کند و توکنِ تازه را می‌گیرد)؛ وگرنه مسیر reuse سخت.
+        const fresh = await db.query.sessions.findFirst({
+          where: eq(sessions.id, current.id),
+        })
+        const recentRace =
+          fresh?.previousRefreshHash === hash &&
+          fresh?.rotatedAt !== null &&
+          Date.now() - (fresh?.rotatedAt?.getTime() ?? 0) < 10_000
+        if (recentRace) {
+          throw Err.unauthorized('نشست هم‌زمان چرخیده است؛ دوباره تلاش کنید.')
+        }
+        await db
+          .update(sessions)
+          .set({ revokedAt: new Date(), revokedReason: 'reuse-detected' })
+          .where(eq(sessions.id, current.id))
+        console.warn(`[session] reuse detected — session ${current.id} revoked`)
+        throw Err.unauthorized('نشست نامعتبر است؛ دوباره وارد شوید.')
+      }
 
       const accessToken = await this.deps.tokens.sign({
         sub: user.id,

@@ -33,6 +33,8 @@ export const uploadRoutes = (deps: UploadRoutesDeps) => {
       const f = await deps.uploads.read(params.name)
       if (!f) throw Err.notFound('فایل پیدا نشد.')
       set.headers['content-type'] = params.name.endsWith('.png') ? 'image/png' : 'image/webp'
+      // رارد M14 — nosniff: عمق دفاعی کنار magic-check سمت ذخیره
+      set.headers['x-content-type-options'] = 'nosniff'
       set.headers['cache-control'] = 'public, max-age=31536000, immutable'
       return f
     },
