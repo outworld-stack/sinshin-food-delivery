@@ -1,14 +1,15 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-48 — sinshin-food-delivery
+// stage-49 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/routes/admin/notifications/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر:
-//   • باکس «ارسال تست» حذف شد (خواسته‌ی صریح)
-//   • تاریخچه‌ی ارسال نوتیفیکیشن‌ها + باکس فیلتر پیشرفته
-//     (عین الگوی فیلتر کاربران: جستجو/نوع/فرستنده/بازه‌ی تاریخ/صفحه‌بندی،
-//      ریسپانسیو با BottomSheet موبایل)
-//   • ادمین۲: تاریخچه با notificationsRead، فرم ارسال با notificationsSend
+// تغییر (بازخورد ۱ + ۶):
+//   • دکمه‌ی «اعمال فیلتر / پاک‌سازی» در باکس تاریخچه بازطراحی شد:
+//     ردیف کاملِ اختصاصی (col-span-full)، دو دکمه کنار هم، متن یک‌خطی
+//     (whitespace-nowrap)، پدینگ مناسب، آیکون، ریسپانسیو در همه‌ی سایزها
+//   • زیر سربرگ تاریخچه: راهنمای کوتاه معنای «گیرندگان» (شمارش صندوق
+//     کاربران عادی؛ پوش به همه‌ی مشترکان فعال — حتی ادمین — می‌رسد)
 // ═══════════════════════════════════════════════════════════════
+// stage-48 — تاریخچه‌ی ارسال + فیلتر پیشرفته (بدون باکس تست) حفظ شد
 
 // src/routes/admin/notifications/index.tsx
 import { createFileRoute } from '@tanstack/react-router'
@@ -20,6 +21,8 @@ import {
 	CalendarSearch,
 	ChevronLeft,
 	ChevronRight,
+	Eraser,
+	Filter,
 } from 'reicon-react'
 import { useI18nSafe } from '#/i18n'
 import { authJson } from '#/lib/api-fetch'
@@ -343,20 +346,27 @@ function AdminNotificationsPage() {
 					placeholder="تا..."
 				/>
 			</div>
-			<div className={`flex gap-2 ${isMobileModal ? 'col-span-2' : ''}`}>
+			{/* stage-49 — دکمه‌ها: ردیف کامل اختصاصی + دو دکمه‌ی کنارِهم؛
+				متن همیشه یک‌خطی (nowrap)، پدینگ افقی واقعی، آیکون؛
+				در موبایل (BottomSheet) و دسکتاپ (گرید ۶ ستونه) هر دو
+				جا دارند — قبلاً در xl دکمه داخل یک ستون ~۸۰ پیکسلی
+				گیر می‌کرد و «اعمال فیلتر» دو خطی می‌شد. */}
+			<div className="col-span-full flex items-stretch gap-2">
 				<button
 					type="button"
 					onClick={setAppliedFilters}
-					className="flex-1 h-10 rounded-lg bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer"
+					className="flex-1 min-w-0 h-10 px-4 sm:px-5 rounded-lg bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap"
 				>
+					<Filter size={16} className="shrink-0" />
 					اعمال فیلتر
 				</button>
 				<button
 					type="button"
 					onClick={resetFilters}
 					title="پاک‌کردن فیلترها"
-					className="px-3 h-10 rounded-lg bg-gray-100 dark:bg-[#2a1015] text-gray-500 dark:text-gray-400 text-sm font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer"
+					className="h-10 px-4 sm:px-5 rounded-lg bg-gray-100 dark:bg-[#2a1015] text-gray-500 dark:text-gray-400 text-sm font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap"
 				>
+					<Eraser size={15} className="shrink-0" />
 					پاک‌سازی
 				</button>
 			</div>
@@ -494,6 +504,17 @@ function AdminNotificationsPage() {
 						)}
 					</div>
 
+					{/* stage-49 — معنای «گیرندگان» (بازخورد ۶): شمارش
+						صندوقِ درون‌بری کاربران عادی؛ پوش به همه‌ی مشترکان
+						فعال می‌رود (حتی ادمین) ولی در این عدد شمرده نمی‌شود. */}
+					<p className="text-[11px] text-gray-400 dark:text-gray-500 font-DanaMedium leading-relaxed bg-gray-50 dark:bg-[#1a0a0e] rounded-xl px-3.5 py-2.5 border border-gray-100 dark:border-[#3a151c]">
+						«گیرندگان» = تعداد کاربران عادی (مشتری‌ها) که پیام
+						در صندوق‌شان ثبت شد؛ نوتیف پوش به همه‌ی دستگاه‌های
+						مشترک‌شده می‌رسد — حتی حساب ادمین. اگر دیتابیس
+						توسعه فقط ادمین دارد، این عدد ۰ می‌ماند ولی پوش
+						همچنان روی دستگاهِ مشترک ظاهر می‌شود.
+					</p>
+
 					{/* فیلتر دسکتاپ */}
 					<div className="hidden md:block">
 						<FilterBox />
@@ -560,7 +581,7 @@ function AdminNotificationsPage() {
 										<div className="flex items-center gap-3 text-[10px] text-gray-400 font-DanaMedium">
 											<span>گیرندگان: {n.audience}</span>
 											{n.url && (
-												<span dir="ltr" className="truncate max-w-[180px]">
+												<span dir="ltr" className="truncate max-w-45">
 													{n.url}
 												</span>
 											)}

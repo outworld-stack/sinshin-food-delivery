@@ -1,9 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-47 — sinshin-food-delivery
+// stage-49 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/Header.tsx
-// تغییر: فیکس z-index — پنل کشویی زنگ نوتیفیکیشن زیر محتوای
-//        صفحه (کارت‌های محصول و…) می‌افتاد؛ هدر الان relative z-40 است.
+// تغییر (بازخورد ۳ + ۵):
+//   • زنگ نوتیفیکیشن (NotificationBell) از هدر حذف شد — پوشِ واقعی
+//     (آیکن بنفش فعال‌سازی + Service Worker) کانال اصلی اطلاع‌رسانی است.
+//   • برند سین‌شین در md..lg دیگر له/کشیده نمی‌شود: کانتینر برند
+//     shrink-0 + بدون شکستن خط (whitespace-nowrap) — خودِ برند و
+//     پس‌زمینه‌ی اریبش به حالت اصلی برگشت. فضا با «کم کردن گپ»
+//     آزاد شد (ناوبری ۴→lg:۸، ردیف ۳ در md، آیکن‌ها ۲.۵ در md..lg)؛
+//     ناوبری در فشار کمبود فضا با overflow-hidden قیچی می‌شود نه برند.
 // ═══════════════════════════════════════════════════════════════
+// stage-47 — فیکس z-index: هدر relative z-40 (backdrop-blur stacking)
 
 // src/components/Header.tsx
 import { memo } from 'react'
@@ -22,7 +29,6 @@ import { Cart, User, Package, Shield, Bell } from 'reicon-react'
 import { useHydrated } from '#/hooks/useHydrated'
 import { HeaderSkeleton } from '#/components/LoadingSkeletons'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
-import { NotificationBell } from '#/components/shared/NotificationBell'
 import { NotificationEnableIcon } from '#/components/shared/NotificationEnableIcon'
 import { useI18n } from '#/i18n'
 
@@ -69,30 +75,35 @@ export const Header = memo(function Header() {
         return (
                 <header className="relative z-40 w-full bg-white/80 dark:bg-[#1a0a0e]/80 backdrop-blur-md border-b border-gray-200 dark:border-white/10 transition-colors duration-500">
                         <div className="container mx-auto px-3 sm:px-6 lg:px-8">
-                                <div className="flex h-16 sm:h-20 items-center justify-between gap-2 sm:gap-4">
-                                        {/* برند — کاربر لاگین → محصولات */}
-                                        <div className="flex items-center justify-center min-w-0 shrink">
+                                {/* stage-49 — گپ ردیف در md..lg فشرده‌تر تا برند حالت اصلی خودش را
+                                    حفظ کند (بازخورد ۵: به خودِ برند دست نزدیم) */}
+                                <div className="flex h-16 sm:h-20 items-center justify-between gap-2 md:gap-3 lg:gap-4">
+                                        {/* برند — stage-49: هرگز جمع/کشیده نمی‌شود (shrink-0 + بدون
+                                            شکستن خط)؛ محدودیت فضا به ناوبری و گپ‌ها منتقل شد */}
+                                        <div className="flex items-center shrink-0 whitespace-nowrap">
                                                 <Brand
                                                         to={isAuthenticated ? '/products' : '/'}
                                                         textSize="text-base sm:text-lg md:text-2xl"
                                                 />
                                         </div>
 
-                                        {/* ناوبری دسکتاپ — Main داینامیک */}
-                                        <nav className="hidden md:flex items-center gap-8">
+                                        {/* ناوبری دسکتاپ — Main داینامیک؛ stage-49: گپ فشرده‌تر در
+                                            md..lg + قیچیِ سرریز به‌جای خم‌کردن برند */}
+                                        <nav className="hidden md:flex items-center gap-4 lg:gap-8 min-w-0 overflow-hidden">
                                                 {(activeMains ?? []).map((mc) => (
                                                         <Link
                                                                 key={mc.id}
                                                                 to="/products"
                                                                 search={{ tab: mc.slug }}
-                                                                className="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-dark-primary transition font-DanaMedium"
+                                                                className="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-dark-primary transition font-DanaMedium whitespace-nowrap"
                                                         >
                                                                 {mc.name}
                                                         </Link>
                                                 ))}
                                         </nav>
 
-                                        <div className="flex items-center justify-end gap-1.5 sm:gap-3 md:gap-4 shrink-0">
+                                        {/* stage-49 — گپ آیکن‌ها در md..lg فشرده‌تر (بازخورد ۵) */}
+                                        <div className="flex items-center justify-end gap-1.5 sm:gap-2.5 lg:gap-4 shrink-0">
                                                 <ThemeToggle />
 
                                                 {/* رارد ۳۲ — سوییچر زبان: جفت «فا/ع» در دسکتاپ، تک‌دکمه در موبایل (تصمیم ۳)
@@ -106,13 +117,10 @@ export const Header = memo(function Header() {
                                                 </div>
 
                                                 {/* stage-48 — آیکون چشمک‌زن «فعال‌سازی نوتیف» (بنفش):
-                                                فقط وقتی پوش خاموش است؛ بعد از فعال‌شدن حذف می‌شود. */}
+                                                فقط وقتی پوش خاموش است؛ بعد از فعال‌شدن حذف می‌شود.
+                                                stage-49 — زنگِ درون‌بری (NotificationBell) از هدر
+                                                برداشته شد (بازخورد ۳): پوش واقعی جای آن را گرفت. */}
                                                 {isAuthenticated && <NotificationEnableIcon />}
-
-                                                {/* فاز-۲ — زنگ نوتیفیکیشن (فقط isAuthenticated) */}
-                                                {isAuthenticated && (
-                                                        <NotificationBell userId={user?.id} />
-                                                )}
 
                                                 {/* پنل‌ها + پیگیری سفارش + پروفایل — فقط isAuthenticated */}
                                                 {isAuthenticated && (

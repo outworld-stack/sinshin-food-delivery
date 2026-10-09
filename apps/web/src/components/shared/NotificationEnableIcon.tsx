@@ -1,7 +1,18 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-48 — sinshin-food-delivery — فایل جدید
+// stage-49 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/shared/NotificationEnableIcon.tsx
+// وضعیت: جایگزینی کامل فایل موجود (stage-48)
+// تغییر (بازخورد ۴):
+//   • پاپ‌اور در موبایل دیگر از لبه‌ی راست صفحه بیرون نمی‌زند:
+//     در <sm یک کارتِ fixed با حاشیه‌ی ۱۶px از هر طرف، دقیقاً زیر هدر
+//     (همیشه داخل صفحه)؛ از sm به بالا همان پاپ‌اور absolute چسبیده
+//     به آیکون.
+//   • حالت خطا: اگر مجوز داده شد اما اشتراک ثبت نشد (SW/کلید/شبکه)
+//     پیام نارنجیِ «دوباره تلاش کن» داخل پاپ‌اور می‌آید — دکمه دیگر
+//     در «در حال فعال‌سازی» گیر نمی‌کند (همه‌ی انتظارها در
+//     push-subscription.ts مهلت‌دار شده‌اند).
 // ═══════════════════════════════════════════════════════════════
+// stage-48 — آیکون بنفشِ چشمک‌زنِ «فعال‌سازی نوتیفیکیشن» در هدر
 
 // src/components/shared/NotificationEnableIcon.tsx
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
@@ -26,6 +37,9 @@ import {
  *  • بعد از فعال‌شدن (مجوز granted + اشتراک ثبت‌شده) آیکون از هدر حذف
  *    می‌شود؛ هر وقت غیرفعال شد برمی‌گردد.
  *  • حالت denied: راهنمای بازکردن مجوز از تنظیمات مرورگر.
+ * stage-49:
+ *  • در موبایل پاپ‌اور fixed زیر هدر است (از صفحه بیرون نمی‌زند).
+ *  • شکستِ فعال‌سازی پیام روشن دارد و حالت busy هرگز گیر نمی‌کند.
  */
 export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 	const { t } = useI18nSafe()
@@ -34,6 +48,7 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 	const [hasSubscription, setHasSubscription] = useState(false)
 	const [busy, setBusy] = useState(false)
 	const [done, setDone] = useState(false)
+	const [failed, setFailed] = useState(false)
 	const rootRef = useRef<HTMLDivElement>(null)
 
 	const refresh = useCallback(async () => {
@@ -89,10 +104,12 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 
 	const onEnable = useCallback(async () => {
 		setBusy(true)
+		setFailed(false)
 		try {
 			const st = await enablePush()
 			setPushState(st)
 			if (st.state === 'granted' && st.subscribed) {
+				setFailed(false)
 				setHasSubscription(true)
 				setDone(true)
 				// انیمیشن موفقیت؛ سپس خودکار بسته می‌شود و آیکون حذف می‌شود
@@ -100,11 +117,19 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 					setOpen(false)
 					setDone(false)
 				}, 1600)
+			} else if (st.state === 'granted') {
+				// مجوز داده شد ولی اشتراک ثبت نشد (SW/کلید VAPID/شبکه)
+				// — پیام روشن؛ دکمه برای تلاش مجدد آزاد است (بازخورد ۴)
+				setFailed(true)
+				void refresh()
 			}
 		} finally {
+			// stage-49 — هر نتیجه‌ای باشد، حالت busy تمام می‌شود
+			// (قبلاً اگر navigator.serviceWorker.ready معلق می‌شد،
+			//  «در حال فعال‌سازی…» برای همیشه می‌ماند)
 			setBusy(false)
 		}
-	}, [])
+	}, [refresh])
 
 	// فعال است؟ ⇒ هیچ آیکونی در هدر نیست (خواسته‌ی صریح)
 	const enabled = pushState.state === 'granted' && hasSubscription
@@ -134,12 +159,16 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 				<Bell size={20} className="h-[18px] w-[18px] sm:h-5 sm:w-5 relative" />
 			</button>
 
-			{/* پاپ‌اور انیمیت‌شده */}
+			{/* پاپ‌اور انیمیت‌شده — stage-49:
+				• <sm: کارتِ fixed با حاشیه‌ی ۱۶px از هر طرف، دقیقاً زیر هدر
+				  (هدر full-width است؛ کارت همیشه داخل صفحه — دیگر از
+				  سمت راست بیرون نمی‌زند)
+				• ≥sm: همان پاپ‌اور absolute چسبیده به آیکون (left-0) */}
 			{open && (
 				<div
 					role="dialog"
 					aria-label={t['notify.enable.title']}
-					className="absolute top-full left-0 mt-2 w-80 max-w-[calc(100vw-24px)] bg-white dark:bg-[#1a0a0e] rounded-2xl shadow-2xl border border-purple-200 dark:border-purple-500/20 z-50 overflow-hidden animate-pop-in"
+					className="fixed left-4 right-4 top-[4.75rem] z-50 overflow-hidden animate-pop-in bg-white dark:bg-[#1a0a0e] rounded-2xl shadow-2xl border border-purple-200 dark:border-purple-500/20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 sm:w-80 sm:max-w-[calc(100vw-24px)]"
 				>
 					{/* هدر گرادیانی بنفش */}
 					<div className="bg-linear-to-br from-purple-500 to-purple-400 dark:from-purple-600 dark:to-purple-500 p-4 text-white">
@@ -197,6 +226,14 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 									<BellRing size={16} className={busy ? 'animate-pulse' : ''} />
 									{busy ? t['notify.enable.busy'] : t['notify.enable.action']}
 								</button>
+
+								{/* stage-49 — شکست فعال‌سازی: پیام روشن + تلاش مجدد */}
+								{failed && (
+									<p className="text-[11px] text-orange-500 dark:text-orange-400 font-DanaMedium leading-relaxed bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20 rounded-xl px-3 py-2.5">
+										{t['notify.enable.retryHint']}
+									</p>
+								)}
+
 								<p className="text-[10px] text-gray-400 dark:text-gray-500 text-center leading-relaxed">
 									{t['notify.enable.hint'].replace(
 										'{b}',

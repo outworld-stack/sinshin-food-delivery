@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-49 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/admin2/admin2.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر (بازخورد ۲): canEditPackagingFee در دسترسی‌های پیش‌فرضِ
+//        «افزودن ادمین۲» روشن شد (قبلاً خاموش بود).
+// ═══════════════════════════════════════════════════════════════
 // round-48 — sinshin-food-delivery — فایل 13 از 97
 // مسیر مقصد: apps/api/src/domain/admin2/admin2.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -67,8 +73,9 @@ export const ALL_ADMIN2_PERMISSIONS: Admin2Permissions = {
 
 /**
  * stage-48 — دسترسی‌های پیش‌فرض لحظه‌ی «افزودن ادمین۲» توسط ادمین اصلی:
- * همه‌ی دسترسی‌های عملیاتی روشن به‌جز ویرایش کاربران، ارسال نوتیفیکیشن
- * (و هزینه بسته‌بندی که خواسته نشد). ادمین اصلی بعداً از پنل تنظیم می‌کند.
+ * همه‌ی دسترسی‌های عملیاتی روشن به‌جز ویرایش کاربران و ارسال نوتیف.
+ * stage-49 — ویرایش هزینه بسته‌بندی هم پیش‌فرض روشن شد (بازخورد ۲).
+ * ادمین اصلی بعداً از پنل تنظیم می‌کند.
  */
 const DEFAULT_ADMIN2_PERMISSIONS = {
     productsRead: true,
@@ -81,7 +88,7 @@ const DEFAULT_ADMIN2_PERMISSIONS = {
     mainCategoriesWrite: true,
     orderDetailsRead: true,
     canToggleTemporaryClose: true,
-    canEditPackagingFee: false,
+    canEditPackagingFee: true,
     notificationsRead: true,
     notificationsSend: false,
     productsAvailability: true,

@@ -1,3 +1,11 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-49 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/pwa/register-sw.tsx
+// تغییر (بازخورد ۶): در DEV هم سرویس‌ورکر ثبت می‌شود — اما نه sw.js
+//        (workbox، فقط با build:pwa) بلکه sw-push.js سبک و استاتیک؛
+//        تا Web Push در حالت توسعه روی دسکتاپ قابل آزمایش باشد.
+// ═══════════════════════════════════════════════════════════════
+
 // src/pwa/register-sw.tsx
 // ثبت SW + بنر آپدیت (client-only) + install-prompt اندروید + راهنمای iOS
 // همه‌چیز داخل useEffect — هیچ رندر SSR نداریم → ناهم‌خوانی هیدریشن صفر
@@ -52,17 +60,26 @@ export function PwaRegister() {
     // ── ثبت SW ──
     if (!('serviceWorker' in navigator)) return
 
-    // محیط توسعه: sw.js فقط با build:pwa تولید می‌شود (بسته‌بندی‌شده توسط workbox)؛ در محیط توسعه
-    // وجود ندارد یا کهنه است → ثبت نکن و SW های مانده روی origin را پاک کن.
-    // (خطای «SyntaxError: import outside a module» در محیط توسعه همین‌جا ریشه می‌گیرد:
-    // فایل sw با درون‌ریزیِ کلاسیک register می‌شود.)
+    // stage-49 — محیط توسعه: به‌جای پاک‌کردنِ همه‌ی ثبت‌ها،
+    // سرویس‌ورکرِ سبکِ «sw-push.js» (فایل استاتیک بدون workbox — فقط
+    // هندلرهای پوش) ثبت می‌شود تا Web Push در dev قابل آزمایش باشد
+    // (بازخورد ۶). ثبت‌های کهنه‌ی دیگر (مثل sw.js ساخته‌شده‌ی build
+    // قبلی که در dev «import outside a module» می‌دهد) همچنان پاک
+    // می‌شوند — فقط sw-push.js نگه داشته می‌شود.
+    // (اول ثبت، بعد پاک‌سازی — تا رقابتِ unregister/register پیش نیاید)
     if (import.meta.env.DEV) {
       navigator.serviceWorker
-        .getRegistrations()
+        .register('/sw-push.js')
+        .then(() => navigator.serviceWorker.getRegistrations())
         .then((regs) => {
-          for (const r of regs) void r.unregister()
+          for (const r of regs) {
+            const scripts = [r.active, r.installing, r.waiting]
+              .map((w) => (w ? w.scriptURL : ''))
+              .join(' ')
+            if (!scripts.includes('sw-push.js')) void r.unregister()
+          }
         })
-        .catch(() => {/* هیچ‌کاری نمی‌کند */})
+        .catch(() => {/* پوش در dev هم اختیاری است — اپ عادی */ })
       return
     }
 
