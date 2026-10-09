@@ -326,6 +326,9 @@ CREATE TABLE "product_sizes" (
 	"name" varchar(60) NOT NULL,
 	"name_ar" varchar(60),
 	"price" integer NOT NULL,
+	"discount_percentage" integer DEFAULT 0 NOT NULL,
+	"discount_starts_at" timestamp with time zone,
+	"discount_ends_at" timestamp with time zone,
 	"sort_order" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
@@ -339,6 +342,8 @@ CREATE TABLE "products" (
 	"ar_auto" boolean DEFAULT false NOT NULL,
 	"original_price" integer DEFAULT 0 NOT NULL,
 	"discount_percentage" integer DEFAULT 0 NOT NULL,
+	"discount_starts_at" timestamp with time zone,
+	"discount_ends_at" timestamp with time zone,
 	"prep_time" integer DEFAULT 15 NOT NULL,
 	"sizes_enabled" boolean DEFAULT false NOT NULL,
 	"packaging_cost" integer DEFAULT 0 NOT NULL,

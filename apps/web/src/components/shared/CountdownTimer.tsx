@@ -122,7 +122,7 @@ export const CountdownTimer = memo(function CountdownTimer({
                                 dir="rtl"
                                 role="timer"
                                 aria-label={t['common.offerEndsIn']}
-                                className={`inline-flex items-center gap-1.5 rounded-xl px-2 py-1 bg-linear-to-l from-[#f6339a] to-[#2fd4d1] shadow-md select-none ${variant === 'box' ? 'gap-2 px-3 py-2' : ''}`}
+                                className={`inline-flex items-center gap-1.5 rounded-xl px-2 py-1 bg-linear-to-l from-[#f6339a] to-dark-primary shadow-md select-none ${variant === 'box' ? 'gap-2 px-3 py-2' : ''}`}
                         >
                                 <Timer size={variant === 'box' ? 16 : 13} className="text-white shrink-0" />
                                 <span
@@ -145,7 +145,7 @@ export const CountdownTimer = memo(function CountdownTimer({
                         dir="rtl"
                         role="timer"
                         aria-label={t['common.offerEndsIn']}
-                        className={`inline-flex items-center gap-1.5 rounded-xl px-2 py-1 bg-linear-to-l from-[#f6339a] to-[#2fd4d1] shadow-md select-none ${variant === 'box' ? 'gap-2 px-3 py-2' : ''}`}
+                        className={`inline-flex items-center gap-1.5 rounded-xl px-2 py-1 bg-linear-to-l from-[#f6339a] to-dark-primary shadow-md select-none ${variant === 'box' ? 'gap-2 px-3 py-2' : ''}`}
                 >
                         <Timer size={variant === 'box' ? 16 : 13} className="text-white shrink-0" />
                         <span

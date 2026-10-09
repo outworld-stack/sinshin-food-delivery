@@ -1,5 +1,5 @@
 {
-  "id": "d3b77c3b-348e-4206-8aad-fa5058b07d44",
+  "id": "615f8665-3e65-44fe-b695-822cf7234cfe",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -3378,6 +3378,25 @@
           "primaryKey": false,
           "notNull": true
         },
+        "discount_percentage": {
+          "name": "discount_percentage",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "discount_starts_at": {
+          "name": "discount_starts_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "discount_ends_at": {
+          "name": "discount_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "sort_order": {
           "name": "sort_order",
           "type": "integer",
@@ -3506,6 +3525,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "discount_starts_at": {
+          "name": "discount_starts_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "discount_ends_at": {
+          "name": "discount_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "prep_time": {
           "name": "prep_time",
