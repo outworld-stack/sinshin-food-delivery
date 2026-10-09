@@ -1,8 +1,18 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-48 — sinshin-food-delivery
+// stage-51 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر:
+// تغییر (ریشه‌ی «هیچ نوتیفی در هیچ مرورگری نمی‌رسد» — باگ احراز هویت):
+//   • باگ 🔴 قطعی: GET /vapid-public داخل گروه requireAuth بود در حالی
+//     که enablePush سمت فرانت آن را بدون Bearer صدا می‌زند ⇒ ۴۰۱ ⇒
+//     قبل از pushManager.subscribe خروج — یعنی «هیچ اشتراکی هرگز در
+//     سرور ثبت نمی‌شد» و پوشی هم ارسال نمی‌شد (گیرنده‌های نمایشی فقط
+//     شمارش صندوق درون‌بری‌اند، نه تحویل پوش).
+//   • فیکس: مسیر عمومی شد (گروه جدا، بدون requireAuth) — کلید عمومی
+//     VAPID طبق طراحی خود استاندارد «عمومی» است (همان چیزی که در
+//     subscribe به مرورگر می‌رسد) و رازی نیست. فرانت هم برای سازگاری
+//     با بک‌اند قدیمی، همان مسیر را با authedPushFetch می‌خواند.
+// stage-48:
 //   • broadcast: ادمین اصلی + ادمین۲ با مجوز notificationsSend؛
 //     فرستنده در notification_log ثبت می‌شود (نقش + نام)
 //   • /notifications/history: تاریخچه‌ی ارسال با فیلتر (جستجو/نوع/
@@ -27,13 +37,16 @@ export interface NotificationRoutesDeps {
 }
 
 /**
- * فاز-۲ + stage-48 — مسیرهای نوتیفیکیشن.
+ * فاز-۲ + stage-48/51 — مسیرهای نوتیفیکیشن.
+ *
+ * عمومی (بدون auth — stage-51):
+ *  GET  /notifications/vapid-public  → کلید عمومی پوش (برای subscribe)
  *
  * کاربر (requireAuth):
  *  GET  /notifications               → لیست + خوانده‌نشده
  *  GET  /notifications/unread-count   → فقط شمارش (poll سبک)
  *  POST /notifications/read           → { id } یا { all: true }
- *  GET  /notifications/vapid-public   → کلید عمومی پوش (برای subscribe)
+ *  GET  /notifications/push-status    → اشتراک‌های فعال من
  *  POST /notifications/subscriptions  → ثبت اشتراک Web Push
  *  DELETE /notifications/subscriptions → حذف اشتراک
  *
@@ -42,6 +55,24 @@ export interface NotificationRoutesDeps {
  *  GET  /notifications/history    → تاریخچه‌ی ارسال (read: notificationsRead)
  */
 export const notificationRoutes = (deps: NotificationRoutesDeps) => {
+  // stage-51 — کلید عمومی VAPID «عمومی» است (خود استاندارد آن را برای
+  // subscribe به مرورگر می‌دهد)؛ قبلاً داخل requireAuth بود و enablePush
+  // بدون Bearer صدا می‌زدش ⇒ 401 ⇒ اشتراک هرگز ثبت نمی‌شد ⇒ هیچ پوشی
+  // نمی‌رسید. این گروه بدون auth است و CORS هم در dev باز است.
+  const publicRoutes = new Elysia({ prefix: '/notifications', tags: ['Notifications'] })
+    .get(
+      '/vapid-public',
+      () => ({ key: deps.notifications.vapidPublicKey() }),
+      {
+        detail: {
+          summary: 'VAPID public key (base64url) — for pushManager.subscribe (public, no auth)',
+          description:
+            'کلید عمومی VAPID از VAPID_PUBLIC_KEY (env). کلید خصوصی هرگز بیرون نمی‌رود. ' +
+            'stage-51: مسیر عمومی شد — کلید عمومی رازی نیست و subscribe نباید به نشست وابسته باشد.',
+        },
+      },
+    )
+
   const user = new Elysia({ prefix: '/notifications', tags: ['Notifications'] })
     .use(requireAuth(deps.sessions))
 
@@ -79,18 +110,6 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           all: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Mark one (id) or all notifications as read' },
-      },
-    )
-
-    .get(
-      '/vapid-public',
-      () => ({ key: deps.notifications.vapidPublicKey() }),
-      {
-        detail: {
-          summary: 'VAPID public key (base64url) — for pushManager.subscribe',
-          description:
-            'فاز-۲: کلید عمومی VAPID از VAPID_PUBLIC_KEY (env). کلید خصوصی هرگز بیرون نمی‌رود.',
-        },
       },
     )
 
@@ -225,7 +244,7 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
       },
     )
 
-  return new Elysia().use(user).use(send).use(history)
+  return new Elysia().use(publicRoutes).use(user).use(send).use(history)
 }
 
 /** تاریخ ISO خراب → undefined (نه Invalid Date → RangeError → 500 — الگوی رارد M21) */

@@ -1,24 +1,22 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-50 — sinshin-food-delivery
+// stage-51 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/lib/push-subscription.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر (اسکن عمیق — سه باگ «گیر کردن دکمه» / «نرفتن آیکون در
-//        فایرفاکس» / «ثبت‌نشدن اشتراک بعد از انقضای توکن»):
-//   • pushManager.subscribe بدون مهلت بود و در Chrome/Firefox می‌توانست
-//     تا ابد معلق بماند ⇒ دکمه در «در حال فعال‌سازی…» گیر می‌کرد. حالا
-//     مهلت ۳۰ ثانیه دارد؛ بعدش شکستِ روشن + دکمه‌ی آزاد برای تلاش مجدد.
-//   • POST /notifications/subscriptions با توکنِ منقضی (TTL ۱۵ دقیقه!)
-//     ۴۰۱ می‌گرفت و هیچ نوسازی/ریتری نداشت ⇒ subscribed=false می‌ماند؛
-//     آیکون در فایرفاکس/کروم حذف نمی‌شد و اشتراک هرگز در بک‌اند ثبت
-//     نمی‌شد (⇒ پوش هم هیچ‌وقت نمی‌رسید). حالا: ensureSession قبل از
-//     فراخوانی + روی ۴۰۱ یک‌بار tryRefresh و تلاش مجدد (الگوی authJson).
-//   • در نبودِ SW، ۸ ثانیه انتظارِ بی‌فایده قبل از ثبت sw-push.js حذف
-//     شد: اول getRegistration (سریع)، نبود ⇒ همان‌جا ثبت، بعد انتظارِ
-//     فعال‌شدن (ready). فعال‌سازی حالا در ~۱ ثانیه شروع می‌شود.
-//   • getPushState هم با fast-path: اگر SW ثبت نشده باشد به‌جای ۴
-//     ثانیه انتظارِ بی‌نتیجه، فوری جواب می‌دهد.
-//   • authedPushFetch صادر می‌شود تا NotificationEnableIcon هم برای
-//     push-status از همان مسیر مهلت‌دار + نوساز استفاده کند.
+// تغییر (ریشه‌ی «هیچ نوتیفی در هیچ مرورگری نمی‌رسد» — باگ احراز هویت):
+//   • باگ 🔴 قطعی: GET /notifications/vapid-public با fetch خام و «بدون
+//     Bearer» صدا زده می‌شد، در حالی که مسیر در بک‌اند داخل requireAuth
+//     بود ⇒ همیشه ۴۰۱ ⇒ enablePush قبل از pushManager.subscribe خارج
+//     می‌شد ⇒ اشتراک هیچ‌وقت نه در مرورگر ساخته و نه در سرور ثبت می‌شد
+//     ⇒ هیچ پوشی هرگز نمی‌رسید (ریشه‌ی «گیرنده: ۱ ولی در Edge هیچی»).
+//   • فیکس دولایه: (۱) مسیر در stage-51 عمومی شد (بک‌اند)؛ (۲) فرانت هم
+//     همان GET را با authedPushFetch می‌زند — با بک‌اند قدیمی (محافظت‌شده)
+//     هم کار می‌کند و با نشستِ منقضی هم ریتری ۴۰۱ دارد.
+//   • گزارش خطا (خواسته‌ی صریح): هر شکست حالا وضعیت HTTP / متن خطا را در
+//     کنسول ثبت می‌کند (بدون توکن) و PushState با failureReason برمی‌گردد
+//     تا UI پیام «دقیق» نشان بدهد نه یک متن کلی — علت واقعی دیگر بی‌صدا
+//     نمی‌ماند.
+// stage-50: مهلت subscribe (۳۰s)، ریتری ۴۰۱ ثبت اشتراک، ثبت سریع SW،
+//           fast-path getPushState — همه محفوظ.
 // ═══════════════════════════════════════════════════════════════
 // phase-2 — اشتراک Web Push سمت کلاینت
 
@@ -31,6 +29,7 @@
  *     (فایل استاتیکِ سبک) ثبت می‌شود — در dev و prodِ بدون build:pwa.
  *  ۲) permission — اگر default بود درخواست بگیر؛ denied = تهی
  *  ۳) کلید عمومی VAPID از API (GET /notifications/vapid-public)
+ *     — stage-51: با authedPushFetch (بک‌اند قدیمی هم جواب می‌دهد)
  *  ۴) pushManager.subscribe({ userVisibleOnly, applicationServerKey })
  *     — با مهلت؛ هیچ‌وقت معلق نمی‌ماند
  *  ۵) ثبت endpoint در بک‌اند (POST /notifications/subscriptions)
@@ -48,8 +47,15 @@ import { ensureSession, getAccessToken, tryRefresh } from '#/lib/auth-session'
 
 export type PushPermission = 'granted' | 'denied' | 'default' | 'unsupported'
 
+/** stage-51 — علتِ شکست برای پیامِ دقیق در UI (گزارش خطای شفاف) */
+export type PushFailureReason =
+  | 'vapid' /** GET vapid-public ناموفق (شبکه/401/کلید نامعتبر) */
+  | 'subscribe' /** pushManager.subscribe رد شد یا مهلت پر شد */
+  | 'register' /** POST subscriptions ناموفق (شبکه/401/اعتبارسنجی) */
+  | 'invalid' /** ساختار اشتراک ناقص (endpoint/keys) */
+
 export type PushState =
-  | { state: 'granted'; subscribed: boolean }
+  | { state: 'granted'; subscribed: boolean; failureReason?: PushFailureReason }
   | { state: 'denied' }
   | { state: 'default' }
   | { state: 'unsupported'; reason?: string }
@@ -115,6 +121,8 @@ async function readyWithTimeout(ms: number): Promise<ServiceWorkerRegistration |
  * fetch با مهلت + Bearer + نشستِ تازه + یک ریتری روی ۴۰۱ (الگوی authJson).
  * stage-50 — قبلاً توکنِ منقضی یعنی ۴۰۱ و شکستِ همیشگی ثبت اشتراک؛
  * حالا اول نشست تازه می‌شود، و اگر باز ۴۰۱ آمد، tryRefresh و تلاش مجدد.
+ * stage-51 — برای vapid-public هم استفاده می‌شود: مسیر در بک‌اند جدید
+ * عمومی است؛ روی بک‌اند قدیمی (محافظت‌شده) با همین Bearer جواب می‌گیرد.
  * خروجی null = مهلت/شبکه — کالر حالتِ «تلاش مجدد» نشان می‌دهد.
  */
 export async function authedPushFetch(
@@ -145,15 +153,6 @@ export async function authedPushFetch(
     if (refreshed) res = await run()
   }
   return res
-}
-
-/** fetch عمومی (بدون auth) با مهلت — برای vapid-public */
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response | null> {
-  try {
-    return await withTimeout(fetch(url, { ...init }), FETCH_TIMEOUT_MS, null)
-  } catch {
-    return null
-  }
 }
 
 /** وضعیت فعلی — سبک، بدون عارضه */
@@ -208,38 +207,71 @@ export async function enablePush(): Promise<PushState> {
     // ثانیه waiting قبل از ثبت می‌ماند — بخشی از «گیر کردن دکمه».)
     let reg = await ensurePushRegistration()
     if (reg) reg = (await readyWithTimeout(READY_TIMEOUT_MS)) ?? reg
-    if (!reg) return { state: 'granted', subscribed: false }
+    if (!reg) return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
 
     let sub = await reg.pushManager.getSubscription()
 
     if (!sub) {
       // کلید عمومی VAPID از سرور (base64url ۶۵ بایت)
-      const keyRes = await fetchWithTimeout(`${apiBase()}/notifications/vapid-public`, { method: 'GET' })
+      // stage-51 — 🔴 باگ ریشه‌ای: این GET قبلاً بدون Bearer بود و مسیر
+      // در بک‌اند requireAuth داشت ⇒ همیشه ۴۰۱ ⇒ subscribe هیچ‌وقت اجرا
+      // نمی‌شد ⇒ هیچ پوشی نمی‌رسید. حالا با authedPushFetch: روی بک‌اند
+      // جدید (عمومی) و قدیمی (محافظت‌شده) هر دو کار می‌کند.
+      const keyRes = await authedPushFetch(`${apiBase()}/notifications/vapid-public`, {
+        method: 'GET',
+      })
       if (!keyRes || !keyRes.ok) {
-        return { state: 'granted', subscribed: false }
+        // گزارش شفاف — علت واقعی دیگر بی‌صدا نیست (بدون توکن در لاگ)
+        console.warn(
+          '[push] vapid-public ناموفق:',
+          keyRes ? `HTTP ${keyRes.status}` : 'شبکه/مهلت',
+        )
+        return { state: 'granted', subscribed: false, failureReason: 'vapid' }
       }
-      const { key } = (await keyRes.json()) as { key?: string }
-      if (!key) return { state: 'granted', subscribed: false }
+      let key: string | undefined
+      try {
+        ;({ key } = (await keyRes.json()) as { key?: string })
+      } catch (err) {
+        console.warn('[push] vapid-public: JSON خراب:', err)
+        return { state: 'granted', subscribed: false, failureReason: 'vapid' }
+      }
+      if (!key) {
+        console.warn('[push] vapid-public: کلید خالی برگشت')
+        return { state: 'granted', subscribed: false, failureReason: 'vapid' }
+      }
 
       const applicationServerKey = urlBase64ToUint8Array(key)
       // stage-50 — مهلتِ صریح: subscribe در فایرفاکس/شبکه‌ی کند می‌توانست
       // تا ابد معلق بماند (بقیه‌ی «گیر کردن دکمه»). timeout ⇒ subscribed=false
       // با پیام تلاش‌مجدد در UI — نه دکمه‌ی قفل‌شده.
-      sub = await withTimeout(
-        reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey,
-        }),
-        SUBSCRIBE_TIMEOUT_MS,
-        null,
-      )
-      if (!sub) return { state: 'granted', subscribed: false }
+      try {
+        sub = await withTimeout(
+          reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey,
+          }),
+          SUBSCRIBE_TIMEOUT_MS,
+          null,
+        )
+      } catch (err) {
+        // رد صریح مرورگر (مثلاً AbortError فایرفاکس) — گزارش + علت دقیق
+        console.warn(
+          '[push] pushManager.subscribe رد شد:',
+          err instanceof Error ? `${err.name}: ${err.message}` : err,
+        )
+        return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
+      }
+      if (!sub) {
+        console.warn(`[push] subscribe بعد از ${SUBSCRIBE_TIMEOUT_MS / 1000}s مهلت پر شد`)
+        return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
+      }
     }
 
     // ثبت در بک‌اند — stage-50: با نشست تازه + ریتری ۴۰۱ (authedPushFetch)
     const raw = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
     if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) {
-      return { state: 'granted', subscribed: false }
+      console.warn('[push] ساختار اشتراک ناقص است (endpoint/keys)')
+      return { state: 'granted', subscribed: false, failureReason: 'invalid' }
     }
     const regRes = await authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
       method: 'POST',
@@ -249,10 +281,18 @@ export async function enablePush(): Promise<PushState> {
         keys: { p256dh: raw.keys.p256dh, auth: raw.keys.auth },
       }),
     })
-    return { state: 'granted', subscribed: regRes !== null && regRes.ok }
+    if (!regRes || !regRes.ok) {
+      // گزارش شفاف — علت واقعی دیگر بی‌صدا نیست (بدون توکن در لاگ)
+      console.warn(
+        '[push] ثبت اشتراک ناموفق:',
+        regRes ? `HTTP ${regRes.status}` : 'شبکه/مهلت',
+      )
+      return { state: 'granted', subscribed: false, failureReason: 'register' }
+    }
+    return { state: 'granted', subscribed: true }
   } catch (err) {
     console.error('[push] enablePush ناموفق:', err)
-    return { state: 'granted', subscribed: false }
+    return { state: 'granted', subscribed: false, failureReason: 'register' }
   }
 }
 

@@ -1,7 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-50 — sinshin-food-delivery
+// stage-51 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/shared/NotificationEnableIcon.tsx
-// وضعیت: جایگزینی کامل فایل موجود (stage-49)
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر (گزارش خطای شفاف — خواسته‌ی صریح کاربر):
+//   • پیام شکست دیگر «یک متن کلی» نیست: enablePush حالا با
+//     failureReason برمی‌گردد (vapid/subscribe/register/invalid) و
+//     پاپ‌اور پیامِ «دقیق همان مرحله» را نشان می‌دهد — کاربر/توسعه‌دهنده
+//     می‌داند مشکل کجاست (کلید؟ مرورگر؟ ثبت در سرور؟) بدون باز کردن
+//     کنسول. کنسول هم هر شکست را با وضعیت HTTP ثبت می‌کند.
+// stage-50: بن‌بستِ denied با راهنمای ۳ گام + دکمه‌ی «بررسی مجدد مجوز»؛
+//           بازبینی روی focus/visibilitychange/بازشدن پاپ‌اور؛ busy همیشه
+//           در finally تمام می‌شود — همه محفوظ.
 // تغییر (اسکن عمیق — بازخورد کاربر):
 //   • باگ حالتِ denied (بن‌بست): کاربری که نوتیف را از تنظیمات مرورگر
 //     خاموش کرده بود، آیکون برمی‌گشت ولی پاپ‌اور «فقط متن» بود — بدون
@@ -30,6 +39,7 @@ import {
 	enablePush,
 	getPushState,
 	authedPushFetch,
+	type PushFailureReason,
 	type PushState,
 } from '#/lib/push-subscription'
 
@@ -61,6 +71,8 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 	const [recheckBusy, setRecheckBusy] = useState(false)
 	const [done, setDone] = useState(false)
 	const [failed, setFailed] = useState(false)
+	/** stage-51 — علتِ دقیقِ آخرین شکست (پیام اختصاصی در پاپ‌اور) */
+	const [failReason, setFailReason] = useState<PushFailureReason | null>(null)
 	const rootRef = useRef<HTMLDivElement>(null)
 
 	const refresh = useCallback(async () => {
@@ -127,11 +139,13 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 	const onEnable = useCallback(async () => {
 		setBusy(true)
 		setFailed(false)
+		setFailReason(null)
 		try {
 			const st = await enablePush()
 			setPushState(st)
 			if (st.state === 'granted' && st.subscribed) {
 				setFailed(false)
+				setFailReason(null)
 				setHasSubscription(true)
 				setDone(true)
 				// انیمیشن موفقیت؛ سپس خودکار بسته می‌شود و آیکون حذف می‌شود
@@ -140,9 +154,11 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 					setDone(false)
 				}, 1600)
 			} else if (st.state === 'granted') {
-				// مجوز داده شد ولی اشتراک ثبت نشد (SW/کلید VAPID/شبکه)
-				// — پیام روشن؛ دکمه برای تلاش مجدد آزاد است
+				// مجوز داده شد ولی اشتراک ثبت نشد — stage-51:
+				// علتِ دقیق همان مرحله نگه داشته می‌شود تا پیام
+				// اختصاصی نشان داده شود (کلید/مرورگر/ثبت سرور)
 				setFailed(true)
+				setFailReason(st.failureReason ?? null)
 				void refresh()
 			}
 		} finally {
@@ -297,10 +313,19 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 									{busy ? t['notify.enable.busy'] : t['notify.enable.action']}
 								</button>
 
-								{/* stage-49 — شکست فعال‌سازی: پیام روشن + تلاش مجدد */}
+								{/* stage-51 — شکست فعال‌سازی با «پیام دقیق همان مرحله»: */}
+								{/* کلید VAPID / ثبت در مرورگر / ثبت در سرور */}
 								{failed && (
 									<p className="text-[11px] text-orange-500 dark:text-orange-400 font-DanaMedium leading-relaxed bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20 rounded-xl px-3 py-2.5">
-										{t['notify.enable.retryHint']}
+										{failReason === 'vapid'
+												? t['notify.enable.errKey']
+												: failReason === 'subscribe'
+													? t['notify.enable.errSubscribe']
+													: failReason === 'register'
+														? t['notify.enable.errRegister']
+														: failReason === 'invalid'
+															? t['notify.enable.errInvalid']
+															: t['notify.enable.retryHint']}
 									</p>
 								)}
 

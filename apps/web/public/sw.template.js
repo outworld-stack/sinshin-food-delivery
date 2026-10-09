@@ -2,6 +2,11 @@
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/web/public/sw.template.js
 // تغییر: هندلرهای Web Push (notification + click) — سیستم پوش کاستوم
+// stage-51: نمایشِ نوتیف مقاوم شد — اگر showNotification با آپشن‌های
+//   کامل روی موتوری خطا بدهد، همان پیام با آپشن‌های حداقلی دوباره
+//   نشان داده می‌شود (همان فیکس sw-push.js در stage-50؛ این نسخه‌ی
+//   production است و جای آن خالی مانده بود — پوش می‌رسید ولی «بی‌صدا»
+//   حذف می‌شد).
 // ═══════════════════════════════════════════════════════════════
 
 // sw.template.js — منبع؛ workbox-build با injectManifest پرش می‌کند
@@ -139,7 +144,31 @@ self.addEventListener('push', (event) => {
     lang: 'fa',
     data: { url: payload.url || '/products', ...(payload.data || {}) },
   }
-  event.waitUntil(self.registration.showNotification(title, options))
+  // stage-51 — مقاوم‌سازی: هر موتوری لزوماً همه‌ی آپشن‌ها را نمی‌پذیرد
+  // (مثلاً renotify/badge روی بعضی نسخه‌ها TypeError می‌دهد)؛ در آن
+  // صورت همان پیام با آپشن‌های حداقلی نشان داده می‌شود — پیام پوش
+  // هرگز «بی‌صدا» نمی‌افتد. (همان فیکس sw-push.js در stage-50 — این
+  // فایل نسخه‌ی production است و جای آن خالی مانده بود.)
+  event.waitUntil(
+    (async () => {
+      try {
+        await self.registration.showNotification(title, options)
+      } catch {
+        try {
+          await self.registration.showNotification(title, {
+            body: options.body,
+            tag: options.tag,
+            dir: options.dir,
+            lang: options.lang,
+            data: options.data,
+          })
+        } catch {
+          // نمایش ممکن نیست — لاگ توسعه؛ کاری بیشتر از دست SW برنمی‌آید
+          console.warn('[sw] showNotification ناموفق بود')
+        }
+      }
+    })(),
+  )
 })
 
 // کلیک روی نوتیف — باز/فوکوس تب سایت روی URL مقصد

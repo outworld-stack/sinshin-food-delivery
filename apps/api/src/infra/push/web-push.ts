@@ -1,21 +1,28 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-50 — sinshin-food-delivery
+// stage-51 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/infra/push/web-push.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر (اسکن عمیق نوتیفیکیشن — باگ ریشه‌ای):
-//   • باگ 🔴 رمزنگاری: مشتق‌سازی کلید CEK/NONCE «دو بار extract»
-//     می‌شد (اول HMAC دستی، بعد HKDF وب‌کریپتو با salt خالی روی PRK)
-//     — این با RFC 8291/8188 یکی نیست. نتیجه: هر پیام پوش با کلیدِ
-//     اشتباه رمز می‌شد؛ سرور پوش ۲۰۱ می‌داد («ارسال شد») ولی مرورگر
-//     رمزگشایی نمی‌توانست بکند و پیام را «بی‌صدا» می‌انداخت — هیچ
-//     نوتیفی در هیچ مرورگری دیده نمی‌شد (بازخورد: «گیرنده: ۱ ولی
-//     در Edge هیچی نیامد»).
-//   • فیکس: برای هر خروجی یک HKDF کاملِ استاندارد (RFC 5869):
-//     IKM = ECDH_shared || auth_secret و salt = نمکِ ۱۶ بایتیِ هدر —
-//     همین یک extract. با تست رفت‌وبرگشتی (رمز سمت سرور + رمزگشایی
-//     استاندارد سمت مرورگر) تأیید شد: نسخه‌ی قبل شکست، این نسخه سبز.
-//   • سخت‌سازی: هدر Topic به کاراکترهای امن [A-Za-z0-9-] پاک‌سازی
-//     می‌شود (underscore در بعضی سرورهای پوش ۴۰۰ می‌دهد).
+// تغییر (ریشه‌یابی «هیچ نوتیفی در هیچ مرورگری نمی‌رسد» — باگ رمزنگاری):
+//   • باگ 🔴‌ قطعی: مشتق‌سازی کلید فقط «مرحله‌ی دوم» RFC را داشت و
+//     «مرحله‌ی اول» (RFC 8291 §3.3) کلاً جا افتاده بود:
+//       نسخه‌ی قبل:   IKM = ecdh_secret || auth_secret   ← چسباندن مستقیم
+//       استاندارد:    PRK_key = HKDF-Extract(auth_secret, ecdh_secret)
+//                     IKM     = HKDF-Expand(PRK_key,
+//                                 "WebPush: info"||0x00||ua_pub||as_pub, 32)
+//     بدون این مرحله، CEK/NONCE با چیزی که مرورگر می‌سازد یکی نیست؛
+//     سرور پوش ۲۰۱ می‌دهد («ارسال شد») ولی مرورگر رمزگشایی نمی‌کند و
+//     پیام را «بی‌صدا» می‌اندازد — هیچ نوتیفی دیده نمی‌شود.
+//   • اثبات عددی: پیاده‌سازی جدید «بایت‌به‌بایت» بردارهای رسمی
+//     RFC 8291 (Appendix A) را بازتولید می‌کند — ecdh_secret، PRK_key،
+//     IKM، PRK، CEK، NONCE و ciphertext کامل؛ و رمزگشایی مستقل با
+//     کلید خصوصی UA همان plaintext را برمی‌گرداند. (نسخه‌ی قبل روی
+//     همین بردارها FAIL می‌شود.)
+//   • پیاده‌سازی با HMAC خام طبق شبه‌کد خود RFC 8291 §3.4 — بدون
+//     HKDF-API؛ قابل خواندن خط‌به‌خط در برابر متن استاندارد.
+//   • encryptWebPushPayload صادر می‌شود (ورودی تعیین‌گرا برای تست
+//     بردارهای RFC — در تولید هرگز با opts فراخوانی نمی‌شود).
+//   • بقیه‌ی فایل (VAPID ES256، هدرهای TTL/Topic/Urgency، پاک‌سازی
+//     Topic، مهلت ۱۰ثانیه، رفتار سه‌حالته ok/gone/fail) دست‌نخورده.
 // ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery — فایل جدید
 // ═══════════════════════════════════════════════════════════════
@@ -88,6 +95,16 @@ export interface PushPayload {
   /** برچسبِ گروه (جایگزینی نوتیفیکیشن قبلی هم‌برچسب) */
   tag?: string
   data?: Record<string, unknown>
+}
+
+/**
+ * ورودی تعیین‌گرا — فقط برای «تست بردارهای RFC 8291»: salt و کلید
+ * موقتِ سرور قابل تزریق‌اند تا خروجی با متن استاندارد مقایسه شود.
+ * در مسیر تولید (sendWebPush) هرگز پاس داده نمی‌شود — تصادفی است.
+ */
+export interface DeterministicPushInput {
+  salt?: Uint8Array<ArrayBuffer>
+  eph?: CryptoKeyPair
 }
 
 // ── base64url helpers ──
@@ -176,14 +193,45 @@ async function vapidAuthHeader(
 
 // ── رمزنگاری پیام (RFC 8291 + RFC 8188 — aes128gcm) ──
 
-/** نسخه‌ی کامل: سر + بدنه — این تابع اصلی رمزنگاری است */
-async function encryptPayloadFull(
+/** HMAC-SHA-256 خام — بلوکِ سازِ HKDF (شبه‌کد RFC 8291 §3.4 خط‌به‌خط) */
+async function hmacSha256(
+  key: Uint8Array<ArrayBuffer>,
+  data: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, data))
+}
+
+/** الحاق بایت‌ها — با بافر تازه (Uint8Array<ArrayBuffer>) */
+function concatBytes(
+  ...parts: Array<Uint8Array<ArrayBuffer>>
+): Uint8Array<ArrayBuffer> {
+  let total = 0
+  for (const p of parts) total += p.length
+  const out = new Uint8Array(new ArrayBuffer(total))
+  let off = 0
+  for (const p of parts) {
+    out.set(p, off)
+    off += p.length
+  }
+  return out
+}
+
+/** رمزنگاری کامل payload طبق RFC 8291 — صادرشده برای تست بردارهای رسمی */
+export async function encryptWebPushPayload(
   payload: string,
   uaPublic: Uint8Array<ArrayBuffer>,
   authSecret: Uint8Array<ArrayBuffer>,
+  opts?: DeterministicPushInput,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const salt = crypto.getRandomValues(new Uint8Array(16))
-  const { cek, nonce, ephPub } = await deriveKeysFull(uaPublic, authSecret, salt)
+  const salt: Uint8Array<ArrayBuffer> =
+    opts?.salt ?? crypto.getRandomValues(new Uint8Array(16))
+  const eph: CryptoKeyPair =
+    opts?.eph ??
+    (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+      'deriveBits',
+    ]))
+  const { cek, nonce, ephPub } = await deriveKeysRfc8291(uaPublic, authSecret, salt, eph)
 
   const data = new TextEncoder().encode(payload)
   // رکورد تنها: data || 0x02 (padding delimiter آخر)
@@ -209,34 +257,39 @@ async function encryptPayloadFull(
 }
 
 /**
- * stage-50 — هسته‌ی فیکس رمزنگاری (RFC 8291 §2.1 + RFC 8188):
+ * stage-51 — مشتق‌سازی کلید، «دو مرحله‌ی کامل» RFC 8291 (§3.3 + §3.4).
+ * شبه‌کد استاندارد (تک‌رکوردی — دنباله‌ی NONCE با 0 XOR می‌شود):
  *
- *   IKM   = ECDH_shared(32) || auth_secret(16)
- *   PRK   = HKDF-Extract(salt, IKM)
- *   CEK   = HKDF-Expand(PRK, "Content-Encoding: aes128gcm" || 0x00, 16)
- *   NONCE = HKDF-Expand(PRK, "Content-Encoding: nonce"     || 0x00, 12)
+ *   ── مرحله ۱: ترکیب راز ECDH با auth_secret (§3.3) ──
+ *   PRK_key  = HMAC-SHA-256(auth_secret, ecdh_secret)          [Extract]
+ *   key_info = "WebPush: info" || 0x00 || ua_public || as_public
+ *   IKM      = HMAC-SHA-256(PRK_key, key_info || 0x01)         [Expand, 32B]
  *
- * HKDF وب‌کریپتو در هر فراخوانی «extract+expand» را یک‌جا انجام می‌دهد
- * (IKM به‌عنوان کلید ورودی، salt پارامتر) — پس هر خروجی فقط «یک»
- * extract دارد؛ دقیقاً همان چیزی که مرورگر انتظار دارد.
- * (نسخه‌ی قبل: اول extract دستی، بعد HKDF با salt خالی روی PRK —
- * یعنی دو extract؛ کلیدهای متفاوت از استاندارد ⇒ مرورگر رمزگشایی
- * نمی‌کرد و پیام پوش را بی‌صدا می‌انداخت.)
+ *   ── مرحله ۲: CEK/NONCE با salt پیام (RFC 8188) ──
+ *   PRK      = HMAC-SHA-256(salt, IKM)                          [Extract]
+ *   CEK      = HMAC-SHA-256(PRK, "Content-Encoding: aes128gcm" || 0x00 || 0x01)[0..15]
+ *   NONCE    = HMAC-SHA-256(PRK, "Content-Encoding: nonce"     || 0x00 || 0x01)[0..11]
+ *
+ * (نسخه‌ی stage-50 فقط IKM=ecdh||auth چسبانده و مستقیم مرحله ۲ را با
+ * آن اجرا می‌کرد — مرحله ۱ و کلید عمومی هر دو طرف در info وجود نداشت؛
+ * نتیجه: کلید متفاوت از مرورگر ⇒ افت بی‌صدای پیام.)
  */
-async function deriveKeysFull(
+async function deriveKeysRfc8291(
   uaPublicBytes: Uint8Array<ArrayBuffer>,
   authSecret: Uint8Array<ArrayBuffer>,
   salt: Uint8Array<ArrayBuffer>,
-): Promise<{ cek: Uint8Array<ArrayBuffer>; nonce: Uint8Array<ArrayBuffer>; ephPub: Uint8Array<ArrayBuffer> }> {
+  eph: CryptoKeyPair,
+): Promise<{
+  cek: Uint8Array<ArrayBuffer>
+  nonce: Uint8Array<ArrayBuffer>
+  ephPub: Uint8Array<ArrayBuffer>
+}> {
   const uaJwk: EcJwk = {
     kty: 'EC', crv: 'P-256',
     x: bytesToB64url(uaPublicBytes.subarray(1, 33)),
     y: bytesToB64url(uaPublicBytes.subarray(33, 65)),
   }
   const uaKey = await importJwkKey({ name: 'ECDH', namedCurve: 'P-256' }, uaJwk, [])
-  const eph = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
-    'deriveBits',
-  ])
   // deriveBits/exportKey هر دو ArrayBuffer برمی‌گردانند → Uint8Array<ArrayBuffer>
   const shared = new Uint8Array(
     await crypto.subtle.deriveBits({ name: 'ECDH', public: uaKey }, eph.privateKey, 256),
@@ -245,29 +298,31 @@ async function deriveKeysFull(
     await crypto.subtle.exportKey('raw', eph.publicKey),
   )
 
-  // IKM = shared || authSecret (RFC 8291 §2.1 — «ikm» از دو بخش)
-  const ikm = new Uint8Array(new ArrayBuffer(shared.length + authSecret.length))
-  ikm.set(shared)
-  ikm.set(authSecret, shared.length)
-
-  // stage-50 — IKM یک‌بار به‌عنوان کلید HKDF وارد می‌شود؛ هر دو خروجی
-  // با همان IKM و همان salt مشتق می‌شوند (استاندارد) — فقط info فرق دارد.
-  const webcrypto = crypto.subtle
-  const ikmKey = await webcrypto.importKey('raw', ikm, { name: 'HKDF' }, false, ['deriveBits'])
   const enc = new TextEncoder()
-  const cek = new Uint8Array(
-    await webcrypto.deriveBits(
-      { name: 'HKDF', hash: 'SHA-256', salt, info: enc.encode('Content-Encoding: aes128gcm\0') },
-      ikmKey, 128,
-    ),
+  const zero = new Uint8Array([0x00])
+  const one = new Uint8Array([0x01])
+
+  // ── مرحله ۱ (RFC 8291 §3.3) — ترکیب راز ECDH و auth_secret ──
+  const prkKey = await hmacSha256(authSecret, shared)
+  const keyInfo = concatBytes(
+    enc.encode('WebPush: info'),
+    zero,
+    uaPublicBytes,
+    ephPub,
   )
-  const nonce = new Uint8Array(
-    await webcrypto.deriveBits(
-      { name: 'HKDF', hash: 'SHA-256', salt, info: enc.encode('Content-Encoding: nonce\0') },
-      ikmKey, 96,
-    ),
+  const ikm = await hmacSha256(prkKey, concatBytes(keyInfo, one))
+
+  // ── مرحله ۲ (RFC 8188) — CEK/NONCE با salt اختصاصی پیام ──
+  const prk = await hmacSha256(salt, ikm)
+  const cekFull = await hmacSha256(
+    prk,
+    concatBytes(enc.encode('Content-Encoding: aes128gcm'), zero, one),
   )
-  return { cek, nonce, ephPub }
+  const nonceFull = await hmacSha256(
+    prk,
+    concatBytes(enc.encode('Content-Encoding: nonce'), zero, one),
+  )
+  return { cek: cekFull.slice(0, 16), nonce: nonceFull.slice(0, 12), ephPub }
 }
 
 // ── ارسال ──
@@ -285,7 +340,7 @@ export async function sendWebPush(
   if (!keys) return { kind: 'fail', error: 'vapid-keys-invalid' }
 
   try {
-    const body = await encryptPayloadFull(
+    const body = await encryptWebPushPayload(
       JSON.stringify(payload),
       b64urlToBytes(target.p256dh),
       b64urlToBytes(target.auth),
