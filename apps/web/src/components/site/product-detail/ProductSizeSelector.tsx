@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-47 — sinshin-food-delivery — فایل ۹
+// مسیر مقصد: apps/web/src/components/site/product-detail/ProductSizeSelector.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: نمایش تخفیف مستقِ هر سایز — درصد روی دکمه + قیمت خط‌خورده
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/site/product-detail/ProductSizeSelector.tsx
 import { memo } from 'react'
 import type { ProductSize } from '#/server/products'
@@ -7,6 +14,23 @@ interface ProductSizeSelectorProps {
   sizes: ProductSize[]
   selectedSizeId: string | null
   onSelect: (sizeId: string) => void
+}
+
+/** stage-47 — تخفیف سایز فعال است؟ (فلگ سرور؛ وگرنه محاسبه‌ی محلی پنجره) */
+function sizeActive(size: ProductSize): boolean {
+  const pct = size.discountPercentage ?? 0
+  if (pct <= 0) return false
+  if (size.discountActive !== undefined) return size.discountActive
+  const now = Date.now()
+  if (size.discountStartsAt) {
+    const t = new Date(size.discountStartsAt).getTime()
+    if (Number.isFinite(t) && now < t) return false
+  }
+  if (size.discountEndsAt) {
+    const t = new Date(size.discountEndsAt).getTime()
+    if (Number.isFinite(t) && now > t) return false
+  }
+  return true
 }
 
 export const ProductSizeSelector = memo(function ProductSizeSelector({
@@ -21,6 +45,12 @@ export const ProductSizeSelector = memo(function ProductSizeSelector({
       <div className="flex flex-wrap gap-2">
         {sizes.map(size => {
           const isSelected = size.id === selectedSizeId
+          // stage-47 — تخفیف فعال این سایز: قیمت مؤثر + قیمت خام
+          const active = sizeActive(size)
+          const pct = size.discountPercentage ?? 0
+          const effPrice = active
+            ? (size.finalPrice ?? Math.round(size.price * (1 - pct / 100)))
+            : size.price
           return (
             <button
               key={size.id}
@@ -33,8 +63,20 @@ export const ProductSizeSelector = memo(function ProductSizeSelector({
               }`}
             >
               {size.name}
-              <span className={`text-[11px] font-DanaMedium ${isSelected ? 'text-white/80' : 'text-gray-400'}`}>
-                {fmt.price(size.price)} {t['common.tomanShort']}
+              <span className={`flex items-baseline gap-1.5 text-[11px] font-DanaMedium ${isSelected ? 'text-white/80' : 'text-gray-400'}`}>
+                {active && (
+                  <span className={`line-through ${isSelected ? 'text-white/50' : 'text-gray-300 dark:text-gray-500'}`}>
+                    {fmt.price(size.price)}
+                  </span>
+                )}
+                <span>{fmt.price(effPrice)} {t['common.tomanShort']}</span>
+                {active && pct > 0 && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-DanaDemiBold ${
+                    isSelected ? 'bg-white/20 text-white' : 'bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary'
+                  }`}>
+                    ٪{fmt.num(pct)}
+                  </span>
+                )}
               </span>
             </button>
           )

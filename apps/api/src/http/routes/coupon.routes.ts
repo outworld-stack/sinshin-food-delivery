@@ -1,3 +1,11 @@
+// ═══════════════════════════════════════════════════════════
+// stage-47 — sinshin-food-delivery — فایل ۳
+// مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: quantity=0 مجاز شد (خرید صفر = فعال شدن کوپن بدون خرید
+//        قبلی برای شرط‌های MIN_PRODUCT_ORDERS / MIN_CATEGORY_ORDERS)
+// ═══════════════════════════════════════════════════════════
+
 // src/http/routes/coupon.routes.ts
 import { Elysia, t } from 'elysia'
 
@@ -14,7 +22,10 @@ const CONDITION_TYPES = [
   'ORDERS_IN_LAST_DAYS',
 ] as const
 
-/** phase-5: قرارداد فرانت (CouponRule: value/quantity) → params ارزیابها */
+/** phase-5: قرارداد فرانت (CouponRule: value/quantity) → params ارزیابها
+ *  stage-47 — MIN_PRODUCT_ORDERS / MIN_CATEGORY_ORDERS: quantity=0 (یا
+ *  نیامدن) یعنی «خرید صفر» — ارزیاب bought >= 0 → همیشه برقرار →
+ *  کوپن بدون نیاز به خرید قبلی فعال می‌شود. quantity>=1 = حداقل خرید. */
 function ruleToParams(
   type: string,
   value: string | number,
@@ -28,11 +39,11 @@ function ruleToParams(
     case 'REGISTERED_DAYS_AGO':
       return { days: n }
     case 'ORDERS_IN_LAST_DAYS':
-      return { days: n, count: quantity ?? 1 }
+      return { days: n, count: Math.max(1, quantity ?? 1) }
     case 'MIN_PRODUCT_ORDERS':
-      return { productId: String(value), count: quantity ?? 1 }
+      return { productId: String(value), count: Math.max(0, quantity ?? 0) }
     case 'MIN_CATEGORY_ORDERS':
-      return { categoryId: String(value), count: quantity ?? 1 }
+      return { categoryId: String(value), count: Math.max(0, quantity ?? 0) }
     case 'MIN_ORDERS_COUNT':
     case 'MIN_REFERRALS':
     case 'MIN_REFERRAL_ORDERS':
@@ -45,7 +56,8 @@ function ruleToParams(
 const ruleSchema = t.Object({
   type: t.Union(CONDITION_TYPES.map((c) => t.Literal(c))),
   value: t.Union([t.String({ minLength: 1, maxLength: 100 }), t.Numeric()]),
-  quantity: t.Optional(t.Numeric({ minimum: 1, maximum: 100000 })),
+  // stage-47 — 0 مجاز: «خرید صفر» (فعال بدون خرید قبلی) برای شرط‌های محصول/دسته
+  quantity: t.Optional(t.Numeric({ minimum: 0, maximum: 100000 })),
 })
 
 const couponBody = t.Object({

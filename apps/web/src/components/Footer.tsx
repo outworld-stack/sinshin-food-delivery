@@ -28,6 +28,19 @@ export const Footer = memo(function Footer() {
 						<p className="text-sm text-gray-500 dark:text-gray-400 font-DanaRegular leading-relaxed text-center sm:text-right">
 							{t['footer.brandDesc']}
 						</p>
+						<a
+							referrerPolicy="origin"
+							target="_blank"
+							rel="noopener noreferrer"
+							href="https://trustseal.enamad.ir/?id=7986156&Code=LnoeWDPBQqa5OOpFGq1R5GsNkHQE0TIu"
+						>
+							<img
+								referrerPolicy="origin"
+								src="https://trustseal.enamad.ir/logo.aspx?id=7986156&Code=LnoeWDPBQqa5OOpFGq1R5GsNkHQE0TIu"
+								alt="نماد اعتماد الکترونیکی سین‌شین"
+								style={{ cursor: "pointer" }}
+							/>
+						</a>
 					</div>
 
 					{/* ستون درباره ما — مقالات دقیقا زیر درباره ما و گالری */}

@@ -84,6 +84,13 @@ export const ar: Dict = {
         'common.scrollTop': 'العودة إلى الأعلى',
         'common.discountBadge': 'خصم {n}٪',
 
+        // ── العدّ التنازلي للخصم المحدود بوقت (stage-47) ──
+        'common.offerEndsIn': 'نهاية الخصم',
+        'common.timeDay': 'يوم',
+        'common.timeHour': 'ساعة',
+        'common.timeMin': 'دقيقة',
+        'common.timeSec': 'ثانية',
+
         // ── الترويسة (الجولة ٣٢) ──
         'header.adminPanel': 'لوحة الإدارة',
         'header.ordersPanel': 'لوحة الطلبات',

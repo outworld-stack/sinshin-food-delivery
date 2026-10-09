@@ -1,3 +1,14 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-47 — sinshin-food-delivery — فایل ۲
+// مسیر مقصد: apps/web/src/components/admin/coupons/CouponForm.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: شرط‌های «خرید یک محصول خاص» و «خرید از دسته‌بندی خاص» —
+//        تعداد خرید لازم به‌طور پیش‌فرض مخفی است (خرید صفر = فعال
+//        شدن کوپن بدون نیاز به خرید قبلی). سوییچ «حداقل تعداد خرید»
+//        (پیش‌فرض خاموش) با فعال‌شدن، باکس تعداد را ظاهر می‌کند و
+//        رفتار خرید صفر از بین می‌رود.
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/coupons/CouponForm.tsx
 // phase-9: فرم واحد ساخت/ویرایش کوپن — جایگزین CouponModal (حذف‌شده).
 // صفحات new.tsx و $couponId.tsx هر دو از همین استفاده می‌کنند.
@@ -30,14 +41,24 @@ export interface CouponFormPayload {
 }
 
 // ─── تنظیمات قوانین — کلیدها = enum سرور (couponConditionTypeEnum) ───
+// stage-47 — optionalQuantity: تعداد خرید لازم به‌صورت سوییچ اختیاری
+// (پیش‌فرض خاموش = خرید صفر = بدون نیاز به خرید قبلی فعال می‌شود).
 const ruleConfig: Record<
   CouponConditionType,
-  { label: string; placeholder?: string; inputType: 'number' | 'select_products' | 'select_categories'; needsQuantity?: boolean; quantityLabel?: string }
+  {
+    label: string
+    placeholder?: string
+    inputType: 'number' | 'select_products' | 'select_categories'
+    needsQuantity?: boolean
+    quantityLabel?: string
+    /** stage-47 — تعداد خرید اختیاری است؛ پیش‌فرض مخفی/صفر */
+    optionalQuantity?: boolean
+  }
 > = {
   MIN_ORDERS_COUNT: { label: 'حداقل تعداد سفارش کل', placeholder: 'مثلا: 5', inputType: 'number' },
   MIN_TOTAL_SPEND: { label: 'حداقل مبلغ پرداختی کل (تومان)', placeholder: 'مثلا: 500000', inputType: 'number' },
-  MIN_PRODUCT_ORDERS: { label: 'خرید یک محصول خاص', inputType: 'select_products', needsQuantity: true },
-  MIN_CATEGORY_ORDERS: { label: 'خرید از دسته‌بندی خاص', inputType: 'select_categories', needsQuantity: true },
+  MIN_PRODUCT_ORDERS: { label: 'خرید یک محصول خاص', inputType: 'select_products', optionalQuantity: true },
+  MIN_CATEGORY_ORDERS: { label: 'خرید از دسته‌بندی خاص', inputType: 'select_categories', optionalQuantity: true },
   REGISTERED_DAYS_AGO: { label: 'ثبت‌نام در X روز گذشته', placeholder: 'مثلا: 30', inputType: 'number' },
   MIN_REFERRALS: { label: 'حداقل افراد زیرمجموعه', placeholder: 'مثلا: 5', inputType: 'number' },
   MIN_REFERRAL_ORDERS: { label: 'حداقل مجموع سفارشات زیرمجموعه‌ها', placeholder: 'مثلا: 10', inputType: 'number' },
@@ -58,7 +79,9 @@ const ruleHints: Record<CouponConditionType, string> = {
   ORDERS_IN_LAST_DAYS: 'با ثبت سفارش کافی در روزهای اخیر، این تخفیف برای شما فعال می‌شود.',
 }
 
-/** params ارزیاب → قرارداد فرم (value/quantity) — معکوسِ ruleToParams روت */
+/** params ارزیاب → قرارداد فرم (value/quantity) — معکوسِ ruleToParams روت
+ *  stage-47 — MIN_PRODUCT_ORDERS / MIN_CATEGORY_ORDERS: count=0 یعنی
+ *  «بدون نیاز به خرید قبلی» (پیش‌فرض جدید)؛ count>=1 یعنی سوییچ روشن. */
 function paramsToRule(
   type: CouponConditionType,
   params: Record<string, unknown>,
@@ -70,11 +93,11 @@ function paramsToRule(
     case 'REGISTERED_DAYS_AGO':
       return { value: Number(params.days ?? 0) }
     case 'ORDERS_IN_LAST_DAYS':
-      return { value: Number(params.days ?? 0), quantity: Number(params.count ?? 1) }
+      return { value: Number(params.days ?? 0), quantity: Math.max(1, Number(params.count ?? 1)) }
     case 'MIN_PRODUCT_ORDERS':
-      return { value: String(params.productId ?? ''), quantity: Number(params.count ?? 1) }
+      return { value: String(params.productId ?? ''), quantity: Math.max(0, Number(params.count ?? 0)) }
     case 'MIN_CATEGORY_ORDERS':
-      return { value: String(params.categoryId ?? ''), quantity: Number(params.count ?? 1) }
+      return { value: String(params.categoryId ?? ''), quantity: Math.max(0, Number(params.count ?? 0)) }
     default:
       return { value: Number(params.count ?? 0) }
   }
@@ -179,6 +202,16 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
     })
   }, [form.rules, set])
 
+  /** stage-47 — سوییچ «حداقل تعداد خرید» برای شرط‌های محصول/دسته:
+   *  خاموش → quantity=0 (کوپن بدون خرید قبلی فعال) | روشن → quantity=1 (حداقل) */
+  const toggleMinPurchase = useCallback((key: string) => {
+    set({
+      rules: form.rules.map((r) =>
+        r.key === key ? { ...r, quantity: (r.quantity ?? 0) >= 1 ? 0 : 1 } : r,
+      ),
+    })
+  }, [form.rules, set])
+
   const handleSubmit = useCallback(() => {
     // ── اعتبارسنجی سمت کلاینت — پیام فارسی روشن، قبل از رفت‌وبرگشت سرور ──
     const code = form.code.trim()
@@ -203,6 +236,14 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
       showToast('مقدار همه‌ی شرط‌ها را کامل کنید', 'error')
       return
     }
+    // stage-47 — سوییچ روشن ولی تعداد نامعتبر (< 1) → خطای روشن
+    const badQuantity = form.rules.some(
+      (r) => ruleConfig[r.type].optionalQuantity && (r.quantity ?? 0) >= 1 === false && (r.quantity ?? 0) !== 0,
+    )
+    if (badQuantity) {
+      showToast('تعداد خرید لازم باید حداقل ۱ باشد — یا سوییچ حداقل خرید را خاموش کنید', 'error')
+      return
+    }
 
     onSubmit({
       code,
@@ -211,7 +252,12 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
       isPublic: form.isPublic,
       expiryDate: buildExpiryISO(),
       // key فقط برای رندر است — به سرور نمی‌رود
-      rules: form.rules.map((r) => ({ type: r.type, value: r.value, quantity: r.quantity })),
+      // stage-47 — شرط‌های اختیاری: quantity=0 صریح ارسال می‌شود (خرید صفر)
+      rules: form.rules.map((r) => ({
+        type: r.type,
+        value: r.value,
+        quantity: ruleConfig[r.type].optionalQuantity ? (r.quantity ?? 0) : r.quantity,
+      })),
     })
   }, [form, buildExpiryISO, onSubmit, showToast])
 
@@ -315,6 +361,8 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
           <div className="space-y-3">
             {form.rules.map((rule) => {
               const config = ruleConfig[rule.type]
+              // stage-47 — سوییچ حداقل خرید: روشن = quantity>=1
+              const minPurchaseOn = (rule.quantity ?? 0) >= 1
               return (
                 <div key={rule.key} className="flex flex-col gap-2 bg-gray-50 dark:bg-[#1a0a0e] p-3 rounded-lg">
                   <div className="flex items-center gap-2">
@@ -325,11 +373,23 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
                         // نمی‌دارد — قبلاً «۵» به‌عنوان productId شرط MIN_PRODUCT_ORDERS
                         // ذخیره می‌شد (شرط مرده) چون value خالی به‌نظر نمی‌رسید.
                         // یک set واحد (دو updateRuleByKey پشت‌سرهم closure کهنه می‌دید).
+                        // stage-47 — quantity هم بر اساس نوعِ تازه نرمال می‌شود:
+                        //   اختیاری (محصول/دسته) → 0 (سوییچ خاموش، خرید صفر)
+                        //   ORDERS_IN_LAST_DAYS → 1 (تعداد الزامی)
                         const newType = e.target.value as keyof typeof ruleConfig
                         set({
                           rules: form.rules.map((r) =>
                             r.key === rule.key && r.type !== newType
-                              ? { ...r, type: newType, value: '' }
+                              ? {
+                                  ...r,
+                                  type: newType,
+                                  value: '',
+                                  quantity: ruleConfig[newType].optionalQuantity
+                                    ? 0
+                                    : ruleConfig[newType].needsQuantity
+                                      ? 1
+                                      : undefined,
+                                }
                               : r,
                           ),
                         })
@@ -394,6 +454,35 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
                       />
                     )}
                   </div>
+
+                  {/* stage-47 — سوییچ «حداقل تعداد خرید» (شرط محصول/دسته) */}
+                  {config?.optionalQuantity && (
+                    <div className="flex flex-col gap-2 pt-1">
+                      <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c]">
+                        <div className="min-w-0">
+                          <p className="text-xs font-DanaDemiBold text-gray-700 dark:text-gray-200">
+                            حداقل تعداد خرید
+                          </p>
+                          <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+                            {minPurchaseOn
+                              ? 'کوپن فقط برای خریداران قبلی (به حد نصاب) فعال می‌شود.'
+                              : 'خرید صفر — کوپن بدون نیاز به خرید قبلی از این محصول/دسته فعال می‌شود.'}
+                          </p>
+                        </div>
+                        <Toggle isOn={minPurchaseOn} onToggle={() => toggleMinPurchase(rule.key)} />
+                      </div>
+                      {minPurchaseOn && (
+                        <input
+                          type="number"
+                          min={1}
+                          placeholder={config.quantityLabel ?? 'تعداد خرید لازم'}
+                          value={rule.quantity || ''}
+                          onChange={(e) => updateRuleByKey(rule.key, 'quantity', Math.max(1, Number(e.target.value) || 1))}
+                          className="sm:col-span-2 px-2 py-2 rounded-md bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-xs outline-none"
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -406,7 +495,14 @@ export function CouponForm({ initialData, onSubmit, onCancel, isSubmitting, subm
             <p className="text-xs text-blue-600 dark:text-blue-400 font-DanaMedium mb-2">💡 سیستم هوشمند بازاریابی رفتاری:</p>
             <ul className="list-disc pr-4 space-y-1 text-[11px] text-blue-500 dark:text-blue-300/80">
               {form.rules.map((rule) => (
-                <li key={rule.key}>{ruleHints[rule.type]}</li>
+                <li key={rule.key}>
+                  {/* stage-47 — پیام هوشمندِ متناسب با حالت سوییچ */}
+                  {ruleConfig[rule.type].optionalQuantity && (rule.quantity ?? 0) < 1
+                    ? rule.type === 'MIN_PRODUCT_ORDERS'
+                      ? 'بدون نیاز به خرید قبلی — با انتخاب همین محصول فعال می‌شود.'
+                      : 'بدون نیاز به خرید قبلی — با خرید از همین دسته فعال می‌شود.'
+                    : ruleHints[rule.type]}
+                </li>
               ))}
             </ul>
           </div>

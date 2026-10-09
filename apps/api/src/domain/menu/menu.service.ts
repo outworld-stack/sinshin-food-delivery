@@ -34,8 +34,98 @@ const VERSION_KEY = 'menu:ver'
  *  قبلاً کپی محلی فیلد nameAr سایز را نداشت و پاسخ ادمین بی‌تایپ بود). */
 export type ProductDto = Product
 
-export function finalPriceOf(p: { originalPrice: number; discountPercentage: number }): number {
-  return Math.round(p.originalPrice * (1 - p.discountPercentage / 100))
+/**
+ * stage-47 — منطق مشترک تخفیف زمان‌دار (محصول + سایز):
+ *  پنجره = [startsAt, endsAt]؛ هر طرف NULL = آن طرف باز. خارج از پنجره →
+ *  تخفیف غیرفعال (قیمت کامل). درِ آینده هم غیرفعال است (تخفیف هنوز شروع
+ *  نشده) — شمارنده‌ی معکوس فقط وقتی فعال است نمایش داده می‌شود.
+ */
+export function isDiscountWindowActive(
+  startsAt: Date | null | undefined,
+  endsAt: Date | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  const t = now.getTime()
+  if (startsAt && t < startsAt.getTime()) return false
+  if (endsAt && t > endsAt.getTime()) return false
+  return true
+}
+
+/** stage-47 — تخفیف محصول همین لحظه فعال است؟ (درصد>0 + داخل پنجره) */
+export function discountActiveNow(
+  p: { discountPercentage: number; discountStartsAt?: Date | null; discountEndsAt?: Date | null },
+  now: Date = new Date(),
+): boolean {
+  return p.discountPercentage > 0 && isDiscountWindowActive(p.discountStartsAt, p.discountEndsAt, now)
+}
+
+/**
+ * قیمت نهایی محصول — stage-47: فقط با «درصدِ فعال» محاسبه می‌شود؛
+ * خارج از پنجره‌ی زمانی، درصد نادیده و قیمت کامل برمی‌گردد.
+ */
+export function finalPriceOf(
+  p: {
+    originalPrice: number
+    discountPercentage: number
+    discountStartsAt?: Date | null
+    discountEndsAt?: Date | null
+  },
+  now: Date = new Date(),
+): number {
+  const pct = discountActiveNow(p, now) ? p.discountPercentage : 0
+  return Math.round(p.originalPrice * (1 - pct / 100))
+}
+
+/** stage-47 — تخفیف سایز همین لحظه فعال است؟ */
+export function sizeDiscountActiveNow(
+  s: { discountPercentage: number; discountStartsAt?: Date | null; discountEndsAt?: Date | null },
+  now: Date = new Date(),
+): boolean {
+  return s.discountPercentage > 0 && isDiscountWindowActive(s.discountStartsAt, s.discountEndsAt, now)
+}
+
+/** stage-47 — قیمت مؤثر یک سایز با تخفیف زمان‌دار مستقل خودش */
+export function sizeFinalPriceOf(
+  s: {
+    price: number
+    discountPercentage: number
+    discountStartsAt?: Date | null
+    discountEndsAt?: Date | null
+  },
+  now: Date = new Date(),
+): number {
+  const pct = sizeDiscountActiveNow(s, now) ? s.discountPercentage : 0
+  return Math.round(s.price * (1 - pct / 100))
+}
+
+/**
+ * stage-47 — نرمال‌سازی ورودی زمانی فرم/روت (ISO string | Date | null)
+ * → Date | null. مقدار خراب/نامعتبر → null (بدون کرش — قانون طلایی بک‌اند).
+ */
+export function asDiscountDate(v: unknown): Date | null {
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v
+  if (typeof v !== 'string' || v.trim() === '') return null
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/**
+ * stage-47 — ورودی سایز از فرم/روت: قیمت + تخفیف مستقل (درصد + پنجره).
+ * تایپ مستقل تا create/update/insertSizes/upsert همه یک قرارداد داشته باشند.
+ */
+export interface SizeInput {
+  name: string
+  nameAr?: string | null
+  price: number
+  discountPercentage?: number
+  discountStartsAt?: Date | string | null
+  discountEndsAt?: Date | string | null
+}
+
+/** stage-47 — گیره‌ی درصد ۰..۱۰۰ (مقدار خارج محدوده → قیچی، نه خطا) */
+function clampPercent(n: number): number {
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.min(100, Math.round(n))
 }
 
 export type ProductRow = typeof products.$inferSelect
@@ -474,13 +564,17 @@ export class MenuService {
     description: string
     originalPrice: number
     discountPercentage: number
+    /** stage-47 — پنجره‌ی زمانی تخفیف محصول (null = بدون محدودیت) */
+    discountStartsAt?: Date | string | null
+    discountEndsAt?: Date | string | null
     prepTime: number
     categoryId: string
     packagingCost?: number
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
-    sizes?: { name: string; nameAr?: string | null; price: number }[]
+    /** stage-47 — تخفیف مستقل هر سایز (درصد + پنجره) */
+    sizes?: SizeInput[]
     ingredients?: string[]
     /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = پشتیبان فارسی) */
     nameAr?: string | null
@@ -489,6 +583,9 @@ export class MenuService {
   }): Promise<{ success: boolean; id?: string; message?: string }> {
     const nameAr = nullIfEmpty(input.nameAr)
     const descriptionAr = nullIfEmpty(input.descriptionAr)
+    // stage-47 — درصد صفر ⇒ پنجره بی‌معناست؛ تمیز ذخیره می‌کنیم (null)
+    const pct = clampPercent(input.discountPercentage)
+    const hasWindow = pct > 0
     const [created] = await this.deps.db
       .insert(products)
       .values({
@@ -500,7 +597,9 @@ export class MenuService {
         ingredientsAr: input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null,
         arAuto: false,
         originalPrice: input.originalPrice,
-        discountPercentage: input.discountPercentage,
+        discountPercentage: pct,
+        discountStartsAt: hasWindow ? asDiscountDate(input.discountStartsAt) : null,
+        discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
         prepTime: input.prepTime,
         packagingCost: input.packagingCost ?? 0,
         categoryId: asCategoryId(input.categoryId),
@@ -526,12 +625,16 @@ export class MenuService {
     description: string
     originalPrice: number
     discountPercentage: number
+    /** stage-47 — پنجره‌ی زمانی تخفیف محصول (null = بدون محدودیت) */
+    discountStartsAt?: Date | string | null
+    discountEndsAt?: Date | string | null
     prepTime: number
     packagingCost?: number
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
-    sizes?: { name: string; nameAr?: string | null; price: number }[]
+    /** stage-47 — تخفیف مستقل هر سایز (درصد + پنجره) */
+    sizes?: SizeInput[]
     ingredients?: string[]
     /** round-34 — محتوای عربی (اختیاری؛ خالی = NULL = پشتیبان فارسی) */
     nameAr?: string | null
@@ -544,6 +647,18 @@ export class MenuService {
     const descriptionAr = nullIfEmpty(input.descriptionAr)
     const ingredientsAr =
       input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null
+    // stage-47 — درصد نرمال + پنجره (درصد ۰ ⇒ پنجره null).
+    // «نیامدن هر دو فیلد زمانی» = کلاینت قدیمی → مقدار موجود حفظ می‌شود
+    // (همان قاعده‌ی packagingCost؛ drizzle مقدار undefined را از SET حذف می‌کند).
+    const pct = clampPercent(input.discountPercentage)
+    const hasWindow = pct > 0
+    const windowFields =
+      input.discountStartsAt === undefined && input.discountEndsAt === undefined
+        ? {}
+        : {
+            discountStartsAt: hasWindow ? asDiscountDate(input.discountStartsAt) : null,
+            discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
+          }
     await this.deps.db
       .update(products)
       .set({
@@ -556,7 +671,8 @@ export class MenuService {
         ingredientsAr,
         arAuto: false,
         originalPrice: input.originalPrice,
-        discountPercentage: input.discountPercentage,
+        discountPercentage: pct,
+        ...windowFields,
         prepTime: input.prepTime,
         // round-11 (اسکن M-3): undefined یعنی «فیلد نیامده» (کلاینت قدیمی/اسکریپت)
         // → مقدار موجود حفظ می‌شود، نه صفرِ بی‌صدا (درآمد بسته‌بندی از دست نمی‌رود).
@@ -588,11 +704,21 @@ export class MenuService {
         const keepIds = new Set<string>()
         let order = 0
         for (const s of sizes) {
+          // stage-47 — تخفیف مستقل هر سایز (نرمال + قیچی)
+          const sizePct = clampPercent(s.discountPercentage ?? 0)
+          const sizeWindow =
+            sizePct > 0
+              ? {
+                  discountPercentage: sizePct,
+                  discountStartsAt: asDiscountDate(s.discountStartsAt),
+                  discountEndsAt: asDiscountDate(s.discountEndsAt),
+                }
+              : { discountPercentage: 0, discountStartsAt: null, discountEndsAt: null }
           const match = byName.get(s.name)
           if (match) {
             await tx
               .update(productSizes)
-              .set({ price: s.price, sortOrder: order, nameAr: nullIfEmpty(s.nameAr) })
+              .set({ price: s.price, sortOrder: order, nameAr: nullIfEmpty(s.nameAr), ...sizeWindow })
               .where(eq(productSizes.id, match.id))
             keepIds.add(match.id)
           } else {
@@ -604,6 +730,7 @@ export class MenuService {
                 nameAr: nullIfEmpty(s.nameAr),
                 price: s.price,
                 sortOrder: order,
+                ...sizeWindow,
               })
               .returning({ id: productSizes.id })
             if (ins) keepIds.add(ins.id)
@@ -637,16 +764,23 @@ export class MenuService {
 
   private async insertSizes(
     productId: ProductId,
-    sizes: { name: string; nameAr?: string | null; price: number }[],
+    sizes: SizeInput[],
   ) {
     await this.deps.db.insert(productSizes).values(
-      sizes.map((s, i) => ({
-        productId,
-        name: s.name,
-        nameAr: nullIfEmpty(s.nameAr),
-        price: s.price,
-        sortOrder: i,
-      })),
+      sizes.map((s, i) => {
+        // stage-47 — تخفیف مستقل هر سایز (نرمال + قیچی)
+        const sizePct = clampPercent(s.discountPercentage ?? 0)
+        return {
+          productId,
+          name: s.name,
+          nameAr: nullIfEmpty(s.nameAr),
+          price: s.price,
+          discountPercentage: sizePct,
+          discountStartsAt: sizePct > 0 ? asDiscountDate(s.discountStartsAt) : null,
+          discountEndsAt: sizePct > 0 ? asDiscountDate(s.discountEndsAt) : null,
+          sortOrder: i,
+        }
+      }),
     )
   }
 
@@ -672,13 +806,19 @@ export class MenuService {
       sizeMap.set(s.productId, list)
     }
 
+    const now = new Date()
+
     return rows.map((r) => ({
       id: r.id,
       name: pickAr(lang, r.nameAr, r.name),
       description: pickAr(lang, r.descriptionAr, r.description ?? ''),
       originalPrice: r.originalPrice,
-      finalPrice: finalPriceOf(r),
+      finalPrice: finalPriceOf(r, now),
       discountPercentage: r.discountPercentage,
+      // stage-47 — تخفیف زمان‌دار: فعال‌بودنِ همین لحظه + پنجره (ISO | null)
+      discountActive: discountActiveNow(r, now),
+      discountStartsAt: r.discountStartsAt?.toISOString() ?? null,
+      discountEndsAt: r.discountEndsAt?.toISOString() ?? null,
       packagingCost: r.packagingCost,
       categoryId: r.categoryId,
       categoryName: catMap.get(r.categoryId),
@@ -689,6 +829,12 @@ export class MenuService {
         id: s.id,
         name: pickAr(lang, s.nameAr, s.name),
         price: s.price,
+        // stage-47 — تخفیف مستقِ این سایز + قیمت مؤثر + فعال‌بودن پنجره
+        discountPercentage: s.discountPercentage,
+        discountActive: sizeDiscountActiveNow(s, now),
+        finalPrice: sizeFinalPriceOf(s, now),
+        discountStartsAt: s.discountStartsAt?.toISOString() ?? null,
+        discountEndsAt: s.discountEndsAt?.toISOString() ?? null,
         // round-34 — فقط پاسخ ادمین: نام عربی خام سایز برای فرم ویرایش
         ...(opts?.includeAr ? { nameAr: s.nameAr ?? null } : {}),
       })),

@@ -101,6 +101,18 @@ export interface ProductSize {
   id: SizeId
   name: string
   price: number
+  /**
+   * stage-47 — تخفیف مستقل این سایز:
+   *  • discountPercentage: درصد تنظیم‌شده ادمین (۰ = بدون تخفیف)
+   *  • discountActive: آیا الان داخل پنجره‌ی زمانی است؟ (پاسخ سرور)
+   *  • finalPrice: قیمت مؤثر همین لحظه = round(price × (۱ − درصد فعال))
+   *  • discountStartsAt / discountEndsAt: پنجره (null = بدون محدودیت)
+   */
+  discountPercentage: number
+  discountActive: boolean
+  finalPrice: number
+  discountStartsAt?: string | null
+  discountEndsAt?: string | null
   /** round-34 — نام عربی سایز (فقط پاسخ ادمین؛ NULL = پشتیبان فارسی) */
   nameAr?: string | null
 }
@@ -112,6 +124,15 @@ export interface Product {
   originalPrice: number
   finalPrice: number
   discountPercentage: number
+  /**
+   * stage-47 — تخفیف زمان‌دار محصول (بدون سایز):
+   *  • discountActive: تخفیف درصدی همین لحظه فعال است؟ (فارسی/عربی UI بج)
+   *  • discountStartsAt / discountEndsAt: پنجره‌ی زمانی (null = همیشه)
+   *  • finalPrice: با «درصدِ فعال» محاسبه می‌شود — خارج از پنجره = قیمت پایه
+   */
+  discountActive?: boolean
+  discountStartsAt?: string | null
+  discountEndsAt?: string | null
   /** stage-10: هزینه بسته‌بندی هر واحد — فقط DELIVERY/PICKUP */
   packagingCost: number
   categoryId: CategoryId

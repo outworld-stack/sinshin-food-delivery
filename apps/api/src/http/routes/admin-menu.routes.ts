@@ -1,9 +1,10 @@
-// ═══════════════════════════════════════════════════════════════
-// round-48 — sinshin-food-delivery — فایل 35 از 97
+// ═══════════════════════════════════════════════════════════
+// stage-47 — sinshin-food-delivery — فایل ۵
 // مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
-// وضعیت: اصلاحیه — همان فایل ۲۲ رارد ۳۴ که در پنل قبلی به‌خاطر خطای نام فایل خالی نمایش داده شد؛ محتوا سالم و کامل است
-// کامیت پیشنهادی: stage forty-three
-// ═══════════════════════════════════════════════════════════════
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: اسکیمای محصول/سایز — ستون‌های تخفیف زمان‌دار (درصد +
+//        پنجره‌ی شروع/پایان ISO) برای سایزها و خود محصول.
+// ═══════════════════════════════════════════════════════════
 
 // src/http/routes/admin-menu.routes.ts
 import { Elysia, t } from 'elysia'
@@ -16,11 +17,19 @@ import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { UUID_PATTERN } from '#/domain/shared/ids'
 
 
+/**
+ * stage-47 — ورودی سایز: قیمت + تخفیف مستقل (درصد + پنجره‌ی ISO).
+ * discountStartsAt/EndsAt: null یا خالی = بدون محدودیت زمانی.
+ */
 const sizeInput = t.Object({
   name: t.String({ minLength: 1, maxLength: 60 }),
   // round-34 — نام عربی سایز (اختیاری؛ خالی = پشتیبان فارسی)
   nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
   price: t.Number({ minimum: 0 }),
+  // stage-47 — تخفیف مستقِ این سایز
+  discountPercentage: t.Optional(t.Numeric({ minimum: 0, maximum: 100 })),
+  discountStartsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
+  discountEndsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
 })
 
 export interface AdminMenuRoutesDeps {
@@ -208,6 +217,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
+          // stage-47 — پنجره‌ی زمانی تخفیف محصول (ISO | null = بدون محدودیت)
+          discountStartsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
+          discountEndsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
           packagingCost: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
           categoryId: t.String({ pattern: UUID_PATTERN }),
@@ -246,6 +258,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
+          // stage-47 — پنجره‌ی زمانی تخفیف محصول (ISO | null = بدون محدودیت)
+          discountStartsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
+          discountEndsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
           packagingCost: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
           profileImage: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),

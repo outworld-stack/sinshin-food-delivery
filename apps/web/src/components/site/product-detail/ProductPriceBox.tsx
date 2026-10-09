@@ -1,20 +1,34 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-47 — sinshin-food-delivery — فایل ۱۰
+// مسیر مقصد: apps/web/src/components/site/product-detail/ProductPriceBox.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: شمارنده‌ی معکوس پایان تخفیف زمان‌دار (فعال فقط وقتی
+//        پنجره‌ی پایان وجود دارد؛ صفر/خالی = بدون شمارنده)
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/site/product-detail/ProductPriceBox.tsx
 import { memo } from 'react'
 import { Cart } from 'reicon-react'
 import { useI18n } from '#/i18n'
+import { CountdownTimer } from '#/components/shared/CountdownTimer'
 
 interface ProductPriceBoxProps {
   totalPrice: number
   originalTotal: number
   hasDiscount: boolean
   quantity: number
+  /** stage-47 — ISO پایان پنجره‌ی تخفیف فعال (null = بدون شمارنده) */
+  discountEndsAt?: string | null
+  /** stage-47 — انقضای شمارنده → والد قیمت را بازمحاسبه می‌کند */
+  onCountdownEnd?: () => void
   onIncrement: () => void
   onDecrement: () => void
   onAddToCart: () => void
 }
 
 export const ProductPriceBox = memo(function ProductPriceBox({
-  totalPrice, originalTotal, hasDiscount, quantity, onIncrement, onDecrement, onAddToCart,
+  totalPrice, originalTotal, hasDiscount, quantity, discountEndsAt, onCountdownEnd,
+  onIncrement, onDecrement, onAddToCart,
 }: ProductPriceBoxProps) {
   const { t, fmt } = useI18n()
 
@@ -56,6 +70,13 @@ export const ProductPriceBox = memo(function ProductPriceBox({
           </button>
         </div>
       </div>
+
+      {/* stage-47 — شمارنده‌ی معکوس پایان تخفیف (فقط با پنجره‌ی پایان) */}
+      {discountEndsAt && (
+        <div className="flex justify-center">
+          <CountdownTimer endsAt={discountEndsAt} onEnd={onCountdownEnd} variant="box" />
+        </div>
+      )}
 
       <button
         type="button"

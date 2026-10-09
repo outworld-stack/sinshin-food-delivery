@@ -184,7 +184,26 @@ function parseLines(text: string): string[] {
     .filter(Boolean)
 }
 
-/** round-34 — بدنه‌ی عربیِ مشترکِ create/update ('' → null = حذف ترجمه = بازگشت به فارسی) */
+/**
+ * stage-47 — پنجره‌ی تخفیف ISO | null → بدنه‌ی سرور. رشته‌ی خالی/خراب → null
+ * (بدون محدودیت). درصد صفر هم پنجره را بی‌اثر می‌کند — تمیز ارسال می‌شود.
+ */
+function discountWindow(
+  pct: number,
+  startsAt: string | null | undefined,
+  endsAt: string | null | undefined,
+): { discountStartsAt: string | null; discountEndsAt: string | null } {
+  if (!(pct > 0)) return { discountStartsAt: null, discountEndsAt: null }
+  const norm = (v: string | null | undefined): string | null => {
+    if (!v) return null
+    const t = new Date(v).getTime()
+    return Number.isFinite(t) ? new Date(t).toISOString() : null
+  }
+  return { discountStartsAt: norm(startsAt), discountEndsAt: norm(endsAt) }
+}
+
+/** round-34 — بدنه‌ی عربیِ مشترکِ create/update ('' → null = حذف ترجمه = بازگشت به فارسی)
+ *  stage-47 — سایزها با تخفیف مستقل (درصد + پنجره) ارسال می‌شوند. */
 function productArPayload(data: ProductFormData) {
   return {
     nameAr: data.nameAr.trim() || null,
@@ -194,6 +213,8 @@ function productArPayload(data: ProductFormData) {
       name: s.name,
       nameAr: s.nameAr.trim() || null,
       price: s.price,
+      ...discountWindow(s.discountPercentage, s.discountStartsAt, s.discountEndsAt),
+      discountPercentage: s.discountPercentage,
     })),
   }
 }
@@ -232,6 +253,8 @@ export async function createAdminProduct(input: {
     description: input.data.description,
     originalPrice: input.data.originalPrice,
     discountPercentage: input.data.discountPercentage,
+    // stage-47 — پنجره‌ی زمانی تخفیف محصول
+    ...discountWindow(input.data.discountPercentage, input.data.discountStartsAt, input.data.discountEndsAt),
     prepTime: input.data.prepTime,
     packagingCost: input.data.packagingCost ?? 0,
     categoryId: input.data.categoryId,
@@ -252,6 +275,8 @@ export async function updateAdminProduct(input: {
     description: input.data.description,
     originalPrice: input.data.originalPrice,
     discountPercentage: input.data.discountPercentage,
+    // stage-47 — پنجره‌ی زمانی تخفیف محصول
+    ...discountWindow(input.data.discountPercentage, input.data.discountStartsAt, input.data.discountEndsAt),
     prepTime: input.data.prepTime,
     packagingCost: input.data.packagingCost ?? 0,
     profileImage: input.data.profileImage || null,

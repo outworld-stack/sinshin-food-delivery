@@ -39,11 +39,30 @@ export interface ArticleFormProps {
   isSubmitting: boolean;
 }
 
+/**
+ * stage-47 — سایز فرم محصول: قیمت + تخفیف مستقل (درصد + پنجره‌ی ISO).
+ * window = null یعنی «بدون محدودیت زمانی» (تخفیف همیشه فعال).
+ */
+export interface ProductFormSize {
+  name: string;
+  nameAr: string;
+  price: number;
+  /** درصد تخفیف این سایز (۰ = بدون تخفیف) */
+  discountPercentage: number;
+  /** ISO میلادی | null — شروع پنجره‌ی تخفیف */
+  discountStartsAt: string | null;
+  /** ISO میلادی | null — پایان پنجره‌ی تخفیف (شمارنده‌ی معکوس) */
+  discountEndsAt: string | null;
+}
+
 export interface ProductFormData {
   name: string;
   description: string;
   originalPrice: number;
   discountPercentage: number;
+  /** stage-47 — پنجره‌ی تخفیف محصول بدون سایز (ISO | null = بدون محدودیت) */
+  discountStartsAt: string | null;
+  discountEndsAt: string | null;
   prepTime: number;
   // stage-10: هزینه بسته‌بندی هر واحد — پیک و بیرون‌بر؛ سرو در محل ندارد
   packagingCost: number;
@@ -52,7 +71,7 @@ export interface ProductFormData {
   galleryImages: string[];
   sizesEnabled: boolean;
   ingredients: string[];
-  sizes: { name: string, nameAr: string, price: number }[];
+  sizes: ProductFormSize[];
   // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
   nameAr: string;
   descriptionAr: string;

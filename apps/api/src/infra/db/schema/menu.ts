@@ -2,7 +2,8 @@
 // round-34 — sinshin-food-delivery — فایل 3 از 49
 // مسیر مقصد: apps/api/src/infra/db/schema/menu.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// round-47 — تخفیف زمان‌دار: ستون‌های products (discount_starts_at/discount_ends_at)
+//        و product_sizes (discount_percentage + پنجره). NULL = بدون محدودیت (رفتار قبلی).
 // ═══════════════════════════════════════════════════════════════
 
 //src/infra/db/schema/menu.ts
@@ -90,6 +91,14 @@ export const products = pgTable(
     arAuto: boolean('ar_auto').notNull().default(false),
     originalPrice: integer('original_price').notNull().default(0),
     discountPercentage: integer('discount_percentage').notNull().default(0),
+    /**
+     * stage-47 — تخفیف زمان‌دار محصول (بدون سایز):
+     * NULL = بدون محدودیت زمانی (همیشه فعال — رفتار قبلی)
+     * پنجره = [discount_starts_at, discount_ends_at]؛ خارج از پنجره → تخفیف
+     * غیرفعال و قیمت = قیمت پایه. شمارنده‌ی معکوس سایت تا پایان پنجره می‌شمارد.
+     */
+    discountStartsAt: timestamp('discount_starts_at', { withTimezone: true }),
+    discountEndsAt: timestamp('discount_ends_at', { withTimezone: true }),
     prepTime: integer('prep_time').notNull().default(15),
     sizesEnabled: boolean('sizes_enabled').notNull().default(false),
     /**
@@ -117,7 +126,9 @@ export const products = pgTable(
   ],
 )
 
-/** سایزهای محصول — فقط وقتی sizes_enabled */
+/** سایزهای محصول — فقط وقتی sizes_enabled
+ *  stage-47 — تخفیف مستقل هر سایز: درصد + پنجره‌ی زمانی اختیاری.
+ *  0/NULL = بدون تخفیف یا بدون محدودیت (رفتار قبلی). */
 export const productSizes = pgTable(
   'product_sizes',
   {
@@ -130,6 +141,11 @@ export const productSizes = pgTable(
     /** round-34 — نام عربی سایز (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
     price: integer('price').notNull(),
+    /** stage-47 — درصد تخفیف این سایز (۰ = بدون تخفیف) */
+    discountPercentage: integer('discount_percentage').notNull().default(0),
+    /** stage-47 — پنجره‌ی زمانی تخفیف این سایز (NULL = بدون محدودیت) */
+    discountStartsAt: timestamp('discount_starts_at', { withTimezone: true }),
+    discountEndsAt: timestamp('discount_ends_at', { withTimezone: true }),
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => [

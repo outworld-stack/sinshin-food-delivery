@@ -8,7 +8,7 @@
 //src/domain/cart/cart.service.ts
 import type { Db } from '#/infra/db/client'
 import { asProductId, asSizeId, type ProductId } from '#/domain/shared/brand'
-import { finalPriceOf, loadPricingBases } from '#/domain/menu/menu.service'
+import { finalPriceOf, loadPricingBases, sizeFinalPriceOf } from '#/domain/menu/menu.service'
 import { pickAr, type Lang } from '#/domain/shared/lang'
 import type { CartDetails, CartItemInput } from '@sinshin/shared'
 
@@ -44,19 +44,31 @@ export class CartService {
 
       // سیاستِ آسان‌گیرِ سبد (عین effectivePrice سابق): سایزِ انتخابی یا
       // اولین سایز — چک‌اوت سخت‌گیر است و سایزِ حذف‌شده را خطا می‌دهد
-      let price = finalPriceOf(product)
+      //
+      // stage-47 — تخفیف زمان‌دار: قیمت واحد حالا «مؤثر» است (محصول یا
+      // سایز، هرکدام پنجره‌ی فعال داشته باشند). originalPrice = قیمت خام
+      // و finalPrice = قیمت با تخفیف — سطر سبد خط‌خورده را نشان می‌دهد.
+      let basePrice: number
+      let effectivePrice: number
       let sizeName: string | null = null
       if (product.sizesEnabled) {
         const sizes = sizesByProduct.get(product.id) ?? []
         if (sizes.length > 0) {
           const size =
             (item.sizeId ? sizes.find((s) => s.id === item.sizeId) : undefined) ?? sizes[0]!
-          price = size.price
+          basePrice = size.price
+          effectivePrice = sizeFinalPriceOf(size)
           sizeName = pickAr(lang, size.nameAr, size.name)
+        } else {
+          basePrice = product.originalPrice
+          effectivePrice = finalPriceOf(product)
         }
+      } else {
+        basePrice = product.originalPrice
+        effectivePrice = finalPriceOf(product)
       }
 
-      const lineTotal = price * item.quantity
+      const lineTotal = effectivePrice * item.quantity
       total += lineTotal
       out.push({
         id: product.id as ProductId,
@@ -64,8 +76,8 @@ export class CartService {
         sizeName,
         name: pickAr(lang, product.nameAr, product.name),
         profileImage: product.profileImage,
-        originalPrice: price,
-        finalPrice: price,
+        originalPrice: basePrice,
+        finalPrice: effectivePrice,
         quantity: item.quantity,
         lineTotal,
       })

@@ -1,15 +1,22 @@
 // ═══════════════════════════════════════════════════════════════
-// phase-2 — sinshin-food-delivery — فایل جدید
+// stage-47 — sinshin-food-delivery — فایل ۱
 // مسیر مقصد: apps/web/src/routes/admin/notifications/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// رفع: کرش «useI18n باید داخل I18nProvider استفاده شود» —
+//      پنل ادمین طبق معماری i18n هیچ I18nProvider ندارد؛ useI18n
+//      فقط داخل سایت (زیر Provider) معتبر است. این صفحه حالا از
+//      useI18nSafe استفاده می‌کند (خارج Provider = فارسی خالص).
+//      ضمناً authedFetch محلی با authJson مشترک عوض شد: نوسازی
+//      توکن روی 401 + هدر زبان + سیگنال SSR — همان الگوی بقیه‌ی
+//      صفحات ادمین.
 // ═══════════════════════════════════════════════════════════════
 
 // src/routes/admin/notifications/index.tsx
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Send, BellRing } from 'reicon-react'
-import { useI18n } from '#/i18n'
-import { apiBase } from '#/lib/api'
-import { getAccessToken } from '#/lib/auth-session'
+import { useI18nSafe } from '#/i18n'
+import { authJson } from '#/lib/api-fetch'
 
 /**
  * فاز-۲ — آهنگساز نوتیفیکیشن ادمین.
@@ -24,7 +31,8 @@ export const Route = createFileRoute('/admin/notifications/')({
 })
 
 function AdminNotificationsPage() {
-  const { t } = useI18n()
+  // stage-47 — ادمین خارج از I18nProvider است؛ نسخه‌ی امن = فارسی خالص
+  const { t } = useI18nSafe()
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [url, setUrl] = useState('')
@@ -40,22 +48,13 @@ function AdminNotificationsPage() {
     if (!valid || !urlClean) return
     setStatus('sending')
     try {
-      const res = await authedFetch(`${apiBase()}/notifications/broadcast`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          title: title.trim(),
-          body: body.trim(),
-          ...(url.trim() ? { url: url.trim() } : {}),
-        }),
+      const json = await authJson<{ targeted?: number }>('/notifications/broadcast', 'POST', {
+        title: title.trim(),
+        body: body.trim(),
+        ...(url.trim() ? { url: url.trim() } : {}),
       })
-      const json = (await res.json().catch(() => ({}))) as { targeted?: number }
-      if (res.ok) {
-        setStatus('sent')
-        setTargeted(json.targeted ?? 0)
-      } else {
-        setStatus('error')
-      }
+      setStatus('sent')
+      setTargeted(json.targeted ?? 0)
     } catch {
       setStatus('error')
     }
@@ -65,17 +64,13 @@ function AdminNotificationsPage() {
     if (testUserId.trim().length < 30 || !valid) return
     setTestStatus('sending')
     try {
-      const res = await authedFetch(`${apiBase()}/notifications/send`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          userId: testUserId.trim(),
-          title: title.trim(),
-          body: body.trim(),
-          ...(url.trim() ? { url: url.trim() } : {}),
-        }),
+      await authJson('/notifications/send', 'POST', {
+        userId: testUserId.trim(),
+        title: title.trim(),
+        body: body.trim(),
+        ...(url.trim() ? { url: url.trim() } : {}),
       })
-      setTestStatus(res.ok ? 'sent' : 'error')
+      setTestStatus('sent')
     } catch {
       setTestStatus('error')
     }
@@ -212,14 +207,4 @@ function AdminNotificationsPage() {
       </div>
     </div>
   )
-}
-
-// ── helper محلی ──
-async function authedFetch(url: string, init: RequestInit): Promise<Response> {
-  const token = getAccessToken()
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string> | undefined),
-  }
-  if (token) headers['authorization'] = `Bearer ${token}`
-  return fetch(url, { ...init, headers, credentials: 'include' })
 }

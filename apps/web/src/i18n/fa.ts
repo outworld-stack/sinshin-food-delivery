@@ -84,6 +84,13 @@ export const fa = {
         'common.scrollTop': 'بازگشت به بالا',
         'common.discountBadge': '{n}٪ تخفیف',
 
+        // ── شمارنده‌ی معکوس تخفیف زمان‌دار (stage-47) ──
+        'common.offerEndsIn': 'پایان تخفیف',
+        'common.timeDay': 'روز',
+        'common.timeHour': 'ساعت',
+        'common.timeMin': 'دقیقه',
+        'common.timeSec': 'ثانیه',
+
         // ── هدر (رارد ۳۲) ──
         'header.adminPanel': 'پنل مدیریت',
         'header.ordersPanel': 'پنل سفارشات',

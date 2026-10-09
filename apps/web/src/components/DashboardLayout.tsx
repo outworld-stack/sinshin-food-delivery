@@ -64,8 +64,8 @@ export function DashboardLayout() {
 
       {hydrated ? (
         <>
-          {/* سایدبار دسکتاپ */}
-          <aside className="hidden md:flex flex-col w-64 bg-white dark:bg-[#2a1015] border-l border-gray-200 dark:border-[#3a151c] p-6 fixed right-0 top-0 bottom-0 z-30">
+          {/* سایدبار دسکتاپ — stage-47: z-30→z-40 هم‌تراز هدر (زنگ داخل سایدبار) */}
+          <aside className="hidden md:flex flex-col w-64 bg-white dark:bg-[#2a1015] border-l border-gray-200 dark:border-[#3a151c] p-6 fixed right-0 top-0 bottom-0 z-40">
             <div className="flex items-center justify-between mb-6 gap-2">
               <Brand to="/products" textSize="text-lg sm:text-2xl" />
               <div className="flex items-center gap-1">
@@ -101,8 +101,8 @@ export function DashboardLayout() {
             </button>
           </aside>
 
-          {/* هدر موبایل */}
-          <header className="md:hidden flex items-center justify-between p-4 bg-white dark:bg-[#2a1015] border-b border-gray-200 dark:border-[#3a151c] sticky top-0 z-30">
+          {/* هدر موبایل — stage-47: z-30→z-40 تا پنل کشویی زنگ همیشه روی محتوای صفحه بماند */}
+          <header className="md:hidden flex items-center justify-between p-4 bg-white dark:bg-[#2a1015] border-b border-gray-200 dark:border-[#3a151c] sticky top-0 z-40">
             <Brand to="/products" textSize="text-lg" />
             <div className="flex items-center gap-4">
               {activeOrderId && (

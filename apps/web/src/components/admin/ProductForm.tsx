@@ -1,8 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
-// round-35 — sinshin-food-delivery — فایل 30 از 31
+// stage-47 — sinshin-food-delivery — فایل ۶
 // مسیر مقصد: apps/web/src/components/admin/ProductForm.tsx
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty one
+// تغییر: تخفیف‌گذاری حتی با سایزبندی فعال —
+//   • هر سایز: درصد تخفیف مستقل + سوییچ «تخفیف زمان‌دار»
+//     (پیش‌فرض خاموش = تخفیف دائمی؛ روشن = پنجره‌ی شروع/پایان شمسی)
+//   • محصول بدون سایز: همان سوییچ زمان‌دار روی تخفیف خود محصول
+//   • پیش‌نمایش زنده: بج تخفیف + قیمت خط‌خورده + شمارنده‌ی معکوس
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/ProductForm.tsx
@@ -10,15 +14,228 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, X } from 'reicon-react'
+import { Plus, X, CalendarX, Timer } from 'reicon-react'
 import { ProductCard } from '#/components/ProductCard'
 import { ArField } from '#/components/admin/ArField'
 import { ImageField } from '#/components/shared/ImageField'
+import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
 import { Toggle } from '#/components/shared/Toggle'
 import { useToastStore } from '#/stores/toastStore'
-import type { ProductFormData, ProductFormProps } from '#/types/forms'
+import type { ProductFormData, ProductFormSize, ProductFormProps } from '#/types/forms'
 import { formatPrice } from '#/utils/format'
+import { gregorianToJalali, jalaliFromISO, jalaliToGregorian, jalaliToISO } from '#/utils/persianDate'
 import { adminCategoriesOptions } from '#/utils/queryOptions'
+
+// ═══ stage-47 — ابزارهای پنجره‌ی زمانی تخفیف (شمسی ↔ ISO) ═══
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** ISO میلادی → { jalaliISO, time } — برای دیت‌پیکر و اینپوت ساعت */
+function isoToJalaliParts(iso: string | null): { j: string | null; time: string } {
+        if (!iso) return { j: null, time: '00:00' }
+        const d = new Date(iso)
+        if (Number.isNaN(d.getTime())) return { j: null, time: '00:00' }
+        return {
+                j: jalaliToISO(gregorianToJalali(d)),
+                time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+        }
+}
+
+/** شمسی + ساعت → ISO میلادی (قرارداد سرور) */
+function jalaliPartsToIso(j: string | null, time: string): string | null {
+        if (!j) return null
+        const parsed = jalaliFromISO(j)
+        if (!parsed) return null
+        const d = jalaliToGregorian(parsed)
+        const [h, m] = time.split(':').map(Number)
+        d.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0)
+        return d.toISOString()
+}
+
+/** سوییچ روشن شد → پنجره‌ی پیش‌فرض: از امروز ۰۰:۰۰ تا فردا ۲۳:۵۹ */
+function defaultWindow(): { startsAt: string; endsAt: string } {
+        const s = new Date()
+        s.setHours(0, 0, 0, 0)
+        const e = new Date()
+        e.setDate(e.getDate() + 1)
+        e.setHours(23, 59, 0, 0)
+        return { startsAt: s.toISOString(), endsAt: e.toISOString() }
+}
+
+/** اعتبارسنجی پنجره: هر دو تاریخ باشند → پایان باید بعد از شروع باشد */
+function windowValid(startsAt: string | null, endsAt: string | null): boolean {
+        if (!startsAt || !endsAt) return true
+        const s = new Date(startsAt).getTime()
+        const e = new Date(endsAt).getTime()
+        if (!Number.isFinite(s) || !Number.isFinite(e)) return true // خراب → سرور null می‌کند
+        return e > s
+}
+
+interface DiscountWindowEditorProps {
+        startsAt: string | null
+        endsAt: string | null
+        onChange: (startsAt: string | null, endsAt: string | null) => void
+        /** پیشوند id برای دیت‌پیکرها (یکتا در فرم) */
+        idPrefix: string
+        /** سوییچ غیرفعال (مثلاً درصد تخفیف صفر است) */
+        disabled?: boolean
+        /** حالت جمع‌وجور برای داخل کارت سایز */
+        compact?: boolean
+}
+
+/**
+ * stage-47 — ویرایشگر «تخفیف زمان‌دار»: سوییچ + دو ردیف شروع/پایان
+ * (دیت‌پیکر شمسی + ساعت + دکمه‌ی پاک‌کردن). هر دو طرف اختیاری‌اند؛
+ * خالی = آن طرف باز. سوییچ خاموش = پنجره‌ی null (تخفیف دائمی).
+ */
+function DiscountWindowEditor({
+        startsAt,
+        endsAt,
+        onChange,
+        idPrefix,
+        disabled = false,
+        compact = false,
+}: DiscountWindowEditorProps) {
+        const timed = startsAt !== null || endsAt !== null
+
+        const startParts = isoToJalaliParts(startsAt)
+        const endParts = isoToJalaliParts(endsAt)
+
+        const handleToggle = () => {
+                if (disabled) return
+                if (timed) {
+                        onChange(null, null)
+                } else {
+                        const w = defaultWindow()
+                        onChange(w.startsAt, w.endsAt)
+                }
+        }
+
+        const label = 'text-xs font-DanaMedium text-gray-500 dark:text-gray-400 mb-1 block'
+        const timeInput =
+                'w-full px-2 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-xs outline-none cursor-pointer'
+
+        return (
+                <div className="space-y-2">
+                        <div
+                                className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border-2 transition ${
+                                        timed
+                                                ? 'border-primary dark:border-dark-primary bg-primary/5 dark:bg-dark-primary/5'
+                                                : 'border-gray-200 dark:border-[#3a151c]'
+                                }`}
+                        >
+                                <div className="flex items-center gap-2 min-w-0">
+                                        <Timer
+                                                size={18}
+                                                className={timed ? 'text-primary dark:text-dark-primary shrink-0' : 'text-gray-400 shrink-0'}
+                                        />
+                                        <div className="min-w-0">
+                                                <p className="text-xs font-DanaDemiBold text-gray-700 dark:text-gray-200">
+                                                        تخفیف زمان‌دار
+                                                </p>
+                                                {!compact && (
+                                                        <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+                                                                {timed
+                                                                        ? 'تخفیف فقط در بازه‌ی زیر فعال است — شمارنده‌ی معکوس تا پایان روی کارت محصول نمایش داده می‌شود.'
+                                                                        : 'خاموش: تخفیف دائمی و بدون شمارنده. روشن: انتخاب بازه‌ی شروع و پایان.'}
+                                                        </p>
+                                                )}
+                                        </div>
+                                </div>
+                                <Toggle isOn={timed} onToggle={handleToggle} disabled={disabled} />
+                        </div>
+
+                        {timed && (
+                                <div className={`grid gap-2 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                                        {/* شروع */}
+                                        <div className="p-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
+                                                <span className={label}>شروع (خالی = همین حالا)</span>
+                                                <div className="flex gap-1.5">
+                                                        <div className="flex-1 min-w-0">
+                                                                <PersianDatePicker
+                                                                        id={`${idPrefix}-start`}
+                                                                        value={startParts.j}
+                                                                        onChange={(iso) =>
+                                                                                onChange(jalaliPartsToIso(iso, startParts.time), endsAt)
+                                                                        }
+                                                                        placeholder="از امروز..."
+                                                                />
+                                                        </div>
+                                                        <input
+                                                                type="time"
+                                                                dir="ltr"
+                                                                value={startParts.time}
+                                                                onChange={(e) =>
+                                                                        onChange(jalaliPartsToIso(startParts.j, e.target.value), endsAt)
+                                                                }
+                                                                className={`${timeInput} w-20 shrink-0`}
+                                                        />
+                                                        {startsAt && (
+                                                                <button
+                                                                        type="button"
+                                                                        onClick={() => onChange(null, endsAt)}
+                                                                        aria-label="حذف تاریخ شروع"
+                                                                        title="حذف تاریخ شروع"
+                                                                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg cursor-pointer shrink-0"
+                                                                >
+                                                                        <CalendarX size={16} />
+                                                                </button>
+                                                        )}
+                                                </div>
+                                        </div>
+
+                                        {/* پایان */}
+                                        <div className="p-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
+                                                <span className={label}>پایان (خالی = بدون پایان)</span>
+                                                <div className="flex gap-1.5">
+                                                        <div className="flex-1 min-w-0">
+                                                                <PersianDatePicker
+                                                                        id={`${idPrefix}-end`}
+                                                                        value={endParts.j}
+                                                                        onChange={(iso) =>
+                                                                                onChange(startsAt, jalaliPartsToIso(iso, endParts.time))
+                                                                        }
+                                                                        placeholder="تا کِی؟"
+                                                                />
+                                                        </div>
+                                                        <input
+                                                                type="time"
+                                                                dir="ltr"
+                                                                value={endParts.time}
+                                                                onChange={(e) =>
+                                                                        onChange(startsAt, jalaliPartsToIso(endParts.j, e.target.value))
+                                                                }
+                                                                className={`${timeInput} w-20 shrink-0`}
+                                                        />
+                                                        {endsAt && (
+                                                                <button
+                                                                        type="button"
+                                                                        onClick={() => onChange(startsAt, null)}
+                                                                        aria-label="حذف تاریخ پایان"
+                                                                        title="حذف تاریخ پایان"
+                                                                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg cursor-pointer shrink-0"
+                                                                >
+                                                                        <CalendarX size={16} />
+                                                                </button>
+                                                        )}
+                                                </div>
+                                        </div>
+                                </div>
+                        )}
+                </div>
+        )
+}
+
+// ═══ فرم اصلی ═══
+
+const EMPTY_SIZE: ProductFormSize = {
+        name: '',
+        nameAr: '',
+        price: 0,
+        discountPercentage: 0,
+        discountStartsAt: null,
+        discountEndsAt: null,
+}
 
 export function ProductForm({
         initialData,
@@ -34,6 +251,9 @@ export function ProductForm({
                 description: '',
                 originalPrice: 0,
                 discountPercentage: 0,
+                // stage-47 — پنجره‌ی تخفیف محصول (null = دائمی)
+                discountStartsAt: null,
+                discountEndsAt: null,
                 prepTime: 15,
                 packagingCost: 0,
                 categoryId: '',
@@ -57,6 +277,9 @@ export function ProductForm({
                                 description: initialData.description || '',
                                 originalPrice: initialData.originalPrice || 0,
                                 discountPercentage: initialData.discountPercentage || 0,
+                                // stage-47 — هیدراته‌کردن پنجره‌ی زمانی از سرور
+                                discountStartsAt: initialData.discountStartsAt ?? null,
+                                discountEndsAt: initialData.discountEndsAt ?? null,
                                 prepTime: initialData.prepTime || 15,
                                 packagingCost: initialData.packagingCost || 0,
                                 categoryId: initialData.categoryId || '',
@@ -68,6 +291,10 @@ export function ProductForm({
                                                 name: s.name,
                                                 nameAr: s.nameAr || '',
                                                 price: s.price,
+                                                // stage-47 — تخفیف مستقِ سایز از سرور
+                                                discountPercentage: s.discountPercentage ?? 0,
+                                                discountStartsAt: s.discountStartsAt ?? null,
+                                                discountEndsAt: s.discountEndsAt ?? null,
                                         })) || [],
                                 sizesEnabled: initialData.sizesEnabled ?? false,
                                 // round-34 — مقادیر عربی ذخیره‌شده (مواد اولیه: هر خط یک مورد)
@@ -99,18 +326,30 @@ export function ProductForm({
         // --- سایزها ---
         const handleSizeChange = (
                 index: number,
-                field: 'name' | 'nameAr' | 'price',
-                value: string,
+                field: keyof ProductFormSize,
+                value: string | number,
         ) => {
                 const newSizes = [...(formData.sizes || [])]
-                if (field === 'price') newSizes[index].price = Number(value)
-                else newSizes[index][field] = value
+                // @ts-expect-error — فیلدهای رشته/عدد ساده؛ فراخواننده مقدار درست می‌دهد
+                newSizes[index][field] = value
                 setFormData((prev) => ({ ...prev, sizes: newSizes }))
         }
+
+        /** stage-47 — آپدیت پنجره‌ی زمانی تخفیف یک سایز */
+        const handleSizeWindow = (
+                index: number,
+                startsAt: string | null,
+                endsAt: string | null,
+        ) => {
+                const newSizes = [...(formData.sizes || [])]
+                newSizes[index] = { ...newSizes[index], discountStartsAt: startsAt, discountEndsAt: endsAt }
+                setFormData((prev) => ({ ...prev, sizes: newSizes }))
+        }
+
         const addSize = () =>
                 setFormData((prev) => ({
                         ...prev,
-                        sizes: [...(prev.sizes || []), { name: '', nameAr: '', price: 0 }],
+                        sizes: [...(prev.sizes || []), { ...EMPTY_SIZE }],
                 }))
         const removeSize = (index: number) =>
                 setFormData((prev) => ({
@@ -126,12 +365,17 @@ export function ProductForm({
                                 return {
                                         ...prev,
                                         sizesEnabled: next,
-                                        sizes: sizeTemplate.map((name) => ({ name, nameAr: '', price: 0 })),
+                                        sizes: sizeTemplate.map((name) => ({ ...EMPTY_SIZE, name })),
                                 }
                         }
                         return { ...prev, sizesEnabled: next }
                 })
         }, [sizeTemplate])
+
+        /** stage-47 — پنجره‌ی تخفیف خود محصول */
+        const handleProductWindow = useCallback((startsAt: string | null, endsAt: string | null) => {
+                setFormData((prev) => ({ ...prev, discountStartsAt: startsAt, discountEndsAt: endsAt }))
+        }, [])
 
         // --- مواد اولیه ---
         const handleAddIngredient = () => {
@@ -186,9 +430,33 @@ export function ProductForm({
                                 showToast('نام سایزها نباید تکراری باشد.', 'error')
                                 return
                         }
+                        // stage-47 — درصد تخفیف سایزها + پنجره‌ها
+                        if (sizes.some((s) => !Number.isFinite(s.discountPercentage) || s.discountPercentage < 0 || s.discountPercentage > 100)) {
+                                showToast('درصد تخفیف سایزها باید بین ۰ تا ۱۰۰ باشد.', 'error')
+                                return
+                        }
+                        const badSizeWindow = sizes.find(
+                                (s) => !windowValid(s.discountStartsAt, s.discountEndsAt),
+                        )
+                        if (badSizeWindow) {
+                                showToast(
+                                        `پنجره‌ی زمانی تخفیف سایز «${badSizeWindow.name}» نامعتبر است — پایان باید بعد از شروع باشد.`,
+                                        'error',
+                                )
+                                return
+                        }
                 } else {
                         if (!formData.originalPrice || formData.originalPrice <= 0) {
                                 showToast('قیمت پایه محصول را وارد کنید.', 'error')
+                                return
+                        }
+                        // stage-47 — پنجره‌ی تخفیف محصول
+                        if (!Number.isFinite(formData.discountPercentage) || formData.discountPercentage < 0 || formData.discountPercentage > 100) {
+                                showToast('درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.', 'error')
+                                return
+                        }
+                        if (!windowValid(formData.discountStartsAt, formData.discountEndsAt)) {
+                                showToast('پنجره‌ی زمانی تخفیف نامعتبر است — پایان باید بعد از شروع باشد.', 'error')
                                 return
                         }
                 }
@@ -206,6 +474,8 @@ export function ProductForm({
 
         // پیش‌نمایش کاملاً تایپ‌دار (قبلاً as any بود) —
         // دقیقاً همون ساختار ProductCardProps.product؛ سایزها id موقت می‌گیرن
+        // stage-47 — فیلدهای تخفیف هم می‌روند تا بج/خط‌خوردگی/شمارنده در
+        // پیش‌نمایش دقیقاً مثل کارت واقعی رندر شود
         const previewProduct = {
                 id: 'preview',
                 name: formData.name,
@@ -213,12 +483,17 @@ export function ProductForm({
                 originalPrice: formData.originalPrice,
                 finalPrice: previewFinalPrice,
                 discountPercentage: formData.sizesEnabled ? 0 : formData.discountPercentage,
+                discountStartsAt: formData.sizesEnabled ? null : formData.discountStartsAt,
+                discountEndsAt: formData.sizesEnabled ? null : formData.discountEndsAt,
                 profileImage: formData.profileImage || null,
                 sizesEnabled: formData.sizesEnabled,
                 sizes: formData.sizes.map((s, i) => ({
                         id: `preview-${i}`,
                         name: s.name,
                         price: s.price,
+                        discountPercentage: s.discountPercentage,
+                        discountStartsAt: s.discountStartsAt,
+                        discountEndsAt: s.discountEndsAt,
                 })),
         }
 
@@ -350,8 +625,8 @@ export function ProductForm({
                                                         </p>
                                                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
                                                                 {isSizesOn
-                                                                        ? 'هر سایز قیمت مستقل خودش را دارد — قیمت پایه و تخفیف اعمال نمی‌شوند.'
-                                                                        : 'خاموش: قیمت پایه + درصد تخفیف (رفتار فعلی). روشن: قیمت‌های مستقل برای هر سایز.'}
+                                                                        ? 'هر سایز قیمت مستقل و تخفیف مستقل خودش را دارد — قیمت پایه و تخفیفِ محصول اعمال نمی‌شوند.'
+                                                                        : 'خاموش: قیمت پایه + درصد تخفیف محصول. روشن: قیمت و تخفیف مستقل برای هر سایز.'}
                                                         </p>
                                                 </div>
                                         </div>
@@ -383,7 +658,9 @@ export function ProductForm({
                                                 <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
                                                         تخفیف (%){' '}
                                                         {isSizesOn && (
-                                                                <span className="text-xs text-gray-400">(قفل)</span>
+                                                                <span className="text-xs text-gray-400">
+                                                                        (قفل — تخفیف هر سایز پایین)
+                                                                </span>
                                                         )}
                                                 </label>
                                                 <input
@@ -434,12 +711,30 @@ export function ProductForm({
                                         </div>
                                 </div>
 
+                                {/* stage-47 — تخفیف زمان‌دار محصول (فقط وقتی سایز خاموش) */}
+                                {!isSizesOn && (
+                                        <div className="border-t border-gray-100 dark:border-white/5 pt-4">
+                                                <DiscountWindowEditor
+                                                        idPrefix="product-discount"
+                                                        startsAt={formData.discountStartsAt}
+                                                        endsAt={formData.discountEndsAt}
+                                                        onChange={handleProductWindow}
+                                                        disabled={!(formData.discountPercentage > 0)}
+                                                />
+                                                {!(formData.discountPercentage > 0) && (
+                                                        <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                                                                برای فعال‌سازی، ابتدا درصد تخفیف محصول را بیشتر از صفر وارد کنید.
+                                                        </p>
+                                                )}
+                                        </div>
+                                )}
+
                                 {/* ⬅ ویرایشگر سایزها — فقط وقتی فعال */}
                                 {isSizesOn && (
                                         <div className="border-t border-gray-100 dark:border-white/5 pt-6">
                                                 <div className="flex items-center justify-between mb-4">
                                                         <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300">
-                                                                سایزها و قیمت‌ها
+                                                                سایزها، قیمت‌ها و تخفیف‌ها
                                                                 {sizeTemplate.length > 0 && (
                                                                         <span className="text-xs text-gray-400 mr-2">
                                                                                 (قالب دسته: {sizeTemplate.length} سایز)
@@ -458,62 +753,99 @@ export function ProductForm({
                                                         {formData.sizes?.map((size, index) => (
                                                                 <div
                                                                         key={index}
-                                                                        className="grid grid-cols-12 gap-2 items-center"
+                                                                        className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] space-y-3"
                                                                 >
-                                                                        {sizeTemplate.length > 0 ? (
-                                                                                <select
-                                                                                        value={size.name}
-                                                                                        onChange={(e) =>
-                                                                                                handleSizeChange(index, 'name', e.target.value)
-                                                                                        }
-                                                                                        className="col-span-4 px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer"
-                                                                                >
-                                                                                        <option value="">انتخاب سایز...</option>
-                                                                                        {sizeTemplate.map((sn) => (
-                                                                                                <option key={sn} value={sn}>
-                                                                                                        {sn}
-                                                                                                </option>
-                                                                                        ))}
-                                                                                </select>
-                                                                        ) : (
+                                                                        {/* ردیف ۱: نام + نام عربی + قیمت + حذف */}
+                                                                        <div className="grid grid-cols-12 gap-2 items-center">
+                                                                                {sizeTemplate.length > 0 ? (
+                                                                                        <select
+                                                                                                value={size.name}
+                                                                                                onChange={(e) =>
+                                                                                                        handleSizeChange(index, 'name', e.target.value)
+                                                                                                }
+                                                                                                className="col-span-4 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer"
+                                                                                        >
+                                                                                                <option value="">انتخاب سایز...</option>
+                                                                                                {sizeTemplate.map((sn) => (
+                                                                                                        <option key={sn} value={sn}>
+                                                                                                                {sn}
+                                                                                                        </option>
+                                                                                                ))}
+                                                                                        </select>
+                                                                                ) : (
+                                                                                        <input
+                                                                                                type="text"
+                                                                                                value={size.name}
+                                                                                                onChange={(e) =>
+                                                                                                        handleSizeChange(index, 'name', e.target.value)
+                                                                                                }
+                                                                                                placeholder="نام سایز (کوچک)"
+                                                                                                className="col-span-4 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
+                                                                                        />
+                                                                                )}
+                                                                                {/* round-34 — نام عربی سایز (اختیاری) */}
                                                                                 <input
                                                                                         type="text"
-                                                                                        value={size.name}
+                                                                                        dir="rtl"
+                                                                                        value={size.nameAr}
                                                                                         onChange={(e) =>
-                                                                                                handleSizeChange(index, 'name', e.target.value)
+                                                                                                handleSizeChange(index, 'nameAr', e.target.value)
                                                                                         }
-                                                                                        placeholder="نام سایز (کوچک)"
-                                                                                        className="col-span-4 px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
+                                                                                        placeholder="نام عربی (اختیاری)"
+                                                                                        maxLength={60}
+                                                                                        className="col-span-3 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
                                                                                 />
-                                                                        )}
-                                                                        {/* round-34 — نام عربی سایز (اختیاری) */}
-                                                                        <input
-                                                                                type="text"
-                                                                                dir="rtl"
-                                                                                value={size.nameAr}
-                                                                                onChange={(e) =>
-                                                                                        handleSizeChange(index, 'nameAr', e.target.value)
-                                                                                }
-                                                                                placeholder="نام عربی (اختیاری)"
-                                                                                maxLength={60}
-                                                                                className="col-span-3 px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
-                                                                        />
-                                                                        <input
-                                                                                type="number"
-                                                                                placeholder="قیمت (تومان)"
-                                                                                value={size.price}
-                                                                                onChange={(e) =>
-                                                                                        handleSizeChange(index, 'price', e.target.value)
-                                                                                }
-                                                                                className="col-span-4 px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
-                                                                        />
-                                                                        <button
-                                                                                type="button"
-                                                                                onClick={() => removeSize(index)}
-                                                                                className="col-span-1 p-2 text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg cursor-pointer flex justify-center"
-                                                                        >
-                                                                                <X size={16} />
-                                                                        </button>
+                                                                                <input
+                                                                                        type="number"
+                                                                                        placeholder="قیمت (تومان)"
+                                                                                        value={size.price}
+                                                                                        onChange={(e) =>
+                                                                                                handleSizeChange(index, 'price', e.target.value)
+                                                                                        }
+                                                                                        className="col-span-4 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
+                                                                                />
+                                                                                <button
+                                                                                        type="button"
+                                                                                        onClick={() => removeSize(index)}
+                                                                                        className="col-span-1 p-2 text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg cursor-pointer flex justify-center"
+                                                                                >
+                                                                                        <X size={16} />
+                                                                                </button>
+                                                                        </div>
+
+                                                                        {/* ردیف ۲ (stage-47): تخفیف مستقِ این سایز + سوییچ زمان‌دار */}
+                                                                        <div className="flex items-center gap-3">
+                                                                                <div className="w-28 shrink-0">
+                                                                                        <label className="block text-[10px] font-DanaMedium text-gray-500 dark:text-gray-400 mb-1">
+                                                                                                تخفیف این سایز (%)
+                                                                                        </label>
+                                                                                        <input
+                                                                                                type="number"
+                                                                                                min="0"
+                                                                                                max="100"
+                                                                                                value={size.discountPercentage}
+                                                                                                onChange={(e) =>
+                                                                                                        handleSizeChange(
+                                                                                                                index,
+                                                                                                                'discountPercentage',
+                                                                                                                Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                                                                                                        )
+                                                                                                }
+                                                                                                placeholder="0"
+                                                                                                className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
+                                                                                        />
+                                                                                </div>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                        <DiscountWindowEditor
+                                                                                                compact
+                                                                                                idPrefix={`size-${index}-discount`}
+                                                                                                startsAt={size.discountStartsAt}
+                                                                                                endsAt={size.discountEndsAt}
+                                                                                                onChange={(s, e) => handleSizeWindow(index, s, e)}
+                                                                                                disabled={!(size.discountPercentage > 0)}
+                                                                                        />
+                                                                                </div>
+                                                                        </div>
                                                                 </div>
                                                         ))}
                                                         {formData.sizes?.length === 0 && (
@@ -621,7 +953,7 @@ export function ProductForm({
                                         </h3>
                                         <div className="p-4 bg-gray-100 dark:bg-[#1a0a0e] rounded-2xl">
                                                 {/* round-12 — interactive=false: لینک‌های preview با id سنتینل
-                'preview' نویز 422 و RouteError می‌ساختند */}
+                                'preview' نویز 422 و RouteError می‌ساختند */}
                                                 <ProductCard product={previewProduct} interactive={false} />
                                         </div>
                                         <div className="bg-white dark:bg-[#2a1015] p-4 rounded-xl border border-gray-200 dark:border-[#3a151c] text-center">
