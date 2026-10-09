@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/weekly-report.job.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر فاز-۲: همه‌ی کاربران + همه‌ی سفارشات هفته → ZIP + TOKEN پیامکی
+// ═══════════════════════════════════════════════════════════════
+
 //src/workers/jobs/weekly-report.job.ts
 import type { AppConfig } from '#/infra/config/env'
 import type { Db } from '#/infra/db/client'
@@ -5,7 +12,11 @@ import type { SmsService } from '#/infra/sms/sms.service'
 import type { ReportService } from '#/domain/report/report.service'
 import type { DailyJob } from '#/workers/scheduler'
 
-/** گزارش هفتگی — شنبه ۰۱:۰۵ — پیامک لینک صفحه‌ی زنده */
+/**
+ * گزارش هفتگی — شنبه ۰۱:۰۵ تهران — فاز-۲:
+ * توکن امضاشده + پیامک به ادمین‌های اصلی (فقط TOKEN — SMS.ir لینکِ
+ * بسته‌ی ZIP با orders.csv + users.csv هفته را از قالب می‌سازد).
+ */
 export class WeeklyReportJob implements DailyJob {
   readonly name = 'weekly-report'
   readonly time = '01:05'
@@ -24,7 +35,7 @@ export class WeeklyReportJob implements DailyJob {
       console.log('[cron:weekly-report] not Saturday — skipping')
       return
     }
-    await this.deps.reports.smsReportLink('weekly')
-    console.log('[cron:weekly-report] SMS sent')
+    await this.deps.reports.runWeeklyFlow()
+    console.log('[cron:weekly-report] flow complete (weekly ZIP link SMS sent)')
   }
 }

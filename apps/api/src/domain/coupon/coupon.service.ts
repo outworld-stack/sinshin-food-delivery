@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M9)
+// تغییر فاز-۲: grantedRecently — جزئیات کوپن‌های تازه‌اعطا برای نوتیف
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/coupon/coupon.service.ts
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
@@ -115,6 +122,29 @@ export class CouponService {
    */
   async grantIfEligibleAfterCommit(userId: string): Promise<number> {
     return this.deps.db.transaction((tx) => this.grantIfEligible(tx, userId))
+  }
+
+  /**
+   * فاز-۲ — جزئیات «آخرین N گرنت» یک کاربر (برای نوتیفیکیشن پوش).
+   * نوتیف بعد از grant ساخته می‌شود؛ این کوئری فقط خواندنی است و
+   * اگر خالی برگردد (مثلاً حذف سریع کوپن) نوتیف عمومی می‌شود — خطا نه.
+   */
+  async grantedRecently(
+    userId: string,
+    count: number,
+  ): Promise<Array<{ code: string; title: string | null; discountPercentage: number }>> {
+    const rows = await this.deps.db
+      .select({
+        code: coupons.code,
+        title: coupons.title,
+        discountPercentage: coupons.discountPercentage,
+      })
+      .from(couponGrants)
+      .innerJoin(coupons, eq(coupons.id, couponGrants.couponId))
+      .where(eq(couponGrants.userId, userId))
+      .orderBy(desc(couponGrants.grantedAt))
+      .limit(Math.min(Math.max(1, count), 10))
+    return rows
   }
 
   // ══ اعتبار در چک‌اوت ══

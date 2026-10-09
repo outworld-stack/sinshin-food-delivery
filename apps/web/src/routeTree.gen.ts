@@ -44,6 +44,7 @@ import { Route as AdminCouponsCouponIdRouteImport } from './routes/admin/coupons
 import { Route as AdminCouponsNewRouteImport } from './routes/admin/coupons/new'
 import { Route as AdminCouriersIndexRouteImport } from './routes/admin/couriers/index'
 import { Route as AdminCouriersCourierIdRouteImport } from './routes/admin/couriers/$courierId'
+import { Route as AdminNotificationsIndexRouteImport } from './routes/admin/notifications/index'
 import { Route as AdminOrdersIndexRouteImport } from './routes/admin/orders/index'
 import { Route as AdminProductsIndexRouteImport } from './routes/admin/products/index'
 import { Route as AdminProductsNewRouteImport } from './routes/admin/products/new'
@@ -239,6 +240,11 @@ const AdminCouriersCourierIdRoute = AdminCouriersCourierIdRouteImport.update({
   path: '/couriers/$courierId',
   getParentRoute: () => AdminRouteRoute,
 } as any)
+const AdminNotificationsIndexRoute = AdminNotificationsIndexRouteImport.update({
+  id: '/notifications/',
+  path: '/notifications/',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
 const AdminOrdersIndexRoute = AdminOrdersIndexRouteImport.update({
   id: '/orders/',
   path: '/orders/',
@@ -378,6 +384,7 @@ export interface FileRoutesByFullPath {
   '/admin/articles/': typeof AdminArticlesIndexRoute
   '/admin/coupons/': typeof AdminCouponsIndexRoute
   '/admin/couriers/': typeof AdminCouriersIndexRoute
+  '/admin/notifications/': typeof AdminNotificationsIndexRoute
   '/admin/orders/': typeof AdminOrdersIndexRoute
   '/admin/products/': typeof AdminProductsIndexRoute
   '/admin/reviews/': typeof AdminReviewsIndexRoute
@@ -425,6 +432,7 @@ export interface FileRoutesByTo {
   '/admin/articles': typeof AdminArticlesIndexRoute
   '/admin/coupons': typeof AdminCouponsIndexRoute
   '/admin/couriers': typeof AdminCouriersIndexRoute
+  '/admin/notifications': typeof AdminNotificationsIndexRoute
   '/admin/orders': typeof AdminOrdersIndexRoute
   '/admin/products': typeof AdminProductsIndexRoute
   '/admin/reviews': typeof AdminReviewsIndexRoute
@@ -482,6 +490,7 @@ export interface FileRoutesById {
   '/admin/articles/': typeof AdminArticlesIndexRoute
   '/admin/coupons/': typeof AdminCouponsIndexRoute
   '/admin/couriers/': typeof AdminCouriersIndexRoute
+  '/admin/notifications/': typeof AdminNotificationsIndexRoute
   '/admin/orders/': typeof AdminOrdersIndexRoute
   '/admin/products/': typeof AdminProductsIndexRoute
   '/admin/reviews/': typeof AdminReviewsIndexRoute
@@ -540,6 +549,7 @@ export interface FileRouteTypes {
     | '/admin/articles/'
     | '/admin/coupons/'
     | '/admin/couriers/'
+    | '/admin/notifications/'
     | '/admin/orders/'
     | '/admin/products/'
     | '/admin/reviews/'
@@ -587,6 +597,7 @@ export interface FileRouteTypes {
     | '/admin/articles'
     | '/admin/coupons'
     | '/admin/couriers'
+    | '/admin/notifications'
     | '/admin/orders'
     | '/admin/products'
     | '/admin/reviews'
@@ -643,6 +654,7 @@ export interface FileRouteTypes {
     | '/admin/articles/'
     | '/admin/coupons/'
     | '/admin/couriers/'
+    | '/admin/notifications/'
     | '/admin/orders/'
     | '/admin/products/'
     | '/admin/reviews/'
@@ -925,6 +937,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCouriersCourierIdRouteImport
       parentRoute: typeof AdminRouteRoute
     }
+    '/admin/notifications/': {
+      id: '/admin/notifications/'
+      path: '/notifications'
+      fullPath: '/admin/notifications/'
+      preLoaderRoute: typeof AdminNotificationsIndexRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
     '/admin/orders/': {
       id: '/admin/orders/'
       path: '/orders'
@@ -1085,6 +1104,7 @@ interface AdminRouteRouteChildren {
   AdminArticlesIndexRoute: typeof AdminArticlesIndexRoute
   AdminCouponsIndexRoute: typeof AdminCouponsIndexRoute
   AdminCouriersIndexRoute: typeof AdminCouriersIndexRoute
+  AdminNotificationsIndexRoute: typeof AdminNotificationsIndexRoute
   AdminOrdersIndexRoute: typeof AdminOrdersIndexRoute
   AdminProductsIndexRoute: typeof AdminProductsIndexRoute
   AdminReviewsIndexRoute: typeof AdminReviewsIndexRoute
@@ -1111,6 +1131,7 @@ const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminArticlesIndexRoute: AdminArticlesIndexRoute,
   AdminCouponsIndexRoute: AdminCouponsIndexRoute,
   AdminCouriersIndexRoute: AdminCouriersIndexRoute,
+  AdminNotificationsIndexRoute: AdminNotificationsIndexRoute,
   AdminOrdersIndexRoute: AdminOrdersIndexRoute,
   AdminProductsIndexRoute: AdminProductsIndexRoute,
   AdminReviewsIndexRoute: AdminReviewsIndexRoute,

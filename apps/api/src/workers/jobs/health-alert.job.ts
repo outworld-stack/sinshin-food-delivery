@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/health-alert.job.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با L2)
+// تغییر فاز-۲: هشدار سلامت با قالب SMS.ir — STATUS / SERVICE / DETAIL
+// ═══════════════════════════════════════════════════════════════
+
 //src/workers/jobs/health-alert.job.ts
 import type { AppConfig } from '#/infra/config/env'
 import type { Database } from '#/infra/db/client'
@@ -61,6 +68,10 @@ const formatDuration = (ms: number): string => {
  * برگشت را هم (با مدت قطعی) خبر می‌دهد. قطعیِ پایدار هر repeatMinutes یادآوری
  * می‌شود تا قطعیِ شبانه بی‌خبر نماند.
  *
+ * فاز-۲ — SMS.ir: هشدار حالا «قالب health-alert» با سه پارامتر
+ *  STATUS | SERVICE | DETAIL  می‌رود (هر کدام ≤ ۲۵ کاراکتر — سرویس
+ * پیامک خودش مقادیر بلندتر را cut می‌کند).
+ *
  *  • noLock: قفلِ بین-رپلیکایی ردیس اینجا عمداً کنار است — وگرنه هنگام قطعیِ
  *    خودِ ردیس، دیده‌بانِ ردیس کور می‌شود. (با N رپلیکا هر نمونه مستقل
  *    هشدار می‌دهد؛ امروز تک‌رپلیکا = بدون تفاوت.)
@@ -109,13 +120,13 @@ export class HealthAlertJob implements IntervalJob {
       if (!st.confirmed && st.consecutiveDown >= CONFIRM_CYCLES) {
         st.confirmed = true
         st.lastAlertAt = now
-        this.alert(`🚨 سین‌شین: ${label} از ساعت ${tehranHm()} قطع است.`)
+        this.alert('قطع است', label, `از ساعت ${tehranHm()}`)
       } else if (
         st.confirmed &&
         now - st.lastAlertAt >= this.deps.config.healthAlert.repeatMinutes * 60_000
       ) {
         st.lastAlertAt = now
-        this.alert(`🚨 سین‌شین: ${label} همچنان قطع است (از ساعت ${tehranHm()}).`)
+        this.alert('همچنان قطع', label, `از ساعت ${tehranHm()}`)
       }
       this.states.set(key, st)
       return
@@ -123,30 +134,36 @@ export class HealthAlertJob implements IntervalJob {
 
     // بالاست — اگر قطعیِ اعلام‌شده‌ای داشتیم، خبرِ برگشت
     if (st.confirmed) {
-      this.alert(`✅ سین‌شین: ${label} برگشت — ${formatDuration(now - st.firstDownAt)} قطع بود.`)
+      this.alert('برگشت', label, `${formatDuration(now - st.firstDownAt)} قطع بود`)
     }
     this.states.set(key, freshState())
   }
 
   /**
-   * ارسال به همهٔ گیرنده‌ها به‌موازات (سهم هر پیامک حداکثر ۱۰s — سقف خود سرویس).
-   * بدون گیرنده، متن در لاگ می‌ماند تا در docker logs دیده شود. غیر-پرتاب.
+   * ارسال به همهٔ گیرنده‌ها به‌موازات (سهم هر پیامک حداکثر timeout خود سرویس).
+   * بدون گیرنده، مقادیر در لاگ می‌ماند تا در docker logs دیده شود. غیر-پرتاب.
    */
-  private alert(message: string): void {
+  private alert(status: string, service: string, detail: string): void {
     const phones = this.deps.config.healthAlert.phones
     if (phones.length === 0) {
-      console.error(`[health-alert] گیرنده‌ای تنظیم نشده — فقط لاگ: ${message}`)
+      console.error(
+        `[health-alert] گیرنده‌ای تنظیم نشده — فقط لاگ: STATUS=${status} SERVICE=${service} DETAIL=${detail}`,
+      )
       return
     }
-    void Promise.all(phones.map((phone) => this.deps.sms.send(phone, message)))
+    void Promise.all(
+      phones.map((phone) => this.deps.sms.sendHealthAlert(phone, status, service, detail)),
+    )
       .then((results) => {
         const sent = results.filter(Boolean).length
-        console.log(`[health-alert] پیامک به ${sent}/${phones.length} گیرنده: ${message}`)
+        console.log(
+          `[health-alert] پیامک به ${sent}/${phones.length} گیرنده: ${service} → ${status} (${detail})`,
+        )
       })
       // رارد L2 — reject قبلاً unhandledRejection سطح پروسه بود (فقط لاگ،
       // ولی نویز/هشدار کاذب در مانیتورینگ)
       .catch((err) => {
-        console.error('[h[health-alert] ارسال پیامک هشدار شکست خورد:', err)
+        console.error('[health-alert] ارسال پیامک هشدار شکست خورد:', err)
       })
   }
 }

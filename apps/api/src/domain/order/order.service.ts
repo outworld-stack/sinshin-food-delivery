@@ -5,6 +5,13 @@
 // کامیت پیشنهادی: stage forty-three
 // ═════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/order/order.service.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با C1+M9+L3)
+// تغییر فاز-۲: بعد از اعطای کوپن، پوش نوتیفیکیشن به کاربر می‌رود
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/order/order.service.ts
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
@@ -43,6 +50,7 @@ import { finalPriceOf, loadPricingBases } from "#/domain/menu/menu.service";
 import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.service";
 import type { SettingsService } from "#/domain/settings/settings.service";
 import type { CouponService } from "../coupon/coupon.service";
+import type { NotificationService } from "../notification/notification.service";
 import type {
 	CheckoutInput,
 	CheckoutPreviewData,
@@ -85,6 +93,8 @@ export class OrderService {
 			zones: DeliveryZoneService;
 			settings: SettingsService;
 			coupons: CouponService;
+			/** فاز-۲ — پوش نوتیفیکیشن اعطای کوپن */
+			notifications: NotificationService;
 		},
 	) {}
 
@@ -413,12 +423,42 @@ export class OrderService {
 				console.log(
 					`[order] ${granted} coupon grant(s) for user ${userId} (post-commit)`,
 				);
+				// فاز-۲ — خبرِ کوپن با پوش نوتیفیکیشن (به‌جای پیامک).
+				// شلیک و رها + catch خودش: نوتیف هرگز تسویه را خراب نمی‌کند.
+				void this.notifyCouponGrant(userId, granted).catch(() => {});
 			}
 		} catch (e) {
 			console.error(
 				`[order] post-commit coupon grant failed for user ${userId}:`,
 				e,
 			);
+		}
+	}
+
+	/**
+	 * فاز-۲ — نوتیفیکیشن «کوپن گرفتی». جزئیات کوپن‌های تازه‌اعطا از
+	 * سرویس کوپن می‌آید (grantedRecently)؛ خطا فقط لاگ می‌شود.
+	 */
+	private async notifyCouponGrant(userId: string, count: number): Promise<void> {
+		try {
+			const granted = await this.deps.coupons.grantedRecently(userId, count);
+			const best = granted[0];
+			const title =
+				granted.length > 1
+					? `🎁 ${granted.length} کوپن تخفیف جدید گرفتی!`
+					: '🎁 یک کوپن تخفیف جدید گرفتی!';
+			const body = best
+				? `«${best.title ?? best.code}» با ٪${best.discountPercentage} تخفیف به حساب تو اضافه شد — سفارش بعدی‌ات ارزان‌تر می‌شود.`
+				: `کوپن تخفیف جدید به حساب شما اضافه شد.`;
+			await this.deps.notifications.notifyUser(userId, {
+				type: 'coupon',
+				title,
+				body,
+				url: '/checkout',
+				data: { coupons: granted.map((c) => ({ code: c.code, discount: c.discountPercentage })) },
+			});
+		} catch (err) {
+			console.error(`[order] coupon-grant notification failed for ${userId}:`, err);
 		}
 	}
 

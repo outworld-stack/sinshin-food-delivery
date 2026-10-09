@@ -56,7 +56,7 @@ function NewCouponPage() {
         </Link>
         <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">کوپن جدید</h1>
         <p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium">
-          ایجاد کوپن عمومی یا هدفمند با قوانین بازاریابی رفتاری
+          ایجاد کوپن عمومی - هدفمند با قوانین بازاریابی رفتاری
         </p>
       </div>
 

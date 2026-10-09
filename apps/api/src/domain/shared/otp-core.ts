@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/shared/otp-core.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی رارد ۴۸)
+// تغییر: smsText(متن آزاد) → sendSms(قالب) — معماری SMS.ir
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/shared/otp-core.ts
 // هسته‌ی مشترک جریان OTP روی ردیس — منبع واحد رارد ۴۸ (اسکن A2).
 // پیش از این، OtpService اصلی و مسیر پیک هر دو همین مکانیزم را جدا می‌نوشتند
@@ -5,9 +12,13 @@
 // هم‌زمان هر دو از exists رد می‌شدند → دو پیامک + بازنویسی کد.
 // سیاست‌های متفاوت (پنجره‌ی خطای تاییدِ کاربر، توکن پیک، متن پیام‌ها)
 // بیرون از هسته می‌مانند — هسته فقط مکانیزم است.
+//
+// فاز-۲: پیامک حالا «قالب‌محور» است (SMS.ir verify). به‌جای smsText که
+// متن آزاد می‌ساخت، فراخوان‌کننده sendSms تزریق می‌کند — بسته به اینکه
+// کد برای کاربر است یا پیک، قالب درست را انتخاب می‌کند. هسته همچنان
+// به SMS.ir وابسته نیست (فقط boolean می‌گیرد).
 
 import type { RedisService } from '#/infra/redis/redis'
-import type { SmsService } from '#/infra/sms/sms.service'
 import { Err } from '#/domain/shared/errors'
 import { randomOtpCode, safeEqual, sha256 } from '#/domain/shared/crypto'
 
@@ -37,7 +48,11 @@ export interface SendOtpParams {
   maxPerDay?: number
   keys: OtpKeys
   messages: OtpMessages
-  smsText: (code: string) => string
+  /**
+   * فاز-۲ — ارسال کد با قالب SMS.ir (verify).
+   * فراخوان‌کننده تزریق می‌کند: کاربر → قالب otp، پیک → قالب courier-otp.
+   */
+  sendSms: (phone: string, code: string) => Promise<boolean>
   isProd: boolean
 }
 
@@ -53,7 +68,7 @@ export type OtpVerifyResult =
  * ترتیب گاردها: سقف‌ها قبل از گیت — ردِ سقف، گیتِ کول‌داون را نگرفته باشد.
  */
 export async function sendOtp(
-  deps: { redis: RedisService; sms: SmsService },
+  deps: { redis: RedisService },
   p: SendOtpParams,
 ): Promise<{ cooldownSeconds: number; devCode?: string }> {
   const { redis } = deps
@@ -97,8 +112,8 @@ export async function sendOtp(
   }
   await redis.del(keys.attempts(p.phone))
 
-  // ۴) ارسال — از تنها نقطه‌ی SMS سیستم
-  const sent = await deps.sms.send(p.phone, p.smsText(code))
+  // ۴) ارسال — فراخوان‌کننده قالب را انتخاب کرده است (فاز-۲)
+  const sent = await p.sendSms(p.phone, code)
   if (!sent && p.isProd) {
     // درگاه مرد؛ کد و کول‌داون را پس بگیر تا کول‌داون کاربر سوخته نشود
     await redis.del(keys.code(p.phone))

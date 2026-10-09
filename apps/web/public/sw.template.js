@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/web/public/sw.template.js
+// تغییر: هندلرهای Web Push (notification + click) — سیستم پوش کاستوم
+// ═══════════════════════════════════════════════════════════════
+
 // sw.template.js — منبع؛ workbox-build با injectManifest پرش می‌کند
 import { registerRoute } from 'workbox-routing'
 import { CacheFirst } from 'workbox-strategies'
@@ -106,6 +112,55 @@ self.addEventListener('activate', (event) => {
           .map((n) => caches.delete(n)),
       )
       await self.clients.claim()
+    })(),
+  )
+})
+
+// ── فاز-۲ — Web Push (سیستم پوش نوتیفیکیشن کاستوم) ──
+// پیام از سرور ما: { title, body, url?, tag?, data? }
+// payload رمزنگاری‌شده (aes128gcm) توسط خود مرورگر باز می‌شود.
+self.addEventListener('push', (event) => {
+  let payload = {}
+  try {
+    payload = event.data ? event.data.json() : {}
+  } catch {
+    payload = { title: 'سین‌شین', body: 'اطلاعیه‌ی جدید دارید.' }
+  }
+  const title = payload.title || 'سین‌شین'
+  const options = {
+    body: payload.body || '',
+    // tag = جایگزینی نوتیفیکیشن قبلی هم‌برچسب (مثل یادآورهای کوپن)
+    tag: payload.tag || 'sinshin',
+    // renotify با tag — نوتیف جدید هم‌برچسب دوباره با صدا می‌آید
+    renotify: true,
+    icon: '/icons/icon-192-v1.png',
+    badge: '/icons/icon-192-v1.png',
+    dir: 'rtl',
+    lang: 'fa',
+    data: { url: payload.url || '/products', ...(payload.data || {}) },
+  }
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+// کلیک روی نوتیف — باز/فوکوس تب سایت روی URL مقصد
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data && event.notification.data.url) || '/products'
+  event.waitUntil(
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      // تب باز؟ فوکوس + ناوبری به مقصد
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin)) {
+          if ('focus' in client) await client.focus()
+          if ('navigate' in client) {
+            try { await client.navigate(url) } catch { /* تب در حال ناوبری است */ }
+          }
+          return
+        }
+      }
+      // تب باز نیست؟ پنجره‌ی جدید
+      await self.clients.openWindow(url)
     })(),
   )
 })

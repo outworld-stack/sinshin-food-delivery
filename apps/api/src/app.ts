@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-37 — sinshin-food-delivery — فایل 6 از 17
+// phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/app.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-three
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M3+L5)
+// تغییر فاز-۲: مسیرهای نوتیفیکیشن + neshan در geo routes
 // ═══════════════════════════════════════════════════════════════
 
 //src/app.ts
@@ -41,6 +41,8 @@ import type { TermsService } from '#/domain/terms/terms.service'
 import type { ArticleService } from './domain/article/article.service'
 import type { GalleryService } from './domain/gallery/gallery.service'
 import type { GeoService } from '#/domain/geo/geo.service'
+import type { NotificationService } from '#/domain/notification/notification.service'
+import type { NeshanService } from '#/infra/maps/neshan.service'
 import type { TranslationService } from '#/domain/translation/translation.service'
 
 import { AppError } from '#/domain/shared/errors'
@@ -75,6 +77,7 @@ import { articlesRoutes } from './http/routes/articles.routes'
 import { galleryRoutes } from './http/routes/gallery.routes'
 import { aboutRoutes } from './http/routes/about.routes'
 import { geoRoutes } from '#/http/routes/geo.routes'
+import { notificationRoutes } from '#/http/routes/notification.routes'
 import { adminTranslateRoutes } from '#/http/routes/admin-translate.routes'
 
 
@@ -116,6 +119,10 @@ export interface AppDeps {
   geo: GeoService
   /** round-35 — صف و پیش‌نمایش ترجمه‌ی خودکار (مترجم آفلاین NLLB) */
   translation: TranslationService
+  /** فاز-۲ — سیستم پوش نوتیفیکیشن */
+  notifications: NotificationService
+  /** فاز-۲ — کلاینت سرویس‌های REST نشان */
+  neshan: NeshanService
 }
 
 export const buildApp = (deps: AppDeps) => {
@@ -262,13 +269,20 @@ export const buildApp = (deps: AppDeps) => {
     )
     .use(paymentRoutes({ payments: deps.payments }))
     .use(reconcileRoutes({ sessions: deps.sessions, reconcile: deps.reconcile }))
-    .use(geoRoutes({ geo: deps.geo, sessions: deps.sessions, redis: deps.redis }))
+    .use(geoRoutes({ geo: deps.geo, sessions: deps.sessions, redis: deps.redis, neshan: deps.neshan }))
     // round-35 — preview/صف/وضعیت ترجمه (گارد پایه؛ قرارداد «دستی برنده» در سرویس)
     .use(
       adminTranslateRoutes({
         sessions: deps.sessions,
         admin2: deps.admin2,
         translation: deps.translation,
+      }),
+    )
+    // فاز-۲ — نوتیفیکیشن‌ها (صندوق + اشتراک پوش + broadcast ادمین)
+    .use(
+      notificationRoutes({
+        sessions: deps.sessions,
+        notifications: deps.notifications,
       }),
     )
 

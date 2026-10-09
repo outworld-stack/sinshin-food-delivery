@@ -1,9 +1,16 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/report/report-links.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M13)
+// تغییر فاز-۲: خانواده‌ی cron → report (r.) با انقضای قابل‌تنظیم
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/report/report-links.ts
 import { timingSafeEqual } from 'node:crypto'
 
 import type { AppConfig } from '#/infra/config/env'
 
-/** رارد M13 — مقایسه‌ی زمان‌ثابت برای توکن‌ها */
+/** رارد M13 — مقایسه‌ی زمان-ثابت برای توکن‌ها */
 const safeEqual = (a: string, b: string): boolean => {
   if (a.length !== b.length) return false
   try {
@@ -16,7 +23,12 @@ const safeEqual = (a: string, b: string): boolean => {
 /**
  * توکن‌های امضاشده‌ی گزارش — دو خانواده:
  *
- * ۱) cron: گزارش روزانه/هفتگی — توکن ثابت per-kind (مثل قبل)
+ * ۱) report (فاز-۲، جایگزین cron): پیامک گزارش روزانه/هفتگی —
+ *    امضاشده + منقضی‌شونده (REPORT_TOKEN_TTL_HOURS؛ پیش‌فرض ۲۴ ساعت)
+ *    + iat برای ضد-بازی. پیامک فورواردشده دیگر لینک دائمی نیست.
+ *    ⚠️ توکن‌های قدیمیِ خانواده‌ی c. (فاز-۱) دیگر معتبر نیستند —
+ *    عمدی است (توکن ثابت روزانه/هفتگی حذف شد).
+ *
  * ۲) پنل: توکن scope-دار — «کی، چه صفحه‌ای، چه فیلترهایی»
  *    payload داخل امضا → لینک ادمین۲ بین افراد شیر نمی‌شود
  *
@@ -25,6 +37,8 @@ const safeEqual = (a: string, b: string): boolean => {
  * لینک تازه از POST /reports/panel-link گرفته می‌شود.
  */
 const PANEL_TOKEN_TTL_SECONDS = 24 * 60 * 60 // ۲۴ ساعت
+
+export type ReportKind = 'daily' | 'weekly'
 
 export class ReportLinks {
   constructor(private readonly config: AppConfig) {}
@@ -44,25 +58,44 @@ export class ReportLinks {
     return Buffer.from(s, 'base64url').toString('utf8')
   }
 
-  // ── زمان‌بند ──
+  // ── گزارش‌های پیامکی (فاز-۲ — r.) ──
 
-  // رارد M13 — توکن کرون قبلاً «بدون تاریخ» بود: یک‌بار لو رفت = برای همیشه.
-  // حالا iat (epoch) داخل توکن + انقضای ۴۸ ساعت + مقایسه‌ی زمان‌ثابت.
-  cronToken(kind: 'daily' | 'weekly', iat = Math.floor(Date.now() / 1000)): string {
-    return `c.${kind}.${iat}.${this.hash(`cron:${kind}:${iat}`)}`
+  /**
+   * توکن لینک گزارش — این تنها چیزی است که به SMS.ir می‌رود؛
+   * URL کامل از قالب پنل SMS.ir ساخته می‌شود (#TOKEN#).
+   * TTL از کانفیگ: REPORT_TOKEN_TTL_HOURS (پیش‌فرض ۲۴).
+   */
+  reportToken(kind: ReportKind, iat = Math.floor(Date.now() / 1000)): string {
+    const ttl = Math.max(1, Math.floor(this.config.reports.tokenTtlHours)) * 3600
+    // exp داخل امضا — تاییدِ انقضا حین verify
+    return `r.${kind}.${iat}.${iat + ttl}.${this.hash(`report:${kind}:${iat}`)}`
   }
 
-  verifyCron(token: string): 'daily' | 'weekly' | null {
+  /**
+   * اعتبار توکن گزارش — امضا + ساختار + انقضا (زمان-ثابت).
+   * iat در آینده (> ۶۰s) هم رد می‌شود (ساعتِ کج).
+   */
+  verifyReport(token: string): ReportKind | null {
     const parts = token.split('.')
-    if (parts.length !== 4 || parts[0] !== 'c') return null
-    const kind = parts[1] === 'daily' || parts[1] === 'weekly' ? parts[1] : null
+    if (parts.length !== 5 || parts[0] !== 'r') return null
+    const kind = parts[1] === 'daily' || parts[1] === 'weekly' ? (parts[1] as ReportKind) : null
     if (!kind) return null
     const iat = Number(parts[2])
+    const exp = Number(parts[3])
     if (!Number.isInteger(iat) || iat <= 0) return null
-    // رارد M13 — انقضای ۴۸ ساعت؛ توکن کهنه رد
-    if (Date.now() / 1000 - iat > 48 * 3600) return null
-    if (!safeEqual(this.cronToken(kind, iat), token)) return null
+    if (!Number.isInteger(exp) || exp <= iat) return null
+    const now = Math.floor(Date.now() / 1000)
+    if (iat > now + 60) return null
+    if (exp < now) return null
+    if (!safeEqual(this.reportToken(kind, iat), token)) return null
     return kind
+  }
+
+  /** ثانیه‌ی باقی‌مانده‌ی اعتبار توکن (برای هدر/لاگ) — منفی = منقضی */
+  reportTokenTtlLeft(token: string): number {
+    const parts = token.split('.')
+    const exp = Number(parts[3])
+    return Number.isInteger(exp) ? exp - Math.floor(Date.now() / 1000) : -1
   }
 
   // ── پنل — scope-دار ──

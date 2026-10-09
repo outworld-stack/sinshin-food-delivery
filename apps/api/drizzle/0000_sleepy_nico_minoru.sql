@@ -503,6 +503,34 @@ CREATE TABLE "translation_jobs" (
 	"finished_at" timestamp with time zone
 );
 --> statement-breakpoint
+CREATE TABLE "notifications" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"type" varchar(40) NOT NULL,
+	"title" varchar(120) NOT NULL,
+	"body" varchar(300) NOT NULL,
+	"url" varchar(300),
+	"data" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"read_at" timestamp with time zone,
+	"push_attempted" integer DEFAULT 0 NOT NULL,
+	"push_delivered" integer DEFAULT 0 NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "push_subscriptions" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"endpoint" text NOT NULL,
+	"p256dh" varchar(255) NOT NULL,
+	"auth" varchar(255) NOT NULL,
+	"user_agent" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"last_seen_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"last_push_at" timestamp with time zone,
+	"failures" integer DEFAULT 0 NOT NULL,
+	"disabled_at" timestamp with time zone
+);
+--> statement-breakpoint
 ALTER TABLE "addresses" ADD CONSTRAINT "addresses_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin2_activities" ADD CONSTRAINT "admin2_activities_admin_user_id_users_id_fk" FOREIGN KEY ("admin_user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin2_profiles" ADD CONSTRAINT "admin2_profiles_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -550,6 +578,8 @@ ALTER TABLE "wallet_transactions" ADD CONSTRAINT "wallet_transactions_referral_p
 ALTER TABLE "reviews" ADD CONSTRAINT "reviews_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "reviews" ADD CONSTRAINT "reviews_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "reviews" ADD CONSTRAINT "reviews_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "push_subscriptions" ADD CONSTRAINT "push_subscriptions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "addresses_user_idx" ON "addresses" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "admin2_activities_admin_idx" ON "admin2_activities" USING btree ("admin_user_id","created_at");--> statement-breakpoint
 CREATE INDEX "admin2_activities_action_idx" ON "admin2_activities" USING btree ("action");--> statement-breakpoint
@@ -650,4 +680,9 @@ CREATE INDEX "reviews_status_idx" ON "reviews" USING btree ("status");--> statem
 CREATE UNIQUE INDEX "reconcile_finding_key" ON "reconcile_findings" USING btree ("check_id","entity_id");--> statement-breakpoint
 CREATE INDEX "reconcile_finding_status_idx" ON "reconcile_findings" USING btree ("status","severity","first_seen_at");--> statement-breakpoint
 CREATE INDEX "translation_jobs_claim_idx" ON "translation_jobs" USING btree ("status","next_attempt_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "translation_jobs_pending_key" ON "translation_jobs" USING btree ("entity_type","entity_id") WHERE "translation_jobs"."status" = 'pending';
+CREATE UNIQUE INDEX "translation_jobs_pending_key" ON "translation_jobs" USING btree ("entity_type","entity_id") WHERE "translation_jobs"."status" = 'pending';--> statement-breakpoint
+CREATE INDEX "notifications_user_created_idx" ON "notifications" USING btree ("user_id","created_at");--> statement-breakpoint
+CREATE INDEX "notifications_user_unread_idx" ON "notifications" USING btree ("user_id","read_at");--> statement-breakpoint
+CREATE INDEX "notifications_created_idx" ON "notifications" USING btree ("created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "push_subscriptions_endpoint_key" ON "push_subscriptions" USING btree ("endpoint");--> statement-breakpoint
+CREATE INDEX "push_subscriptions_user_idx" ON "push_subscriptions" USING btree ("user_id","disabled_at");

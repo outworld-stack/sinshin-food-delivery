@@ -1,8 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
-// round-48 — sinshin-food-delivery — فایل 54 از 97
+// phase-2 — sinshin-food-delivery — SMS.ir + پوش نوتیفیکیشن + نشان
 // مسیر مقصد: apps/api/src/infra/config/env.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage forty-three
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱)
 // ═══════════════════════════════════════════════════════════════
 
 // src/infra/config/env.ts
@@ -18,13 +17,62 @@ export interface OtpConfig {
   maxPerDayPerPhone: number
 }
 
+/**
+ * phase-2 — پیامک روی SMS.ir (verify API).
+ * قرارداد قدیمی (SMS_BASE_URL / SMS_SENDER + متن آزاد) حذف شد:
+ * SMS.ir فقط با «شناسه‌ی قالب + پارامترها» کار می‌کند و URL گزارش
+ * را خودش از روی قالب می‌سازد (توکن TOKEN فقط از سمت بک‌اند می‌رود).
+ */
 export interface SmsConfig {
   provider: 'console' | 'real'
-  baseUrl: string
+  /** x-api-key پنل SMS.ir */
   apiKey: string
-  sender: string
-  /** رارد ۴۵ — مهلت فراخوانی درگاه پیامک (میلی‌ثانیه) */
+  /** مهلت فراخوانی درگاه (میلی‌ثانیه) */
   timeoutMs: number
+  /** شناسه‌ی قالب‌ها — همه از env (هرگز هاردکد نمی‌شوند) */
+  templateOtp: number
+  /** اختیاری — خالی = همان قالب otp برای پیک هم استفاده می‌شود */
+  templateCourierOtp: number | null
+  templateDailyReport: number
+  templateWeeklyReport: number
+  templateHealthAlert: number
+}
+
+/** phase-2 — سرویس‌های REST نشان (routing / matrix / reverse) — فقط سمت سرور */
+export interface NeshanConfig {
+  /** کلید «service» نشان — هرگز وارد باندل وب نمی‌شود */
+  serviceApiKey: string
+  timeoutMs: number
+  /** TTL کش حافظه‌ای برای پاسخ‌های نشان (ثانیه) */
+  cacheTtlSeconds: number
+}
+
+/** phase-2 — Web Push (VAPID) — سیستم پوش نوتیفیکیشن کاستوم */
+export interface PushConfig {
+  /** کلید عمومی — base64url (۶۵ بایت، با پیشوند 0x04) */
+  vapidPublicKey: string
+  /** کلید خصوصی — base64url (۳۲ بایت) */
+  vapidPrivateKey: string
+  /** شناسه‌ی تماس (mailto:) برای سرپیوش استاندارد VAPID */
+  vapidSubject: string
+  /** عمر پیام پوش روی سرور پوش مرورگر (ثانیه) */
+  ttlSeconds: number
+  /** سقف اشتراک پوش فعال هر کاربر — بیشترها غیرفعال می‌شوند */
+  maxSubsPerUser: number
+}
+
+/** phase-2 — گزارش روزانه/هفتگی + بسته‌ی ZIP + لاگ‌های داکر */
+export interface ReportConfig {
+  /** عمر توکن لینک گزارش (ساعت) — پیش‌فرض ۲۴ */
+  tokenTtlHours: number
+  /** سقف جمع لاگ‌های داکر داخل بسته‌ی روزانه (مگابایت) */
+  logsMaxMb: number
+  /** جمع‌آوری لاگ داکر (نیاز به docker.sock) — خاموش = بسته بدون لاگ */
+  dockerLogsEnabled: boolean
+  /** بعد از آرشیو، لاگ کانتینرها truncate شود (پاک‌سازی سرور) */
+  dockerLogsTruncate: boolean
+  /** مسیر سوکت داکر داخل کانتینر */
+  dockerSocket: string
 }
 
 export interface GatewayConfig {
@@ -86,9 +134,10 @@ const DEV_JWT_SECRET = 'dev-only-insecure-secret'
  * پیش‌فرض‌ها برای اجرای بی‌دردسرِ محیط توسعه روی سیستم (localhost) چیده شده‌اند؛
  * داخل Docker با env_file مقادیر سرویس‌ها (postgres/redis) بازنویسی می‌شوند.
  *
- * phase-1: assertProdInvariants — قبلاً فقط DEV-JWT چک می‌شد؛ حالا
- * جای‌نگهدارها، SMS_PROVIDER=console (باگ 🔴۱)، GATEWAY_MODE=mock (باگ 🔴۳)،
- * SUPER_ADMIN_PHONES خالی، SITE_URL غیر https و UPLOAD_DIR نسبی هم بوت را می‌کُشند.
+ * phase-1: assertProdInvariants — جای‌نگهدارها، SMS_PROVIDER=console،
+ * GATEWAY_MODE=mock، SUPER_ADMIN_PHONES خالی، SITE_URL غیر https و
+ * UPLOAD_DIR نسبی بوت را می‌کُشند.
+ * phase-2: کلیدهای VAPID و شناسه‌ی قالب‌های SMS.ir هم به همین گاردها اضافه شدند.
  */
 export class AppConfig {
   readonly env: AppEnv
@@ -116,6 +165,11 @@ export class AppConfig {
   readonly device: DeviceConfig
   readonly healthAlert: HealthAlertConfig
 
+  /** phase-2 — نشان / پوش / گزارش */
+  readonly neshan: NeshanConfig
+  readonly push: PushConfig
+  readonly reports: ReportConfig
+
   readonly couponScanTime: string
   readonly couponNudgeTime: string
 
@@ -130,10 +184,12 @@ export class AppConfig {
   /** رارد ۴۵ — پالیسی‌های مغایرت‌گیری مالی */
   readonly reconcile: ReconcileConfig
 
-  /** round-35 — آدرس سرویس مترجم آفلاین (NLLB) در شبکه داخلی compose؛ پایین بودنش صف ترجمه را نگه می‌دارد */
+  /** round-35 — آدرس سرویس مترجم آفلاین (NLLB) در شبکه داخلی compose */
   readonly translatorUrl: string
+  /** phase-1/M15 — راز مشترک api ↔ مترجم (هدر x-translator-token) */
+  readonly translatorToken: string
 
-  /** round-13 — مختصات رستوران (مبدأ محاسبه‌ی هزینه‌ی ارسال) از env؛ فقط وقتی هر دو مقدار معتبر باشند */
+  /** round-13 — مختصات رستوران (مبدأ محاسبه‌ی هزینه‌ی ارسال) از env */
   readonly restaurantLocation: RestaurantLocationConfig | null
 
   constructor(source: Record<string, string | undefined> = Bun.env) {
@@ -145,13 +201,26 @@ export class AppConfig {
       const n = Number(source[key])
       return Number.isFinite(n) && n > 0 ? n : fallback
     }
+    const int = (key: string, fallback: number): number => {
+      const raw = source[key]?.trim()
+      if (raw === undefined || raw === '') return fallback
+      const n = Number(raw)
+      return Number.isInteger(n) && n > 0 ? n : fallback
+    }
     const bool = (key: string, fallback: boolean): boolean => {
       const v = source[key]?.trim().toLowerCase()
       if (v === 'on' || v === 'true' || v === '1') return true
       if (v === 'off' || v === 'false' || v === '0') return false
       return fallback
     }
-    /** لیست شمارهٔ موبایل جدا شده با کاما — نرمال‌شده، بدون تهی (SUPER_ADMIN و HEALTH_ALERT) */
+    /** شناسه‌ی قالب SMS.ir — عدد صحیح مثبت یا null (قالب اختیاری) */
+    const templateId = (key: string): number | null => {
+      const raw = source[key]?.trim()
+      if (raw === undefined || raw === '') return null
+      const n = Number(raw)
+      return Number.isInteger(n) && n > 0 ? n : null
+    }
+    /** لیست شمارهٔ موبایل جدا شده با کاما — نرمال‌شده، بدون تهی */
     const phoneList = (key: string): string[] =>
       str(key)
         .split(',')
@@ -173,7 +242,6 @@ export class AppConfig {
       'postgres://sinshin:sinshin_local@localhost:5432/sinshin',
     )
     this.redisUrl = str('REDIS_URL', 'redis://localhost:6379')
-    // رارد ۴۵ — قبلاً index.ts مستقیم از Bun.env می‌خواند (بیرون کلاس کانفیگ)
     this.dbPoolMax = num('DB_POOL_MAX', 10)
 
     this.jwtSecret = str('JWT_SECRET', DEV_JWT_SECRET)
@@ -190,14 +258,17 @@ export class AppConfig {
       enforcementRaw !== '' ? bool('DEVICE_ENFORCEMENT', true) : this.isProd
     this.maxDevicesPerUser = num('MAX_DEVICES_PER_USER', 5)
 
+    // ── phase-2 — SMS.ir ──
     const smsProvider = str('SMS_PROVIDER', 'console').toLowerCase()
     this.sms = {
       provider: smsProvider === 'real' ? 'real' : 'console',
-      baseUrl: str('SMS_BASE_URL'),
-      apiKey: str('SMS_API_KEY'),
-      sender: str('SMS_SENDER'),
-      // رارد ۴۵ — قبلاً ۱۰ ثانیه‌ی ثابت در سرویس پیامک
+      apiKey: str('SMS_IR_API_KEY'),
       timeoutMs: num('SMS_TIMEOUT_MS', 10_000),
+      templateOtp: templateId('SMS_TEMPLATE_ID_OTP') ?? 0,
+      templateCourierOtp: templateId('SMS_TEMPLATE_ID_COURIER_OTP'),
+      templateDailyReport: templateId('SMS_TEMPLATE_ID_DAILY') ?? 0,
+      templateWeeklyReport: templateId('SMS_TEMPLATE_ID_WEEKLY') ?? 0,
+      templateHealthAlert: templateId('SMS_TEMPLATE_ID_HEALTH') ?? 0,
     }
 
     // نرخ‌ها طبق قرارداد فرانت: ۶۰ ثانیه فاصله، ۳ تلاش
@@ -213,15 +284,12 @@ export class AppConfig {
     this.gateway = {
       mode: gwMode === 'direct' || gwMode === 'indirect' ? gwMode : 'mock',
       zarinpalMerchantId: str('ZARINPAL_MERCHANT_ID'),
-      // رارد ۴۵ — سرویس تست رسمی زرین‌پال: فقط هاست عوض می‌شود؛ آدرس
-      // برگشت همیشه از SITE_URL ساخته می‌شود (ZARINPAL_CALLBACK حذف شد)
       zarinpalSandbox: bool('ZARINPAL_SANDBOX', false),
       payirApiKey: str('PAYIR_API_KEY'),
       sepTerminalId: str('SEP_TERMINAL_ID'),
       mellatTerminalId: str('MELLAT_TERMINAL_ID'),
       mellatUserName: str('MELLAT_USERNAME'),
       mellatUserPassword: str('MELLAT_PASSWORD'),
-      // رارد ۴۵ — قبلاً ۱۵ ثانیه‌ی ثابت در هر ۴ آداپتر
       timeoutMs: num('PAYMENT_TIMEOUT_MS', 15_000),
     }
 
@@ -232,12 +300,37 @@ export class AppConfig {
       similarityWindowDays: Number(source['DEVICE_SIMILARITY_WINDOW_DAYS']) || 7,
     }
 
-    // round-19 — بدون HEALTH_ALERT_PHONES، ادمین‌های اصلی گیرنده‌اند (بدون کانفیگ اضافه)
+    // round-19 — بدون HEALTH_ALERT_PHONES، ادمین‌های اصلی گیرنده‌اند
     const alertPhones = phoneList('HEALTH_ALERT_PHONES')
     this.healthAlert = {
       phones: alertPhones.length > 0 ? alertPhones : this.superAdminPhones,
       everySeconds: num('HEALTH_ALERT_EVERY_SECONDS', 60),
       repeatMinutes: num('HEALTH_ALERT_REPEAT_MINUTES', 60),
+    }
+
+    // ── phase-2 — نشان (سرویس‌ها؛ فقط سمت سرور) ──
+    this.neshan = {
+      serviceApiKey: str('NESHAN_SERVICE_API_KEY'),
+      timeoutMs: num('NESHAN_TIMEOUT_MS', 10_000),
+      cacheTtlSeconds: num('NESHAN_CACHE_TTL_SECONDS', 300),
+    }
+
+    // ── phase-2 — Web Push (VAPID) ──
+    this.push = {
+      vapidPublicKey: str('VAPID_PUBLIC_KEY'),
+      vapidPrivateKey: str('VAPID_PRIVATE_KEY'),
+      vapidSubject: str('VAPID_SUBJECT', 'mailto:admin@sinshin-foodpark.ir'),
+      ttlSeconds: num('PUSH_TTL_SECONDS', 86_400),
+      maxSubsPerUser: int('PUSH_MAX_SUBS_PER_USER', 5),
+    }
+
+    // ── phase-2 — گزارش‌ها + لاگ داکر ──
+    this.reports = {
+      tokenTtlHours: num('REPORT_TOKEN_TTL_HOURS', 24),
+      logsMaxMb: num('REPORT_LOGS_MAX_MB', 20),
+      dockerLogsEnabled: bool('DOCKER_LOGS_ENABLED', true),
+      dockerLogsTruncate: bool('DOCKER_LOGS_TRUNCATE', true),
+      dockerSocket: str('DOCKER_SOCKET', '/var/run/docker.sock'),
     }
 
     this.couponScanTime = str('COUPON_SCAN_TIME', '02:00')
@@ -248,22 +341,17 @@ export class AppConfig {
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
 
-    // رارد ۴۵ — دروازه‌ی جغرافیایی؛ قبلاً ثابت ۱۰ ثانیه / ۱۵ دقیقه در سرویس
     this.geo = {
       fetchTimeoutMs: num('GEO_FETCH_TIMEOUT_MS', 10_000),
       retryMs: num('GEO_RETRY_MINUTES', 15) * 60_000,
     }
 
-    // رارد ۴۵ — سود معرف: عدد صحیح ۰ تا ۱۰۰؛ صفر یعنی خاموش؛ خراب = پیش‌فرض
     const referralRaw = Number(source['REFERRAL_PERCENT'])
     this.referralPercent =
       Number.isInteger(referralRaw) && referralRaw >= 0 && referralRaw <= 100
         ? referralRaw
         : 10
 
-    // رارد ۴۵ — پرچم‌های اصلاح خودکارِ مغایرت‌گیری که قبلاً سرویس مستقیم از
-    // Bun.env می‌خواند؛ اینجا یک‌جا خوانده و تایپ‌دار می‌شوند. R11 همیشه
-    // فقط گزارش است و پرچمی ندارد.
     const autoChecks = new Set<string>()
     for (let i = 1; i <= 10; i++) {
       if (bool(`RECONCILE_AUTO_R${i}`, false)) autoChecks.add(`R${i}`)
@@ -274,11 +362,9 @@ export class AppConfig {
       r3WindowDays: Number.isInteger(r3Raw) && r3Raw >= 1 ? r3Raw : 120,
     }
 
-    // round-35 — مترجم آفلاین؛ پیش‌فرض نام سرویس compose (بدون داکر: 127.0.0.1:8300)
     this.translatorUrl = str('TRANSLATOR_URL', 'http://translator:8300').replace(/\/+$/, '')
+    this.translatorToken = str('TRANSLATOR_TOKEN')
 
-    // round-13 — RESTAURANT_LAT / RESTAURANT_LNG — مبدأ ناحیه‌های ارسال.
-    // هر دو باید عددِ متناهی و در بازه‌ی معتبر باشند؛ وگرنه null (می‌رود سراغ تنظیمات DB).
     const lat = Number(source['RESTAURANT_LAT'])
     const lng = Number(source['RESTAURANT_LNG'])
     this.restaurantLocation =
@@ -287,11 +373,11 @@ export class AppConfig {
         ? { lat, lng }
         : null
 
-    // ── phase-1: جایگزین چک قبلی (که فقط DEV-JWT می‌گرفت) ──
+    // ── شکست سریع — کرش بوت عمدی است ──
     this.assertProdInvariants()
   }
 
-  // ═══════════ phase-1: شکست سریع در محیط عملیاتی — کرش بوت عمدی است ═══════════
+  // ═══════════ شکست سریع در محیط عملیاتی — کرش بوت عمدی است ═══════════
   private assertProdInvariants(): void {
     if (!this.isProd) return
 
@@ -306,11 +392,40 @@ export class AppConfig {
       problems.push('JWT_SECRET مقدار placeholder/شناخته‌شده است — مقدار تصادفی واقعی بگذار.')
     }
 
-    // ── SMS: باگ 🔴۱ — کد OTP در پاسخ API ──
+    // ── SMS.ir (phase-2): قالب‌ها اجباری‌اند — پیامک بدون قالب عملاً غیرممکن است ──
     if (this.sms.provider !== 'real') {
       problems.push('SMS_PROVIDER=console در production ممنوع است (کد ورود پیامک نمی‌شود).')
-    } else if (!this.sms.baseUrl || !this.sms.apiKey || !this.sms.sender) {
-      problems.push('SMS_PROVIDER=real اما SMS_BASE_URL / SMS_API_KEY / SMS_SENDER ناقص‌اند.')
+    } else {
+      if (!this.sms.apiKey) {
+        problems.push('SMS_PROVIDER=real اما SMS_IR_API_KEY خالی است (کلید پنل SMS.ir).')
+      }
+      const missing: string[] = []
+      if (this.sms.templateOtp === 0) missing.push('SMS_TEMPLATE_ID_OTP')
+      if (this.sms.templateDailyReport === 0) missing.push('SMS_TEMPLATE_ID_DAILY')
+      if (this.sms.templateWeeklyReport === 0) missing.push('SMS_TEMPLATE_ID_WEEKLY')
+      if (this.sms.templateHealthAlert === 0) missing.push('SMS_TEMPLATE_ID_HEALTH')
+      if (missing.length > 0) {
+        problems.push(
+          `شناسه‌ی قالب‌های SMS.ir ناقص است: ${missing.join(' , ')} — همه باید در .env باشند.`,
+        )
+      }
+      if (this.sms.templateCourierOtp === null) {
+        // هشدار سخت نیست — fallback به قالب otp کار می‌کند؛ فقط لاگ
+        console.warn(
+          '[config] SMS_TEMPLATE_ID_COURIER_OTP تنظیم نشده — پیامک OTP پیک از قالب otp استفاده می‌کند.',
+        )
+      }
+    }
+
+    // ── پوش نوتیفیکیشن (phase-2): بدون کلید VAPID پوش کار نمی‌کند ──
+    if (!this.push.vapidPublicKey || !this.push.vapidPrivateKey) {
+      problems.push(
+        'کلیدهای VAPID خالی‌اند — با «bun scripts/generate-vapid-keys.ts» بساز و در .env بگذار (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY).',
+      )
+    } else if (
+      this.push.vapidPublicKey.length < 40 || this.push.vapidPrivateKey.length < 30
+    ) {
+      problems.push('کلیدهای VAPID ساختار معتبر ندارند — دوباره با اسکریپت بساز.')
     }
 
     // ── درگاه پرداخت: باگ 🔴۳ — سفارش رایگان با MOCK ──
@@ -328,7 +443,7 @@ export class AppConfig {
       problems.push('SUPER_ADMIN_PHONES خالی است — دسترسی پنل از دست می‌رود.')
     }
 
-    // ── HTTPS: کوکی امن و آدرس بازگشت درگاه‌ها (فاز ۲) ──
+    // ── HTTPS ──
     if (!this.siteUrl.startsWith('https://')) {
       problems.push(`SITE_URL باید https باشد (فعلی: ${this.siteUrl}).`)
     }
@@ -337,6 +452,10 @@ export class AppConfig {
     if (!this.uploadDir.startsWith('/')) {
       problems.push('UPLOAD_DIR باید مسیر مطلق باشد (مثلاً /data/uploads).')
     }
+
+    // نکته: کلید نشان (NESHAN_SERVICE_API_KEY) و docker.sock «اختیاری»‌اند —
+    // بدون نشان سایت با فاصله‌ی هوایی کار می‌کند؛ بدون سوکت، بسته‌ی روزانه
+    // بدون فایل لاگ ارسال می‌شود. بوت هرگز به‌خاطر آن‌ها نمی‌میرد.
 
     if (problems.length) {
       throw new Error(

@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/realtime.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با H5)
+// تغییر فاز-۲: کانال notify:{userId} برای نوتیفیکیشن‌های زنده‌ی کاربر
+// ═══════════════════════════════════════════════════════════════
+
 // src/http/routes/realtime.routes.ts
 import { Elysia, t } from 'elysia'
 import { eq } from 'drizzle-orm'
@@ -18,8 +25,9 @@ const sseChunk = (event: string, data: unknown): Uint8Array =>
 
 // ── phase-1: کانال‌های مجاز (سفت‌تر از قبل) ──
 // demo:* (تست) | orders:new (پنل) | orders:{displayId یا uuid} (ردیابی)
+// فاز-۲: notify:{uuid} — صندوق نوتیفیکیشن زنده‌ی خودِ کاربر (فقط مالک)
 const CHANNEL_RE =
-  /^(demo:[A-Za-z0-9_-]{1,40}|orders:new|orders:(ord-[a-z0-9]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))$/
+  /^(demo:[A-Za-z0-9_-]{1,40}|orders:new|orders:(ord-[a-z0-9]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})|notify:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 
 const HEARTBEAT_MS = 15_000
 const MAX_QUEUE = 128 // سقف صفِ هر اتصال — بک‌پرشر: بیشتر نشود، قدیمی‌ترین می‌افتد
@@ -56,6 +64,14 @@ async function authorizeChannel(
   if (channel === 'orders:new') {
     if (user.role !== 'admin' && user.role !== 'admin2') {
       throw Err.forbidden('کانال سفارش‌های زنده فقط برای پنل مدیریت است.')
+    }
+    return
+  }
+
+  // فاز-۲ — notify:{userId}: صندوق شخصی؛ فقط مالکِ همان شناسه
+  if (channel.startsWith('notify:')) {
+    if (channel.slice('notify:'.length) !== user.id) {
+      throw Err.forbidden('این کانال مال شما نیست.')
     }
     return
   }

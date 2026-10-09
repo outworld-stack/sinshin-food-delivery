@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// round-48 — sinshin-food-delivery — فایل 53 از 97
+// phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/index.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage forty-three
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱)
+// تغییر فاز-۲: سیم‌کشی neshan / docker-logs / notifications + job جدید
 // ═══════════════════════════════════════════════════════════════
 
 //src/index.ts
@@ -44,7 +44,6 @@ import { ReconcileService } from '#/domain/reconcile/reconcile.service'
 import { TermsService } from '#/domain/terms/terms.service'
 import { CronScheduler } from '#/workers/scheduler'
 import { CouponScanJob } from '#/workers/jobs/coupon-scan.job'
-import { CouponNudgeSmsJob } from '#/workers/jobs/coupon-nudge-sms.job'
 import { DailyReportJob } from '#/workers/jobs/daily-report.job'
 import { WeeklyReportJob } from '#/workers/jobs/weekly-report.job'
 import { ReconcileJob } from '#/workers/jobs/reconcile.job'
@@ -57,6 +56,12 @@ import { GeoService } from '#/domain/geo/geo.service'
 import { MetricsService } from '#/infra/monitor/metrics'
 import { JobRunRegistry } from '#/infra/monitor/job-registry'
 import { TranslationService } from '#/domain/translation/translation.service'
+// فاز-۲ — نشان / لاگ داکر / نوتیفیکیشن
+import { NeshanService } from '#/infra/maps/neshan.service'
+import { DockerLogsService } from '#/infra/logs/docker-logs.service'
+import { NotificationService } from '#/domain/notification/notification.service'
+// فاز-۲ — یادآور کوپن حالا پوش است؛ همان مسیر فایل قبلی (محتوای جدید)
+import { CouponNudgeJob } from '#/workers/jobs/coupon-nudge-sms.job'
 import { AutoTranslateJob } from '#/workers/jobs/auto-translate.job'
 import { buildApp } from '#/app'
 
@@ -106,7 +111,12 @@ const addresses = new AddressService({ db })
 const zones = new DeliveryZoneService({ db, settings })
 const coupons = new CouponService({ db })
 const termsService = new TermsService({ db })
-const orders = new OrderService({ db, config, zones, settings, coupons })
+// فاز-۲ — نشان (کلید service فقط سمت سرور) + لاگ داکر (سوکت compose) +
+// نوتیفیکیشن (صندوق + پوش) — قبل از مصرف‌کننده‌ها (orders/reports/retention)
+const neshan = new NeshanService(config)
+const dockerLogs = new DockerLogsService(config)
+const notifications = new NotificationService({ db, config, hub: sseHub })
+const orders = new OrderService({ db, config, zones, settings, coupons, notifications })
 const profile = new ProfileService({ db, config, orders, devices })
 // round-20 — تکرارناپذیری چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)
 const checkoutIdempotency = new CheckoutIdempotency({ db })
@@ -119,7 +129,7 @@ const admin = new AdminService({ db })
 const reviews = new ReviewService({ db })
 const links = new ReportLinks(config)
 const reconcile = new ReconcileService({ db, config, orders })
-const reports = new ReportService({ db, config, sms, links, reconcile })
+const reports = new ReportService({ db, config, sms, links, reconcile, dockerLogs })
 // stage-10: باکس گزارشات داشبورد + لاگ ممیزی ادمین اصلی
 const audit = new AuditService({ db })
 const reportQueries = new ReportQueryService({ db, audit })
@@ -135,12 +145,13 @@ const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis, monitor.jobRuns
 if (!g.__sinshin_cron_registered) {
   g.__sinshin_cron_registered = true
   scheduler.register(new CouponScanJob({ config, db, coupons }))
-  scheduler.register(new CouponNudgeSmsJob({ config, db, sms }))
+  // فاز-۲ — یادآور کوپن حالا پوش نوتیفیکیشن است (به‌جای پیامک)
+  scheduler.register(new CouponNudgeJob({ config, db, notifications }))
   scheduler.register(new DailyReportJob({ config, db, sms, reports }))
   scheduler.register(new WeeklyReportJob({ config, db, sms, reports }))
   scheduler.register(new ReconcileJob({ config, db, reconcile }))
   // round-16 — پاک‌سازی دوره‌ای جدول‌های لاگی/سشن (۱۸۰/۹۰ روز، حذف سقف‌دار)
-  scheduler.register(new RetentionJob({ db }))
+  scheduler.register(new RetentionJob({ db, notifications }))
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
   // round-19 — دیده‌بان سلامت: پیامک قطعی/برگشت db/redis/uploads (بدون قفل — موثق در کار)
   scheduler.registerInterval(
@@ -232,6 +243,8 @@ const app = buildApp({
   gallery,
   geo,
   translation,
+  notifications,
+  neshan,
 })
 
 // round-16 — گارد بوت: اگر پورت گرفته شده باشد/ bind شکست بخورد، با پیام

@@ -1,6 +1,19 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/shared/MapPicker.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر فاز-۲:
+//   • SDK جدید نشان (MapLibre) به‌جای OpenLayers قدیمی (v4.6.2)
+//   • آدرس معکوس (Reverse Geocoding) زیر نقشه — از API خود سرور
+//     (کلید service نشان هرگز وارد باندل وب نمی‌شود)
+//   • کلید: VITE_NESHAN_MAP_KEY (جدید) یا VITE_NESHAN_API_KEY (قدیمی)
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/shared/MapPicker.tsx
 import { memo, useRef, useEffect, useState } from 'react'
 import { useI18nSafe } from '#/i18n'
+import { apiBase } from '#/lib/api'
+import { getAccessToken } from '#/lib/auth-session'
 
 interface MapPickerProps {
   /** مختصات انتخاب‌شده (تهی = هنوز انتخاب نشده) */
@@ -9,9 +22,8 @@ interface MapPickerProps {
 }
 
 /**
- * round-13 — پشتیبان دستی مختصات وقتی کلید نقشه (VITE_NESHAN_API_KEY)
- * تنظیم نشده است: بدون آن، قبلاً ذخیره‌ی آدرس (و سفارش تست ارسالی)
- * عملاً غیرممکن بود. محدوده‌ها مثل API: lat ±90 / lng ±180.
+ * پشتیبان دستی مختصات وقتی کلید نقشه تنظیم نشده است.
+ * محدوده‌ها مثل API: lat ±90 / lng ±180.
  */
 const ManualCoordsFallback = memo(function ManualCoordsFallback({
   value,
@@ -20,7 +32,6 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
   value: { lat: number; lng: number } | null
   onChangeRef: React.RefObject<(coords: { lat: number; lng: number }) => void>
 }) {
-  // رارد ۳۳ — دوزبانه با useI18nSafe: ادمین (بدون Provider) همان فارسیِ قبل
   const { t } = useI18nSafe()
   // درفت محلی — تا پاک‌کردن/تایپ جزئی وسط کار، مقدار والد را نلرزاند
   const [latDraft, setLatDraft] = useState(value ? String(value.lat) : '')
@@ -47,8 +58,8 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
     <div className="space-y-3">
       <div className="text-sm text-gray-600 dark:text-gray-300 bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 rounded-xl p-4 leading-relaxed">
         {t['map.noKeyWarning']}{' '}
-        <code dir="ltr">VITE_NESHAN_API_KEY</code> را در <code dir="ltr">apps/web/.env</code> بگذار
-        (ثبت‌نام: platform.neshan.org)
+        <code dir="ltr">VITE_NESHAN_MAP_KEY</code> را در <code dir="ltr">.env</code> ریشه بگذار
+        (کلید «web» از پنل نشان — platform.neshan.org)
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -101,32 +112,54 @@ const ManualCoordsFallback = memo(function ManualCoordsFallback({
   )
 })
 
-// ═══ phase-3 — نقشه‌ی واقعی نشان ═══
-// قبلاً: مختصات از «پیکسل کلیک» ساخته می‌شد → آدرس‌های آشغال در DB.
-// حالا: SDK نشان (فورک OpenLayers) + کلیک واقعی → lonLat واقعی.
+// ═══ فاز-۲ — نقشه‌ی واقعی نشان (SDK جدید MapLibre) ═══
+// بارگذاری از CDN (UMD) — بدون تغییر package.json / bun.lock:
+//   https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.umd.js
+// قرارداد نسخه‌ی UMD: مقدار از window.maplibregl.default خوانده می‌شود.
 
-// ⚠️ نسخه‌ی SDK را از Getting Started نشان چک کن — الگوی کد مستقل از نسخه است
-// رارد L14 — self-hosted: فایل‌ها از public خود اپ سرو می‌شوند (تا قبل:
-// وابسته به cdn.neshan.org — قطعی/فیلترینگ/تغییر نسخه سمت بیرون).
-// گام نصب (یک‌بار):
-//   mkdir -p apps/web/public/sdk/ol
-//   curl -o apps/web/public/sdk/ol/ol.js  https://cdn.neshan.org/sdk/ol/v4.6.2/ol.js
-//   curl -o apps/web/public/sdk/ol/ol.css https://cdn.neshan.org/sdk/ol/v4.6.2/ol.css
-const SDK_JS = '/sdk/ol/ol.js'
-const SDK_CSS = '/sdk/ol/ol.css'
+const SDK_JS = 'https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.umd.js'
+const SDK_CSS = 'https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.css'
+const MAP_STYLE = 'https://static.neshan.org/sdk/maplibre/styles/light.json'
 
-const NESHAN_KEY = import.meta.env.VITE_NESHAN_API_KEY as string | undefined
+// فاز-۲: کلید web جدید + سازگاری با نام قدیمی
+const NESHAN_KEY =
+  (import.meta.env.VITE_NESHAN_MAP_KEY as string | undefined) ||
+  (import.meta.env.VITE_NESHAN_API_KEY as string | undefined)
 const DEFAULT_CENTER = { lat: 37.4822056, lng: 49.4418273 } // رستوران سین‌شین — بندرانزلی
 
-let sdkPromise: Promise<void> | null = null
-function loadNeshanSdk(): Promise<void> {
+/** شکل loose سمت SDK — UMD بدون تایپ است */
+interface LooseMap {
+  remove(): void
+  on(event: string, handler: (e: { lngLat: { lat: number; lng: number } }) => void): void
+}
+interface LooseMarker {
+  setLngLat(pos: { lat: number; lng: number }): LooseMarker
+  addTo(map: LooseMap): LooseMarker
+  remove(): void
+}
+interface LooseMapLibre {
+  Map: new (opts: Record<string, unknown>) => LooseMap
+  Marker: new (opts: { element?: HTMLElement; anchor?: string }) => LooseMarker
+  NavigationControl: new (opts?: Record<string, unknown>) => unknown
+}
+
+let sdkPromise: Promise<LooseMapLibre> | null = null
+function loadNeshanSdk(): Promise<LooseMapLibre> {
   if (sdkPromise) return sdkPromise
-  sdkPromise = new Promise<void>((resolve, reject) => {
-    if ((window as unknown as { ol?: unknown }).ol) return resolve()
+  sdkPromise = new Promise<LooseMapLibre>((resolve, reject) => {
+    const w = window as unknown as { maplibregl?: { default?: LooseMapLibre } }
+    if (w.maplibregl?.default) return resolve(w.maplibregl.default)
     const script = document.createElement('script')
     script.src = SDK_JS
     script.async = true
-    script.onload = () => resolve()
+    script.onload = () => {
+      const ml = (window as unknown as { maplibregl?: { default?: LooseMapLibre } }).maplibregl?.default
+      if (ml) resolve(ml)
+      else {
+        sdkPromise = null
+        reject(new Error('SDK نقشه‌ی نشان لود شد اما window.maplibregl.default خالی است'))
+      }
+    }
     script.onerror = () => {
       sdkPromise = null // دفعه‌ی بعد دوباره تلاش شود
       reject(new Error('بارگذاری SDK نقشه‌ی نشان ناموفق بود'))
@@ -151,13 +184,35 @@ function pinColor(): string {
   }
 }
 
+/** آدرس معکوس از API خودِ سرور (پروکسی نشان با کلید service) — best-effort */
+async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const token = getAccessToken()
+    const res = await fetch(
+      `${apiBase()}/geo/reverse?lat=${lat.toFixed(6)}&lng=${lng.toFixed(6)}`,
+      {
+        headers: token ? { authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
+        signal: AbortSignal.timeout(6_000),
+      },
+    )
+    if (!res.ok) return null
+    const body = (await res.json()) as { available?: boolean; address?: string }
+    return body.available === true && body.address ? body.address : null
+  } catch {
+    return null
+  }
+}
+
 export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerProps) {
   const { t } = useI18nSafe()
   const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<{ setTarget(t: unknown): void } | null>(null)
-  const markerRef = useRef<{ setPosition(p: number[] | null): void } | null>(null)
+  const mapRef = useRef<LooseMap | null>(null)
+  const markerRef = useRef<LooseMarker | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const [address, setAddress] = useState<string | null>(null)
+  const [addressLoading, setAddressLoading] = useState(false)
 
   // init — یک بار؛ SDK بارگذاری می‌شود و نقشه ساخته می‌شود (SSR-safe: فقط کلاینت)
   useEffect(() => {
@@ -165,34 +220,47 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
     let cancelled = false
 
     void loadNeshanSdk()
-      .then(() => {
+      .then((maplibregl) => {
         if (cancelled || !containerRef.current) return
-        const ol = (window as unknown as { ol: any }).ol
 
         const center = value ?? DEFAULT_CENTER
-        const map = new ol.Map({
-          target: containerRef.current,
-          key: NESHAN_KEY,
-          maptype: 'neshan',
-          view: new ol.View({
-            center: ol.proj.fromLonLat([center.lng, center.lat]),
-            zoom: value ? 15 : 12,
-          }),
+        // ⚠️ نکته‌ی مستندات نشان: apiKey به‌ازای «صفحه» ذخیره می‌شود — در هر
+        // صفحه فقط یک کلید نقشه استفاده شود (SDK خودش مدیریت می‌کند).
+        const map = new maplibregl.Map({
+          container: containerRef.current,
+          style: MAP_STYLE,
+          center: [center.lng, center.lat],
+          zoom: value ? 15 : 12,
+          minZoom: 2,
+          maxZoom: 21,
+          trackResize: true,
+          apiKey: NESHAN_KEY,
+          // فاز-۲ — RTL فارسی از همان ابتدا (lazy:false — نقشه فارسی‌محور است)
+          rtl: { lazy: false },
         })
 
-        // پین — ol.Overlay (بدون position رندر نمی‌شود)
+        // پین — element سفارشی (همان SVG قبلی)
         const pinEl = document.createElement('div')
         pinEl.style.cssText = 'width:32px;height:32px;transform:translate(-50%,-100%);'
         pinEl.innerHTML = `<svg width="32" height="32" viewBox="0 0 24 24" fill="${pinColor()}" stroke="white" stroke-width="1"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>`
-        const marker = new ol.Overlay({ element: pinEl, positioning: 'bottom-center', stopEvent: false })
-        if (value) marker.setPosition(ol.proj.fromLonLat([value.lng, value.lat]))
-        map.addOverlay(marker)
+        const marker = new maplibregl.Marker({ element: pinEl, anchor: 'bottom' })
+          .setLngLat({ lat: center.lat, lng: center.lng })
+          .addTo(map)
 
-        // کلیک → مختصات «واقعی» (lonLat) + جابه‌جایی پین
-        map.on('click', (e: { coordinate: number[] }) => {
-          const [lng, lat] = ol.proj.toLonLat(e.coordinate)
-          marker.setPosition(e.coordinate)
+        // کلیک → مختصات «واقعی» + جابه‌جایی پین + آدرس معکوس (debounce سبک)
+        let addrTimer: ReturnType<typeof setTimeout> | null = null
+        map.on('click', (e) => {
+          const { lat, lng } = e.lngLat
+          marker.setLngLat({ lat, lng })
           onChangeRef.current({ lat, lng })
+          setAddress(null)
+          if (addrTimer) clearTimeout(addrTimer)
+          addrTimer = setTimeout(() => {
+            setAddressLoading(true)
+            void reverseGeocode(lat, lng)
+              .then((a) => setAddress(a))
+              .finally(() => setAddressLoading(false))
+          }, 400)
         })
 
         mapRef.current = map
@@ -202,11 +270,15 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
 
     return () => {
       cancelled = true
-      if (mapRef.current) {
-        mapRef.current.setTarget(undefined) // تخریب تمیز OL
-        mapRef.current = null
-        markerRef.current = null
+      // تخریب تمیز MapLibre
+      try {
+        markerRef.current?.remove()
+        mapRef.current?.remove()
+      } catch {
+        /* نقشه نیمه‌ساخته — سکوت */
       }
+      mapRef.current = null
+      markerRef.current = null
     }
     // فقط init — value اولیه در closure گرفته شد؛ تغییرات بعدی از effect پایین
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -214,9 +286,8 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
 
   // تغییر value از بیرون (مودال ویرایش با مختصات موجود) → پین جابه‌جا شود
   useEffect(() => {
-    if (!mapRef.current || !markerRef.current || !value) return
-    const ol = (window as unknown as { ol: any }).ol
-    markerRef.current.setPosition(ol.proj.fromLonLat([value.lng, value.lat]))
+    if (!markerRef.current || !value) return
+    markerRef.current.setLngLat({ lat: value.lat, lng: value.lng })
   }, [value?.lat, value?.lng])
 
   if (!NESHAN_KEY) {
@@ -226,7 +297,7 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
   return (
     <div>
       <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">{t['map.pickLocation']}</label>
-      {/* z-0 → زمینه stacking محلی؛ z-index های داخلی OpenLayers به مودال نشت نمی‌کنند */}
+      {/* z-0 → زمینه stacking محلی؛ z-index های داخلی SDK به مودال نشت نمی‌کنند */}
       <div
         ref={containerRef}
         className="relative w-full h-48 rounded-xl overflow-hidden border border-gray-300 dark:border-white/10 z-0"
@@ -234,6 +305,14 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
       {value && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium" dir="ltr">
           {value.lat.toFixed(6)}, {value.lng.toFixed(6)}
+        </p>
+      )}
+      {/* فاز-۲ — آدرس معکوس نشان (از API خود سرور) */}
+      {(addressLoading || address) && (
+        <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 font-DanaMedium bg-gray-50 dark:bg-white/5 rounded-lg px-3 py-2 leading-relaxed">
+          {addressLoading
+            ? t['map.loadingAddress']
+            : `${t['map.addressFound']} ${address}`}
         </p>
       )}
     </div>

@@ -1,7 +1,15 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/retention.job.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱)
+// تغییر فاز-۲: پاک‌سازی نوتیفیکیشن‌ها/اشتراک‌های مرده‌ی پوش (90/30 روز)
+// ═══════════════════════════════════════════════════════════════
+
 // src/workers/jobs/retention.job.ts
 import { sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
+import type { NotificationService } from '#/domain/notification/notification.service'
 import type { DailyJob } from '#/workers/scheduler'
 
 /**
@@ -26,7 +34,9 @@ export class RetentionJob implements DailyJob {
   readonly time = '04:30'
   readonly catchUp = true
 
-  constructor(private readonly deps: { db: Db }) {}
+  constructor(
+    private readonly deps: { db: Db; notifications: NotificationService },
+  ) {}
 
   async run(): Promise<void> {
     const logCutoff = sql`now() - interval '180 days'`
@@ -123,6 +133,16 @@ export class RetentionJob implements DailyJob {
         // یک جدول شکست بخورد → بقیه ادامه می‌یابند؛ خطا در لاگِ زمان‌بند دیده می‌شود
         console.error(`[retention] "${t.label}" cleanup failed:`, err)
       }
+    }
+
+    // فاز-۲ — صندوق نوتیفیکیشن: خوانده‌شده‌های ۹۰ روز + اشتراک پوش مرده‌ی ۳۰ روز.
+    // fail-soft — خطا را خودش لاگ می‌کند و بقیه‌ی پاک‌سازی را نمی‌اندازد.
+    const pruned = await this.deps.notifications.prune()
+    if (pruned.notifications > 0 || pruned.subscriptions > 0) {
+      console.log(
+        `[retention] notifications: ${pruned.notifications} read-old deleted, ` +
+        `${pruned.subscriptions} dead push subscriptions deleted`,
+      )
     }
   }
 }

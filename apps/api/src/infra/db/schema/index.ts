@@ -5,6 +5,12 @@
 // کامیت پیشنهادی: stage thirty one
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/infra/db/schema/index.ts
+// تغییر: خروجی جدول‌های نوتیفیکیشن
+// ═══════════════════════════════════════════════════════════════
+
 //src/infra/db/schema/index.ts
 export * from './users'
 export * from './devices'
@@ -26,3 +32,4 @@ export * from './articles'
 export * from './gallery'
 export * from './checkout-idempotency'
 export * from './translation'
+export * from './notifications'

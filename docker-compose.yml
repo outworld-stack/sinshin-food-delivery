@@ -1,8 +1,11 @@
 # ═══════════════════════════════════════════════════════════════
-# round-50 — sinshin-food-delivery — فایل 9 از 10
+# phase-2 — sinshin-food-delivery
 # مسیر مقصد: docker-compose.yml
-# وضعیت: جایگزینی کامل فایل موجود
-# کامیت پیشنهادی: stage forty-four
+# وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱/رارد ۵۰)
+# تغییر فاز-۲:
+#   • docker.sock به api (لاگ روزانه + truncate) + group_add DOCKER_GID
+#   • TRANSLATOR_TOKEN به api و translator (راز مشترک M15)
+#   • VITE_NESHAN_MAP_KEY به build وب (کلید web نشان)
 # ═══════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════
 # round-49 — sinshin-food-delivery — فایل 4 از 6
@@ -59,12 +62,23 @@ x-api-service: &api-service
 
     # round-35 — مترجم آفلاین NLLB (شبکه داخلی؛ پایین بودنش فقط صف ترجمه را نگه می‌دارد)
     TRANSLATOR_URL: ${TRANSLATOR_URL:-http://translator:8300}
-    # رارد M15 — همان shared-secret که سرویس translator چک می‌کند
-    # (translate-client هدر x-translator-token را می‌فرستد)
+
+    # فاز-۲/M15 — راز مشترک api ↔ مترجم (هدر x-translator-token)
     TRANSLATOR_TOKEN: ${TRANSLATOR_TOKEN:-}
 
   volumes:
     - uploads_data:/data/uploads
+
+    # فاز-۲ — سوکت داکر برای گزارش روزانه‌ی لاگ + truncate.
+    # ⚠️ سطح دسترسی: سوکت = ریشه‌ی میزبان — فقط روی سرور تک‌مستأجر خودت.
+    # اگر نمی‌خواهی: این دو خط و DOCKER_LOGS_ENABLED را در .env off کن؛
+    # گزارش روزانه بدون فایل لاگ ولی کامل ارسال می‌شود.
+    - /var/run/docker.sock:/var/run/docker.sock
+
+  # فاز-۲ — گروه docker میزبان برای دسترسی rw به سوکت.
+  # مقدار درستش: stat -c '%g' /var/run/docker.sock  ← در .env بگذار
+  group_add:
+    - "${DOCKER_GID:-999}"
 
   depends_on:
     migrate:
@@ -209,6 +223,8 @@ services:
       # خالی = فرم مختصات دستی جای نقشه (رفتار قبلی).
       args:
         VITE_NESHAN_API_KEY: ${VITE_NESHAN_API_KEY:-}
+        # فاز-۲ — کلید web نشان (SDK MapLibre)؛ نام جدید، قدیمی هم کار می‌کند
+        VITE_NESHAN_MAP_KEY: ${VITE_NESHAN_MAP_KEY:-}
 
     image: sinshin/web
 
@@ -440,9 +456,6 @@ services:
       BACKUP_HOUR: ${BACKUP_HOUR:-5}
       BACKUP_KEEP: ${BACKUP_KEEP:-7}
       BACKUP_DIR: /backups
-      # رارد H7 — مقصد offsite (rclone) + کلید عمومی age برای رمزنگاری
-      BACKUP_RCLONE_REMOTE: ${BACKUP_RCLONE_REMOTE:-}
-      BACKUP_AGE_PUBKEY: ${BACKUP_AGE_PUBKEY:-}
 
     volumes:
       - ./deploy/backup/backup.sh:/usr/local/bin/sinshin-backup:ro
@@ -532,14 +545,13 @@ services:
 
     container_name: sinshin-translator
 
+    # فاز-۲/M15 — همان راز api؛ اگر خالی باشد مترجم بدون توکن کار می‌کند
+    environment:
+      TRANSLATOR_TOKEN: ${TRANSLATOR_TOKEN:-}
+
     restart: unless-stopped
 
     init: true
-
-    # رارد M15 — shared-secret با API: فقط کانتینر api با این توکن
-    # می‌تواند /translate را صدا بزند (شبکه‌ی internal + توکن = دو لایه).
-    environment:
-      TRANSLATOR_TOKEN: ${TRANSLATOR_TOKEN:-}
 
     deploy:
       resources:

@@ -1,3 +1,15 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/report/report.service.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M22)
+// تغییر فاز-۲:
+//   • SMS.ir فقط TOKEN می‌گیرد (قالب daily-report / weekly-report)
+//   • گزارش روزانه: لاگ داکر + سفارشات + کاربران جدید → بسته‌ی ZIP
+//     قابل دانلود از /api/reports/download/:token
+//   • گزارش هفتگی: همه‌ی سفارشات + همه‌ی کاربران هفته → ZIP
+//   • بعد از ارسال روزانه، لاگ داکر روی سرور پاک (truncate) می‌شود
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/report/report.service.ts
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm'
 
@@ -5,11 +17,19 @@ import type { Db } from '#/infra/db/client'
 import { orders, users, walletTransactions } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import type { SmsService } from '#/infra/sms/sms.service'
-import type { ReportLinks } from './report-links'
+import type { ReportLinks, ReportKind } from './report-links'
 import type { ReportViewModel } from '#/http/templates/report'
 import type { ReconcileService } from '#/domain/reconcile/reconcile.service'
 import { faNum, faDate, ORDER_TABLE_HEAD, orderRow } from './format'
+import type { DockerLogsService } from '#/infra/logs/docker-logs.service'
+import { buildZip } from '#/infra/report/zip'
 
+/** سقف دفاعی ردیف‌ها در CSV (فاز-۱/M22) */
+const MAX_CSV_ROWS = 10_000
+
+const USERS_TABLE_HEAD = [
+  'شناسه', 'شماره', 'نام', 'نقش', 'تاریخ عضویت', 'آخرین ورود', 'وضعیت',
+] as const
 
 export class ReportService {
   constructor(
@@ -19,20 +39,21 @@ export class ReportService {
       sms: SmsService
       links: ReportLinks
       reconcile: ReconcileService
+      dockerLogs: DockerLogsService
     },
   ) { }
 
-  // ══ گزارش‌های cron — ViewModel ══
+  // ══ گزارش‌های cron — ViewModel (صفحه‌ی زنده) ══
 
   async dailyViewModel(range?: 'yesterday' | 'today'): Promise<ReportViewModel> {
     const range2 = range === 'today' ? 'today' : 'yesterday'
     const { from, to } = range2 === 'today' ? await this.todayRangeTehran() : await this.yesterdayRangeTehran()
-    return this.buildViewModel('گزارش روزانه', from, to, this.deps.links.cronToken('daily'), range2)
+    return this.buildViewModel('گزارش روزانه', from, to, this.deps.links.reportToken('daily'), range2)
   }
 
   async weeklyViewModel(): Promise<ReportViewModel> {
     const { from, to } = await this.lastWeekRangeTehran()
-    return this.buildViewModel('گزارش هفتگی', from, to, this.deps.links.cronToken('weekly'), 'week')
+    return this.buildViewModel('گزارش هفتگی', from, to, this.deps.links.reportToken('weekly'), 'week')
   }
   private async buildViewModel(
     title: string,
@@ -80,22 +101,11 @@ export class ReportService {
     }
   }
 
-  // ══ خروجی CSV ══
+  // ══ خروجی CSV (سفارش‌ها — مثل قبل) ══
 
   async csvBody(range: 'yesterday' | 'today' | 'week'): Promise<string> {
-    let from: Date, to: Date
-    if (range === 'week') {
-      ; ({ from, to } = await this.lastWeekRangeTehran())
-    } else if (range === 'today') {
-      ; ({ from, to } = await this.todayRangeTehran())
-    } else {
-      ; ({ from, to } = await this.yesterdayRangeTehran())
-    }
+    const { from, to } = await this.rangeOf(range)
     const [allRows] = await this.orderAndWalletRows(from, to)
-    // رارد M22 — سقف دفاعی ۱۰٬۰۰۰ ردیف: رشته‌ی CSV قبلاً بی‌سقف رشد می‌کرد
-    // (حافظه + پاسخ غول‌پیکر). روز عادی ~صدها ردیف است؛ ۱۰k یعنی چیزی
-    // غیرعادی در جریان است — لاگ شود.
-    const MAX_CSV_ROWS = 10_000
     if (allRows.length > MAX_CSV_ROWS) {
       console.warn(`[reports] csv capped: ${allRows.length} → ${MAX_CSV_ROWS} rows`)
     }
@@ -110,21 +120,190 @@ export class ReportService {
     return '\uFEFF' + lines.join('\r\n')
   }
 
-  // ══ پیامک ══
+  // ══ فاز-۲ — بسته‌ی ZIP قابل دانلود ══
 
-  async smsReportLink(kind: 'daily' | 'weekly'): Promise<void> {
-    const token = this.deps.links.cronToken(kind)
-    const url = this.deps.links.url(`/api/reports/view/${token}`)
-    const label = kind === 'daily' ? 'روزانه' : 'هفتگی'
-    for (const phone of this.deps.config.superAdminPhones) {
-      await this.deps.sms.send(phone, `گزارش ${label} سین‌شین: ${url}`)
+  /**
+   * بسته‌ی روزانه: لاگ‌های داکر (آرشیوِ زمانِ job) + سفارشات امروز/دیروز
+   * + کاربران جدید. داده‌های DB موقع باز شدنِ لینک تازه می‌شوند؛ فایل لاگ
+   * همان آرشیوِ زمان ارسال پیامک است (لاگ روی سرور پس از ارسال پاک شده).
+   */
+  async dailyBundle(range?: 'yesterday' | 'today'): Promise<Uint8Array> {
+    const range2 = range === 'today' ? 'today' : 'yesterday'
+    const { from, to } = range2 === 'today' ? await this.todayRangeTehran() : await this.yesterdayRangeTehran()
+    const [ordersCsv, newUsersCsv, agg] = await Promise.all([
+      this.ordersCsv(from, to),
+      this.usersCsv(from, to),
+      this.summaryAggregate(from, to),
+    ])
+
+    const entries = [
+      { name: 'summary.txt', data: this.summaryText('گزارش روزانه سین‌شین', from, to, agg, range2) },
+      { name: 'orders.csv', data: ordersCsv },
+      { name: 'new-users.csv', data: newUsersCsv },
+    ]
+
+    // لاگ داکر — از آرشیوِ امروز (زمان ارسال پیامک ساخته شده)
+    const logs = this.deps.dockerLogs.readArchive(this.deps.dockerLogs.todayArchivePath())
+    if (logs !== null) {
+      entries.push({ name: 'docker-logs.txt', data: logs })
+    } else {
+      entries.push({
+        name: 'docker-logs.txt',
+        data:
+          'لاگ داکر برای این بازه در آرشیو نیست.\n' +
+          'علت‌های محتمل: DOCKER_LOGS_ENABLED خاموش است، سوکت داکر در دسترس نیست، ' +
+          'یا لینک بعد از ۳ روز (پاک‌سازی آرشیو) باز شده است.\n' +
+          'بقیه‌ی فایل‌های بسته کامل و معتبرند.',
+      })
     }
+
+    return buildZip(entries)
+  }
+
+  /** بسته‌ی هفتگی: همه‌ی سفارشات + همه‌ی کاربران هفته‌ی قبل */
+  async weeklyBundle(): Promise<Uint8Array> {
+    const { from, to } = await this.lastWeekRangeTehran()
+    const [ordersCsv, usersCsv, agg] = await Promise.all([
+      this.ordersCsv(from, to),
+      this.usersCsv(from, to),
+      this.summaryAggregate(from, to),
+    ])
+    return buildZip([
+      { name: 'summary.txt', data: this.summaryText('گزارش هفتگی سین‌شین', from, to, agg, 'week') },
+      { name: 'orders.csv', data: ordersCsv },
+      { name: 'users.csv', data: usersCsv },
+    ])
+  }
+
+  // ══ فاز-۲ — جریان‌های زمان‌بند (job + trigger دستی ادمین) ══
+
+  /**
+   * جریان روزانه — ترتیب مهم است:
+   *  ۱) لاگ داکر از «آخرین جمع‌آوری» تا الان جمع و آرشیو می‌شود
+   *  ۲) لاگ کانتینرها روی سرور truncate می‌شود (پاک‌سازی — بعد از آرشیو)
+   *  ۳) توکن امضاشده + پیامک به همه‌ی ادمین‌های اصلی (فقط TOKEN —
+   *     SMS.ir خودش لینک را از قالب می‌سازد)
+   * اگر مرحله ۱/۲ شکست بخورد پیامک «همچنان» می‌رود (بسته بدون لاگ) —
+   * گزارشِ مالی هرگز قربانی لاگ داکر نمی‌شود.
+   */
+  async runDailyFlow(): Promise<{ token: string; smsOk: number; logs: string }> {
+    const collect = await this.deps.dockerLogs.collectAndArchive()
+    const logsNote =
+      collect.collected
+        ? `لاگ ${collect.containers} کانتینر آرشیو شد (${(collect.bytes / 1024).toFixed(0)}KB)` +
+          (collect.skipped.length > 0 ? ` — skip: ${collect.skipped.join(' , ')}` : '')
+        : `لاگ داکر جمع نشد (${collect.skipped.join(' , ')})`
+    if (collect.collected) {
+      const trunc = await this.deps.dockerLogs.truncateAll()
+      console.log(`[report:daily] docker logs: ${logsNote} | truncate: ${trunc.note} (${trunc.truncated.length})`)
+    } else {
+      console.warn(`[report:daily] docker logs: ${logsNote}`)
+    }
+
+    const token = this.deps.links.reportToken('daily')
+    const smsOk = await this.smsTokenToAdmins('daily', token)
     console.log(
-      `[report] ${kind} report SMS sent to ${this.deps.config.superAdminPhones.length} admin(s)`,
+      `[report:daily] SMS sent to ${smsOk}/${this.deps.config.superAdminPhones.length} admin(s); token TTL ${this.deps.config.reports.tokenTtlHours}h`,
     )
+    return { token, smsOk, logs: logsNote }
+  }
+
+  /** جریان هفتگی — توکن + پیامک (لاگ/پاک‌سازی ندارد) */
+  async runWeeklyFlow(): Promise<{ token: string; smsOk: number }> {
+    const token = this.deps.links.reportToken('weekly')
+    const smsOk = await this.smsTokenToAdmins('weekly', token)
+    console.log(
+      `[report:weekly] SMS sent to ${smsOk}/${this.deps.config.superAdminPhones.length} admin(s)`,
+    )
+    return { token, smsOk }
+  }
+
+  /** پیامک TOKEN به همه‌ی ادمین‌های اصلی — فاز-۲: بدون URL (قالب می‌سازدش) */
+  private async smsTokenToAdmins(kind: ReportKind, token: string): Promise<number> {
+    let ok = 0
+    for (const phone of this.deps.config.superAdminPhones) {
+      const sent = await this.deps.sms.sendReportToken(phone, kind, token)
+      if (sent) ok++
+    }
+    return ok
   }
 
   // ══ داخلی ══
+
+  private async rangeOf(range: 'yesterday' | 'today' | 'week'): Promise<{ from: Date; to: Date }> {
+    if (range === 'week') return this.lastWeekRangeTehran()
+    if (range === 'today') return this.todayRangeTehran()
+    return this.yesterdayRangeTehran()
+  }
+
+  /** CSV سفارشات بازه — همان قالب csvBody (سقف M22) */
+  private async ordersCsv(from: Date, to: Date): Promise<string> {
+    const [allRows] = await this.orderAndWalletRows(from, to)
+    if (allRows.length > MAX_CSV_ROWS) {
+      console.warn(`[reports] zip csv capped: ${allRows.length} → ${MAX_CSV_ROWS} rows`)
+    }
+    const rows = allRows.slice(0, MAX_CSV_ROWS)
+    const lines = [ORDER_TABLE_HEAD.join(',')]
+    for (const { o, u } of rows) {
+      const cells = orderRow(o, u, { num: String, date: (d) => d.toISOString() })
+        .map((c) => `"${String(c).replace(/"/g, '""')}"`)
+      lines.push(cells.join(','))
+    }
+    return '\uFEFF' + lines.join('\r\n')
+  }
+
+  /** CSV کاربران بازه — ثبت‌نام‌های جدید (روزانه) یا همه‌ی کاربران هفته (هفتگی) */
+  private async usersCsv(from: Date, to: Date): Promise<string> {
+    const rows = await this.deps.db
+      .select()
+      .from(users)
+      .where(and(gte(users.createdAt, from), lte(users.createdAt, to)))
+      .orderBy(desc(users.createdAt))
+      .limit(MAX_CSV_ROWS)
+
+    const lines = [USERS_TABLE_HEAD.join(',')]
+    for (const u of rows) {
+      const cells = [
+        u.id,
+        u.phone,
+        u.name ?? '',
+        u.role,
+        u.createdAt.toISOString(),
+        u.lastLoginAt ? u.lastLoginAt.toISOString() : '',
+        u.bannedAt ? 'مسدود' : u.suspendedAt ? 'معلق' : 'فعال',
+      ]
+      lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    }
+    return '\uFEFF' + lines.join('\r\n')
+  }
+
+  /** خلاصه‌ی متنی داخل ZIP — خوانا بدون اکسل */
+  private summaryText(
+    title: string,
+    from: Date,
+    to: Date,
+    agg: { count: number; amount: number; avg: number },
+    range: 'yesterday' | 'today' | 'week',
+  ): string {
+    const fromFa = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'full' }).format(from)
+    const toFa = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'full' }).format(to)
+    return [
+      `${title}`,
+      `بازه: ${fromFa} تا ${toFa}`,
+      `تولید: ${new Date().toISOString()}`,
+      '',
+      `تعداد سفارش: ${faNum(agg.count)}`,
+      `مبلغ کل (تومان): ${faNum(agg.amount)}`,
+      `میانگین سفارش (تومان): ${faNum(agg.avg)}`,
+      '',
+      'فایل‌های این بسته:',
+      range === 'week'
+        ? '  • orders.csv — سفارشات هفته' + '\n  • users.csv — کاربران هفته'
+        : '  • orders.csv — سفارشات روز' + '\n  • new-users.csv — کاربران جدید روز' + '\n  • docker-logs.txt — لاگ داکر سرور',
+      '',
+      'این بسته با یک توکن امضاشده‌ی منقضی‌شونده ساخته شده؛ بعد از انقضا دیگر در دسترس نیست.',
+    ].join('\n')
+  }
 
   private async orderAndWalletRows(from: Date, to: Date) {
     return Promise.all([

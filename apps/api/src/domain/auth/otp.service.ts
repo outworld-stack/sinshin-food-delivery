@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/auth/otp.service.ts
+// وضعیت: جایگزینی کامل فایل موجود — ارسال با قالب otp در SMS.ir
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/auth/otp.service.ts
 import type { RedisService } from '#/infra/redis/redis'
 import type { AppConfig } from '#/infra/config/env'
@@ -30,30 +36,35 @@ export class OtpService {
   ) { }
 
   /**
-   * کد ۶ رقمی می‌سازد، «هش» آن را در Redis می‌گذارد و پیامک می‌فرستد.
+   * کد ۶ رقمی می‌سازد، «هش» آن را در Redis می‌گذارد و با قالب otp در
+   * SMS.ir پیامک می‌فرستد (فاز-۲ — دیگر متن آزاد نیست؛ قالب در پنل
+   * SMS.ir تأیید شده و کد در پارامتر #CODE# می‌نشیند).
    * نرخ‌ها طبق قرارداد فرانت: ۶۰s فاصله / ۳ تلاش / سقف ساعتی و روزانه.
-   * مکانیزم در otp-core مشترک است (رارد ۴۸) — این‌جا فقط سیاستِ کاربر.
    */
   async send(phone: string): Promise<{ cooldownSeconds: number; devCode?: string }> {
     const { ttlSeconds, cooldownSeconds, maxPerHourPerPhone, maxPerDayPerPhone } =
       this.deps.config.otp
-    return sendOtp(this.deps, {
-      phone,
-      ttlSeconds,
-      cooldownSeconds,
-      maxPerHour: maxPerHourPerPhone,
-      maxPerDay: maxPerDayPerPhone,
-      keys: K,
-      messages: {
-        hourCap: 'سقف درخواست کد در این ساعت پر شده است.',
-        dayCap: 'سقف درخواست کد در امروز پر شده است.',
-        cooldown: (s) => `کد قبلی هنوز معتبر است؛ ${s} ثانیه دیگر تلاش کنید.`,
-        storeFail: 'ذخیره‌ی کد ناموفق بود؛ کمی بعد تلاش کنید.',
-        smsFail: 'ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.',
+    return sendOtp(
+      { redis: this.deps.redis },
+      {
+        phone,
+        ttlSeconds,
+        cooldownSeconds,
+        maxPerHour: maxPerHourPerPhone,
+        maxPerDay: maxPerDayPerPhone,
+        keys: K,
+        messages: {
+          hourCap: 'سقف درخواست کد در این ساعت پر شده است.',
+          dayCap: 'سقف درخواست کد در این امروز پر شده است.',
+          cooldown: (s) => `کد قبلی هنوز معتبر است؛ ${s} ثانیه دیگر تلاش کنید.`,
+          storeFail: 'ذخیره‌ی کد ناموفق بود؛ کمی بعد تلاش کنید.',
+          smsFail: 'ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.',
+        },
+        // فاز-۲ — قالب otp (SMS_TEMPLATE_ID_OTP)
+        sendSms: (to, code) => this.deps.sms.sendOtp(to, code),
+        isProd: this.deps.config.isProd,
       },
-      smsText: (code) => `کد ورود شما به سین‌شین: ${code}`,
-      isProd: this.deps.config.isProd,
-    })
+    )
   }
 
   /**
@@ -68,13 +79,16 @@ export class OtpService {
     const { redis } = this.deps
     const { ttlSeconds, maxAttempts } = this.deps.config.otp
 
-    const result = await verifyOtp(this.deps, {
-      phone,
-      code,
-      maxAttempts,
-      ttlSeconds,
-      keys: K,
-    })
+    const result = await verifyOtp(
+      { redis: this.deps.redis },
+      {
+        phone,
+        code,
+        maxAttempts,
+        ttlSeconds,
+        keys: K,
+      },
+    )
     if (result.ok) {
       // مالکِ شماره ثابت شده است — پنجره‌ی مستقل هم پاک می‌شود
       await redis.del(vfailsKey(phone))

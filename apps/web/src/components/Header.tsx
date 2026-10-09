@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/Header.tsx
+// تغییر: زنگ نوتیفیکیشن برای کاربر لاگین‌شده
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/Header.tsx
 import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
@@ -15,6 +21,7 @@ import { Cart, User, Package, Shield, Bell } from 'reicon-react'
 import { useHydrated } from '#/hooks/useHydrated'
 import { HeaderSkeleton } from '#/components/LoadingSkeletons'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
+import { NotificationBell } from '#/components/shared/NotificationBell'
 import { useI18n } from '#/i18n'
 
 // round-14 — موبایل فیکس (گوشی‌های سامسونگ):
@@ -88,6 +95,11 @@ export const Header = memo(function Header() {
 						<div className="md:hidden">
 							<LangSwitcher variant="single" />
 						</div>
+
+						{/* فاز-۲ — زنگ نوتیفیکیشن (فقط isAuthenticated) */}
+						{isAuthenticated && (
+							<NotificationBell userId={user?.id} />
+						)}
 
 						{/* پنل‌ها + پیگیری سفارش + پروفایل — فقط isAuthenticated */}
 						{isAuthenticated && (

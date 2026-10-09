@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/DashboardLayout.tsx
+// تغییر: زنگ نوتیفیکیشن در هدر موبایل + سایدبار دسکتاپ
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/DashboardLayout.tsx
 import { Outlet, Link, useNavigate } from '@tanstack/react-router'
 import { useState, useEffect } from 'react'
@@ -12,6 +18,7 @@ import { useRealLogout } from '#/hooks/shared/useRealLogout'
 import { DashboardLayoutSkeleton } from '#/components/LoadingSkeletons'
 import { User, Cart, Wallet, Pin, Discover2, Logout4, Menu, Package, X } from 'reicon-react'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
+import { NotificationBell } from '#/components/shared/NotificationBell'
 import { useI18n } from '#/i18n'
 
 export function DashboardLayout() {
@@ -59,9 +66,12 @@ export function DashboardLayout() {
         <>
           {/* سایدبار دسکتاپ */}
           <aside className="hidden md:flex flex-col w-64 bg-white dark:bg-[#2a1015] border-l border-gray-200 dark:border-[#3a151c] p-6 fixed right-0 top-0 bottom-0 z-30">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 gap-2">
               <Brand to="/products" textSize="text-lg sm:text-2xl" />
-              <ThemeToggle />
+              <div className="flex items-center gap-1">
+                <NotificationBell userId={user?.id} />
+                <ThemeToggle />
+              </div>
             </div>
 
             <div className="border-t border-gray-200 dark:border-white/10 mx-2 mb-6"></div>
@@ -109,6 +119,7 @@ export function DashboardLayout() {
                   </span>
                 </Link>
               )}
+              <NotificationBell userId={user?.id} />
               <ThemeToggle />
               <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-gray-600 dark:text-gray-300 cursor-pointer">
                 <Menu size={24} />

@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/AdminLayout.tsx
+// تغییر: آیتم «نوتیفیکیشن» در منوی ادمین اصلی
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/AdminLayout.tsx
 import { Outlet, Link } from '@tanstack/react-router'
 import { memo, useState, useMemo, useCallback, useEffect } from 'react'
@@ -41,6 +47,8 @@ function buildAdminItems(): NavItem[] {
     COURIERS_ITEM,
     { to: '/admin/articles', label: 'مقالات', icon: <File size={20} /> },
     { to: '/admin/coupons', label: 'کوپن‌ها', icon: <Ticket size={20} /> },
+    // فاز-۲ — ارسال نوتیفیکیشن پوش به کاربران
+    { to: '/admin/notifications', label: 'نوتیفیکیشن', icon: <Bell size={20} /> },
     { to: '/admin/reviews', label: 'نظرات', icon: <Star size={20} /> },
     { to: '/admin/admins', label: 'ادمین‌ها', icon: <ShieldCheck size={20} /> },
     { to: '/admin/settings', label: 'تنظیمات', icon: <Settings size={20} /> },

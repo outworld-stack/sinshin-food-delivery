@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/courier/courier.service.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با H3+M10+L4)
+// تغییر فاز-۲: پیامک OTP پیک با قالب SMS.ir (courier-otp با fallback به otp)
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/courier/courier.service.ts
 import { and, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from 'drizzle-orm'
 import { buildRangeCharts } from '#/domain/shared/charts'
@@ -58,21 +65,26 @@ export class CourierService {
     // تفاوت‌های عمدی با نسخه‌ی قبل: گیتِ کول‌داون اتمیک است (قبلاً exists→set
     // بود و دو درخواست هم‌زمان دو پیامک می‌گرفتند) و سقف ساعتی قبل از گیت
     // چک می‌شود (هم‌ترتیب مسیر کاربر).
-    return sendOtp(this.deps, {
-      phone,
-      ttlSeconds: COURIER_OTP_TTL_SECONDS,
-      cooldownSeconds: COURIER_OTP_COOLDOWN_SECONDS,
-      maxPerHour: COURIER_OTP_MAX_PER_HOUR,
-      keys: otpKeys,
-      messages: {
-        hourCap: 'سقف درخواست کد پیک در این ساعت پر شده است.',
-        cooldown: (s) => `کد قبلی هنوز معتبر است؛ ${s} ثانیه دیگر.`,
-        storeFail: 'ذخیره‌ی کد ناموفق بود؛ کمی بعد تلاش کنید.',
-        smsFail: 'ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.',
+    return sendOtp(
+      { redis: this.deps.redis },
+      {
+        phone,
+        ttlSeconds: COURIER_OTP_TTL_SECONDS,
+        cooldownSeconds: COURIER_OTP_COOLDOWN_SECONDS,
+        maxPerHour: COURIER_OTP_MAX_PER_HOUR,
+        keys: otpKeys,
+        messages: {
+          hourCap: 'سقف درخواست کد پیک در این ساعت پر شده است.',
+          cooldown: (s) => `کد قبلی هنوز معتبر است؛ ${s} ثانیه دیگر.`,
+          storeFail: 'ذخیره‌ی کد ناموفق بود؛ کمی بعد تلاش کنید.',
+          smsFail: 'ارسال پیامک ناموفق بود؛ کمی بعد تلاش کنید.',
+        },
+        isProd: this.deps.config.isProd,
+        // فاز-۲ — قالب اختصاصی پیک؛ اگر تنظیم نشده باشد همان قالب otp
+        // (SmsService خودش fallback را مدیریت می‌کند)
+        sendSms: (to, code) => this.deps.sms.sendCourierOtp(to, code),
       },
-      smsText: (code) => `کد ورود پیک سین‌شین: ${code}`,
-      isProd: this.deps.config.isProd,
-    })
+    )
   }
 
   async verifyOtp(phone: string, code: string): Promise<{ token: string; courierId: string }> {
