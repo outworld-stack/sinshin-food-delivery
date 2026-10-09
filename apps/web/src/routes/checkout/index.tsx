@@ -10,6 +10,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
+import { BoxRemove } from 'reicon-react'
 import { CheckoutPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { AddAddressModal } from '#/components/site/checkout/AddAddressModal'
@@ -110,11 +111,32 @@ function CheckoutPage() {
 
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 				<div className="lg:col-span-2 space-y-6">
+					{/* stage-48 — بنر نارنجی ناموجودی: پرداخت قفل تا رفع (سروری + زنده با SSE) */}
+					{page.hasUnavailableItems && (
+						<div className="p-4 rounded-2xl bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 flex items-start gap-3">
+							<BoxRemove
+								size={20}
+								className="text-orange-500 shrink-0 mt-0.5"
+							/>
+							<div className="min-w-0">
+								<p className="text-sm text-orange-600 dark:text-orange-400 font-DanaDemiBold">
+									{t['checkout.unavailableBannerTitle']}
+								</p>
+								<p className="text-xs text-orange-500/90 dark:text-orange-400/80 font-DanaMedium leading-relaxed mt-1">
+									{t['checkout.unavailableBannerBody']}
+								</p>
+							</div>
+						</div>
+					)}
+
 					<DeliveryTypeSelector
 						deliveryType={page.state.deliveryType}
 						deliveryFee={page.calc.deliveryFee}
 						packagingFee={page.calc.packagingFee}
 						onChange={page.handleDeliveryTypeChange}
+						blockedCourier={page.blocked.courierBlockedNames[0] ?? null}
+						blockedTakeaway={page.blocked.takeawayBlockedNames[0] ?? null}
+						blockedDineIn={page.blocked.dineInBlockedNames[0] ?? null}
 					/>
 
 					<CouponBox

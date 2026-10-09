@@ -47,6 +47,15 @@ export interface ProductCardProps {
                         finalPrice?: number
                         discountActive?: boolean
                 }[]
+                /**
+                 * stage-48 — موجودی فروش (نیامد = موجود؛ پیش‌نمایش فرم هم می‌فرستد).
+                 * ناموجود: عکس تار + نوشته‌ی نارنجی + قفل دکمه‌ی سبد.
+                 */
+                isAvailable?: boolean
+                /** stage-48 — حالت‌های مؤثر سفارش (نیامد = هر سه مجاز) */
+                courierAllowed?: boolean
+                takeawayAllowed?: boolean
+                dineInAllowed?: boolean
         }
         /**
          * round-12 — false = حالت پیش‌نمایش (فرم محصول): بدون Link.

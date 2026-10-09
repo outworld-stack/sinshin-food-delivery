@@ -1,6 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// phase-2 — sinshin-food-delivery — فایل جدید
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/infra/db/schema/notifications.ts
+// تغییر: نوع product_discount + جدول notification_log (تاریخچه‌ی ارسال
+//        برای پنل ادمین/ادمین۲ با فیلتر پیشرفته)
 // ═══════════════════════════════════════════════════════════════
 
 // src/infra/db/schema/notifications.ts
@@ -85,12 +87,42 @@ export const notifications = pgTable(
   ],
 )
 
+/**
+ * stage-48 — تاریخچه‌ی «ارسال‌های گروهی» نوتیفیکیشن.
+ * هر broadcast (ادمین/ادمین۲) و هر پخش خودکار (تخفیف محصول و…) یک ردیف.
+ * ارسال‌های شخصی (notifyUser مثل کوپن شخصی) جزو تاریخچه نیستند —
+ * آنها در صندوق خود کاربر دیده می‌شوند.
+ */
+export const notificationLog = pgTable(
+  'notification_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    type: varchar('type', { length: 40 }).notNull(),
+    title: varchar('title', { length: 120 }).notNull(),
+    body: varchar('body', { length: 300 }).notNull(),
+    url: varchar('url', { length: 300 }),
+    /** تعداد گیرندگان (ردیف‌های صندوق ساخته‌شده) */
+    audience: integer('audience').notNull().default(0),
+    /** فرستنده: admin | admin2 | system */
+    senderRole: varchar('sender_role', { length: 16 }).notNull().default('system'),
+    /** نام فرستنده (ادمین۲/ادمین) — برای system مقدار ندارد */
+    senderName: varchar('sender_name', { length: 120 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('notification_log_created_idx').on(t.createdAt),
+    index('notification_log_type_idx').on(t.type),
+    index('notification_log_role_idx').on(t.senderRole),
+  ],
+)
+
 /** انواع مجاز نوتیفیکیشن — قرارداد با کلاینت */
 export const NOTIFICATION_TYPES = [
   'coupon', // کوپن جدید به کاربر تعلق گرفت
   'coupon_nudge', // یادآور «یک قدم تا کوپن»
   'broadcast', // پیام عمومی ادمین
   'system', // سیستم (سلامت/به‌روزرسانی)
+  'product_discount', // stage-48 — تخفیف محصول (پخش خودکار به همه)
 ] as const
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number]

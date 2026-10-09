@@ -41,6 +41,12 @@ export const admin2Profiles = pgTable(
     canToggleTemporaryClose: boolean('can_toggle_temporary_close').notNull().default(false),
     /** ویرایش/به‌روزرسانی هزینه بسته‌بندی */
     canEditPackagingFee: boolean('can_edit_packaging_fee').notNull().default(false),
+    /** stage-48 — مشاهده تاریخچه نوتیفیکیشن‌ها (پیش‌فرضِ افزودن = true) */
+    notificationsRead: boolean('notifications_read').notNull().default(false),
+    /** stage-48 — ارسال نوتیفیکیشن عمومی (پیش‌فرضِ افزودن = false) */
+    notificationsSend: boolean('notifications_send').notNull().default(false),
+    /** stage-48 — موجود/ناموجود کردن محصولات (پیش‌فرضِ افزودن = true) */
+    productsAvailability: boolean('products_availability').notNull().default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

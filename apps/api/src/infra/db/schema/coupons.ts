@@ -47,6 +47,12 @@ export const coupons = pgTable(
     usedCount: integer('used_count').notNull().default(0),
     isPublic: boolean('is_public').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
+    /**
+     * stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (اسکن شایستگی + nudge).
+     * پیش‌فرض خاموش: کوپن فقط لحظه‌ی تسویه سفارش اعطا می‌شود.
+     * روشن = کوپن وارد بررسی دوره‌ای cron هم می‌شود.
+     */
+    cronEnabled: boolean('cron_enabled').notNull().default(false),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
     endsAt: timestamp('ends_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

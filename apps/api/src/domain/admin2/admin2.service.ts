@@ -45,7 +45,7 @@ const PROFILE_CACHE_TTL_MS = 15_000
  * لاگین: فقط با بسته‌بودنِ «ساعتی» رد می‌شود (موقت آزاد است).
  * لاگین موفق → ردیف admin2Sessions + رویداد LOGIN + اطلاعِ صفِ داخل حوزه.
  */
-/** رارد ۴۸ — همه‌ی ۱۴ دسترسی روشن؛ برای ادمین اصلی در مسیر session پنل زنده */
+/** رارد ۴۸ — همه‌ی دسترسی‌ها روشن؛ برای ادمین اصلی در مسیر session پنل زنده */
 export const ALL_ADMIN2_PERMISSIONS: Admin2Permissions = {
     hall: true,
     takeaway: true,
@@ -60,7 +60,32 @@ export const ALL_ADMIN2_PERMISSIONS: Admin2Permissions = {
     orderDetailsRead: true,
     canToggleTemporaryClose: true,
     canEditPackagingFee: true,
+    notificationsRead: true,
+    notificationsSend: true,
+    productsAvailability: true,
 }
+
+/**
+ * stage-48 — دسترسی‌های پیش‌فرض لحظه‌ی «افزودن ادمین۲» توسط ادمین اصلی:
+ * همه‌ی دسترسی‌های عملیاتی روشن به‌جز ویرایش کاربران، ارسال نوتیفیکیشن
+ * (و هزینه بسته‌بندی که خواسته نشد). ادمین اصلی بعداً از پنل تنظیم می‌کند.
+ */
+const DEFAULT_ADMIN2_PERMISSIONS = {
+    productsRead: true,
+    productsWrite: true,
+    usersRead: true,
+    usersWrite: false,
+    couriersRead: true,
+    couriersWrite: true,
+    mainCategoriesRead: true,
+    mainCategoriesWrite: true,
+    orderDetailsRead: true,
+    canToggleTemporaryClose: true,
+    canEditPackagingFee: false,
+    notificationsRead: true,
+    notificationsSend: false,
+    productsAvailability: true,
+} as const
 
 export class Admin2Service {
     /** round-16 — userId → { at, profile|null } — ایندکس‌شده با TTL ۱۵s */
@@ -298,8 +323,21 @@ export class Admin2Service {
                     lastName: input.lastName,
                     scopeHall: input.scopeHall,
                     scopeTakeaway: input.scopeTakeaway,
+                    // stage-48 — دسترسی‌های پیش‌فرض (به‌جز ویرایش کاربران/ارسال نوتیف)
+                    ...DEFAULT_ADMIN2_PERMISSIONS,
                 } as typeof admin2Profiles.$inferInsert)
-                .onConflictDoNothing()
+                .onConflictDoUpdate({
+                    target: admin2Profiles.userId,
+                    set: {
+                        firstName: input.firstName,
+                        lastName: input.lastName,
+                        scopeHall: input.scopeHall,
+                        scopeTakeaway: input.scopeTakeaway,
+                        // stage-48 — پروفایل قدیمی بدون این ستون‌ها = مقادیر false؛
+                        // ارتقای مجدد با همین فرم پیش‌فرض‌ها را می‌نویسد
+                        ...DEFAULT_ADMIN2_PERMISSIONS,
+                    },
+                })
             return { success: true, userId: existing.id }
         }
 
@@ -322,6 +360,8 @@ export class Admin2Service {
             lastName: input.lastName,
             scopeHall: input.scopeHall,
             scopeTakeaway: input.scopeTakeaway,
+            // stage-48 — دسترسی‌های پیش‌فرض (به‌جز ویرایش کاربران/ارسال نوتیف)
+            ...DEFAULT_ADMIN2_PERMISSIONS,
         } as typeof admin2Profiles.$inferInsert)
 
         // round-16 — پروفایل جدید ممکن است قبلاً «نبود» کش شده باشد
@@ -443,7 +483,7 @@ export class Admin2Service {
         else this.profileCache.clear()
     }
 
-    /** رارد ۴۸ (اسکن A10) — نگاشت ردیف پروفایل → ۱۴ کلید قرارداد؛ تنها مبدأ */
+    /** رارد ۴۸ (اسکن A10) — نگاشت ردیف پروفایل → کلیدهای قرارداد؛ تنها مبدأ */
     private static toPermissions(
         p: typeof admin2Profiles.$inferSelect,
     ): Admin2Permissions {
@@ -461,6 +501,9 @@ export class Admin2Service {
             orderDetailsRead: p.orderDetailsRead,
             canToggleTemporaryClose: p.canToggleTemporaryClose,
             canEditPackagingFee: p.canEditPackagingFee,
+            notificationsRead: p.notificationsRead,
+            notificationsSend: p.notificationsSend,
+            productsAvailability: p.productsAvailability,
         }
     }
 

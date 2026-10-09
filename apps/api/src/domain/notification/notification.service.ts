@@ -1,13 +1,15 @@
 // ═══════════════════════════════════════════════════════════════
-// phase-2 — sinshin-food-delivery — فایل جدید
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
+// تغییر: notification_log (تاریخچه‌ی ارسال برای پنل) + sender + آمار
+//        خطای پیاپی/غیرفعال‌سازی اشتراک بعد از ۵ شکست + lastPushAt.
 // ═══════════════════════════════════════════════════════════════
 
 // src/domain/notification/notification.service.ts
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
-import { notifications, pushSubscriptions, users } from '#/infra/db/schema'
+import { notificationLog, notifications, pushSubscriptions, users } from '#/infra/db/schema'
 import type { NotificationType } from '#/infra/db/schema/notifications'
 import type { AppConfig } from '#/infra/config/env'
 import type { SseHub } from '#/infra/realtime/sse-hub'
@@ -35,6 +37,35 @@ export interface NotifyInput {
   data?: Record<string, unknown>
 }
 
+/** stage-48 — فرستنده‌ی یک ارسال گروهی (برای تاریخچه) */
+export interface NotifySender {
+  role: 'admin' | 'admin2' | 'system'
+  name?: string | null
+}
+
+/** stage-48 — فیلترهای تاریخچه‌ی ارسال (پنل ادمین/ادمین۲) */
+export interface NotificationHistoryFilter {
+  search?: string
+  type?: string
+  senderRole?: string
+  from?: Date
+  to?: Date
+  page: number
+  limit: number
+}
+
+export interface NotificationLogDto {
+  id: string
+  type: string
+  title: string
+  body: string
+  url: string | null
+  audience: number
+  senderRole: string
+  senderName: string | null
+  createdAt: Date
+}
+
 export interface NotificationDto {
   id: string
   type: string
@@ -50,6 +81,8 @@ export interface NotificationDto {
 const PUSH_CONCURRENCY = 25
 /** chunk درج broadcast — تراکنش کوچک و پایدار */
 const INSERT_CHUNK = 500
+/** stage-48 — شکستِ پیاپی پوش قبل از غیرفعال‌کردن اشتراک */
+const PUSH_MAX_FAILURES = 5
 
 export class NotificationService {
   constructor(
@@ -123,9 +156,11 @@ export class NotificationService {
   /**
    * پخش عمومی — به همه‌ی کاربران (نه ادمین‌ها). ردیف نوتیفیکیشن برای
    * همه ساخته می‌شود (صندوق درون‌بری)؛ پوش فقط به مشترکان می‌رود.
+   * stage-48 — هر پخش یک ردیف در notification_log (تاریخچه‌ی پنل) می‌گیرد؛
+   * sender برای گزارش «چه کسی فرستاد» است (ادمین/ادمین۲/سیستم).
    * خروجی: تعداد کاربران هدف.
    */
-  async broadcast(input: NotifyInput): Promise<{ targeted: number }> {
+  async broadcast(input: NotifyInput, sender?: NotifySender): Promise<{ targeted: number }> {
     let ids: string[] = []
     try {
       // فقط کاربر عادی — ادمین‌ها از پنل خودشان همه‌چیز را می‌بینند
@@ -140,7 +175,11 @@ export class NotificationService {
       console.error('[notify] broadcast: خواندن کاربران ناموفق:', err)
       return { targeted: 0 }
     }
-    if (ids.length === 0) return { targeted: 0 }
+    if (ids.length === 0) {
+      // stage-48 — پخش بدون گیرنده هم لاگ می‌شود (ردپای عملیات ادمین)
+      await this.logBroadcast(input, 0, sender).catch(() => {})
+      return { targeted: 0 }
+    }
 
     // درج chunked — بدون تراکنش غول‌پیکر
     let inserted = 0
@@ -163,6 +202,9 @@ export class NotificationService {
       }
     }
 
+    // stage-48 — تاریخچه‌ی ارسال (fail-soft — پخش موفق نباید گیر لاگ بکند)
+    await this.logBroadcast(input, inserted, sender).catch(() => {})
+
     // SSE برای آنلاین‌ها + پوش به مشترکان — بدون ردیف‌یابی مجدد
     this.publishSse('broadcast', {
       type: input.type,
@@ -174,6 +216,41 @@ export class NotificationService {
     })
     await this.pushToSubscribedUsers(input)
     return { targeted: inserted }
+  }
+
+  /** stage-48 — تاریخچه‌ی ارسال‌های گروهی با فیلتر پیشرفته (پنل) */
+  async listHistory(
+    filter: NotificationHistoryFilter,
+  ): Promise<{ items: NotificationLogDto[]; total: number }> {
+    const conditions = []
+    if (filter.search) {
+      const q = `%${filter.search}%`
+      conditions.push(or(ilike(notificationLog.title, q), ilike(notificationLog.body, q)))
+    }
+    if (filter.type && filter.type !== 'all') {
+      conditions.push(eq(notificationLog.type, filter.type))
+    }
+    if (filter.senderRole && filter.senderRole !== 'all') {
+      conditions.push(eq(notificationLog.senderRole, filter.senderRole))
+    }
+    if (filter.from) conditions.push(gte(notificationLog.createdAt, filter.from))
+    if (filter.to) conditions.push(lte(notificationLog.createdAt, filter.to))
+    const where = conditions.length > 0 ? and(...conditions) : undefined
+
+    const total = await this.deps.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notificationLog)
+      .where(where)
+      .then((r) => r[0]?.count ?? 0)
+
+    const rows = await this.deps.db
+      .select()
+      .from(notificationLog)
+      .where(where)
+      .orderBy(desc(notificationLog.createdAt))
+      .limit(Math.min(Math.max(1, filter.limit), 100))
+      .offset((Math.max(1, filter.page) - 1) * filter.limit)
+    return { items: rows.map(toLogDto), total }
   }
 
   // ═══ صندوق درون‌بری ═══
@@ -362,25 +439,31 @@ export class NotificationService {
       }
 
       let attempted = 0
-      const outcomes: Array<{ subId: string; outcome: Awaited<ReturnType<typeof sendWebPush>> }> = []
+      const outcomes: Array<{
+        sub: typeof pushSubscriptions.$inferSelect
+        outcome: Awaited<ReturnType<typeof sendWebPush>>
+      }> = []
       for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
         const batch = subs.slice(i, i + PUSH_CONCURRENCY)
         const results = await Promise.all(
           batch.map(async (sub) => ({
-            subId: sub.id,
+            sub,
             outcome: await sendWebPush(this.deps.config, sub, pushPayload),
           })),
         )
         outcomes.push(...results)
       }
 
-      for (const { subId, outcome } of outcomes) {
+      // stage-48 — آمار پیاپی/غیرفعال‌سازی: ok ⇒ صفر + lastPushAt؛
+      // fail ⇒ شمارنده بالا (تا ۵) و بعد از سقف غیرفعال؛ gone ⇒ همیشه غیرفعال.
+      for (const { sub, outcome } of outcomes) {
         attempted++
         if (outcome.kind === 'ok') delivered++
         if (outcome.kind === 'gone') {
           gone++
-          await this.disableSubscription(subId)
+          await this.disableSubscription(sub.id)
         }
+        await this.recordPushOutcome(sub.id, outcome)
       }
 
       // آمار تحویل روی ردیف نوتیفیکیشن
@@ -423,6 +506,8 @@ export class NotificationService {
         )
         for (const { sub, outcome } of results) {
           if (outcome.kind === 'gone') goneIds.push(sub.id)
+          // stage-48 — همان آمار خطای پیاپی (تلاش مجدد دوره‌ای بعدی تصمیم می‌گیرد)
+          await this.recordPushOutcome(sub.id, outcome)
         }
       }
       // غیرفعال‌سازی اشتراک‌های مرده — دسته‌ای
@@ -437,6 +522,56 @@ export class NotificationService {
     } catch (err) {
       console.error('[notify] pushToSubscribedUsers ناموفق:', err)
     }
+  }
+
+  /**
+   * stage-48 — آمار تحویل هر اشتراک (fail-soft):
+   *  • ok ⇒ failures=0 + lastPushAt (سلامت اشتراک تأیید شد)
+   *  • fail (شبکه/429/5xx — خطای موقت) ⇒ failures+1؛ با رسیدن به سقف،
+   *    اشتراک غیرفعال می‌شود تا فان‌آوت‌های بعدی مسدود نمانند.
+   */
+  private async recordPushOutcome(
+    subId: string,
+    outcome: Awaited<ReturnType<typeof sendWebPush>>,
+  ): Promise<void> {
+    try {
+      if (outcome.kind === 'ok') {
+        await this.deps.db
+          .update(pushSubscriptions)
+          .set({ failures: 0, lastPushAt: new Date() })
+          .where(eq(pushSubscriptions.id, subId))
+      } else if (outcome.kind === 'fail') {
+        const rows = await this.deps.db
+          .update(pushSubscriptions)
+          .set({ failures: sql`${pushSubscriptions.failures} + 1` })
+          .where(eq(pushSubscriptions.id, subId))
+          .returning({ failures: pushSubscriptions.failures })
+        const failures = rows[0]?.failures ?? 0
+        if (failures >= PUSH_MAX_FAILURES) {
+          await this.disableSubscription(subId)
+          console.warn(`[notify] اشتراک ${subId} بعد از ${failures} شکست پیاپی غیرفعال شد`)
+        }
+      }
+    } catch {
+      /* آماری است — سکوت */
+    }
+  }
+
+  /** stage-48 — درج ردیف تاریخچه‌ی ارسال (notification_log) */
+  private async logBroadcast(
+    input: NotifyInput,
+    audience: number,
+    sender?: NotifySender,
+  ): Promise<void> {
+    await this.deps.db.insert(notificationLog).values({
+      type: input.type,
+      title: input.title.slice(0, 120),
+      body: input.body.slice(0, 300),
+      url: input.url?.slice(0, 300) ?? null,
+      audience,
+      senderRole: sender?.role ?? 'system',
+      senderName: sender?.name?.slice(0, 120) ?? null,
+    })
   }
 
   private async disableSubscription(subId: string): Promise<void> {
@@ -486,5 +621,20 @@ function toDto(row: typeof notifications.$inferSelect): NotificationDto {
     data: (row.data ?? {}) as Record<string, unknown>,
     createdAt: row.createdAt,
     readAt: row.readAt,
+  }
+}
+
+/** stage-48 — ردیف تاریخچه → DTO پنل */
+function toLogDto(row: typeof notificationLog.$inferSelect): NotificationLogDto {
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    body: row.body,
+    url: row.url,
+    audience: row.audience,
+    senderRole: row.senderRole,
+    senderName: row.senderName,
+    createdAt: row.createdAt,
   }
 }

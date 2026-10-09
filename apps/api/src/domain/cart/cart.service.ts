@@ -1,14 +1,23 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 9 از 49
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/cart/cart.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty
+// تغییر: آیتم ناموجود (is_available=false یا INACTIVE) دیگر حذفِ
+//        بی‌صدا نمی‌شود — با available=false و lineTotal=0 برمی‌گردد تا
+//        فرانت هشدار نارنجی + قفل پرداخت نشان دهد. حالت‌های مؤثر
+//        سفارش (پیک/بیرون‌بر/سرو در محل = دسته AND محصول) هم روی هر
+//        آیتم می‌آید تا سبد/چک‌اوت محدودیت ارسال را زنده نشان دهند.
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/cart/cart.service.ts
 import type { Db } from '#/infra/db/client'
 import { asProductId, asSizeId, type ProductId } from '#/domain/shared/brand'
-import { finalPriceOf, loadPricingBases, sizeFinalPriceOf } from '#/domain/menu/menu.service'
+import {
+  finalPriceOf,
+  loadCategoryModes,
+  loadPricingBases,
+  sizeFinalPriceOf,
+} from '#/domain/menu/menu.service'
 import { pickAr, type Lang } from '#/domain/shared/lang'
 import type { CartDetails, CartItemInput } from '@sinshin/shared'
 
@@ -17,13 +26,15 @@ import type { CartDetails, CartItemInput } from '@sinshin/shared'
 
 /**
  * قیمت‌گذاری سبد — سروری، عین قرارداد getCartDetails فرانت:
- *  - نامعتبرها نادیده گرفته می‌شوند (نه خطا)
+ *  - نامعتبرها (محصول حذف‌شده از DB) نادیده گرفته می‌شوند (نه خطا)
+ *  - stage-48: محصولِ ناموجود (is_available=false / status≠ACTIVE) با
+ *    available=false برمی‌گردد — قیمت نمایشی حفظ، جمعیت حساب نمی‌شود.
  *  - originalPrice و finalPrice هر دو «قیمت مؤثر» — مطابق موک فرانت
  *
  * round-28 — دسته‌ای: قبلاً به‌ازای هر آیتم ۳ کوئری متوالی زده می‌شد
  * (effectivePrice + واکشی دوباره‌ی همان محصول) — سبد ۶ آیتمی یعنی ~۱۸
- * رفت‌وبرگشت DB در یک درخواستِ عمومی. حالا کل سبد = ۲ کوئری، از همان
- * loadPricingBases ای که چک‌اوت هم می‌خواند (DRY — menu.service).
+ * رفت‌وبرگشت DB در یک درخواستِ عمومی. حالا کل سبد = ۲ کوئری + ۱ کوئری
+ * دسته‌ها (stage-48)، از همان loadPricingBases ای که چک‌اوت هم می‌خواند.
  */
 export class CartService {
   constructor(private readonly deps: { db: Db }) {}
@@ -35,12 +46,23 @@ export class CartService {
   ): Promise<CartDetails> {
     const { productMap, sizesByProduct } = await loadPricingBases(this.deps.db, items)
 
+    // stage-48 — حالت‌های دسته‌ی همه‌ی محصولات سبد (یک کوئری)
+    const categoryIds = [...new Set([...productMap.values()].map((p) => p.categoryId))]
+    const catModes = await loadCategoryModes(this.deps.db, categoryIds)
+
     const out: CartDetails['items'] = []
     let total = 0
 
     for (const item of items) {
       const product = productMap.get(asProductId(item.productId))
       if (!product) continue // نامعتبر → skip (قرارداد فرانت)
+
+      const modes = catModes.get(product.categoryId)
+      const courierAllowed = (modes?.courier ?? true) && product.courierAllowed
+      const takeawayAllowed = (modes?.takeaway ?? true) && product.takeawayAllowed
+      const dineInAllowed = (modes?.dineIn ?? true) && product.dineInAllowed
+      // stage-48 — «فعلاً ناموجود»: فعال در منو ولی فروشش قفل است
+      const available = product.status === 'ACTIVE' && product.isAvailable
 
       // سیاستِ آسان‌گیرِ سبد (عین effectivePrice سابق): سایزِ انتخابی یا
       // اولین سایز — چک‌اوت سخت‌گیر است و سایزِ حذف‌شده را خطا می‌دهد
@@ -68,8 +90,9 @@ export class CartService {
         effectivePrice = finalPriceOf(product)
       }
 
-      const lineTotal = effectivePrice * item.quantity
-      total += lineTotal
+      // stage-48 — ناموجود: قیمت برای نمایش می‌ماند ولی در جمع حساب نمی‌شود
+      const lineTotal = available ? effectivePrice * item.quantity : 0
+      if (available) total += lineTotal
       out.push({
         id: product.id as ProductId,
         sizeId: item.sizeId ? asSizeId(item.sizeId) : null,
@@ -80,6 +103,10 @@ export class CartService {
         finalPrice: effectivePrice,
         quantity: item.quantity,
         lineTotal,
+        available,
+        courierAllowed,
+        takeawayAllowed,
+        dineInAllowed,
       })
     }
 

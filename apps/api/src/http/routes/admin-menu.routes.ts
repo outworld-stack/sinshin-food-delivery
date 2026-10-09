@@ -1,9 +1,12 @@
 // ═══════════════════════════════════════════════════════════
-// stage-47 — sinshin-food-delivery — فایل ۵
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر: اسکیمای محصول/سایز — ستون‌های تخفیف زمان‌دار (درصد +
-//        پنجره‌ی شروع/پایان ISO) برای سایزها و خود محصول.
+// تغییر:
+//   • دسته‌ها: سه سوئیچ حالت سفارش (پیک/بیرون‌بر/سرو در محل)
+//   • محصولات: is_available + سه پرچم حالت سفارش (ارث از دسته)
+//   • POST /products/:id/availability — موجود/ناموجود سریع
+//     (ادمین اصلی یا ادمین۲ با productsAvailability)
 // ═══════════════════════════════════════════════════════════
 
 // src/http/routes/admin-menu.routes.ts
@@ -108,6 +111,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           sizeNames: body.sizeNames ?? [],
           nameAr: body.nameAr,
           sizeNamesAr: body.sizeNamesAr ?? null,
+          // stage-48 — حالت‌های سفارش پایه (پیش‌فرض روشن)
+          courierEnabled: body.courierEnabled ?? true,
+          takeawayEnabled: body.takeawayEnabled ?? true,
+          dineInEnabled: body.dineInEnabled ?? true,
         }),
       {
         body: t.Object({
@@ -118,6 +125,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
           sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
+          // stage-48 — حالت‌های سفارش محصولاتِ این دسته
+          courierEnabled: t.Optional(t.Boolean()),
+          takeawayEnabled: t.Optional(t.Boolean()),
+          dineInEnabled: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Create category (slug auto-generated, unique)' },
       },
@@ -133,6 +144,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           sizeNames: body.sizeNames ?? [],
           nameAr: body.nameAr,
           sizeNamesAr: body.sizeNamesAr ?? null,
+          // stage-48 — حالت‌های سفارش (undefined = دست‌نخورده)
+          courierEnabled: body.courierEnabled,
+          takeawayEnabled: body.takeawayEnabled,
+          dineInEnabled: body.dineInEnabled,
         }),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
@@ -144,6 +159,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
           sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
+          // stage-48 — حالت‌های سفارش (اختیاری — نیامد = دست‌نخورده)
+          courierEnabled: t.Optional(t.Boolean()),
+          takeawayEnabled: t.Optional(t.Boolean()),
+          dineInEnabled: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Update category' },
       },
@@ -228,6 +247,12 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           sizesEnabled: t.Optional(t.Boolean()),
           sizes: t.Optional(t.Array(sizeInput, { maxItems: 8 })),
           ingredients: t.Optional(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 })),
+          // stage-48 — موجودی فروش (پیش‌فرض true)
+          isAvailable: t.Optional(t.Boolean()),
+          // stage-48 — پرچم‌های حالت سفارش (پیش‌فرض true = ارث از دسته)
+          courierAllowed: t.Optional(t.Boolean()),
+          takeawayAllowed: t.Optional(t.Boolean()),
+          dineInAllowed: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Create product (sizes replace-all on update)' },
       },
@@ -268,6 +293,12 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           sizesEnabled: t.Optional(t.Boolean()),
           sizes: t.Optional(t.Array(sizeInput, { maxItems: 8 })),
           ingredients: t.Optional(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 })),
+          // stage-48 — موجودی فروش (نیامد = دست‌نخورده)
+          isAvailable: t.Optional(t.Boolean()),
+          // stage-48 — پرچم‌های حالت سفارش (نیامد = دست‌نخورده)
+          courierAllowed: t.Optional(t.Boolean()),
+          takeawayAllowed: t.Optional(t.Boolean()),
+          dineInAllowed: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Update product — categoryId immutable (frontend contract)' },
       },
@@ -290,5 +321,45 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       detail: { summary: 'Toggle product ACTIVE / INACTIVE' },
     })
 
-  return new Elysia().use(mainsRead).use(structureWrite).use(productsRead).use(productsWrite)
+  // ── stage-48 — موجود/ناموجود سریع ──
+  // گارد: ادمین اصلی همیشه؛ ادمین۲ فقط با productsAvailability
+  // (requireAdmin2Permission نقش admin را بدون چک مجوز رد می‌کند).
+  // عملیات ادمین۲ در activities خودش ثبت می‌شود (الگوی بقیه‌ی روت‌های ادمین۲).
+  const availabilityWrite = new Elysia({ prefix: '/admin/menu', tags: ['Admin / Menu'] })
+    .use(requireAdmin2Permission(admin2, 'productsAvailability'))
+    .post(
+      '/products/:id/availability',
+      async ({ params, body, user }) => {
+        const res = await deps.menu.setProductAvailability(params.id, body.available)
+        if (!res.success) {
+          return res
+        }
+        if (user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: body.available ? 'PRODUCT_AVAILABLE' : 'PRODUCT_UNAVAILABLE',
+            entity: 'product',
+            entityId: params.id,
+          })
+        }
+        return res
+      },
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        body: t.Object({ available: t.Boolean() }),
+        detail: {
+          summary: 'Set product availability (main admin or admin2 with productsAvailability)',
+          description:
+            'stage-48: ناموجود = کارت تار + هشدار نارنجی + قفل خرید + خطای چک‌اوت؛ ' +
+            'سفارش‌های باز از طریق SSE (menu:live) درجا مطلع می‌شوند.',
+        },
+      },
+    )
+
+  return new Elysia()
+    .use(mainsRead)
+    .use(structureWrite)
+    .use(productsRead)
+    .use(productsWrite)
+    .use(availabilityWrite)
 }

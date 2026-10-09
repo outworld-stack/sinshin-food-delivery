@@ -23,6 +23,7 @@ import { useHydrated } from '#/hooks/useHydrated'
 import { HeaderSkeleton } from '#/components/LoadingSkeletons'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
 import { NotificationBell } from '#/components/shared/NotificationBell'
+import { NotificationEnableIcon } from '#/components/shared/NotificationEnableIcon'
 import { useI18n } from '#/i18n'
 
 // round-14 — موبایل فیکس (گوشی‌های سامسونگ):
@@ -94,13 +95,19 @@ export const Header = memo(function Header() {
                                         <div className="flex items-center justify-end gap-1.5 sm:gap-3 md:gap-4 shrink-0">
                                                 <ThemeToggle />
 
-                                                {/* رارد ۳۲ — سوییچر زبان: جفت «فا/ع» در دسکتاپ، تک‌دکمه در موبایل (تصمیم ۳) */}
-                                                <div className="hidden md:flex">
+                                                {/* رارد ۳۲ — سوییچر زبان: جفت «فا/ع» در دسکتاپ، تک‌دکمه در موبایل (تصمیم ۳)
+                                                stage-48 — md..lg به‌هم‌ریخته بود: در این بازه هم فقط دکمه‌ی زبان مقابل
+                                                (تک‌دکمه) نشان داده می‌شود — جفت‌باکس‌ها فقط از lg به بالا. */}
+                                                <div className="hidden lg:flex">
                                                         <LangSwitcher />
                                                 </div>
-                                                <div className="md:hidden">
+                                                <div className="lg:hidden">
                                                         <LangSwitcher variant="single" />
                                                 </div>
+
+                                                {/* stage-48 — آیکون چشمک‌زن «فعال‌سازی نوتیف» (بنفش):
+                                                فقط وقتی پوش خاموش است؛ بعد از فعال‌شدن حذف می‌شود. */}
+                                                {isAuthenticated && <NotificationEnableIcon />}
 
                                                 {/* فاز-۲ — زنگ نوتیفیکیشن (فقط isAuthenticated) */}
                                                 {isAuthenticated && (
@@ -167,7 +174,8 @@ export const Header = memo(function Header() {
                                                                         {fmt.num(totalItems)}
                                                                 </span>
                                                         )}
-                                                        <span className="hidden sm:inline">{t['header.cart']}</span>
+                                                        {/* stage-48 — md..lg: فقط آیکون (مثل موبایل)؛ متن از lg به بالا */}
+                                                        <span className="hidden lg:inline">{t['header.cart']}</span>
                                                 </Link>
 
                                                 {/* پروفایل — لاگین → داشبورد / مهمان → ورود */}
@@ -177,7 +185,7 @@ export const Header = memo(function Header() {
                                                         className="flex items-center gap-2 p-2 sm:px-5 sm:py-2.5 text-sm rounded-xl bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition font-DanaMedium shadow-sm"
                                                 >
                                                         <User size={20} className={ico} />
-                                                        <span className="hidden sm:inline">
+                                                        <span className="hidden lg:inline">
                                                                 {isAuthenticated ? t['header.profile'] : t['header.auth']}
                                                         </span>
                                                 </Link>

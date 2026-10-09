@@ -104,7 +104,6 @@ const otp = new OtpService({ redis, config, sms })
 const sessions = new SessionService({ db, config, tokens })
 const devices = new DeviceService({ db, config })
 const settings = new SettingsService({ db, config }) // round-13 — config برای مختصات env رستوران
-const menu = new MenuService({ db, redis })
 // round-28 — سبد: دسته‌ای از loadPricingBases مشترک؛ دیگر به menu نیاز ندارد
 const cart = new CartService({ db })
 const addresses = new AddressService({ db })
@@ -116,6 +115,9 @@ const termsService = new TermsService({ db })
 const neshan = new NeshanService(config)
 const dockerLogs = new DockerLogsService(config)
 const notifications = new NotificationService({ db, config, hub: sseHub })
+// stage-48 — منو: پخش نوتیفیکیشن تخفیف + SSE عمومی menu:live
+// (بعد از notifications ساخته می‌شود تا هر دو سرویس را بگیرد)
+const menu = new MenuService({ db, redis, notifications, hub: sseHub })
 const orders = new OrderService({ db, config, zones, settings, coupons, notifications })
 const profile = new ProfileService({ db, config, orders, devices })
 // round-20 — تکرارناپذیری چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)

@@ -1,8 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
-// phase-2 — sinshin-food-delivery
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/realtime.routes.ts
-// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با H5)
-// تغییر فاز-۲: کانال notify:{userId} برای نوتیفیکیشن‌های زنده‌ی کاربر
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: GET /realtime/menu-stream — استریم عمومیِ کانال menu:live
+//        (بدون auth؛ حتی مهمانِ سبد‌دار) برای به‌روزرسانی درجای موجودی/
+//        حالت ارسال در سبد و چک‌اوت. سقف به‌ازای IP + سقف کلی.
 // ═══════════════════════════════════════════════════════════════
 
 // src/http/routes/realtime.routes.ts
@@ -18,6 +20,7 @@ import { Err } from '#/domain/shared/errors'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { UUID_RE } from '#/domain/shared/ids'
 import { DISPLAY_RE } from '#/domain/shared/ids'
+import { clientIp } from '#/domain/shared/net'
 
 const encoder = new TextEncoder()
 const sseChunk = (event: string, data: unknown): Uint8Array =>
@@ -40,12 +43,19 @@ const MAX_QUEUE = 128 // سقف صفِ هر اتصال — بک‌پرشر: بی
 const MAX_STREAMS_PER_USER = 5
 const MAX_STREAMS_TOTAL = 500
 
+// stage-48 — استریم عمومی menu:live: مهمان هم مشترک می‌شود (سبد بدون لاگین) →
+// سقف به‌ازای IP (نه کاربر) + سهم از سقف کلی.
+const MAX_MENU_STREAMS_PER_IP = 3
+
 // مانند index.ts — شمارنده‌ها بین بارگذاری‌های دوباره روی globalThis زنده می‌مانند
 // تا شمارش سرگردان نشود (اتصال‌های قدیمی closure خودشان را کم می‌کنند)
 const capsGlobal = globalThis as {
   __sinshin_sse_caps?: { byUser: Map<string, number>; total: number }
+  /** stage-48 — شمارنده‌ی استریم عمومی menu:live به‌ازای IP */
+  __sinshin_menu_stream_ips?: Map<string, number>
 }
 const caps = (capsGlobal.__sinshin_sse_caps ??= { byUser: new Map(), total: 0 })
+const menuIps = (capsGlobal.__sinshin_menu_stream_ips ??= new Map())
 
 export interface RealtimeDeps {
   hub: SseHub
@@ -98,8 +108,9 @@ async function authorizeChannel(
   if (!row || row.userId !== user.id) throw Err.forbidden('این کانال مال شما نیست.')
 }
 
-export const realtimeRoutes = (deps: RealtimeDeps) =>
-  new Elysia({ prefix: '/realtime', tags: ['Realtime'] })
+export const realtimeRoutes = (deps: RealtimeDeps) => {
+  // ── استریم‌های احرازشده (کانال شخصی/پنلی) ──
+  const authed = new Elysia({ prefix: '/realtime', tags: ['Realtime'] })
     .use(requireAuth(deps.sessions))
     .get(
       '/stream',
@@ -229,3 +240,109 @@ export const realtimeRoutes = (deps: RealtimeDeps) =>
         detail: { summary: 'Demo publish (admin only) — fan-out test' },
       },
     )
+
+  // ── stage-48 — استریم عمومی menu:live (بدون auth) ──
+  // سبد خرید مهمان هم زنده به‌روز می‌شود: ناموجود شدن / تغییر حالت ارسال
+  // محصول → رویداد «menu» → کلاینت جزئیات سبد/پیش‌نمایش چک‌اوت را رفرش
+  // می‌کند. کانال فقط همین یکی است (نه پارامتر)؛ سقف به‌ازای IP.
+  // دروازه‌ی ژئو (app.ts onRequest) همچنان اعمال می‌شود.
+  const menuStream = new Elysia({ prefix: '/realtime', tags: ['Realtime'] })
+    .get(
+      '/menu-stream',
+      async ({ set, request, server }) => {
+        const ip = clientIp(request.headers.get('x-forwarded-for')) ?? 'unknown'
+        const perIp = menuIps.get(ip) ?? 0
+        if (perIp >= MAX_MENU_STREAMS_PER_IP || caps.total >= MAX_STREAMS_TOTAL) {
+          throw Err.rateLimited('تعداد اتصال‌های زنده‌ی شما زیاد است؛ تب‌های اضافه را ببندید.', 60)
+        }
+        menuIps.set(ip, perIp + 1)
+        caps.total += 1
+
+        set.headers['content-type'] = 'text/event-stream'
+        set.headers['cache-control'] = 'no-cache'
+        set.headers['x-accel-buffering'] = 'no'
+        server?.timeout(request, 0)
+
+        // همان پل کششی بک‌پرشر-امن استریم اصلی
+        const queue: Uint8Array[] = []
+        let waiter: ((chunk: Uint8Array | null) => void) | null = null
+        let closed = false
+
+        const push = (chunk: Uint8Array): void => {
+          if (closed) return
+          if (waiter) {
+            const w = waiter
+            waiter = null
+            w(chunk)
+            return
+          }
+          if (queue.length >= MAX_QUEUE) queue.shift()
+          queue.push(chunk)
+        }
+        const next = (): Promise<Uint8Array | null> =>
+          new Promise((resolve) => {
+            if (queue.length) {
+              resolve(queue.shift() ?? null)
+              return
+            }
+            if (closed) {
+              resolve(null)
+              return
+            }
+            waiter = resolve
+          })
+
+        let unsubscribe: (() => void) | null = null
+        let heartbeat: ReturnType<typeof setInterval> | null = null
+
+        const cleanup = () => {
+          if (closed) return
+          closed = true
+          waiter?.(null)
+          waiter = null
+          unsubscribe?.()
+          unsubscribe = null
+          if (heartbeat) clearInterval(heartbeat)
+          heartbeat = null
+          caps.total -= 1
+          const n = (menuIps.get(ip) ?? 1) - 1
+          if (n <= 0) menuIps.delete(ip)
+          else menuIps.set(ip, n)
+        }
+
+        request.signal.addEventListener('abort', cleanup)
+
+        unsubscribe = deps.hub.subscribe('menu:live', (payload) => {
+          push(sseChunk(payload.event, payload.data))
+        })
+        push(sseChunk('connected', { channel: 'menu:live', at: new Date().toISOString() }))
+
+        heartbeat = setInterval(() => push(encoder.encode(': ping\n\n')), HEARTBEAT_MS)
+
+        return new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            const chunk = await next()
+            if (chunk === null) {
+              controller.close()
+              return
+            }
+            controller.enqueue(chunk)
+          },
+          cancel() {
+            cleanup()
+          },
+        })
+      },
+      {
+        detail: {
+          summary: 'Public menu live stream (menu:live channel — no auth)',
+          description:
+            'stage-48: استریم عمومی کانال menu:live — رویدادهای «menu» (ناموجودی/تغییر حالت ارسال/وضعیت محصول) ' +
+            'برای به‌روزرسانی درجای سبد خرید و چک‌اوت، حتی برای کاربر مهمان. pull-based + 15s heartbeat. ' +
+            'سقف: ۳ اتصال به‌ازای IP و ۵۰۰ کلی. دروازه‌ی ژئو همچنان فعال است.',
+        },
+      },
+    )
+
+  return new Elysia({ prefix: '/realtime' }).use(authed).use(menuStream)
+}

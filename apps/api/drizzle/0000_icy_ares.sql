@@ -43,6 +43,9 @@ CREATE TABLE "admin2_profiles" (
 	"order_details_read" boolean DEFAULT false NOT NULL,
 	"can_toggle_temporary_close" boolean DEFAULT false NOT NULL,
 	"can_edit_packaging_fee" boolean DEFAULT false NOT NULL,
+	"notifications_read" boolean DEFAULT false NOT NULL,
+	"notifications_send" boolean DEFAULT false NOT NULL,
+	"products_availability" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -160,6 +163,7 @@ CREATE TABLE "coupons" (
 	"used_count" integer DEFAULT 0 NOT NULL,
 	"is_public" boolean DEFAULT false NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
+	"cron_enabled" boolean DEFAULT false NOT NULL,
 	"starts_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"ends_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -306,6 +310,9 @@ CREATE TABLE "categories" (
 	"has_sizes" boolean DEFAULT false NOT NULL,
 	"size_names" jsonb DEFAULT '[]'::jsonb,
 	"size_names_ar" jsonb,
+	"courier_enabled" boolean DEFAULT true NOT NULL,
+	"takeaway_enabled" boolean DEFAULT true NOT NULL,
+	"dine_in_enabled" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -354,6 +361,10 @@ CREATE TABLE "products" (
 	"views" integer DEFAULT 0 NOT NULL,
 	"sales" integer DEFAULT 0 NOT NULL,
 	"status" varchar(20) DEFAULT 'ACTIVE' NOT NULL,
+	"is_available" boolean DEFAULT true NOT NULL,
+	"courier_allowed" boolean DEFAULT true NOT NULL,
+	"takeaway_allowed" boolean DEFAULT true NOT NULL,
+	"dine_in_allowed" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -506,6 +517,18 @@ CREATE TABLE "translation_jobs" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"started_at" timestamp with time zone,
 	"finished_at" timestamp with time zone
+);
+--> statement-breakpoint
+CREATE TABLE "notification_log" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"type" varchar(40) NOT NULL,
+	"title" varchar(120) NOT NULL,
+	"body" varchar(300) NOT NULL,
+	"url" varchar(300),
+	"audience" integer DEFAULT 0 NOT NULL,
+	"sender_role" varchar(16) DEFAULT 'system' NOT NULL,
+	"sender_name" varchar(120),
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "notifications" (
@@ -686,6 +709,9 @@ CREATE UNIQUE INDEX "reconcile_finding_key" ON "reconcile_findings" USING btree 
 CREATE INDEX "reconcile_finding_status_idx" ON "reconcile_findings" USING btree ("status","severity","first_seen_at");--> statement-breakpoint
 CREATE INDEX "translation_jobs_claim_idx" ON "translation_jobs" USING btree ("status","next_attempt_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "translation_jobs_pending_key" ON "translation_jobs" USING btree ("entity_type","entity_id") WHERE "translation_jobs"."status" = 'pending';--> statement-breakpoint
+CREATE INDEX "notification_log_created_idx" ON "notification_log" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX "notification_log_type_idx" ON "notification_log" USING btree ("type");--> statement-breakpoint
+CREATE INDEX "notification_log_role_idx" ON "notification_log" USING btree ("sender_role");--> statement-breakpoint
 CREATE INDEX "notifications_user_created_idx" ON "notifications" USING btree ("user_id","created_at");--> statement-breakpoint
 CREATE INDEX "notifications_user_unread_idx" ON "notifications" USING btree ("user_id","read_at");--> statement-breakpoint
 CREATE INDEX "notifications_created_idx" ON "notifications" USING btree ("created_at");--> statement-breakpoint

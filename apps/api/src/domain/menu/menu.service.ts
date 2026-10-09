@@ -1,8 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
-// round-48 — sinshin-food-delivery — فایل 20 از 97
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage forty-three
+// stage-48 —
+//   • حالت‌های سفارش: دسته (۳ سوئیچ پایه) + محصول (۳ پرچم؛ مؤثر = AND)
+//   • is_available محصولات + toggleAvailability
+//   • SSE کانال عمومی menu:live — تغییر موجودی/حالت/وضعیت → سبد/چک‌اوت زنده
+//   • پخش خودکار نوتیفیکیشن «تخفیف محصول» برای همه کاربران (بدون کرون)
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/menu/menu.service.ts
@@ -10,6 +14,8 @@ import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
+import type { SseHub } from '#/infra/realtime/sse-hub'
+import type { NotificationService } from '#/domain/notification/notification.service'
 import { VersionedCache } from '#/domain/shared/versioned-cache'
 import {
   categories,
@@ -134,6 +140,55 @@ export type CategoryRow = typeof categories.$inferSelect
 export type MainCategoryRow = typeof mainCategories.$inferSelect
 
 /**
+ * stage-48 — حالت‌های مؤثر سفارشِ یک محصول = پرچم دسته AND پرچم محصول.
+ * قفل سلسله‌مراتبی: دسته خاموش ⇒ محصول هرچه باشد، مؤثراً خاموش است.
+ * دستهِ ناموجود (legacy) = هر سه روشن (پیش‌فرض مهاجرت).
+ */
+export interface OrderModes {
+  courier: boolean
+  takeaway: boolean
+  dineIn: boolean
+}
+
+export const ALL_MODES_ON: OrderModes = { courier: true, takeaway: true, dineIn: true }
+
+export function categoryModesOf(c: CategoryRow | undefined | null): OrderModes {
+  if (!c) return ALL_MODES_ON
+  return {
+    courier: c.courierEnabled && true,
+    takeaway: c.takeawayEnabled && true,
+    dineIn: c.dineInEnabled && true,
+  }
+}
+
+/** دسته‌ای از دسته‌ها → نقشۀ حالت‌ها (یک کوئری، همه‌ی ردیف‌ها) */
+export async function loadCategoryModes(
+  db: DbOrTx,
+  ids: readonly string[],
+): Promise<Map<CategoryId, OrderModes>> {
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return new Map()
+  const rows = await db
+    .select({
+      id: categories.id,
+      courierEnabled: categories.courierEnabled,
+      takeawayEnabled: categories.takeawayEnabled,
+      dineInEnabled: categories.dineInEnabled,
+    })
+    .from(categories)
+    .where(inArray(categories.id, unique as CategoryId[]))
+  const out = new Map<CategoryId, OrderModes>()
+  for (const r of rows) {
+    out.set(r.id, {
+      courier: r.courierEnabled,
+      takeaway: r.takeawayEnabled,
+      dineIn: r.dineInEnabled,
+    })
+  }
+  return out
+}
+
+/**
  * round-34 — نمای عمومی دسته: COALESCE(ar, fa) روی نام و قالب سایزها.
  * nameAr/sizeNamesAr نگه داشته می‌شوند (فیلد اختیاری قرارداد shared؛ مصرف‌کننده‌ی
  * عمومی نادیده‌شان می‌گیرد، ادمین برای ویرایش می‌خواندش).
@@ -205,7 +260,14 @@ export async function loadPricingBases(
  * است و بقیه به همان نتیجه می‌پیوندند.
  */
 export class MenuService {
-  constructor(private readonly deps: { db: Db; redis: RedisService }) {
+  constructor(private readonly deps: {
+    db: Db
+    redis: RedisService
+    /** stage-48 — پخش نوتیفیکیشن تخفیف (اختیاری؛ fail-soft) */
+    notifications?: NotificationService
+    /** stage-48 — SSE عمومی menu:live (اختیاری؛ fail-soft) */
+    hub?: SseHub
+  }) {
     // رارد ۴۸ — ماشین‌آلات کش به VersionedCache مشترک رفت؛ کلید‌ها و
     // رفتار بایت‌به‌بایت همان قبل است (menu:v{ver}:...)
     this.cache = new VersionedCache({
@@ -294,8 +356,12 @@ export class MenuService {
       const catMap = new Map(
         cats.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)] as const),
       )
+      // stage-48 — نقشه‌ی حالت‌های دسته برای محاسبه‌ی حالت مؤثر هر محصول
+      const catModes = new Map(
+        cats.map((c) => [c.id, categoryModesOf(c)] as const),
+      )
       return {
-        products: await this.withSizes(rows, catMap, lang),
+        products: await this.withSizes(rows, catMap, lang, { catModes }),
         categories: cats.map((c) => categoryView(c, lang)),
       }
     })
@@ -316,6 +382,8 @@ export class MenuService {
         [row],
         new Map([[row.categoryId, pickAr(lang, cat?.nameAr, cat?.name ?? '')]]),
         lang,
+        // stage-48 — حالت مؤثر = دسته AND محصول
+        { catModes: new Map([[row.categoryId, categoryModesOf(cat)]]) },
       )
       return list[0] ?? null
     }
@@ -442,6 +510,10 @@ export class MenuService {
     /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
     nameAr?: string | null
     sizeNamesAr?: string[] | null
+    /** stage-48 — حالت‌های سفارش پایه (پیش‌فرض هر سه روشن) */
+    courierEnabled?: boolean
+    takeawayEnabled?: boolean
+    dineInEnabled?: boolean
   }): Promise<{ success: boolean; message?: string }> {
     const slug = await this.uniqueCategorySlug(input.name.trim())
     await this.deps.db.insert(categories).values({
@@ -452,6 +524,10 @@ export class MenuService {
       hasSizes: input.hasSizes,
       sizeNames: input.hasSizes ? input.sizeNames : [],
       sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
+      // stage-48 — حالت‌های سفارش (undefined = پیش‌فرض روشن)
+      courierEnabled: input.courierEnabled ?? true,
+      takeawayEnabled: input.takeawayEnabled ?? true,
+      dineInEnabled: input.dineInEnabled ?? true,
     } as typeof categories.$inferInsert)
     await this.cache.invalidate()
     return { success: true }
@@ -466,8 +542,16 @@ export class MenuService {
     /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
     nameAr?: string | null
     sizeNamesAr?: string[] | null
+    /** stage-48 — حالت‌های سفارش پایه (undefined = دست‌نخورده) */
+    courierEnabled?: boolean
+    takeawayEnabled?: boolean
+    dineInEnabled?: boolean
   }): Promise<void> {
     const catId = asCategoryId(input.id)
+    // stage-48 — ردیف قبلی برای تشخیص تغییر حالت‌ها (SSE + قید ارث‌بری)
+    const before = await this.deps.db.query.categories.findFirst({
+      where: eq(categories.id, catId),
+    })
     await this.deps.db
       .update(categories)
       .set({
@@ -477,9 +561,23 @@ export class MenuService {
         hasSizes: input.hasSizes,
         sizeNames: input.hasSizes ? input.sizeNames : [],
         sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
+        ...(input.courierEnabled !== undefined ? { courierEnabled: input.courierEnabled } : {}),
+        ...(input.takeawayEnabled !== undefined ? { takeawayEnabled: input.takeawayEnabled } : {}),
+        ...(input.dineInEnabled !== undefined ? { dineInEnabled: input.dineInEnabled } : {}),
       })
       .where(eq(categories.id, catId))
     await this.cache.invalidate()
+
+    // stage-48 — تغییر حالت‌های دسته ⇒ همه‌ی محصولات ذیلش مؤثراً عوض می‌شوند →
+    // سبد/چک‌اوتِ باز باید فوراً رفرش شوند (رویداد عمومی بدون productId).
+    if (
+      before &&
+      (before.courierEnabled !== (input.courierEnabled ?? before.courierEnabled) ||
+        before.takeawayEnabled !== (input.takeawayEnabled ?? before.takeawayEnabled) ||
+        before.dineInEnabled !== (input.dineInEnabled ?? before.dineInEnabled))
+    ) {
+      this.publishMenuLive({ productId: null, reason: 'category' })
+    }
   }
 
   async deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
@@ -533,13 +631,26 @@ export class MenuService {
     const catIds = [...new Set(rows.map((r) => r.categoryId))]
     const cats = catIds.length
       ? await this.deps.db
-        .select({ id: categories.id, name: categories.name })
+        .select({
+          id: categories.id,
+          name: categories.name,
+          courierEnabled: categories.courierEnabled,
+          takeawayEnabled: categories.takeawayEnabled,
+          dineInEnabled: categories.dineInEnabled,
+        })
         .from(categories)
         .where(inArray(categories.id, catIds))
       : []
     const catMap = new Map(cats.map((c) => [c.id, c.name]))
+    // stage-48 — حالت مؤثر = دسته AND محصول
+    const catModes = new Map(
+      cats.map((c) => [
+        c.id,
+        { courier: c.courierEnabled, takeaway: c.takeawayEnabled, dineIn: c.dineInEnabled } satisfies OrderModes,
+      ]),
+    )
 
-    return { products: await this.withSizes(rows, catMap), total }
+    return { products: await this.withSizes(rows, catMap, undefined, { catModes }), total }
   }
 
   async adminProductDetails(id: string): Promise<ProductDto | null> {
@@ -555,6 +666,8 @@ export class MenuService {
     })
     const list = await this.withSizes([row], new Map([[row.categoryId, cat?.name ?? '']]), 'fa', {
       includeAr: true,
+      // stage-48 — حالت مؤثر = دسته AND محصول (فرم ادمین برای قفل سوئیچ‌ها)
+      catModes: new Map([[row.categoryId, categoryModesOf(cat)]]),
     })
     return list[0] ?? null
   }
@@ -580,6 +693,12 @@ export class MenuService {
     nameAr?: string | null
     descriptionAr?: string | null
     ingredientsAr?: string[] | null
+    /** stage-48 — موجودی فروش (پیش‌فرض true) */
+    isAvailable?: boolean
+    /** stage-48 — پرچم‌های حالت سفارش (پیش‌فرض true = ارث کامل از دسته) */
+    courierAllowed?: boolean
+    takeawayAllowed?: boolean
+    dineInAllowed?: boolean
   }): Promise<{ success: boolean; id?: string; message?: string }> {
     const nameAr = nullIfEmpty(input.nameAr)
     const descriptionAr = nullIfEmpty(input.descriptionAr)
@@ -608,6 +727,11 @@ export class MenuService {
         sizesEnabled: input.sizesEnabled ?? false,
         ingredients: input.ingredients ?? [],
         status: 'ACTIVE',
+        // stage-48 — موجودی + حالت‌های سفارش (پیش‌فرض روشن = ارث از دسته)
+        isAvailable: input.isAvailable ?? true,
+        courierAllowed: input.courierAllowed ?? true,
+        takeawayAllowed: input.takeawayAllowed ?? true,
+        dineInAllowed: input.dineInAllowed ?? true,
       } as typeof products.$inferInsert)
       .returning()
     if (!created) return { success: false, message: 'ذخیره‌سازی ناموفق بود' }
@@ -616,6 +740,9 @@ export class MenuService {
       await this.insertSizes(created.id, input.sizes)
     }
     await this.cache.invalidate()
+
+    // stage-48 — تخفیف فعال هنگام ساخت ⇒ پخش فوری به همه (بدون کرون)
+    await this.broadcastDiscountIfActive(created)
     return { success: true, id: created.id }
   }
 
@@ -640,8 +767,18 @@ export class MenuService {
     nameAr?: string | null
     descriptionAr?: string | null
     ingredientsAr?: string[] | null
+    /** stage-48 — موجودی فروش (undefined = دست‌نخورده) */
+    isAvailable?: boolean
+    /** stage-48 — پرچم‌های حالت سفارش (undefined = دست‌نخورده) */
+    courierAllowed?: boolean
+    takeawayAllowed?: boolean
+    dineInAllowed?: boolean
   }): Promise<void> {
     const pid = asProductId(input.id)
+    // stage-48 — ردیف قبلی: تشخیص تغییر موجودی/حالت (SSE) + تغییر تخفیف (پخش)
+    const before = await this.deps.db.query.products.findFirst({
+      where: eq(products.id, pid),
+    })
     // round-34 — نرمال‌سازی: '' → NULL؛ مواد اولیه‌ی خالی → NULL
     const nameAr = nullIfEmpty(input.nameAr)
     const descriptionAr = nullIfEmpty(input.descriptionAr)
@@ -682,6 +819,11 @@ export class MenuService {
         galleryImages: input.galleryImages ?? [],
         sizesEnabled: input.sizesEnabled ?? false,
         ingredients: input.ingredients ?? [],
+        // stage-48 — موجودی/حالت‌ها: undefined = حفظ مقدار قبلی (دراپ Removes undefined از SET)
+        ...(input.isAvailable !== undefined ? { isAvailable: input.isAvailable } : {}),
+        ...(input.courierAllowed !== undefined ? { courierAllowed: input.courierAllowed } : {}),
+        ...(input.takeawayAllowed !== undefined ? { takeawayAllowed: input.takeawayAllowed } : {}),
+        ...(input.dineInAllowed !== undefined ? { dineInAllowed: input.dineInAllowed } : {}),
         updatedAt: new Date(),
       })
       .where(eq(products.id, pid))
@@ -746,6 +888,25 @@ export class MenuService {
     }
 
     await this.cache.invalidate()
+
+    // ── stage-48: عوارض زنده ──
+    const after = await this.deps.db.query.products.findFirst({
+      where: eq(products.id, pid),
+    })
+    if (after) {
+      // ۱) تغییر موجودی/حالت/وضعیت ⇒ SSE فوری برای سبد/چک‌اوت‌های باز
+      const modesOrStatusChanged =
+        (input.isAvailable !== undefined && before?.isAvailable !== input.isAvailable) ||
+        (input.courierAllowed !== undefined && before?.courierAllowed !== input.courierAllowed) ||
+        (input.takeawayAllowed !== undefined && before?.takeawayAllowed !== input.takeawayAllowed) ||
+        (input.dineInAllowed !== undefined && before?.dineInAllowed !== input.dineInAllowed) ||
+        before?.status !== after.status
+      if (modesOrStatusChanged) {
+        await this.publishProductLive(after)
+      }
+      // ۲) تخفیف مادی/جدید فعال شد ⇒ پخش فوری نوتیفیکیشن به همه
+      await this.broadcastDiscountIfActive(after, before)
+    }
   }
 
   async toggleProductStatus(id: string): Promise<void> {
@@ -758,6 +919,31 @@ export class MenuService {
       .set({ status: row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE', updatedAt: new Date() })
       .where(eq(products.id, row.id))
     await this.cache.invalidate()
+    // stage-48 — سبد/چک‌اوتِ باز باید فوراً بداند (محصول از منو رفت/برگشت)
+    await this.publishProductLive({ ...row, status: row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' })
+  }
+
+  /**
+   * stage-48 — موجود/ناموجود کردن سریع محصول (بدون فرم کامل).
+   * جدا از toggleProductStatus (وضعیت منو) است: ناموجود = از فروش موقتاً خارج
+   * ولی در منو می‌ماند (کارت تار + هشدار نارنجی).
+   */
+  async setProductAvailability(id: string, available: boolean): Promise<{ success: boolean; message?: string }> {
+    const pid = asProductId(id)
+    const row = await this.deps.db.query.products.findFirst({
+      where: eq(products.id, pid),
+    })
+    if (!row) return { success: false, message: 'محصول پیدا نشد' }
+    if (row.isAvailable === available) {
+      return { success: true, message: available ? 'از قبل موجود است' : 'از قبل ناموجود است' }
+    }
+    await this.deps.db
+      .update(products)
+      .set({ isAvailable: available, updatedAt: new Date() })
+      .where(eq(products.id, pid))
+    await this.cache.invalidate()
+    await this.publishProductLive({ ...row, isAvailable: available })
+    return { success: true }
   }
 
   // ── داخلی ──
@@ -788,8 +974,12 @@ export class MenuService {
     rows: Array<typeof products.$inferSelect>,
     catMap: Map<CategoryId, string>,
     lang: Lang = 'fa',
-    /** round-34 — پاسخ ادمین: فیلدهای ar خام هم برگردند (فرم ویرایش) */
-    opts?: { includeAr?: boolean },
+    opts?: {
+      /** round-34 — پاسخ ادمین: فیلدهای ar خام هم برگردند (فرم ویرایش) */
+      includeAr?: boolean
+      /** stage-48 — حالت‌های دسته برای محاسبه‌ی حالت مؤثر (نیامد = همه روشن) */
+      catModes?: Map<CategoryId, OrderModes>
+    },
   ): Promise<ProductDto[]> {
     const sizedIds = rows.filter((r) => r.sizesEnabled).map((r) => r.id)
     const sizeRows = sizedIds.length
@@ -843,6 +1033,11 @@ export class MenuService {
       views: r.views,
       sales: r.sales,
       status: r.status,
+      // ── stage-48 — موجودی + حالت‌های مؤثر سفارش (دسته AND محصول) ──
+      isAvailable: r.isAvailable,
+      courierAllowed: (opts?.catModes?.get(r.categoryId)?.courier ?? true) && r.courierAllowed,
+      takeawayAllowed: (opts?.catModes?.get(r.categoryId)?.takeaway ?? true) && r.takeawayAllowed,
+      dineInAllowed: (opts?.catModes?.get(r.categoryId)?.dineIn ?? true) && r.dineInAllowed,
       // round-34 — فقط پاسخ ادمین (فرم ویرایش دوزبانه؛ بج دستی/خودکار/ندارد)
       ...(opts?.includeAr
         ? {
@@ -850,6 +1045,10 @@ export class MenuService {
             descriptionAr: r.descriptionAr ?? null,
             ingredientsAr: r.ingredientsAr ?? null,
             arAuto: r.arAuto,
+            /** stage-48 — قفل سوئیچ‌های فرم: دسته خاموش ⇒ محصول نمی‌تواند روشن کند */
+            categoryCourierEnabled: opts.catModes?.get(r.categoryId)?.courier ?? true,
+            categoryTakeawayEnabled: opts.catModes?.get(r.categoryId)?.takeaway ?? true,
+            categoryDineInEnabled: opts.catModes?.get(r.categoryId)?.dineIn ?? true,
           }
         : {}),
     }))
@@ -866,6 +1065,132 @@ export class MenuService {
       })
       if (!clash) return slug
       slug = `${base}-${++i}`
+    }
+  }
+
+  // ═══ stage-48 — ابزارهای زنده (SSE + پخش تخفیف) ═══
+
+  /**
+   * publish روی کانال عمومی menu:live — مشترکین (سبد/چک‌اوتِ باز، حتی مهمان)
+   * رویداد را می‌گیرند و جزئیات سبد/پیش‌نمایش را رفرش می‌کنند.
+   * هرگز throw نمی‌شود (fail-soft).
+   */
+  private async publishMenuLive(data: {
+    productId: string | null
+    reason?: string
+    isAvailable?: boolean
+    courierAllowed?: boolean
+    takeawayAllowed?: boolean
+    dineInAllowed?: boolean
+  }): Promise<void> {
+    try {
+      this.deps.hub?.publish('menu:live', {
+        event: 'menu',
+        data: {
+          productId: data.productId,
+          reason: data.reason ?? 'product',
+          isAvailable: data.isAvailable,
+          courierAllowed: data.courierAllowed,
+          takeawayAllowed: data.takeawayAllowed,
+          dineInAllowed: data.dineInAllowed,
+          at: new Date().toISOString(),
+        },
+      })
+    } catch (err) {
+      console.error('[menu] publish menu:live ناموفق:', err)
+    }
+  }
+
+  /** ردیف محصول (یا آبجکت ترکیبی) → رویداد زنده با حالت‌های مؤثر */
+  private async publishProductLive(
+    row: Pick<
+      typeof products.$inferSelect,
+      | 'id' | 'categoryId' | 'status'
+      | 'isAvailable' | 'courierAllowed' | 'takeawayAllowed' | 'dineInAllowed'
+    >,
+  ): Promise<void> {
+    const modes = await loadCategoryModes(this.deps.db, [row.categoryId]).then(
+      (m) => m.get(row.categoryId) ?? ALL_MODES_ON,
+    )
+    await this.publishMenuLive({
+      productId: row.id,
+      reason: 'product',
+      isAvailable: row.isAvailable,
+      courierAllowed: modes.courier && row.courierAllowed,
+      takeawayAllowed: modes.takeaway && row.takeawayAllowed,
+      dineInAllowed: modes.dineIn && row.dineInAllowed,
+    })
+  }
+
+  /**
+   * stage-48 — بهترین درصد تخفیفِ «فعال» یک ردیف محصول:
+   * بدون سایز → تخفیف خود محصول؛ با سایز → بیشترین تخفیف فعالِ سایزها.
+   */
+  private async bestActiveDiscountPct(
+    row: Pick<
+      typeof products.$inferSelect,
+      'id' | 'sizesEnabled' | 'discountPercentage' | 'discountStartsAt' | 'discountEndsAt'
+    >,
+  ): Promise<number> {
+    if (!row.sizesEnabled) {
+      return discountActiveNow(row) ? row.discountPercentage : 0
+    }
+    const sizes = await this.deps.db
+      .select()
+      .from(productSizes)
+      .where(eq(productSizes.productId, asProductId(row.id)))
+    let best = 0
+    for (const s of sizes) {
+      if (sizeDiscountActiveNow(s) && s.discountPercentage > best) best = s.discountPercentage
+    }
+    return best
+  }
+
+  /**
+   * stage-48 — پخش فوری نوتیفیکیشن «تخفیف محصول» به همه‌ی کاربران.
+   *   • create: تخفیف فعال ⇒ پخش.
+   *   • update: فقط وقتی تخفیف «مادی» تغییر کرده (درصد/پنجره/سایز‌ها) و نتیجه
+   *     فعال است — ویرایش‌های بی‌ربط به تخفیف (مثلاً توضیحات) پخش نمی‌شوند.
+   * خروجی system در notification_log ثبت می‌شود. هرگز throw نمی‌شود.
+   */
+  private async broadcastDiscountIfActive(
+    after: Pick<
+      typeof products.$inferSelect,
+      | 'id' | 'name' | 'categoryId' | 'sizesEnabled' | 'status'
+      | 'discountPercentage' | 'discountStartsAt' | 'discountEndsAt'
+      | 'isAvailable' | 'courierAllowed' | 'takeawayAllowed' | 'dineInAllowed'
+    >,
+    before?: typeof products.$inferSelect | null,
+  ): Promise<void> {
+    try {
+      const svc = this.deps.notifications
+      if (!svc) return
+      if (after.status !== 'ACTIVE') return
+
+      const pctAfter = await this.bestActiveDiscountPct(after)
+      if (pctAfter <= 0) return
+
+      let materialChange = true
+      if (before) {
+        const pctBefore = await this.bestActiveDiscountPct(before)
+        const windowChanged =
+          before.discountStartsAt?.getTime() !== after.discountStartsAt?.getTime() ||
+          before.discountEndsAt?.getTime() !== after.discountEndsAt?.getTime() ||
+          before.sizesEnabled !== after.sizesEnabled
+        materialChange = pctBefore !== pctAfter || windowChanged || pctBefore === 0
+        if (!materialChange) return
+      }
+
+      await svc.broadcast({
+        type: 'product_discount',
+        title: '🎉 تخفیف ویژه در سین‌شین!',
+        body: `«${after.name}» الان با ${pctAfter}٪ تخفیف در دسترس است — همین حالا سفارش بده.`,
+        url: `/products/${after.id}`,
+        data: { productId: after.id, discount: pctAfter },
+      })
+      console.log(`[menu] discount broadcast: ${after.name} (${pctAfter}%)`)
+    } catch (err) {
+      console.error('[menu] discount broadcast ناموفق:', err)
     }
   }
 }

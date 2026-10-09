@@ -6,80 +6,85 @@ import { CartItemRow } from './CartItemRow'
 import { useI18n } from '#/i18n'
 
 interface CartItemRowData {
-	id: string
-	sizeId: string | null
-	sizeName: string | null
-	name: string
-	// ⬅ عوض شد: imageGradient → profileImage (قرارداد API)
-	profileImage: string | null
-	originalPrice: number
-	finalPrice: number
-	quantity: number
-	lineTotal: number
+        id: string
+        sizeId: string | null
+        sizeName: string | null
+        name: string
+        // ⬅ عوض شد: imageGradient → profileImage (قرارداد API)
+        profileImage: string | null
+        originalPrice: number
+        finalPrice: number
+        quantity: number
+        lineTotal: number
+        /** stage-48 — ناموجود + حالت‌های مؤثر سفارش */
+        available?: boolean
+        courierAllowed?: boolean
+        takeawayAllowed?: boolean
+        dineInAllowed?: boolean
 }
 
 // round-12 — ردیف استور که سرور آن را حذف کرده (محصول حذف/غیرفعال شده).
 // قبلاً این ردیف‌ها هیچ جایی رندر نمی‌شدند ولی تعدادشان در «تعداد کل اقلام»
 // می‌ماند و راه حذف نداشتند جز خالی‌کردن کل سبد.
 export interface UnavailableCartItem {
-	key: string
-	quantity: number
+        key: string
+        quantity: number
 }
 
 interface CartItemsListProps {
-	items: CartItemRowData[]
-	unavailableItems: UnavailableCartItem[]
-	onIncrement: (key: string, quantity: number) => void
-	onDecrement: (key: string, quantity: number) => void
-	onRemove: (key: string) => void
+        items: CartItemRowData[]
+        unavailableItems: UnavailableCartItem[]
+        onIncrement: (key: string, quantity: number) => void
+        onDecrement: (key: string, quantity: number) => void
+        onRemove: (key: string) => void
 }
 
 // رارد ۳۲ — متن‌های ردیف ناموجود از دیکشنری + تعداد با فرمتر زبان‌آگاه
 export const CartItemsList = memo(function CartItemsList({
-	items,
-	unavailableItems,
-	onIncrement,
-	onDecrement,
-	onRemove,
+        items,
+        unavailableItems,
+        onIncrement,
+        onDecrement,
+        onRemove,
 }: CartItemsListProps) {
-	const { t, fmt } = useI18n()
+        const { t, fmt } = useI18n()
 
-	return (
-		<div className="lg:col-span-2 space-y-4">
-			{unavailableItems.map((item) => (
-				<div
-					key={item.key}
-					className="flex items-center justify-between gap-4 p-4 rounded-2xl border border-dashed border-orange-300 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-500/5"
-				>
-					<div className="flex flex-col gap-1">
-						<p className="font-DanaDemiBold text-sm text-orange-600 dark:text-orange-400">
-							{t['cart.unavailable']}
-						</p>
-						<p className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium leading-relaxed">
-							{t['cart.unavailableHint']}
-							{item.quantity > 1 && ` (${fmt.num(item.quantity)} ${t['common.pcs']})`}
-						</p>
-					</div>
-					<button
-						type="button"
-						onClick={() => onRemove(item.key)}
-						className="p-2.5 rounded-xl bg-orange-500 text-white hover:bg-orange-600 transition cursor-pointer shrink-0"
-						aria-label={t['cart.removeUnavailable']}
-					>
-						<X size={18} />
-					</button>
-				</div>
-			))}
+        return (
+                <div className="lg:col-span-2 space-y-4">
+                        {unavailableItems.map((item) => (
+                                <div
+                                        key={item.key}
+                                        className="flex items-center justify-between gap-4 p-4 rounded-2xl border border-dashed border-orange-300 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-500/5"
+                                >
+                                        <div className="flex flex-col gap-1">
+                                                <p className="font-DanaDemiBold text-sm text-orange-600 dark:text-orange-400">
+                                                        {t['cart.unavailable']}
+                                                </p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium leading-relaxed">
+                                                        {t['cart.unavailableHint']}
+                                                        {item.quantity > 1 && ` (${fmt.num(item.quantity)} ${t['common.pcs']})`}
+                                                </p>
+                                        </div>
+                                        <button
+                                                type="button"
+                                                onClick={() => onRemove(item.key)}
+                                                className="p-2.5 rounded-xl bg-orange-500 text-white hover:bg-orange-600 transition cursor-pointer shrink-0"
+                                                aria-label={t['cart.removeUnavailable']}
+                                        >
+                                                <X size={18} />
+                                        </button>
+                                </div>
+                        ))}
 
-			{items.map((item) => (
-				<CartItemRow
-					key={cartItemKey(item.id, item.sizeId)}
-					item={item}
-					onIncrement={onIncrement}
-					onDecrement={onDecrement}
-					onRemove={onRemove}
-				/>
-			))}
-		</div>
-	)
+                        {items.map((item) => (
+                                <CartItemRow
+                                        key={cartItemKey(item.id, item.sizeId)}
+                                        item={item}
+                                        onIncrement={onIncrement}
+                                        onDecrement={onDecrement}
+                                        onRemove={onRemove}
+                                />
+                        ))}
+                </div>
+        )
 })

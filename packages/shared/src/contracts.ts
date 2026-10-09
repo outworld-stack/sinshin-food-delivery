@@ -95,6 +95,13 @@ export interface Category {
   sizeNames?: string[] | null
   /** round-34 — قالب نام سایزها به عربی (موازی با sizeNames) */
   sizeNamesAr?: string[] | null
+  /**
+   * stage-48 — حالت‌های سفارش پایه‌ی محصولاتِ این دسته (مبنا ارث‌بری).
+   * مؤثرِ هر محصول = پرچم دسته AND پرچم خود محصول.
+   */
+  courierEnabled: boolean
+  takeawayEnabled: boolean
+  dineInEnabled: boolean
 }
 
 export interface ProductSize {
@@ -146,6 +153,22 @@ export interface Product {
   views: number
   sales: number
   status: string
+  /**
+   * stage-48 — موجودیِ فروش (فعلاً ناموجود = false؛ جدا از status منو).
+   * سرور روی هر پاسخ پرش می‌کند (منو/جزئیات/ادمین).
+   */
+  isAvailable: boolean
+  /** stage-48 — حالت‌های مؤثر سفارش = دسته AND محصول (سروری) */
+  courierAllowed: boolean
+  takeawayAllowed: boolean
+  dineInAllowed: boolean
+  /**
+   * stage-48 — فقط پاسخ ادمین (adminProductDetails): حالت‌های پایه‌ی دسته
+   * برای قفل سوئیچ‌های فرم (دسته خاموش ⇒ محصول نمی‌تواند روشن کند).
+   */
+  categoryCourierEnabled?: boolean
+  categoryTakeawayEnabled?: boolean
+  categoryDineInEnabled?: boolean
   /** ═══ round-34 — لایه محتوای دوزبانه (فقط پاسخ ادمین پر می‌کند) ═══ */
   nameAr?: string | null
   descriptionAr?: string | null
@@ -179,6 +202,12 @@ export interface CartItemDto {
   finalPrice: number
   quantity: number
   lineTotal: number
+  /** stage-48 — ناموجود: false ⇒ هشدار نارنجی + خارج از جمع + قفل پرداخت */
+  available: boolean
+  /** stage-48 — حالت‌های مؤثر سفارش (دسته AND محصول) */
+  courierAllowed: boolean
+  takeawayAllowed: boolean
+  dineInAllowed: boolean
 }
 
 export interface CartDetails {
@@ -266,9 +295,22 @@ export interface CheckoutPreviewCoupon {
   message?: string
 }
 
+export interface CheckoutPreviewItem {
+  name: string
+  sizeName: string | null
+  unitPrice: number
+  quantity: number
+  /** stage-48 — ناموجود: هشدار نارنجی در چک‌اوت + قفل ثبت */
+  available: boolean
+  /** stage-48 — حالت‌های مؤثر سفارش (دسته AND محصول) */
+  courierAllowed: boolean
+  takeawayAllowed: boolean
+  dineInAllowed: boolean
+}
+
 export interface CheckoutPreviewData {
   breakdown: OrderBreakdown
-  items: { name: string; sizeName: string | null; unitPrice: number; quantity: number }[]
+  items: CheckoutPreviewItem[]
   coupon: CheckoutPreviewCoupon | null
 }
 
@@ -617,6 +659,8 @@ export interface CouponWithConditionsDto {
     usedCount: number
     isPublic: boolean
     isActive: boolean
+    /** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (اسکن/یادآور) */
+    cronEnabled: boolean
     startsAt: string
     endsAt: string | null
     /** رارد ۴۷ — همیشه روی سیم است (ردیف خام دیتابیس)؛ قبلاً در قرارداد جا افتاده بود */
@@ -720,6 +764,12 @@ export interface SubAdminPermissionsDto {
   /** stage-15 — نام واقعی روی سیم (قبلاً scopeHall/scopeTakeaway بود که API هرگز نمی‌فرستاد) */
   hall: boolean
   takeaway: boolean
+  /** stage-48 — مشاهده تاریخچه‌ی نوتیفیکیشن‌ها (پیش‌فرضِ افزودن: true) */
+  notificationsRead: boolean
+  /** stage-48 — ارسال نوتیفیکیشن عمومی (پیش‌فرضِ افزودن: false) */
+  notificationsSend: boolean
+  /** stage-48 — موجود/ناموجود کردن محصولات (پیش‌فرضِ افزودن: true) */
+  productsAvailability: boolean
 }
 
 /** رارد ۴۷ — بدنه‌ی PATCH دسترسی‌ها — به‌روزرسانی جزئی: همه‌ی کلیدها اختیاری.
@@ -739,6 +789,26 @@ export interface SubAdminRecordDto {
   sessions: AdminSessionDto[]
   /** stage-15: ادمینی که هنوز لاگین نکرده → null (کلاینت «—» نشان دهد) */
   lastActivity: Date | null
+}
+
+// ═══════════ stage-48 — تاریخچه‌ی ارسال نوتیفیکیشن (پنل ادمین/ادمین۲) ═══════════
+
+export interface NotificationLogDto {
+  id: string
+  type: string
+  title: string
+  body: string
+  url: string | null
+  audience: number
+  /** admin | admin2 | system */
+  senderRole: string
+  senderName: string | null
+  createdAt: Date
+}
+
+export interface NotificationHistoryData {
+  items: NotificationLogDto[]
+  total: number
 }
 
 export interface CourierOptionDto {

@@ -99,7 +99,6 @@ export interface AppDeps {
   settings: SettingsService
   orders: OrderService
   profile: ProfileService
-  /** round-20 — تصرف اتمیک تکرارناپذیری چک‌اوت (مقیم DB) */
   checkoutIdempotency: CheckoutIdempotency
   payments: PaymentService
   uploads: UploadService
@@ -117,11 +116,8 @@ export interface AppDeps {
   articles: ArticleService
   gallery: GalleryService
   geo: GeoService
-  /** round-35 — صف و پیش‌نمایش ترجمه‌ی خودکار (مترجم آفلاین NLLB) */
   translation: TranslationService
-  /** فاز-۲ — سیستم پوش نوتیفیکیشن */
   notifications: NotificationService
-  /** فاز-۲ — کلاینت سرویس‌های REST نشان */
   neshan: NeshanService
 }
 
@@ -279,10 +275,12 @@ export const buildApp = (deps: AppDeps) => {
       }),
     )
     // فاز-۲ — نوتیفیکیشن‌ها (صندوق + اشتراک پوش + broadcast ادمین)
+    // stage-48 — admin2 برای گارد مجوز‌های notificationsSend/notificationsRead
     .use(
       notificationRoutes({
         sessions: deps.sessions,
         notifications: deps.notifications,
+        admin2: deps.admin2,
       }),
     )
 

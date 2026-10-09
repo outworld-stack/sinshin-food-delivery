@@ -1,22 +1,33 @@
 // ═══════════════════════════════════════════════════════════════
-// phase-2 — sinshin-food-delivery — فایل جدید
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر:
+//   • broadcast: ادمین اصلی + ادمین۲ با مجوز notificationsSend؛
+//     فرستنده در notification_log ثبت می‌شود (نقش + نام)
+//   • /notifications/history: تاریخچه‌ی ارسال با فیلتر (جستجو/نوع/
+//     فرستنده/بازه/صفحه‌بندی) — ادمین اصلی + ادمین۲ با notificationsRead
+//   • POST /send (ارسال تست) حذف شد — خواسته‌ی صریح: باکس تست برداشته شود
 // ═══════════════════════════════════════════════════════════════
 
 // src/http/routes/notification.routes.ts
 import { Elysia, t } from 'elysia'
 
 import type { SessionService } from '#/domain/auth/session.service'
+import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { NotificationService } from '#/domain/notification/notification.service'
-import { requireAuth, requireAdmin } from '#/http/hooks/require-auth'
+import { requireAuth } from '#/http/hooks/require-auth'
+import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 
 export interface NotificationRoutesDeps {
   sessions: SessionService
   notifications: NotificationService
+  /** stage-48 — گارد مجوز ادمین۲ (notificationsSend / notificationsRead) */
+  admin2: Admin2Service
 }
 
 /**
- * فاز-۲ — مسیرهای نوتیفیکیشن.
+ * فاز-۲ + stage-48 — مسیرهای نوتیفیکیشن.
  *
  * کاربر (requireAuth):
  *  GET  /notifications               → لیست + خوانده‌نشده
@@ -26,9 +37,9 @@ export interface NotificationRoutesDeps {
  *  POST /notifications/subscriptions  → ثبت اشتراک Web Push
  *  DELETE /notifications/subscriptions → حذف اشتراک
  *
- * ادمین اصلی (requireAdmin):
- *  POST /notifications/broadcast  → پخش عمومی (همه‌ی کاربران)
- *  POST /notifications/send       → ارسال به یک کاربر (تست)
+ * پنل (ادمین اصلی همیشه؛ ادمین۲ با مجوز):
+ *  POST /notifications/broadcast  → پخش عمومی (send: notificationsSend)
+ *  GET  /notifications/history    → تاریخچه‌ی ارسال (read: notificationsRead)
  */
 export const notificationRoutes = (deps: NotificationRoutesDeps) => {
   const user = new Elysia({ prefix: '/notifications', tags: ['Notifications'] })
@@ -130,20 +141,31 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
       },
     )
 
-  // ── ادمین اصلی ──
-  const admin = new Elysia({ prefix: '/notifications', tags: ['Notifications'] })
-    .use(requireAdmin(deps.sessions))
+  // ── پنل — ادمین اصلی همیشه رد می‌شود؛ ادمین۲ با مجوز مربوطه ──
+  // (requireAdmin2Permission برای نقش admin بدون چک مجوز رد می‌شود)
+  const send = new Elysia({ prefix: '/notifications', tags: ['Notifications'] })
+    .use(
+      requireAdmin2Permission(
+        { sessions: deps.sessions, admin2: deps.admin2 },
+        'notificationsSend',
+      ),
+    )
 
     .post(
       '/broadcast',
-      async ({ body }) => {
-        const res = await deps.notifications.broadcast({
-          type: 'broadcast',
-          title: body.title.slice(0, 120),
-          body: body.body.slice(0, 300),
-          url: body.url || undefined,
-          data: {},
-        })
+      async ({ body, user }) => {
+        // stage-48 — فرستنده در تاریخچه ثبت می‌شود (نقش + نام/شماره)
+        const senderName = (user.name ?? '').trim() || user.phone
+        const res = await deps.notifications.broadcast(
+          {
+            type: 'broadcast',
+            title: body.title.slice(0, 120),
+            body: body.body.slice(0, 300),
+            url: body.url || undefined,
+            data: {},
+          },
+          { role: user.role === 'admin2' ? 'admin2' : 'admin', name: senderName },
+        )
         return { success: true, targeted: res.targeted }
       },
       {
@@ -153,35 +175,61 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           url: t.Optional(t.String({ maxLength: 300 })),
         }),
         detail: {
-          summary: 'Broadcast notification to all users (admin only)',
+          summary: 'Broadcast notification to all users (main admin or admin2 with notificationsSend)',
           description:
-            'به همه‌ی کاربران عادی: ردیف صندوق + پوش به مشترکان. ادمین‌ها هدف نیستند.',
+            'به همه‌ی کاربران عادی: ردیف صندوق + پوش به مشترکان. ادمین‌ها هدف نیستند. ' +
+            'stage-48: هر ارسال در تاریخچه (notification_log) با نقش/نام فرستنده ثبت می‌شود.',
         },
       },
     )
 
-    .post(
-      '/send',
-      async ({ body }) => {
-        const res = await deps.notifications.notifyUser(body.userId, {
-          type: 'system',
-          title: body.title.slice(0, 120),
-          body: body.body.slice(0, 300),
-          url: body.url || undefined,
-          data: {},
+  const history = new Elysia({ prefix: '/notifications', tags: ['Notifications'] })
+    .use(
+      requireAdmin2Permission(
+        { sessions: deps.sessions, admin2: deps.admin2 },
+        'notificationsRead',
+      ),
+    )
+
+    .get(
+      '/history',
+      async ({ query }) => {
+        const from = query.from ? dateOrUndefined(query.from) : undefined
+        const to = query.to ? dateOrUndefined(query.to) : undefined
+        return deps.notifications.listHistory({
+          search: query.search || undefined,
+          type: query.type || undefined,
+          senderRole: query.sender || undefined,
+          from,
+          to,
+          page: query.page,
+          limit: query.limit,
         })
-        return { success: res.id !== null, pushed: res.pushed }
       },
       {
-        body: t.Object({
-          userId: t.String({ maxLength: 40 }),
-          title: t.String({ minLength: 2, maxLength: 120 }),
-          body: t.String({ minLength: 2, maxLength: 300 }),
-          url: t.Optional(t.String({ maxLength: 300 })),
+        query: t.Object({
+          page: t.Number({ minimum: 1 }),
+          limit: t.Number({ minimum: 5, maximum: 100 }),
+          search: t.Optional(t.String({ maxLength: 80 })),
+          type: t.Optional(t.String({ maxLength: 40 })),
+          sender: t.Optional(t.String({ maxLength: 16 })),
+          from: t.Optional(t.String({ maxLength: 30 })),
+          to: t.Optional(t.String({ maxLength: 30 })),
         }),
-        detail: { summary: 'Send notification to one user (admin only — for testing)' },
+        detail: {
+          summary: 'Notification send history with advanced filters (main admin or admin2 with notificationsRead)',
+          description:
+            'stage-48: تاریخچه‌ی ارسال‌های گروهی (broadcast ادمین/ادمین۲ + پخش خودکار تخفیف محصول). ' +
+            'فیلترها: جستجو در عنوان/متن، نوع، فرستنده (admin/admin2/system)، بازه‌ی تاریخ، صفحه‌بندی.',
+        },
       },
     )
 
-  return new Elysia().use(user).use(admin)
+  return new Elysia().use(user).use(send).use(history)
+}
+
+/** تاریخ ISO خراب → undefined (نه Invalid Date → RangeError → 500 — الگوی رارد M21) */
+function dateOrUndefined(raw: string): Date | undefined {
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? undefined : d
 }

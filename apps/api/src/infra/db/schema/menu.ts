@@ -1,7 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
-// round-34 — sinshin-food-delivery — فایل 3 از 49
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/infra/db/schema/menu.ts
 // وضعیت: جایگزینی کامل فایل موجود
+// stage-48 — حالت‌های سفارش (پیک/بیرون‌بر/سرو در محل):
+//        categories سه سوئیچ پایه + products سه پرچم ارث‌بری
+//        (مؤثر = دسته AND محصول) + is_available محصولات.
 // round-47 — تخفیف زمان‌دار: ستون‌های products (discount_starts_at/discount_ends_at)
 //        و product_sizes (discount_percentage + پنجره). NULL = بدون محدودیت (رفتار قبلی).
 // ═══════════════════════════════════════════════════════════════
@@ -56,12 +59,22 @@ export const categories = pgTable(
     slug: varchar('slug', { length: 60 }).notNull(),
     /** round-34 — نام عربی دسته (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
-    /** سایزبندی برای این دسته فعال است؟ (پیتزا) */
+    /** سایزبندی برای این دسته فعال است؟ (پیتزا) — stage-48: از مودال دسته حذف شد؛ ستون برای سازگاری مانده */
     hasSizes: boolean('has_sizes').notNull().default(false),
     /** قالب نام سایزها — کوچک/متوسط/بزرگ/خانوادگی */
     sizeNames: jsonb('size_names').$type<string[]>().default([]),
     /** round-34 — قالب نام سایزها به عربی (موازی با sizeNames) */
     sizeNamesAr: jsonb('size_names_ar').$type<string[]>(),
+    /**
+     * stage-48 — حالت‌های سفارشِ مجاز برای «محصولاتِ این دسته» (پایه‌ی ارث‌بری).
+     * محصول = دسته AND پرچم خود محصول؛ یعنی اگر دسته خاموش باشد، محصولِ روشن هم
+     * مؤثراً خاموش است (قفل سلسله‌مراتبی). هر سه به‌طور پیش‌فرض روشن‌اند.
+     */
+    courierEnabled: boolean('courier_enabled').notNull().default(true),
+    /** تحویل در محل — بیرون‌بر (PICKUP) */
+    takeawayEnabled: boolean('takeaway_enabled').notNull().default(true),
+    /** تحویل در محل با سرو (DINE_IN) */
+    dineInEnabled: boolean('dine_in_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -117,6 +130,19 @@ export const products = pgTable(
     views: integer('views').notNull().default(0),
     sales: integer('sales').notNull().default(0),
     status: varchar('status', { length: 20 }).notNull().default('ACTIVE'), // ACTIVE | INACTIVE
+    /**
+     * stage-48 — موجودیِ فروشِ محصول (موجود = true). جدا از status است:
+     * status=INACTIVE یعنی «از منو حذف»؛ is_available=false یعنی «فعلاً ناموجود»
+     * (کارت تار + قفل خرید؛ سفارش/سبد باید هشدار نارنجی بگیرند).
+     */
+    isAvailable: boolean('is_available').notNull().default(true),
+    /**
+     * stage-48 — پرچم‌های حالت سفارش محصول (مؤثر = دسته AND این پرچم‌ها).
+     * پیش‌فرض true = ارث کامل از دسته؛ ادمین فقط می‌تواند محدودترش کند.
+     */
+    courierAllowed: boolean('courier_allowed').notNull().default(true),
+    takeawayAllowed: boolean('takeaway_allowed').notNull().default(true),
+    dineInAllowed: boolean('dine_in_allowed').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

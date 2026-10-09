@@ -46,7 +46,12 @@ import {
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
 import { signedWalletAmount } from "#/domain/shared/wallet-sql";
-import { finalPriceOf, loadPricingBases, sizeFinalPriceOf } from "#/domain/menu/menu.service";
+import {
+        finalPriceOf,
+        loadCategoryModes,
+        loadPricingBases,
+        sizeFinalPriceOf,
+} from "#/domain/menu/menu.service";
 import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.service";
 import type { SettingsService } from "#/domain/settings/settings.service";
 import type { CouponService } from "../coupon/coupon.service";
@@ -163,6 +168,13 @@ export class OrderService {
                                 quantity: number;
                                 packagingCost: number;
                         }[] = [];
+                        // ── stage-48 — قفل‌های سفارش ──
+                        // ناموجود → خطای صریح (نه skip بی‌صدا): کاربر باید هشدار نارنجی
+                        // سبد/چک‌اوت را ببیند، نه اینکه آیتم‌ها بی‌سروصدا حذف شوند.
+                        const unavailableNames: string[] = [];
+                        const courierBlockedNames: string[] = [];
+                        const takeawayBlockedNames: string[] = [];
+                        const dineInBlockedNames: string[] = [];
                         let foodTotal = 0;
                         // stage-10: بسته‌بندیِ هر محصول — جمع (هزینه بسته‌بندی محصول × تعداد)
                         // فقط برای DELIVERY و PICKUP؛ DINE_IN (سرو در محل) بسته‌بندی ندارد.
@@ -171,9 +183,31 @@ export class OrderService {
                                 tx,
                                 input.items,
                         );
+                        // stage-48 — حالت‌های دسته (یک کوئری) → مؤثر = دسته AND محصول
+                        const catModes = await loadCategoryModes(
+                                tx,
+                                [...new Set([...productMap.values()].map((p) => p.categoryId))],
+                        );
                         for (const item of input.items) {
                                 const product = productMap.get(asProductId(item.productId));
-                                if (!product || product.status !== "ACTIVE") continue; // skip نامعتبر — قرارداد فرانت
+                                if (!product) continue; // حذف‌شده از DB — skip (قرارداد فرانت)
+
+                                // stage-48 — ناموجود: فعال در منو ولی فروش قفل → سفارش قابل ثبت نیست
+                                if (product.status !== "ACTIVE" || !product.isAvailable) {
+                                        unavailableNames.push(product.name);
+                                        continue;
+                                }
+                                // stage-48 — حالت مؤثر سفارش این آیتم (برای گزینه‌ی تحویلِ انتخابی)
+                                const modes = catModes.get(product.categoryId);
+                                const courierAllowed =
+                                        (modes?.courier ?? true) && product.courierAllowed;
+                                const takeawayAllowed =
+                                        (modes?.takeaway ?? true) && product.takeawayAllowed;
+                                const dineInAllowed =
+                                        (modes?.dineIn ?? true) && product.dineInAllowed;
+                                if (!courierAllowed) courierBlockedNames.push(product.name);
+                                if (!takeawayAllowed) takeawayBlockedNames.push(product.name);
+                                if (!dineInAllowed) dineInBlockedNames.push(product.name);
 
                                 let unitPrice = finalPriceOf(product);
                                 let sizeId: SizeId | null = null;
@@ -217,6 +251,30 @@ export class OrderService {
                         }
                         if (itemRows.length === 0)
                                 throw Err.validation("هیچ آیتم معتبری در سبد نیست.");
+
+                        // ── stage-48 — گارد ناموجودی و حالت تحویل ──
+                        // ناموجود → خطا (پرداخت قفل؛ فرانت هشدار نارنجی داده)
+                        if (unavailableNames.length > 0) {
+                                throw Err.validation(
+                                        `محصول «${unavailableNames[0]}» فعلاً ناموجود است — سبد خرید را به‌روز کنید.`,
+                                );
+                        }
+                        // یک آیتم محدود ⇒ کل سفارش در آن حالت ارسال نمی‌شود
+                        if (input.deliveryType === "DELIVERY" && courierBlockedNames.length > 0) {
+                                throw Err.validation(
+                                        `ارسال با پیک برای «${courierBlockedNames[0]}» امکان ندارد — حالت تحویل را عوض کنید یا آن را از سبد حذف کنید.`,
+                                );
+                        }
+                        if (input.deliveryType === "PICKUP" && takeawayBlockedNames.length > 0) {
+                                throw Err.validation(
+                                        `تحویل حضوری بیرون‌بر برای «${takeawayBlockedNames[0]}» امکان ندارد — حالت تحویل را عوض کنید یا آن را از سبد حذف کنید.`,
+                                );
+                        }
+                        if (input.deliveryType === "DINE_IN" && dineInBlockedNames.length > 0) {
+                                throw Err.validation(
+                                        `سرو در محل برای «${dineInBlockedNames[0]}» امکان ندارد — حالت تحویل را عوض کنید یا آن را از سبد حذف کنید.`,
+                                );
+                        }
 
                         // ── کوپن — اعتبار سروری + رزرو اتمیک زیر قفل ──
                         // phase-fix: باخت رقابت (ظرفیت/گرنت) = خطای صریح، نه سقوط بی‌صدای تخفیف.
@@ -492,11 +550,17 @@ export class OrderService {
 
                 // آیتم‌ها — همان منطق چک‌اوت (فقط‌خواندنی)
                 // perf-fix (کار-۲): همان دسته‌ای — قبلاً N+1 (بدون قفل هم بود، فقط کوئری‌های زائد)
+                // stage-48 — هر آیتم: موجودی + حالت‌های مؤثر سفارش را هم برمی‌گرداند
+                // تا UI چک‌اوت گزینه‌ی تحویلِ محدود را قفل + هشدار نارنجی نشان دهد.
                 const items: {
                         name: string;
                         sizeName: string | null;
                         unitPrice: number;
                         quantity: number;
+                        available: boolean;
+                        courierAllowed: boolean;
+                        takeawayAllowed: boolean;
+                        dineInAllowed: boolean;
                 }[] = [];
                 let foodTotal = 0;
                 // stage-10: بسته‌بندیِ هر محصول — همان جمعِ چک‌اوت
@@ -505,9 +569,24 @@ export class OrderService {
                         db,
                         input.items,
                 );
+                // stage-48 — حالت‌های دسته (یک کوئری) → مؤثر = دسته AND محصول
+                const catModes = await loadCategoryModes(
+                        db,
+                        [...new Set([...productMap.values()].map((p) => p.categoryId))],
+                );
                 for (const item of input.items) {
                         const product = productMap.get(asProductId(item.productId));
-                        if (!product || product.status !== "ACTIVE") continue;
+                        if (!product) continue;
+
+                        const modes = catModes.get(product.categoryId);
+                        const courierAllowed =
+                                (modes?.courier ?? true) && product.courierAllowed;
+                        const takeawayAllowed =
+                                (modes?.takeaway ?? true) && product.takeawayAllowed;
+                        const dineInAllowed =
+                                (modes?.dineIn ?? true) && product.dineInAllowed;
+                        // stage-48 — ناموجود: نمایش با هشدار نارنجی، بدون محاسبه
+                        const available = product.status === "ACTIVE" && product.isAvailable;
 
                         let unitPrice = finalPriceOf(product);
                         let sizeName: string | null = null;
@@ -530,13 +609,17 @@ export class OrderService {
                                         }
                                 }
                         }
-                        foodTotal += unitPrice * item.quantity;
-                        packagingTotal += product.packagingCost * item.quantity;
+                        foodTotal += available ? unitPrice * item.quantity : 0;
+                        packagingTotal += available ? product.packagingCost * item.quantity : 0;
                         items.push({
                                 name: product.name,
                                 sizeName,
-                                unitPrice,
+                                unitPrice: available ? unitPrice : 0,
                                 quantity: item.quantity,
+                                available,
+                                courierAllowed,
+                                takeawayAllowed,
+                                dineInAllowed,
                         });
                 }
                 if (items.length === 0)

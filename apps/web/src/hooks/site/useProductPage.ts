@@ -80,6 +80,9 @@ export function useProductPage(product: Product) {
   const showToast = useToastStore((s) => s.showToast)
   const { t } = useI18n()
 
+  // ── stage-48 — موجودی فروش (سروری؛ جداست از وضعیت منو) ──
+  const isAvailable = product.isAvailable !== false
+
   // --- سایزبندی ---
   const hasSizes = product.sizesEnabled && product.sizes.length > 0
   // انتخاب مؤثر: انتخابِ کاربر، وگرنه سایز اول
@@ -121,11 +124,16 @@ export function useProductPage(product: Product) {
   const handleCountdownEnd = useCallback(() => tick(), [])
 
   const handleAddToCart = useCallback(() => {
+    // stage-48 — ناموجود: دکمه قفل است؛ این گارد عمقی برای حالت‌های مرزی
+    if (!isAvailable) {
+      showToast(t['common.temporarilyUnavailable'], 'error')
+      return
+    }
     addItem(product.id, state.quantity, selectedSizeId)
     showToast(tpl(t['pdetail.addedToast'], {
       n: `${product.name}${selectedSize ? ` (${selectedSize.name})` : ''}`,
     }))
-  }, [addItem, showToast, product.id, product.name, state.quantity, selectedSizeId, selectedSize, t])
+  }, [addItem, showToast, product.id, product.name, state.quantity, selectedSizeId, selectedSize, isAvailable, t])
 
   return {
     quantity: state.quantity,
@@ -137,6 +145,8 @@ export function useProductPage(product: Product) {
     hasDiscount,
     /** stage-47 — ISO پایان پنجره‌ی تخفیف فعال (null = بدون شمارنده) */
     discountEndsAt,
+    /** stage-48 — موجودی فروش (قفل دکمه + هشدار نارنجی) */
+    isAvailable,
     handleIncrement,
     handleDecrement,
     handleSelectSize,

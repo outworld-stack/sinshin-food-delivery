@@ -27,6 +27,9 @@ export class CouponScanJob implements DailyJob {
   async run(): Promise<void> {
     const { db } = this.deps
 
+    // stage-48 — فقط کوپن‌هایی که با سوییچِ فرم وارد فرآیند کرون شده‌اند
+    // (cronEnabled=false ⇒ اسکن/یادآور برایش اجرا نمی‌شود — اعطای لحظه‌ی
+    // تسویه جدا از این فرآیند است و دست‌نخورده می‌ماند).
     const active = await db
       .select()
       .from(coupons)
@@ -34,6 +37,7 @@ export class CouponScanJob implements DailyJob {
         and(
           eq(coupons.isActive, true),
           eq(coupons.isPublic, false),
+          eq(coupons.cronEnabled, true),
           isNull(coupons.endsAt),
         ),
       )

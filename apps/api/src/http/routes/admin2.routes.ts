@@ -126,6 +126,10 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
           orderDetailsRead: t.Optional(t.Boolean()),
           canToggleTemporaryClose: t.Optional(t.Boolean()),
           canEditPackagingFee: t.Optional(t.Boolean()),
+          /** stage-48 — نوتیفیکیشن + موجودی محصولات */
+          notificationsRead: t.Optional(t.Boolean()),
+          notificationsSend: t.Optional(t.Boolean()),
+          productsAvailability: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Update scopes and permissions' },
       },

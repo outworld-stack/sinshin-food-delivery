@@ -142,6 +142,7 @@ function ProductDetailPage() {
                                                 quantity={page.quantity}
                                                 discountEndsAt={page.discountEndsAt}
                                                 onCountdownEnd={page.handleCountdownEnd}
+                                                isAvailable={page.isAvailable}
                                                 onIncrement={page.handleIncrement}
                                                 onDecrement={page.handleDecrement}
                                                 onAddToCart={page.handleAddToCart}
@@ -169,6 +170,7 @@ function ProductDetailPage() {
                                 quantity={page.quantity}
                                 discountEndsAt={page.discountEndsAt}
                                 onCountdownEnd={page.handleCountdownEnd}
+                                isAvailable={page.isAvailable}
                                 onIncrement={page.handleIncrement}
                                 onDecrement={page.handleDecrement}
                                 onAddToCart={page.handleAddToCart}

@@ -321,6 +321,8 @@ export class CouponService {
     isPublic: boolean
     expiryDate: string | null
     rules: Array<{ type: string; params: Record<string, unknown> }>
+    /** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (پیش‌فرض خاموش) */
+    cronEnabled?: boolean
   }): Promise<{ success: boolean; id?: string }> {
     // phase-9: حروف فارسی هم مجاز شد (پلتفرم کاملاً فارسی است؛ چک‌اوت toUpperCase
     // روی فارسی بی‌اثر و بی‌ضرر است) + خطاها به‌جای success:false با 200،
@@ -350,6 +352,8 @@ export class CouponService {
         maxUses: input.maxUses,
         isPublic: input.isPublic,
         isActive: true,
+        // stage-48 — ورود به فرآیند بررسی کرون (سوییچ فرم؛ پیش‌فرض خاموش)
+        cronEnabled: input.cronEnabled ?? false,
         ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : {}),
       })
       .returning()
@@ -377,6 +381,8 @@ export class CouponService {
       isPublic: boolean
       expiryDate: string | null
       rules: Array<{ type: string; params: Record<string, unknown> }>
+      /** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (undefined = دست‌نخورده) */
+      cronEnabled?: boolean
     },
   ): Promise<{ success: boolean }> {
     const { db } = this.deps
@@ -406,6 +412,8 @@ export class CouponService {
         discountPercentage: input.discountPercentage,
         maxUses: input.maxUses,
         isPublic: input.isPublic,
+        // stage-48 — سوییچ کرون (نیامد = دست‌نخورده)
+        ...(input.cronEnabled !== undefined ? { cronEnabled: input.cronEnabled } : {}),
         ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : { endsAt: null }),
       })
       .where(eq(coupons.id, cid))

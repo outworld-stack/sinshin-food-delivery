@@ -6,6 +6,8 @@
 //     • تحویل گرفتن از سین‌شین (PICKUP / بیرون‌بر) — با هزینه بسته‌بندی
 // هزینه بسته‌بندی per-product است و از breakdown سرور می‌آید.
 // رارد ۳۲ — متن‌ها از دیکشنری؛ قیمت‌ها با فرمتر زبان‌آگاه.
+// stage-48 — گزینه‌ی تحویلی که آیتمی از سبد اجازه‌ی آن را ندارد قفل می‌شود
+// (کم‌رنگ + hint) — قرارداد سرور: یک آیتم محدود ⇒ کل سفارش.
 import { memo } from 'react'
 import type { DeliveryType } from '#/types/site/checkout'
 import { useI18n, tpl } from '#/i18n'
@@ -15,6 +17,10 @@ interface DeliveryTypeSelectorProps {
 	deliveryFee: number
 	packagingFee: number
 	onChange: (t: DeliveryType) => void
+	/** stage-48 — حالت‌های مسدود (اسم محصول محدودکننده) */
+	blockedCourier?: string | null
+	blockedTakeaway?: string | null
+	blockedDineIn?: string | null
 }
 
 export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
@@ -22,6 +28,9 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 	deliveryFee,
 	packagingFee,
 	onChange,
+	blockedCourier = null,
+	blockedTakeaway = null,
+	blockedDineIn = null,
 }: DeliveryTypeSelectorProps) {
 	const { t, fmt } = useI18n()
 	const isInPerson = deliveryType === 'PICKUP' || deliveryType === 'DINE_IN'
@@ -34,16 +43,19 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 			<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 				{/* ── ۱. ارسال با پیک ── */}
 				<label
-					className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition ${
-						deliveryType === 'DELIVERY'
+					className={`flex items-center gap-4 p-4 rounded-xl border-2 transition ${
+						!blockedCourier && deliveryType === 'DELIVERY'
 							? 'border-primary dark:border-dark-primary bg-primary/5 dark:bg-dark-primary/5'
-							: 'border-gray-200 dark:border-[#3a151c]'
+							: blockedCourier
+								? 'border-gray-200 dark:border-[#3a151c] opacity-70 cursor-not-allowed bg-gray-50 dark:bg-[#1a0a0e]'
+								: 'border-gray-200 dark:border-[#3a151c] cursor-pointer'
 					}`}
 				>
 					<input
 						type="radio"
 						name="deliveryType"
-						checked={deliveryType === 'DELIVERY'}
+						checked={!blockedCourier && deliveryType === 'DELIVERY'}
+						disabled={!!blockedCourier}
 						onChange={() => onChange('DELIVERY')}
 						className="w-4 h-4 accent-primary dark:accent-dark-primary"
 					/>
@@ -52,9 +64,11 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 							{t['checkout.courier']}
 						</p>
 						<p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-							{tpl(t['checkout.courierFee'], {
-								n: `${fmt.price(deliveryFee)} ${t['common.toman']}`,
-							})}
+							{blockedCourier
+								? tpl(t['checkout.modeBlockedHint'], { n: blockedCourier })
+								: tpl(t['checkout.courierFee'], {
+										n: `${fmt.price(deliveryFee)} ${t['common.toman']}`,
+									})}
 						</p>
 					</div>
 				</label>
@@ -94,16 +108,19 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 						{/* سرو در محل — بدون بسته‌بندی */}
 						<label
-							className={`flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition ${
-								deliveryType === 'DINE_IN'
+							className={`flex items-center gap-3 p-3.5 rounded-xl border-2 transition ${
+								!blockedDineIn && deliveryType === 'DINE_IN'
 									? 'border-green-500 bg-green-50 dark:bg-green-500/10'
-									: 'border-gray-200 dark:border-[#3a151c]'
+									: blockedDineIn
+										? 'border-gray-200 dark:border-[#3a151c] opacity-70 cursor-not-allowed bg-gray-50 dark:bg-[#1a0a0e]'
+										: 'border-gray-200 dark:border-[#3a151c] cursor-pointer'
 							}`}
 						>
 							<input
 								type="radio"
 								name="inPersonMode"
-								checked={deliveryType === 'DINE_IN'}
+								checked={!blockedDineIn && deliveryType === 'DINE_IN'}
+								disabled={!!blockedDineIn}
 								onChange={() => onChange('DINE_IN')}
 								className="w-4 h-4 accent-green-500"
 							/>
@@ -111,24 +128,31 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 								<p className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">
 									{t['checkout.dineIn']}
 								</p>
-								<p className="text-xs text-green-600 dark:text-green-400 mt-1">
-									{t['checkout.dineInFree']}
+								<p
+									className={`text-xs mt-1 ${blockedDineIn ? 'text-gray-400 dark:text-gray-500' : 'text-green-600 dark:text-green-400'}`}
+								>
+									{blockedDineIn
+										? tpl(t['checkout.modeBlockedHint'], { n: blockedDineIn })
+										: t['checkout.dineInFree']}
 								</p>
 							</div>
 						</label>
 
 						{/* بیرون‌بر — با بسته‌بندی */}
 						<label
-							className={`flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition ${
-								deliveryType === 'PICKUP'
+							className={`flex items-center gap-3 p-3.5 rounded-xl border-2 transition ${
+								!blockedTakeaway && deliveryType === 'PICKUP'
 									? 'border-primary dark:border-dark-primary bg-primary/5 dark:bg-dark-primary/5'
-									: 'border-gray-200 dark:border-[#3a151c]'
+									: blockedTakeaway
+										? 'border-gray-200 dark:border-[#3a151c] opacity-70 cursor-not-allowed bg-gray-50 dark:bg-[#1a0a0e]'
+										: 'border-gray-200 dark:border-[#3a151c] cursor-pointer'
 							}`}
 						>
 							<input
 								type="radio"
 								name="inPersonMode"
-								checked={deliveryType === 'PICKUP'}
+								checked={!blockedTakeaway && deliveryType === 'PICKUP'}
+								disabled={!!blockedTakeaway}
 								onChange={() => onChange('PICKUP')}
 								className="w-4 h-4 accent-primary dark:accent-dark-primary"
 							/>
@@ -137,11 +161,13 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 									{t['checkout.pickup']}
 								</p>
 								<p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-									{packagingFee > 0
-										? tpl(t['checkout.pickupFee'], {
-												n: `${fmt.price(packagingFee)} ${t['common.toman']}`,
-											})
-										: t['checkout.pickupFeeGeneric']}
+									{blockedTakeaway
+										? tpl(t['checkout.modeBlockedHint'], { n: blockedTakeaway })
+										: packagingFee > 0
+											? tpl(t['checkout.pickupFee'], {
+													n: `${fmt.price(packagingFee)} ${t['common.toman']}`,
+												})
+											: t['checkout.pickupFeeGeneric']}
 								</p>
 							</div>
 						</label>

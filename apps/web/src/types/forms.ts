@@ -72,6 +72,12 @@ export interface ProductFormData {
   sizesEnabled: boolean;
   ingredients: string[];
   sizes: ProductFormSize[];
+  /** stage-48 — موجودی فروش (پیش‌فرض true) */
+  isAvailable: boolean;
+  /** stage-48 — پرچم‌های حالت سفارش (true = ارث از دسته؛ فقط محدودکردن مجاز) */
+  courierAllowed: boolean;
+  takeawayAllowed: boolean;
+  dineInAllowed: boolean;
   // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
   nameAr: string;
   descriptionAr: string;
@@ -83,4 +89,9 @@ export interface ProductFormProps {
   initialData?: Product | null
   onSubmit: (data: ProductFormData) => void;
   isSubmitting: boolean;
+  /**
+   * stage-48 — اجازه‌ی نمایش سوئیچ موجودی (ادمین اصلی همیشه؛ ادمین۲ با
+   * productsAvailability). نیامد = اجازه (سازگاری).
+   */
+  canToggleAvailability?: boolean;
 }

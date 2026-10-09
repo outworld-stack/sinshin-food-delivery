@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-// stage-47 — sinshin-food-delivery — فایل ۳
+// stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر: quantity=0 مجاز شد (خرید صفر = فعال شدن کوپن بدون خرید
-//        قبلی برای شرط‌های MIN_PRODUCT_ORDERS / MIN_CATEGORY_ORDERS)
+// تغییر: cronEnabled — سوییچ عضویت کوپن در فرآیند کرون‌جاب
+//        (اسکن شایستگی + یادآور). پیش‌فرض خاموش.
 // ═══════════════════════════════════════════════════════════
 
 // src/http/routes/coupon.routes.ts
@@ -68,6 +68,8 @@ const couponBody = t.Object({
   isPublic: t.Boolean(),
   expiryDate: t.Optional(t.Nullable(t.String({ maxLength: 30 }))),
   rules: t.Array(ruleSchema, { maxItems: 10 }),
+  /** stage-48 — ورود به فرآیند کرون‌جاب کوپن‌ها (پیش‌فرض خاموش) */
+  cronEnabled: t.Optional(t.Boolean()),
 })
 
 export interface CouponRoutesDeps {
@@ -105,6 +107,7 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           maxUses: body.maxUses,
           isPublic: body.isPublic,
           expiryDate: body.expiryDate ?? null,
+          cronEnabled: body.cronEnabled ?? false,
           rules: body.rules.map((r) => ({
             type: r.type,
             params: ruleToParams(r.type, r.value, r.quantity),
@@ -133,6 +136,7 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           maxUses: body.maxUses,
           isPublic: body.isPublic,
           expiryDate: body.expiryDate ?? null,
+          cronEnabled: body.cronEnabled,
           rules: body.rules.map((r) => ({
             type: r.type,
             params: ruleToParams(r.type, r.value, r.quantity),
