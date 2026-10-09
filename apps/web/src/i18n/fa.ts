@@ -603,6 +603,13 @@ export const fa = {
 	'notify.enable.retryHint':
 		'فعال‌سازی کامل نشد — چند لحظه بعد دوباره امتحان کنید؛ اگر تکرار شد صفحه را یک‌بار رفرش کنید.',
 
+	// stage-50 — حالت denied: راهنمای گام‌به‌گام + دکمه‌ی «بررسی مجدد»
+	// (قبلاً این حالت بن‌بستِ متنی بود — هیچ دکمه‌ای نبود)
+	'notify.enable.deniedStep1': 'در نوار آدرس، روی آیکون قفل/تنظیماتِ سایت کلیک کن.',
+	'notify.enable.deniedStep2': '«Notifications» را پیدا کن و روی Allow بگذار.',
+	'notify.enable.deniedStep3': 'برگرد به همین پنجره و «بررسی مجدد مجوز» را بزن.',
+	'notify.enable.recheck': 'بررسی مجدد مجوز',
+
 	// ── stage-48 — پنل: تاریخچه‌ی نوتیفیکیشن ──
 	'admin.notify.historyTitle': 'تاریخچه‌ی ارسال',
 } as const

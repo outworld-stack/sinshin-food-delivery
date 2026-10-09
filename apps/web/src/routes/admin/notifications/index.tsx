@@ -19,8 +19,6 @@ import {
 	Send,
 	BellRing,
 	CalendarSearch,
-	ChevronLeft,
-	ChevronRight,
 	Eraser,
 	Filter,
 } from 'reicon-react'
@@ -29,6 +27,7 @@ import { authJson } from '#/lib/api-fetch'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
 import { BottomSheet } from '#/components/shared/BottomSheet'
+import { Pagination } from '#/components/Pagination'
 import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
 import {
 	FILTER_INPUT_CLS,
@@ -52,7 +51,12 @@ export const Route = createFileRoute('/admin/notifications/')({
 	component: AdminNotificationsPage,
 })
 
-const PAGE_SIZE = 20
+/**
+ * stage-50 — صفحه‌بندی: پیش‌فرض ۵ + گزینه‌ی ۵/۱۰/۲۰/۵۰
+ * (خواسته‌ی صریح — مثل بقیه‌ی صفحات پنل)
+ */
+const DEFAULT_PAGE_SIZE = 5
+const PAGE_SIZES = [5, 10, 20, 50]
 
 const TYPE_OPTIONS = [
 	{ value: 'all', label: 'همه انواع' },
@@ -165,6 +169,9 @@ function AdminNotificationsPage() {
 	const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
 
 	// اعمال‌شده‌ها (کلید کوئری)
+	// stage-50 — تعداد آیتم هر صفحه (۵ پیش‌فرض؛ ۵/۱۰/۲۰/۵۰)
+	const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE)
+
 	const [applied, setApplied] = useState({
 		search: '',
 		type: 'all',
@@ -214,12 +221,12 @@ function AdminNotificationsPage() {
 	}, [])
 
 	const historyQuery = useQuery({
-		queryKey: ['admin-notification-history', applied],
+		queryKey: ['admin-notification-history', applied, limit],
 		enabled: canReadHistory,
 		queryFn: async () => {
 			const params = new URLSearchParams()
 			params.set('page', String(applied.page))
-			params.set('limit', String(PAGE_SIZE))
+			params.set('limit', String(limit))
 			if (applied.search) params.set('search', applied.search)
 			if (applied.type !== 'all') params.set('type', applied.type)
 			if (applied.sender !== 'all') params.set('sender', applied.sender)
@@ -234,7 +241,7 @@ function AdminNotificationsPage() {
 
 	const items: NotificationLogDto[] = historyQuery.data?.items ?? []
 	const total = historyQuery.data?.total ?? 0
-	const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+	const totalPages = Math.max(1, Math.ceil(total / limit))
 
 	const valid = title.trim().length >= 2 && body.trim().length >= 2
 	const urlClean = url.trim() === '' || url.trim().startsWith('/')
@@ -590,36 +597,22 @@ function AdminNotificationsPage() {
 								))}
 							</div>
 
-							{/* صفحه‌بندی */}
-							{totalPages > 1 && (
-								<div className="flex items-center justify-center gap-3 pt-2">
-									<button
-										type="button"
-										disabled={applied.page <= 1}
-										onClick={() =>
-											setApplied((p) => ({ ...p, page: p.page - 1 }))
-										}
-										className="p-2 rounded-lg bg-gray-100 dark:bg-[#1a0a0e] text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-										aria-label="صفحه قبل"
-									>
-										<ChevronRight size={18} />
-									</button>
-									<span className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium">
-										صفحه {applied.page} از {totalPages}
-									</span>
-									<button
-										type="button"
-										disabled={applied.page >= totalPages}
-										onClick={() =>
-											setApplied((p) => ({ ...p, page: p.page + 1 }))
-										}
-										className="p-2 rounded-lg bg-gray-100 dark:bg-[#1a0a0e] text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-										aria-label="صفحه بعد"
-									>
-										<ChevronLeft size={18} />
-									</button>
-								</div>
-							)}
+							{/* stage-50 — صفحه‌بندی مشترک: «X از Y» + انتخابِ تعداد در
+							صفحه (۵ پیش‌فرض — ۵/۱۰/۲۰/۵۰ مثل سایر صفحات پنل) +
+							شماره‌صفحه‌های هوشمند؛ قبلاً فقط دو دکمه‌ی قبل/بعد
+							با ۲۰ آیتمِ ثابت بود */}
+							<Pagination
+								currentPage={applied.page}
+								totalPages={totalPages}
+								itemsPerPage={limit}
+								totalItems={total}
+								onPageChange={(page) => setApplied((p) => ({ ...p, page }))}
+								onItemsPerPageChange={(n) => {
+									setLimit(n)
+									setApplied((p) => ({ ...p, page: 1 }))
+								}}
+								pageSizeOptions={PAGE_SIZES}
+							/>
 						</>
 					)}
 				</div>

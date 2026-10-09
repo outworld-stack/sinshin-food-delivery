@@ -1,18 +1,24 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-49 — sinshin-food-delivery
+// stage-50 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/lib/push-subscription.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر (بازخورد ۴ + ۶ — ریشه‌ی «گیر کردن در حال فعال‌سازی»):
-//   • در محیط توسعه، سرویس‌ورکرِ کامل (workbox/sw.js) اصلاً ثبت نمی‌شود
-//     (فقط با build:pwa ساخته می‌شود) ⇒ navigator.serviceWorker.ready
-//     هیچ‌وقت resolve نمی‌شد ⇒ enablePush برای همیشه معلق می‌ماند و
-//     دکمه در «در حال فعال‌سازی…» گیر می‌کرد و هیچ اشتراکی ثبت
-//     نمی‌شد (گیرنده: ۰).
-//   • حالا: ۱) همه‌ی انتظارها مهلت‌دارند (withTimeout) — هیچ تابعی
-//     هرگز معلق نمی‌ماند؛ ۲) ensurePushRegistration در نبودِ هر SW،
-//     فایل استاتیکِ سبکِ «/sw-push.js» (بدون workbox، فقط هندلرهای
-//     پوش) را ثبت می‌کند ⇒ Web Push در dev با دسکتاپ هم قابل آزمایش
-//     است؛ در prod همان sw.js ورک‌باکس (با هندلرهای پوش فاز-۲) می‌نشیند.
+// تغییر (اسکن عمیق — سه باگ «گیر کردن دکمه» / «نرفتن آیکون در
+//        فایرفاکس» / «ثبت‌نشدن اشتراک بعد از انقضای توکن»):
+//   • pushManager.subscribe بدون مهلت بود و در Chrome/Firefox می‌توانست
+//     تا ابد معلق بماند ⇒ دکمه در «در حال فعال‌سازی…» گیر می‌کرد. حالا
+//     مهلت ۳۰ ثانیه دارد؛ بعدش شکستِ روشن + دکمه‌ی آزاد برای تلاش مجدد.
+//   • POST /notifications/subscriptions با توکنِ منقضی (TTL ۱۵ دقیقه!)
+//     ۴۰۱ می‌گرفت و هیچ نوسازی/ریتری نداشت ⇒ subscribed=false می‌ماند؛
+//     آیکون در فایرفاکس/کروم حذف نمی‌شد و اشتراک هرگز در بک‌اند ثبت
+//     نمی‌شد (⇒ پوش هم هیچ‌وقت نمی‌رسید). حالا: ensureSession قبل از
+//     فراخوانی + روی ۴۰۱ یک‌بار tryRefresh و تلاش مجدد (الگوی authJson).
+//   • در نبودِ SW، ۸ ثانیه انتظارِ بی‌فایده قبل از ثبت sw-push.js حذف
+//     شد: اول getRegistration (سریع)، نبود ⇒ همان‌جا ثبت، بعد انتظارِ
+//     فعال‌شدن (ready). فعال‌سازی حالا در ~۱ ثانیه شروع می‌شود.
+//   • getPushState هم با fast-path: اگر SW ثبت نشده باشد به‌جای ۴
+//     ثانیه انتظارِ بی‌نتیجه، فوری جواب می‌دهد.
+//   • authedPushFetch صادر می‌شود تا NotificationEnableIcon هم برای
+//     push-status از همان مسیر مهلت‌دار + نوساز استفاده کند.
 // ═══════════════════════════════════════════════════════════════
 // phase-2 — اشتراک Web Push سمت کلاینت
 
@@ -21,14 +27,14 @@
  * فاز-۲ — اشتراک Web Push سمت کلاینت.
  *
  * جریان (همه‌ی گاردها داخلی — هرگز throw به UI):
- *  ۱) SW آماده؟ — stage-49: اگر هیچ SWی ثبت نشده باشد، sw-push.js
- *     (فایل استاتیکِ سبک) ثبت می‌شود تا در dev هم پوش کار کند؛
- *     همه‌ی «ready»ها مهلت‌دارند (۸s) و بعد از مهلت با نتیجه‌ی
- *     «ناموفق» برمی‌گردند، نه معلق‌ماندن.
+ *  ۱) SW آماده؟ — getRegistration سریع؛ اگر هیچ SWی نیست، sw-push.js
+ *     (فایل استاتیکِ سبک) ثبت می‌شود — در dev و prodِ بدون build:pwa.
  *  ۲) permission — اگر default بود درخواست بگیر؛ denied = تهی
  *  ۳) کلید عمومی VAPID از API (GET /notifications/vapid-public)
  *  ۴) pushManager.subscribe({ userVisibleOnly, applicationServerKey })
+ *     — با مهلت؛ هیچ‌وقت معلق نمی‌ماند
  *  ۵) ثبت endpoint در بک‌اند (POST /notifications/subscriptions)
+ *     — با نشستِ تازه و ریتری روی ۴۰۱
  *
  * نکته‌ی iOS: پوش فقط وقتی PWA روی هوم‌اسکرین نصب شده باشد کار می‌کند
  * (محدودیت اپل — 16.4+)؛ در مرورگر عادیِ iOS subscribe خطا می‌دهد که
@@ -38,7 +44,7 @@
  */
 
 import { apiBase } from '#/lib/api'
-import { getAccessToken } from '#/lib/auth-session'
+import { ensureSession, getAccessToken, tryRefresh } from '#/lib/auth-session'
 
 export type PushPermission = 'granted' | 'denied' | 'default' | 'unsupported'
 
@@ -51,10 +57,12 @@ export type PushState =
 /** SW مخصوص پوش — فایل استاتیک بدون workbox؛ در dev سرو می‌شود */
 const SW_PUSH_URL = '/sw-push.js'
 
-/** مهلت‌های انتظار — هیچ await معلق نمی‌ماند (بازخورد ۴) */
+/** مهلت‌های انتظار — هیچ await معلق نمی‌ماند */
 const READY_TIMEOUT_MS = 8_000
 const GETSTATE_TIMEOUT_MS = 4_000
 const FETCH_TIMEOUT_MS = 10_000
+/** subscribe می‌تواند (فایرفاکس/شبکه‌ی کند) طول بکشد — ۳۰ ثانیه سقف */
+const SUBSCRIBE_TIMEOUT_MS = 30_000
 
 /** رقابتِ promise با تایمر — برنده‌ی اول؛ هیچ‌وقت معلق نمی‌ماند */
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -65,23 +73,36 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 }
 
 /**
- * stage-49 — اطمینان از وجود سرویس‌ورکر برای پوش:
+ * ثبت‌شده‌ی فعلی (اگر باشد) — سریع؛ null یعنی «هیچ SWی نیست».
+ * (getRegistration بدون آرگومان = scope همین صفحه)
+ */
+async function getRegistrationFast(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null
+  try {
+    return (await navigator.serviceWorker.getRegistration()) ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * اطمینان از وجود سرویس‌ورکر برای پوش:
  *  • SW موجود (prod: sw.js ورک‌باکس) → همان
  *  • هیچ SW نیست → ثبت sw-push.js (استاتیک، فقط هندلر پوش)
  * فایل در public است و vite هم در dev سرو می‌کند.
  */
 async function ensurePushRegistration(): Promise<ServiceWorkerRegistration | null> {
   if (!('serviceWorker' in navigator)) return null
+  const existing = await getRegistrationFast()
+  if (existing) return existing
   try {
-    const existing = await navigator.serviceWorker.getRegistration()
-    if (existing) return existing
     return await navigator.serviceWorker.register(SW_PUSH_URL)
   } catch {
     return null
   }
 }
 
-/** navigator.serviceWorker.ready با مهلت — معلق نمی‌ماند (ریشه‌ی بازخورد ۴) */
+/** navigator.serviceWorker.ready با مهلت — معلق نمی‌ماند */
 async function readyWithTimeout(ms: number): Promise<ServiceWorkerRegistration | null> {
   try {
     return await withTimeout(navigator.serviceWorker.ready, ms, null)
@@ -90,19 +111,46 @@ async function readyWithTimeout(ms: number): Promise<ServiceWorkerRegistration |
   }
 }
 
-/** fetch با مهلت + Bearer (اگر توکن بود) — سرورِ خاموش/کند دکمه را قفل نمی‌کند */
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response | null> {
-  const token = getAccessToken()
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string> | undefined),
+/**
+ * fetch با مهلت + Bearer + نشستِ تازه + یک ریتری روی ۴۰۱ (الگوی authJson).
+ * stage-50 — قبلاً توکنِ منقضی یعنی ۴۰۱ و شکستِ همیشگی ثبت اشتراک؛
+ * حالا اول نشست تازه می‌شود، و اگر باز ۴۰۱ آمد، tryRefresh و تلاش مجدد.
+ * خروجی null = مهلت/شبکه — کالر حالتِ «تلاش مجدد» نشان می‌دهد.
+ */
+export async function authedPushFetch(
+  url: string,
+  init: RequestInit,
+): Promise<Response | null> {
+  // نشست را قبل از حرکت تازه کن (توکنِ ۱۵ دقیقه‌ای ممکن است مرده باشد)
+  await ensureSession().catch(() => {})
+  const buildHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = {
+      ...(init.headers as Record<string, string> | undefined),
+    }
+    const token = getAccessToken()
+    if (token) headers.authorization = `Bearer ${token}`
+    return headers
   }
-  if (token) headers['authorization'] = `Bearer ${token}`
-  try {
-    return await withTimeout(
-      fetch(url, { ...init, headers, credentials: 'include' }),
+  const run = (): Promise<Response | null> =>
+    withTimeout(
+      fetch(url, { ...init, headers: buildHeaders(), credentials: 'include' }),
       FETCH_TIMEOUT_MS,
       null,
-    )
+    ).catch(() => null)
+
+  let res = await run()
+  if (res !== null && res.status === 401) {
+    // توکن کهنه — یک‌بار نوسازی و تلاش مجدد
+    const refreshed = await tryRefresh().catch(() => false)
+    if (refreshed) res = await run()
+  }
+  return res
+}
+
+/** fetch عمومی (بدون auth) با مهلت — برای vapid-public */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response | null> {
+  try {
+    return await withTimeout(fetch(url, { ...init }), FETCH_TIMEOUT_MS, null)
   } catch {
     return null
   }
@@ -120,10 +168,12 @@ export async function getPushState(): Promise<PushState> {
   if (permission === 'denied') return { state: 'denied' }
   if (permission === 'default') return { state: 'default' }
   // granted — subscribed هست؟
-  const reg = await readyWithTimeout(GETSTATE_TIMEOUT_MS)
+  // stage-50 — fast-path: بدون SW فوری جواب بده (قبلاً ۴ ثانیه
+  // انتظارِ بی‌نتیجه روی ready می‌کشید — حالت اولیه‌ی آیکون دیر می‌آمد)
+  const reg = await getRegistrationFast()
   if (!reg) return { state: 'granted', subscribed: false }
   try {
-    const existing = await reg.pushManager.getSubscription()
+    const existing = await withTimeout(reg.pushManager.getSubscription(), GETSTATE_TIMEOUT_MS, null)
     return { state: 'granted', subscribed: existing !== null }
   } catch {
     return { state: 'granted', subscribed: false }
@@ -153,13 +203,11 @@ export async function enablePush(): Promise<PushState> {
       return permission === 'denied' ? { state: 'denied' } : { state: 'default' }
     }
 
-    // stage-49 — اول مطمئن شو SWی هست (dev: sw-push.js؛ prod: sw.js)؛
-    // readyِ بدون SW قبلاً برای همیشه معلق می‌ماند — اینجا همان باگ بود.
-    let reg = await readyWithTimeout(READY_TIMEOUT_MS)
-    if (!reg) {
-      reg = await ensurePushRegistration()
-      if (reg) reg = (await readyWithTimeout(READY_TIMEOUT_MS)) ?? reg
-    }
+    // stage-50 — SW: اول ثبت‌شده را ببین (سریع)؛ نبود ⇒ همین‌جا ثبت
+    // sw-push.js؛ فقط بعدش منتظر فعال‌شدن بمان. (قبلاً در نبود SW، ۸
+    // ثانیه waiting قبل از ثبت می‌ماند — بخشی از «گیر کردن دکمه».)
+    let reg = await ensurePushRegistration()
+    if (reg) reg = (await readyWithTimeout(READY_TIMEOUT_MS)) ?? reg
     if (!reg) return { state: 'granted', subscribed: false }
 
     let sub = await reg.pushManager.getSubscription()
@@ -174,18 +222,26 @@ export async function enablePush(): Promise<PushState> {
       if (!key) return { state: 'granted', subscribed: false }
 
       const applicationServerKey = urlBase64ToUint8Array(key)
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey,
-      })
+      // stage-50 — مهلتِ صریح: subscribe در فایرفاکس/شبکه‌ی کند می‌توانست
+      // تا ابد معلق بماند (بقیه‌ی «گیر کردن دکمه»). timeout ⇒ subscribed=false
+      // با پیام تلاش‌مجدد در UI — نه دکمه‌ی قفل‌شده.
+      sub = await withTimeout(
+        reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        }),
+        SUBSCRIBE_TIMEOUT_MS,
+        null,
+      )
+      if (!sub) return { state: 'granted', subscribed: false }
     }
 
-    // ثبت در بک‌اند
+    // ثبت در بک‌اند — stage-50: با نشست تازه + ریتری ۴۰۱ (authedPushFetch)
     const raw = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
     if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) {
       return { state: 'granted', subscribed: false }
     }
-    const regRes = await fetchWithTimeout(`${apiBase()}/notifications/subscriptions`, {
+    const regRes = await authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -203,12 +259,12 @@ export async function enablePush(): Promise<PushState> {
 /** لغو اشتراک — هم مرورگر هم بک‌اند */
 export async function disablePush(): Promise<PushState> {
   try {
-    const reg = await readyWithTimeout(READY_TIMEOUT_MS)
+    const reg = await getRegistrationFast()
     const sub = reg ? await reg.pushManager.getSubscription() : null
     if (sub) {
       const raw = sub.toJSON() as { endpoint?: string }
       if (raw.endpoint) {
-        await fetchWithTimeout(`${apiBase()}/notifications/subscriptions`, {
+        await authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
           method: 'DELETE',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ endpoint: raw.endpoint }),

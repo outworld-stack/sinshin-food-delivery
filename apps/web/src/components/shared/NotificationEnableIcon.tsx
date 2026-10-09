@@ -1,28 +1,35 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-49 — sinshin-food-delivery
+// stage-50 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/shared/NotificationEnableIcon.tsx
-// وضعیت: جایگزینی کامل فایل موجود (stage-48)
-// تغییر (بازخورد ۴):
-//   • پاپ‌اور در موبایل دیگر از لبه‌ی راست صفحه بیرون نمی‌زند:
-//     در <sm یک کارتِ fixed با حاشیه‌ی ۱۶px از هر طرف، دقیقاً زیر هدر
-//     (همیشه داخل صفحه)؛ از sm به بالا همان پاپ‌اور absolute چسبیده
-//     به آیکون.
-//   • حالت خطا: اگر مجوز داده شد اما اشتراک ثبت نشد (SW/کلید/شبکه)
-//     پیام نارنجیِ «دوباره تلاش کن» داخل پاپ‌اور می‌آید — دکمه دیگر
-//     در «در حال فعال‌سازی» گیر نمی‌کند (همه‌ی انتظارها در
-//     push-subscription.ts مهلت‌دار شده‌اند).
+// وضعیت: جایگزینی کامل فایل موجود (stage-49)
+// تغییر (اسکن عمیق — بازخورد کاربر):
+//   • باگ حالتِ denied (بن‌بست): کاربری که نوتیف را از تنظیمات مرورگر
+//     خاموش کرده بود، آیکون برمی‌گشت ولی پاپ‌اور «فقط متن» بود — بدون
+//     هیچ دکمه‌ای («دکمه‌ی فعال‌سازی نیستش و کاربر باید دستی…»).
+//     حالا: راهنمای گام‌به‌گامِ بازکردن مجوز + دکمه‌ی «بررسی مجدد مجوز»
+//     — کاربر مجوز را در مرورگر Allow می‌کند، دکمه را می‌زند و همان
+//     جریانِ فعال‌سازی ادامه می‌یابد (بدون رفرش/جست‌وجوی دستی).
+//   • بازبینی خودکار حالت روی focus + visibilitychange + بازشدنِ
+//     پاپ‌اور (قبلاً فقط focus) — تغییرِ مجوز از تنظیمات مرورگر،
+//     به‌محضِ برگشتن به تب، خودش دیده می‌شود.
+//   • push-status با همان authedPushFetch مهلت‌دار + نوساز ۴۰۱
+//     (قبلاً fetch خام بدون مهلت/ریتری — توکنِ منقضی ⇒ آیکین
+//     دیر/غلط به‌روز می‌شد).
+//   • گیرکردن دکمه: ریشه در push-subscription.ts (مهلتِ subscribe +
+//     ریتری ۴۰۱) رفع شد؛ اینجا فقط رندرِ حالت‌هاست — busy همیشه در
+//     finally تمام می‌شود.
 // ═══════════════════════════════════════════════════════════════
 // stage-48 — آیکون بنفشِ چشمک‌زنِ «فعال‌سازی نوتیفیکیشن» در هدر
 
 // src/components/shared/NotificationEnableIcon.tsx
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, BellRing, Check } from 'reicon-react'
+import { Bell, BellRing, Check, Refresh } from 'reicon-react'
 import { useI18nSafe } from '#/i18n'
 import { apiBase } from '#/lib/api'
-import { getAccessToken } from '#/lib/auth-session'
 import {
 	enablePush,
 	getPushState,
+	authedPushFetch,
 	type PushState,
 } from '#/lib/push-subscription'
 
@@ -36,10 +43,14 @@ import {
  *  • کلیک → پاپ‌اورِ انیمیت‌شده (fade+scale) با دکمه‌ی فعال‌سازی.
  *  • بعد از فعال‌شدن (مجوز granted + اشتراک ثبت‌شده) آیکون از هدر حذف
  *    می‌شود؛ هر وقت غیرفعال شد برمی‌گردد.
- *  • حالت denied: راهنمای بازکردن مجوز از تنظیمات مرورگر.
+ *  • حالت denied: راهنمای گام‌به‌گام + دکمه‌ی «بررسی مجدد مجوز»
+ *    (stage-50 — قبلاً بن‌بستِ متنی بود).
  * stage-49:
  *  • در موبایل پاپ‌اور fixed زیر هدر است (از صفحه بیرون نمی‌زند).
  *  • شکستِ فعال‌سازی پیام روشن دارد و حالت busy هرگز گیر نمی‌کند.
+ * stage-50:
+ *  • بازبینی روی focus/visibilitychange/بازشدن پاپ‌اور؛ push-status
+ *    مهلت‌دار و با نوسازی توکن.
  */
 export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 	const { t } = useI18nSafe()
@@ -47,6 +58,7 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 	const [pushState, setPushState] = useState<PushState>({ state: 'default' })
 	const [hasSubscription, setHasSubscription] = useState(false)
 	const [busy, setBusy] = useState(false)
+	const [recheckBusy, setRecheckBusy] = useState(false)
 	const [done, setDone] = useState(false)
 	const [failed, setFailed] = useState(false)
 	const rootRef = useRef<HTMLDivElement>(null)
@@ -56,16 +68,11 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 			const st = await getPushState()
 			setPushState(st)
 			// اشتراکِ ثبت‌شده در بک‌اند (این دستگاه یا کاربر) — استاتوس سروری
-			const token = getAccessToken()
-			if (!token) {
-				setHasSubscription(st.state === 'granted' && st.subscribed)
-				return
-			}
-			const res = await fetch(`${apiBase()}/notifications/push-status`, {
-				headers: { authorization: `Bearer ${token}` },
-				credentials: 'include',
+			// stage-50 — authedPushFetch: مهلت‌دار + نوسازی ۴۰۱ (توکن ۱۵ دقیقه‌ای)
+			const res = await authedPushFetch(`${apiBase()}/notifications/push-status`, {
+				method: 'GET',
 			})
-			if (res.ok) {
+			if (res && res.ok) {
 				const body = (await res.json()) as { subscriptions?: number }
 				setHasSubscription((body.subscriptions ?? 0) > 0)
 			} else {
@@ -79,9 +86,24 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 	useEffect(() => {
 		void refresh()
 		const onFocus = () => void refresh()
+		// stage-50 — برگشتن به تب (بعد از تغییر مجوز در تنظیمات مرورگر)
+		// خودش بازبینی می‌کند؛ قبلاً فقط window.focus این کار را می‌کرد.
+		const onVisibility = () => {
+			if (document.visibilityState === 'visible') void refresh()
+		}
 		window.addEventListener('focus', onFocus)
-		return () => window.removeEventListener('focus', onFocus)
+		document.addEventListener('visibilitychange', onVisibility)
+		return () => {
+			window.removeEventListener('focus', onFocus)
+			document.removeEventListener('visibilitychange', onVisibility)
+		}
 	}, [refresh])
+
+	// بازشدن پاپ‌اور ⇒ وضعیت تازه (مجوز ممکن است از تنظیمات مرورگر
+	// برگشته باشد — denied → default/granted)
+	useEffect(() => {
+		if (open) void refresh()
+	}, [open, refresh])
 
 	// بستن پاپ‌اور با کلیک بیرون / Escape
 	useEffect(() => {
@@ -119,15 +141,31 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 				}, 1600)
 			} else if (st.state === 'granted') {
 				// مجوز داده شد ولی اشتراک ثبت نشد (SW/کلید VAPID/شبکه)
-				// — پیام روشن؛ دکمه برای تلاش مجدد آزاد است (بازخورد ۴)
+				// — پیام روشن؛ دکمه برای تلاش مجدد آزاد است
 				setFailed(true)
 				void refresh()
 			}
 		} finally {
-			// stage-49 — هر نتیجه‌ای باشد، حالت busy تمام می‌شود
-			// (قبلاً اگر navigator.serviceWorker.ready معلق می‌شد،
-			//  «در حال فعال‌سازی…» برای همیشه می‌ماند)
+			// هر نتیجه‌ای باشد، حالت busy تمام می‌شود — stage-50:
+			// ریشه‌ی گیرکردن در push-subscription.ts (مهلت‌ها) رفع شد؛
+			// این finally تضمِ نهایی است.
 			setBusy(false)
+		}
+	}, [refresh])
+
+	// stage-50 — «بررسی مجدد مجوز»: کاربر بعد از Allow کردنِ مجوز از
+	// تنظیمات مرورگر، بدون رفرشِ صفحه به جریان فعال‌سازی برمی‌گردد.
+	const onRecheck = useCallback(async () => {
+		setRecheckBusy(true)
+		try {
+			const st = await getPushState()
+			setPushState(st)
+			// اگر مجوز برگشته و همین دستگاه اشتراکِ زنده دارد، بقیه‌ی مسیر
+			// (ثبت در بک‌اند) خودش با enablePush تکمیل می‌شود — دکمه‌ی
+			// فعال‌سازی نمایان می‌شود.
+			if (st.state === 'granted') void refresh()
+		} finally {
+			setRecheckBusy(false)
 		}
 	}, [refresh])
 
@@ -156,19 +194,17 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 						aria-hidden="true"
 					/>
 				)}
-				<Bell size={20} className="h-[18px] w-[18px] sm:h-5 sm:w-5 relative" />
+				<Bell size={20} className="h-4.5 w-4.5 sm:h-5 sm:w-5 relative" />
 			</button>
 
 			{/* پاپ‌اور انیمیت‌شده — stage-49:
-				• <sm: کارتِ fixed با حاشیه‌ی ۱۶px از هر طرف، دقیقاً زیر هدر
-				  (هدر full-width است؛ کارت همیشه داخل صفحه — دیگر از
-				  سمت راست بیرون نمی‌زند)
-				• ≥sm: همان پاپ‌اور absolute چسبیده به آیکون (left-0) */}
+					• <sm: کارتِ fixed با حاشیه‌ی ۱۶px از هر طرف، دقیقاً زیر هدر
+					• ≥sm: همان پاپ‌اور absolute چسبیده به آیکون (left-0) */}
 			{open && (
 				<div
 					role="dialog"
 					aria-label={t['notify.enable.title']}
-					className="fixed left-4 right-4 top-[4.75rem] z-50 overflow-hidden animate-pop-in bg-white dark:bg-[#1a0a0e] rounded-2xl shadow-2xl border border-purple-200 dark:border-purple-500/20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 sm:w-80 sm:max-w-[calc(100vw-24px)]"
+					className="fixed left-4 right-4 top-19 z-50 overflow-hidden animate-pop-in bg-white dark:bg-[#1a0a0e] rounded-2xl shadow-2xl border border-purple-200 dark:border-purple-500/20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 sm:w-80 sm:max-w-[calc(100vw-24px)]"
 				>
 					{/* هدر گرادیانی بنفش */}
 					<div className="bg-linear-to-br from-purple-500 to-purple-400 dark:from-purple-600 dark:to-purple-500 p-4 text-white">
@@ -190,9 +226,43 @@ export const NotificationEnableIcon = memo(function NotificationEnableIcon() {
 					{/* بدنه */}
 					<div className="p-4 space-y-3">
 						{denied ? (
-							<p className="text-xs text-gray-600 dark:text-gray-300 font-DanaMedium leading-relaxed">
-								{t['notify.enable.deniedHint']}
-							</p>
+							/* stage-50 — حالت denied دیگر بن‌بست نیست:
+								راهنمای گام‌به‌گام + دکمه‌ی بررسی مجدد.
+								قبلاً فقط یک متن بود و کاربر هیچ اقدامی از داخل
+								سایت نمی‌توانست بکند. */
+							<>
+								<p className="text-xs text-gray-600 dark:text-gray-300 font-DanaMedium leading-relaxed">
+									{t['notify.enable.deniedHint']}
+								</p>
+								<ol className="space-y-2 border-r-2 border-purple-200 dark:border-purple-500/20 pr-3">
+									{[
+										t['notify.enable.deniedStep1'],
+										t['notify.enable.deniedStep2'],
+										t['notify.enable.deniedStep3'],
+									].map((step, i) => (
+										<li
+											key={step}
+											className="relative flex items-start gap-2 text-[11px] text-gray-600 dark:text-gray-300 font-DanaMedium leading-relaxed"
+										>
+											<span className="w-5 h-5 shrink-0 rounded-full bg-purple-100 dark:bg-purple-500/15 text-purple-500 dark:text-purple-300 text-[10px] font-DanaDemiBold flex items-center justify-center">
+													{i + 1}
+											</span>
+											{step}
+										</li>
+									))}
+								</ol>
+								<button
+									type="button"
+									disabled={recheckBusy}
+									onClick={() => void onRecheck()}
+									className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-linear-to-l from-purple-500 to-purple-400 text-white text-sm font-DanaDemiBold hover:opacity-90 transition disabled:opacity-50 cursor-pointer shadow-md shadow-purple-500/20"
+								>
+									<Refresh size={16} className={recheckBusy ? 'animate-spin' : ''} />
+									{recheckBusy
+										? t['notify.enable.busy']
+										: t['notify.enable.recheck']}
+								</button>
+							</>
 						) : unsupported ? (
 							<p className="text-xs text-gray-600 dark:text-gray-300 font-DanaMedium leading-relaxed">
 								{t['notify.pushUnsupported']}

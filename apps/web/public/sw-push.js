@@ -1,7 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-49 — sinshin-food-delivery — فایل جدید
+// stage-50 — sinshin-food-delivery
 // مسیر مقصد: apps/web/public/sw-push.js
+// وضعیت: جایگزینی کامل فایل موجود (stage-49)
+// تغییر (اسکن عمیق): نمایشِ نوتیف مقاوم شد — اگر showNotification با
+//   آپشن‌های کامل (renotify/badge/icon/…) روی موتوری خطا بدهد،
+//   همان پیام با آپشن‌های حداقلی دوباره نشان داده می‌شود؛ قبلاً هر
+//   خطا یعنی «پوش رسید ولی هیچی نمایش داده نشد» (افتِ بی‌صدا).
 // ═══════════════════════════════════════════════════════════════
+// stage-49 — sinshin-food-delivery — فایل جدید
 //
 // sw-push.js — سرویس‌ورکرِ سبکِ مخصوص Web Push.
 //
@@ -10,7 +16,7 @@
 //    می‌شود و در محیط توسعه وجود ندارد؛ در نتیجه
 //    navigator.serviceWorker.ready در dev هیچ‌وقت resolve نمی‌شد و
 //    جریان فعال‌سازی پوش برای همیشه در «در حال فعال‌سازی…» گیر
-//    می‌کرد (بازخورد ۴) و هیچ اشتراکی ثبت نمی‌شد (بازخورد ۶).
+//    می‌کرد و هیچ اشتراکی ثبت نمی‌شد.
 //  • این فایل استاتیک است: بدون import، بدون workbox، بدون fetch
 //    handler — فقط هندلرهای پوش (همان رفتار sw.template.js فاز-۲).
 //    Vite آن را از public/ سرو می‌کند، پس در dev هم در دسترس است.
@@ -44,7 +50,30 @@ self.addEventListener('push', (event) => {
     lang: 'fa',
     data: { url: payload.url || '/products', ...(payload.data || {}) },
   }
-  event.waitUntil(self.registration.showNotification(title, options))
+  // stage-50 — مقاوم‌سازی: هر موتوری لزوماً همه‌ی آپشن‌ها را نمی‌پذیرد
+  // (مثلاً renotify/badge روی بعضی نسخه‌ها TypeError می‌دهد)؛ در آن
+  // صورت همان پیام با آپشن‌های حداقلی نشان داده می‌شود — پیام پوش
+  // هرگز «بی‌صدا» نمی‌افتد.
+  event.waitUntil(
+    (async () => {
+      try {
+        await self.registration.showNotification(title, options)
+      } catch {
+        try {
+          await self.registration.showNotification(title, {
+            body: options.body,
+            tag: options.tag,
+            dir: options.dir,
+            lang: options.lang,
+            data: options.data,
+          })
+        } catch {
+          // نمایش ممکن نیست — لاگ توسعه؛ کاری بیشتر از دست SW برنمی‌آید
+          console.warn('[sw-push] showNotification ناموفق بود')
+        }
+      }
+    })(),
+  )
 })
 
 // کلیک روی نوتیف — باز/فوکوس تب سایت روی URL مقصد

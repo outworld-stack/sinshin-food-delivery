@@ -1,6 +1,23 @@
 // ═══════════════════════════════════════════════════════════════
-// phase-2 — sinshin-food-delivery — فایل جدید
+// stage-50 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/infra/push/web-push.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر (اسکن عمیق نوتیفیکیشن — باگ ریشه‌ای):
+//   • باگ 🔴 رمزنگاری: مشتق‌سازی کلید CEK/NONCE «دو بار extract»
+//     می‌شد (اول HMAC دستی، بعد HKDF وب‌کریپتو با salt خالی روی PRK)
+//     — این با RFC 8291/8188 یکی نیست. نتیجه: هر پیام پوش با کلیدِ
+//     اشتباه رمز می‌شد؛ سرور پوش ۲۰۱ می‌داد («ارسال شد») ولی مرورگر
+//     رمزگشایی نمی‌توانست بکند و پیام را «بی‌صدا» می‌انداخت — هیچ
+//     نوتیفی در هیچ مرورگری دیده نمی‌شد (بازخورد: «گیرنده: ۱ ولی
+//     در Edge هیچی نیامد»).
+//   • فیکس: برای هر خروجی یک HKDF کاملِ استاندارد (RFC 5869):
+//     IKM = ECDH_shared || auth_secret و salt = نمکِ ۱۶ بایتیِ هدر —
+//     همین یک extract. با تست رفت‌وبرگشتی (رمز سمت سرور + رمزگشایی
+//     استاندارد سمت مرورگر) تأیید شد: نسخه‌ی قبل شکست، این نسخه سبز.
+//   • سخت‌سازی: هدر Topic به کاراکترهای امن [A-Za-z0-9-] پاک‌سازی
+//     می‌شود (underscore در بعضی سرورهای پوش ۴۰۰ می‌دهد).
+// ═══════════════════════════════════════════════════════════════
+// phase-2 — sinshin-food-delivery — فایل جدید
 // ═══════════════════════════════════════════════════════════════
 
 // src/infra/push/web-push.ts
@@ -191,7 +208,21 @@ async function encryptPayloadFull(
   return out
 }
 
-// HKDF کامل با برگرداندن کلید عمومی ephemeral — هسته‌ی RFC 8291
+/**
+ * stage-50 — هسته‌ی فیکس رمزنگاری (RFC 8291 §2.1 + RFC 8188):
+ *
+ *   IKM   = ECDH_shared(32) || auth_secret(16)
+ *   PRK   = HKDF-Extract(salt, IKM)
+ *   CEK   = HKDF-Expand(PRK, "Content-Encoding: aes128gcm" || 0x00, 16)
+ *   NONCE = HKDF-Expand(PRK, "Content-Encoding: nonce"     || 0x00, 12)
+ *
+ * HKDF وب‌کریپتو در هر فراخوانی «extract+expand» را یک‌جا انجام می‌دهد
+ * (IKM به‌عنوان کلید ورودی، salt پارامتر) — پس هر خروجی فقط «یک»
+ * extract دارد؛ دقیقاً همان چیزی که مرورگر انتظار دارد.
+ * (نسخه‌ی قبل: اول extract دستی، بعد HKDF با salt خالی روی PRK —
+ * یعنی دو extract؛ کلیدهای متفاوت از استاندارد ⇒ مرورگر رمزگشایی
+ * نمی‌کرد و پیام پوش را بی‌صدا می‌انداخت.)
+ */
 async function deriveKeysFull(
   uaPublicBytes: Uint8Array<ArrayBuffer>,
   authSecret: Uint8Array<ArrayBuffer>,
@@ -219,21 +250,21 @@ async function deriveKeysFull(
   ikm.set(shared)
   ikm.set(authSecret, shared.length)
 
+  // stage-50 — IKM یک‌بار به‌عنوان کلید HKDF وارد می‌شود؛ هر دو خروجی
+  // با همان IKM و همان salt مشتق می‌شوند (استاندارد) — فقط info فرق دارد.
   const webcrypto = crypto.subtle
-  const saltKey = await webcrypto.importKey('raw', salt, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-  const prk = new Uint8Array(await webcrypto.sign('HMAC', saltKey, ikm))
-  const prkKey = await webcrypto.importKey('raw', prk, { name: 'HKDF' }, false, ['deriveBits'])
+  const ikmKey = await webcrypto.importKey('raw', ikm, { name: 'HKDF' }, false, ['deriveBits'])
   const enc = new TextEncoder()
   const cek = new Uint8Array(
     await webcrypto.deriveBits(
-      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: enc.encode('Content-Encoding: aes128gcm\0') },
-      prkKey, 128,
+      { name: 'HKDF', hash: 'SHA-256', salt, info: enc.encode('Content-Encoding: aes128gcm\0') },
+      ikmKey, 128,
     ),
   )
   const nonce = new Uint8Array(
     await webcrypto.deriveBits(
-      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: enc.encode('Content-Encoding: nonce\0') },
-      prkKey, 96,
+      { name: 'HKDF', hash: 'SHA-256', salt, info: enc.encode('Content-Encoding: nonce\0') },
+      ikmKey, 96,
     ),
   )
   return { cek, nonce, ephPub }
@@ -261,6 +292,12 @@ export async function sendWebPush(
     )
     const authorization = await vapidAuthHeader(keys, target.endpoint, config.push.vapidSubject)
 
+    // stage-50 — Topic فقط کاراکترهای امن [A-Za-z0-9-] (≤۳۲)؛
+    // «_» و کاراکترهای خاص در بعضی سرورهای پوش ⇒ 400 و شکست بی‌دلیل.
+    const topic = payload.tag
+      ? payload.tag.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 32)
+      : null
+
     const res = await Bun.fetch(target.endpoint, {
       method: 'POST',
       headers: {
@@ -269,7 +306,7 @@ export async function sendWebPush(
         'content-encoding': 'aes128gcm',
         ttl: String(Math.min(2419200, Math.max(0, config.push.ttlSeconds))),
         urgency: 'normal',
-        ...(payload.tag ? { topic: payload.tag.slice(0, 32) } : {}),
+        ...(topic ? { topic } : {}),
       },
       // Uint8Array<ArrayBuffer> — BodyInit استاندارد
       body: body as unknown as ArrayBuffer,

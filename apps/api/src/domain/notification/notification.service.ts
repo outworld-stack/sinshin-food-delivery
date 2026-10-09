@@ -1,8 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-48 — sinshin-food-delivery
+// stage-50 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
-// تغییر: notification_log (تاریخچه‌ی ارسال برای پنل) + sender + آمار
-//        خطای پیاپی/غیرفعال‌سازی اشتراک بعد از ۵ شکست + lastPushAt.
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر (اسکن عمیق): نرمال‌سازی limit/offset صفحه‌بندی تاریخچه —
+//        هر دو از یک مقدار نرمال‌شده استفاده می‌کنند (قبلاً offset با
+//        limitِ خامِ فراخواننده ضرب می‌شد — ناسازگاری بالقوه).
+//        (فیکس ریشه‌ای رمزنگاری پوش در infra/push/web-push.ts است.)
 // ═══════════════════════════════════════════════════════════════
 
 // src/domain/notification/notification.service.ts
@@ -243,13 +246,18 @@ export class NotificationService {
       .where(where)
       .then((r) => r[0]?.count ?? 0)
 
+    // stage-50 — حد و صفحه را یک بار نرمال کن و در limit/offset «هر دو»
+    // همان مقدار را بگذار (قبلاً offset با limit خام ضرب می‌شد — با
+    // مقدار نامعتبر، صفحه‌ها بی‌دلیل جلو می‌پریدند)
+    const limit = Math.min(Math.max(1, filter.limit), 100)
+    const page = Math.max(1, filter.page)
     const rows = await this.deps.db
       .select()
       .from(notificationLog)
       .where(where)
       .orderBy(desc(notificationLog.createdAt))
-      .limit(Math.min(Math.max(1, filter.limit), 100))
-      .offset((Math.max(1, filter.page) - 1) * filter.limit)
+      .limit(limit)
+      .offset((page - 1) * limit)
     return { items: rows.map(toLogDto), total }
   }
 
