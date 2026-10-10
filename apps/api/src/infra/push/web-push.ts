@@ -1,4 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-52 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/infra/push/web-push.ts
+// تغییر: PushPayload دو فیلد «اختیاری» جدید گرفت — urgency (هدر RFC 8030)
+//        و ttl اختصاصیِ همان پیام. موتیویشن: پوشِ «سفارش جدید صف زنده»
+//        باید urgency=high بگیرد و TTL کوتاه (سفارشِ ربع‌ساعت قبل دیگر
+//        خبر فوری نیست)؛ بقیه‌ی ارسال‌ها دقیقاً همان رفتار قبلی
+//        (normal + PUSH_TTL_SECONDS) — کاملاً سازگار به‌عقب؛ هیچ
+//        فراخوان دیگری تغییری لازم ندارد.
+// ═══════════════════════════════════════════════════════════════
 // stage-51 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/infra/push/web-push.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -95,6 +104,19 @@ export interface PushPayload {
   /** برچسبِ گروه (جایگزینی نوتیفیکیشن قبلی هم‌برچسب) */
   tag?: string
   data?: Record<string, unknown>
+  /**
+   * stage-52 — فوریت پیام (هدر Urgency طبق RFC 8030):
+   *  very-low | low | normal | high — پیش‌فرض normal (رفتار قبلی).
+   *  «سفارش جدید صف زنده» با high می‌رود: سرور پوش دستگاه را زودتر
+   *  بیدار می‌کند و نمایش معمولاً فوری‌تر انجام می‌شود.
+   */
+  urgency?: 'very-low' | 'low' | 'normal' | 'high'
+  /**
+   * stage-52 — TTL اختصاصیِ همین پیام (ثانیه) — پیش‌فرض config.push.ttlSeconds.
+   *  پوشِ سفارش زنده ۹۰۰ ثانیه است: پیام دیررس (دستگاه آفلاین بود) دیگر
+   *  نمایش داده نمی‌شود — خبرِ ۲۰ دقیقه پیش دیگر «زنگ» نیست، نویز است.
+   */
+  ttl?: number
 }
 
 /**
@@ -330,6 +352,8 @@ async function deriveKeysRfc8291(
 /**
  * ارسال یک Web Push به یک اشتراک — هرگز throw نمی‌کند.
  * TTL/Topic/Urgency هدرهای استاندارد؛ abort روی تایم‌اوت.
+ * stage-52 — TTL و Urgency از خودِ payload قابل تنظیم‌اند (اختیاری؛
+ * نبودند = دقیقاً رفتار قبلی: PUSH_TTL_SECONDS و normal).
  */
 export async function sendWebPush(
   config: AppConfig,
@@ -359,8 +383,11 @@ export async function sendWebPush(
         authorization,
         'content-type': 'application/octet-stream',
         'content-encoding': 'aes128gcm',
-        ttl: String(Math.min(2419200, Math.max(0, config.push.ttlSeconds))),
-        urgency: 'normal',
+        // stage-52 — TTL/فوریت از خود پیام؛ پیش‌فرض = کانفیگ / normal
+        ttl: String(
+          Math.min(2_419_200, Math.max(0, Math.round(payload.ttl ?? config.push.ttlSeconds))),
+        ),
+        urgency: payload.urgency ?? 'normal',
         ...(topic ? { topic } : {}),
       },
       // Uint8Array<ArrayBuffer> — BodyInit استاندارد

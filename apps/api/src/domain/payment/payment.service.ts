@@ -1,3 +1,11 @@
+// ══════════════════════════════════════════════════════════════
+// stage-52 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/payment/payment.service.ts
+// تغییر: نهایی‌شدن موفق پرداخت (سفارش واقعاً وارد صف زنده می‌شود) علاوه بر
+//         رویداد SSE ‏orders:new، Web Push هم به ادمین‌های سطح ۲ می‌فرستد —
+//         deps.notifications جدید + فراخوان fire-and-forget در finalize.
+// ══════════════════════════════════════════════════════════════
+
 // src/domain/payment/payment.service.ts
 import { and, eq, lt } from 'drizzle-orm'
 
@@ -8,6 +16,7 @@ import type { AppConfig } from '#/infra/config/env'
 import { AppError, Err } from '#/domain/shared/errors'
 import type { OrderService } from '#/domain/order/order.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
+import type { NotificationService } from '#/domain/notification/notification.service'
 import { signState, verifyState } from './state'
 import { MockAdapter } from './mock.adapter'
 import { ZarinpalAdapter } from './zarinpal.adapter'
@@ -27,6 +36,8 @@ export class PaymentService {
       orders: OrderService
       /** round-16 — اعلام سفارش جدید/نهایی‌شده به پنل زنده (SSE) */
       hub: SseHub
+      /** stage-52 — سفارش جدید صف زنده: Web Push به ادمین‌های سطح ۲ */
+      notifications: NotificationService
     },
   ) {
     this.gateways = new Map<string, PaymentGateway>([
@@ -319,6 +330,17 @@ export class PaymentService {
       )
     } catch {
       /* هیچ‌کاری نمی‌کند — publish هرگز نباید مسیر پرداخت را بشکند */
+    }
+    // stage-52 — سفارشِ «واقعاً جدید» (پرداخت موفق، داخل صف زنده ظاهر شد):
+    // علاوه بر SSE، Web Push به ادمین‌های سطح ۲ — مرورگر بسته هم می‌گیرد و
+    // کلیک ⇒ پنل سفارشات زنده. فایر-اند-فورگت: redirect مشتری هرگز
+    // منتظر ارسال پوش نمی‌ماند و سرویس هرگز throw نمی‌کند.
+    // (تصرف اتمیک PENDING تضمین می‌کند callback و job تایم‌اوت فقط یکی
+    // به اینجا می‌رسند ⇒ پوش تکراری وجود ندارد.)
+    if (result.paymentStatus === 'SUCCESS') {
+      void this.deps.notifications
+        .notifyAdmin2sNewOrder({ displayId: result.orderDisplayId })
+        .catch(() => { /* ضد-کرش دوبل — قانون طلایی */ })
     }
     return result
   }

@@ -1,4 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-52 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/app.ts
+// تغییر: سیم‌کشی orderRoutes — notifications پاس داده می‌شود (پوش سفارش زنده).
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/app.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M3+L5)
@@ -261,6 +266,8 @@ export const buildApp = (deps: AppDeps) => {
         redis: deps.redis,
         idempotency: deps.checkoutIdempotency,
         hub: deps.sseHub,
+        // stage-52 — پوش «سفارش جدید صف زنده» به ادمین‌های سطح ۲
+        notifications: deps.notifications,
       }),
     )
     .use(paymentRoutes({ payments: deps.payments }))

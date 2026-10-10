@@ -1,4 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-52 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/index.ts
+// تغییر: سیم‌کشی PaymentService — notifications پاس داده می‌شود (پوش سفارش زنده).
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/index.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱)
@@ -122,7 +127,9 @@ const orders = new OrderService({ db, config, zones, settings, coupons, notifica
 const profile = new ProfileService({ db, config, orders, devices })
 // round-20 — تکرارناپذیری چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)
 const checkoutIdempotency = new CheckoutIdempotency({ db })
-const payments = new PaymentService({ db, config, orders, hub: sseHub })
+// stage-52 — payments هم notifications گرفت: پرداخت موفق = سفارش وارد صف
+// زنده ⇒ علاوه بر SSE پنل‌ها، Web Push به ادمین‌های سطح ۲ می‌رود.
+const payments = new PaymentService({ db, config, orders, notifications, hub: sseHub })
 const uploads = new UploadService(config.uploadDir)
 const admin2 = new Admin2Service({ db, config, settings, hub: sseHub })
 const live = new LiveService({ db, config, admin2, hub: sseHub })

@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-52 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-50)
+// تغییر (خواسته‌ی stage-52): سفارش جدید در «صف زنده» علاوه بر پنلِ SSE،
+//        به‌صورت Web Push «فقط به ادمین‌های سطح ۲» هم می‌رود — متد جدید
+//        notifyAdmin2sNewOrder(). کلیک روی نوتیف ⇒ /admin/admin2/live-orders
+//        (هندلر notificationclick از قبل در sw-push.js و sw.template.js هست).
+// ═══════════════════════════════════════════════════════════════
 // stage-50 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -12,11 +20,11 @@
 import { and, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
-import { notificationLog, notifications, pushSubscriptions, users } from '#/infra/db/schema'
+import { notificationLog, notifications, orderItems, orders, pushSubscriptions, users } from '#/infra/db/schema'
 import type { NotificationType } from '#/infra/db/schema/notifications'
 import type { AppConfig } from '#/infra/config/env'
 import type { SseHub } from '#/infra/realtime/sse-hub'
-import { sendWebPush } from '#/infra/push/web-push'
+import { sendWebPush, type PushPayload } from '#/infra/push/web-push'
 
 /**
  * فاز-۲ — سیستم نوتیفیکیشن مرکزی.
@@ -26,8 +34,14 @@ import { sendWebPush } from '#/infra/push/web-push'
  *  ۲) SSE زنده — کانال notify:{userId} (فقط مالک؛ گارد در realtime.routes)
  *  ۳) Web Push — به همه‌ی اشتراک‌های فعال کاربر (مرورگر بسته هم می‌رسد)
  *
+ * stage-52 — کانال چهارم (اختصاصی): notifyAdmin2sNewOrder
+ *  سفارش جدید صف زنده ⇒ پوشِ «فقط ادمین سطح ۲» (ادمین اصلی همان پنل
+ *  زنده + SSE را دارد؛ طبق خواسته، پوش نمی‌گیرد). بدون ردیف صندوق و بدون
+ *  تاریخچه — پنل زنده خودش منبع نمایش سفارش است؛ این کانال فقط «زنگ» است.
+ *
  * ضد-کرش (قانون طلایی: نوتیفیکیشن هرگز مسیر اصلی را زمین نمی‌زند):
- *  • notifyUser/notifyUsers/broadcast هرگز throw نمی‌کنند — خطا فقط لاگ.
+ *  • notifyUser/notifyUsers/broadcast/notifyAdmin2sNewOrder هرگز throw
+ *    نمی‌کنند — خطا فقط لاگ.
  *  • پوش اشتراکی که 404/410 داد → غیرفعال (disabledAt) و بعداً پاک‌سازی.
  *  • ارسال پوش فان‌اوت با سقف هم‌زمانی؛ هر اشتراک مستقل try/catch.
  */
@@ -80,12 +94,47 @@ export interface NotificationDto {
   readAt: Date | null
 }
 
+/** stage-52 — آمار پوش سفارش زنده (برای لاگ و فراخوان‌های آینده) */
+export interface LiveOrderPushStats {
+  /** اشتراک‌های فعال ادمین‌های سطح ۲ که پوش برایشان ارسال شد */
+  targeted: number
+  /** تحویل موفق (201 از سرور پوش) */
+  delivered: number
+  /** اشتراک مرده (404/410) — همین‌جا غیرفعال شد */
+  gone: number
+}
+
 /** سقف هم‌زمانی ارسال پوش — فشار لحظه‌ای روی حلقه‌ی رویداد نمی‌سازد */
 const PUSH_CONCURRENCY = 25
 /** chunk درج broadcast — تراکنش کوچک و پایدار */
 const INSERT_CHUNK = 500
 /** stage-48 — شکستِ پیاپی پوش قبل از غیرفعال‌کردن اشتراک */
 const PUSH_MAX_FAILURES = 5
+
+// ── stage-52 — ثابت‌های کانال «سفارش زنده → پوش ادمین۲» ──
+
+/** مقصد کلیک روی نوتیف (SW با data.url باز می‌کند — مسیر پنل زنده‌ی ادمین۲) */
+const ADMIN2_LIVE_ORDERS_URL = '/admin/admin2/live-orders'
+/**
+ * برچسب ثابت پوش سفارش: اعلان‌های جدید جای قبلی را می‌گیرند (tag یکسان)
+ * و renotify در SW باعث می‌شود هر سفارشِ تازه دوباره «با صدا» بیاید —
+ * ساعت پیک‌کاری ۵۰ اعلان روی هم انبار نمی‌شود، همیشه آخرین سفارش دیده است.
+ */
+const LIVE_ORDER_TAG = 'new-order'
+/**
+ * TTL اختصاصی این کانال (پیش‌فرض کلی ۲۴ ساعت است): سفارشِ ربع ساعت پیش
+ * دیگر «زنده» نیست — پوشِ دیرهنگام فقط نویز است؛ مشتری صفحه‌ی خودش را دارد.
+ */
+const LIVE_ORDER_PUSH_TTL = 900
+/** سقف اشتراک در یک ارسال — واقعیت: چند ادمین۲ × چند مرورگر/گوشی */
+const LIVE_ORDER_PUSH_MAX_SUBS = 500
+
+/** برچسب فارسی نوع ارسال — همان واژگان پنل زنده */
+const DELIVERY_LABELS: Record<'DELIVERY' | 'PICKUP' | 'DINE_IN', string> = {
+  DELIVERY: 'ارسال با پیک',
+  PICKUP: 'بیرون‌بر',
+  DINE_IN: 'سرو در سالن',
+}
 
 export class NotificationService {
   constructor(
@@ -219,6 +268,97 @@ export class NotificationService {
     })
     await this.pushToSubscribedUsers(input)
     return { targeted: inserted }
+  }
+
+  /**
+   * stage-52 — سفارش جدید وارد «صف زنده» شد ⇒ Web Push فقط به ادمین‌های
+   * سطح ۲. فراخوان: چک‌اوت تمام-کیف‌پول (order.routes) و نهایی‌شدن موفق
+   * پرداخت درگاهی (payment.service.finalize) — همان دو جایی که رویداد
+   * SSE ‏order-created روی orders:new منتشر می‌شود؛ یعنی دقیقاً لحظه‌ای
+   * که سفارش در پنل زنده ظاهر می‌شود.
+   *
+   *  • هدف: اشتراک‌های فعالِ کاربران role=admin2 (غیربن) — ادمین اصلی
+   *    عمداً خارج است (خواسته‌ی صریح؛ او همان پنل زنده + SSE را دارد).
+   *  • فقط «پوش» است: ردیف صندوق نه (unread بی‌پایان برای هر سفارش =
+   *    اسپم)، SSE نه (پنل زنده خودش مشترک orders:new است)، ردیف
+   *    notification_log نه (تاریخچه با هر سفارش پر می‌شد).
+   *  • کلیک ⇒ /admin/admin2/live-orders — notificationclick در SW با
+   *    data.url تب را فوکوس/ناو یا پنجره‌ی تازه باز می‌کند.
+   *  • urgency=high (RFC 8030) + TTL اختصاصی ۱۵ دقیقه — سفارشِ قدیمی
+   *    دیگر خبر فوری نیست.
+   *  • قانون طلایی: هرگز throw نمی‌کند؛ چک‌اوت/پرداخت هرگز زمین نمی‌خورد.
+   */
+  async notifyAdmin2sNewOrder(input: { displayId: string }): Promise<LiveOrderPushStats> {
+    const stats: LiveOrderPushStats = { targeted: 0, delivered: 0, gone: 0 }
+    try {
+      // ۱) خلاصه‌ی سبک سفارش (نوع ارسال/جمع اقلام/مبلغ) — شکست = بدنه‌ی ساده
+      const summary = await this.liveOrderSummary(input.displayId)
+
+      // ۲) اشتراک‌های فعال ادمین‌های سطح ۲ (join با users برای نقش/بن)
+      const subs = await this.deps.db
+        .select({
+          id: pushSubscriptions.id,
+          endpoint: pushSubscriptions.endpoint,
+          p256dh: pushSubscriptions.p256dh,
+          auth: pushSubscriptions.auth,
+        })
+        .from(pushSubscriptions)
+        .innerJoin(users, eq(users.id, pushSubscriptions.userId))
+        .where(
+          and(
+            eq(users.role, 'admin2'),
+            isNull(users.bannedAt),
+            isNull(pushSubscriptions.disabledAt),
+          ),
+        )
+        .limit(LIVE_ORDER_PUSH_MAX_SUBS)
+      if (subs.length === 0) return stats
+
+      const pushPayload: PushPayload = {
+        title: `🔔 سفارش جدید (${input.displayId})`,
+        body: liveOrderPushBody(input.displayId, summary),
+        url: ADMIN2_LIVE_ORDERS_URL,
+        tag: LIVE_ORDER_TAG,
+        urgency: 'high',
+        ttl: LIVE_ORDER_PUSH_TTL,
+        data: {
+          kind: 'live-order',
+          displayId: input.displayId,
+          ...(summary
+            ? { deliveryType: summary.deliveryType, totalAmount: summary.totalAmount }
+            : {}),
+        },
+      }
+
+      // ۳) فان‌آوت سقف‌دار + همان آمار/غیرفعال‌سازی بقیه‌ی مسیرهای پوش:
+      //    ok ⇒ failures صفر؛ fail ⇒ شمارنده (سقف ۵ ⇒ غیرفعال)؛
+      //    gone (404/410) ⇒ همان‌جا غیرفعال.
+      for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
+        const batch = subs.slice(i, i + PUSH_CONCURRENCY)
+        const results = await Promise.all(
+          batch.map(async (sub) => ({
+            sub,
+            outcome: await sendWebPush(this.deps.config, sub, pushPayload),
+          })),
+        )
+        for (const { sub, outcome } of results) {
+          stats.targeted++
+          if (outcome.kind === 'ok') stats.delivered++
+          if (outcome.kind === 'gone') {
+            stats.gone++
+            await this.disableSubscription(sub.id)
+          }
+          await this.recordPushOutcome(sub.id, outcome)
+        }
+      }
+      console.log(
+        `[notify] سفارش زنده ${input.displayId}: پوش به ${stats.targeted} اشتراک ادمین۲ ` +
+          `(تحویل ${stats.delivered}${stats.gone > 0 ? `، مرده ${stats.gone}` : ''})`,
+      )
+    } catch (err) {
+      console.error(`[notify] پوش سفارش زنده ${input.displayId} ناموفق:`, err)
+    }
+    return stats
   }
 
   /** stage-48 — تاریخچه‌ی ارسال‌های گروهی با فیلتر پیشرفته (پنل) */
@@ -423,6 +563,38 @@ export class NotificationService {
     }
   }
 
+  /**
+   * stage-52 — خلاصه‌ی سبک سفارش برای متن پوش (fail-soft):
+   * یک کوئری join + تجمیع اقلام؛ شکست (سفارش تازه هنوز commit نشده و…) ⇒
+   * null ⇒ بدنه‌ی ساده بدون جزئیات. گروه‌بندی روی PK سفارش مجاز است
+   * (وابستگی تابعی در Postgres) و leftJoin یعنی سفارش بدون قلم هم می‌آید.
+   */
+  private async liveOrderSummary(
+    displayId: string,
+  ): Promise<{
+    deliveryType: 'DELIVERY' | 'PICKUP' | 'DINE_IN'
+    totalAmount: number
+    pieces: number
+  } | null> {
+    try {
+      const [row] = await this.deps.db
+        .select({
+          deliveryType: orders.deliveryType,
+          totalAmount: orders.totalAmount,
+          pieces: sql<number>`coalesce(sum(${orderItems.quantity}), 0)::int`,
+        })
+        .from(orders)
+        .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
+        .where(eq(orders.displayId, displayId))
+        .groupBy(orders.id)
+        .limit(1)
+      return row ?? null
+    } catch (err) {
+      console.error(`[notify] خلاصه‌ی سفارش ${displayId} خوانده نشد:`, err)
+      return null
+    }
+  }
+
   /** پوش به همه‌ی اشتراک‌های فعال یک کاربر — هم‌زمانی سقف‌دار */
   private async pushToUser(
     userId: string,
@@ -618,6 +790,25 @@ export class NotificationService {
 
 const UUID_OK = (s: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+
+/**
+ * stage-52 — متن پوش سفارش زنده (بدنه‌ی نوتیف):
+ * با خلاصه ⇒ «ارسال با پیک • ۳ قلم • ۲۵۰٬۰۰۰ تومان — در صف سفارشات زنده…»
+ * بی‌خلاصه (کوئری شکست خورد) ⇒ جمله‌ی ساده — پوش هرگز به خاطر متن نمی‌افتد.
+ * اعداد فارسی با toLocaleString('fa-IR') — همان قرارداد domain/report/format.
+ */
+function liveOrderPushBody(
+  displayId: string,
+  summary: { deliveryType: 'DELIVERY' | 'PICKUP' | 'DINE_IN'; totalAmount: number; pieces: number } | null,
+): string {
+  if (!summary) {
+    return `سفارش ${displayId} در صف سفارشات زنده ثبت شد — برای مدیریت کلیک کنید.`
+  }
+  const parts: string[] = [DELIVERY_LABELS[summary.deliveryType] ?? 'سفارش']
+  if (summary.pieces > 0) parts.push(`${summary.pieces.toLocaleString('fa-IR')} قلم`)
+  parts.push(`${summary.totalAmount.toLocaleString('fa-IR')} تومان`)
+  return `در صف سفارشات زنده: ${parts.join(' • ')} — برای مدیریت کلیک کنید.`
+}
 
 function toDto(row: typeof notifications.$inferSelect): NotificationDto {
   return {

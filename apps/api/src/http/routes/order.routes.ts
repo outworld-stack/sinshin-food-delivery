@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-52 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/order.routes.ts
+// تغییر: چک‌اوت تمام-کیف‌پول (سفارش PAID بلافاصله وارد صف زنده می‌شود) علاوه بر
+//         رویداد SSE ‏orders:new، Web Push هم به ادمین‌های سطح ۲ می‌فرستد —
+//         deps.notifications جدید + فراخوان fire-and-forget (هرگز مسیر را نمی‌شکند).
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // round-48 — sinshin-food-delivery — فایل 47 از 97
 // مسیر مقصد: apps/api/src/http/routes/order.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -16,6 +23,7 @@ import type { PaymentService } from '#/domain/payment/payment.service'
 import type { RedisService } from '#/infra/redis/redis'
 import type { CheckoutIdempotency } from '#/domain/order/checkout-idempotency.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
+import type { NotificationService } from '#/domain/notification/notification.service'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { Err } from '#/domain/shared/errors'
 import { langFromHeaders } from '#/domain/shared/lang'
@@ -36,6 +44,8 @@ export interface OrderRoutesDeps {
   idempotency: CheckoutIdempotency
   /** round-16 — چک‌اوت تمام-کیف‌پول: سفارش PAID بلافاصله به پنل زنده اعلام شود */
   hub: SseHub
+  /** stage-52 — همان لحظه: Web Push «سفارش جدید» به ادمین‌های سطح ۲ */
+  notifications: NotificationService
 }
 
 export const orderRoutes = (deps: OrderRoutesDeps) => {
@@ -203,6 +213,14 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
             } catch {
               /* هیچ‌کاری نمی‌کند */
             }
+            // stage-52 — سفارش جدید صف زنده: پنل‌ها SSE را گرفتند؛ حالا
+            // ادمین‌های سطح ۲ علاوه بر آن Web Push هم می‌گیرند (مرورگر بسته/
+            // تب دیگری هم باشد می‌رسد؛ کلیک ⇒ پنل سفارشات زنده). فایر-اند-
+            // فورگت — سرویس هرگز throw نمی‌کند و پاسخ چک‌اوت برای پوش
+            // هرگز معطل نمی‌ماند.
+            void deps.notifications
+              .notifyAdmin2sNewOrder({ displayId: r.displayId })
+              .catch(() => { /* ضد-کرش دوبل — قانون طلایی */ })
           }
           response = !r.requiresPayment || !r.paymentId
             ? {
