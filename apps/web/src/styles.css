@@ -1,3 +1,9 @@
+/* ═══════════════════════════════════════════════════════════════ */
+/* stage-56 — sinshin-food-delivery                                    */
+/* مسیر مقصد: apps/web/src/styles.css                                   */
+/* تغییر: pt-safe + px-safe-x (بالا/کناره — مکمل viewport-fit=cover)   */
+/* ═══════════════════════════════════════════════════════════════ */
+
 @import "tailwindcss";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -257,6 +263,19 @@
    پس حتی روی p-4/p-6 هم به‌طور قابل‌اتکا override می‌شوند.) */
 .pb-safe {
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* ═══ stage-56 — safe-areaهای بالا/چپ/راست (viewport-fit=cover) ═══
+   هدرهای sticky موبایل با pt-safe زیر ناچ/status-bar فرو نمی‌روند؛
+   px-safe-x در landscape (ناچِ کناری) محتوا را از لبه‌ها نگه می‌دارد.
+   در دستگاه‌های بدون ناچ env()=0 → هیچ تغییر بصری. */
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+.px-safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 .pb-safe-lg {

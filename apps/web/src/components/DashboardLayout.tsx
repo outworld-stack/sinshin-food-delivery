@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/DashboardLayout.tsx
+// تغییر: pt-safe روی هدر موبایلِ sticky (viewport-fit=cover — ناچ)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/DashboardLayout.tsx
 // وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
@@ -110,8 +116,9 @@ export function DashboardLayout() {
             </button>
           </aside>
 
-          {/* هدر موبایل — stage-47: z-30→z-40 تا پنل کشویی زنگ همیشه روی محتوای صفحه بماند */}
-          <header className="md:hidden flex items-center justify-between p-4 bg-white dark:bg-[#2a1015] border-b border-gray-200 dark:border-[#3a151c] sticky top-0 z-40">
+          {/* هدر موبایل — stage-47: z-30→z-40 تا پنل کشویی زنگ همیشه روی محتوای صفحه بماند
+              stage-56: pt-safe — با viewport-fit=cover زیر ناچ/status-bar فرو نمی‌رود */}
+          <header className="md:hidden flex items-center justify-between p-4 pt-safe bg-white dark:bg-[#2a1015] border-b border-gray-200 dark:border-[#3a151c] sticky top-0 z-40">
             <Brand to="/products" textSize="text-lg" />
             <div className="flex items-center gap-4">
               {activeOrderId && (

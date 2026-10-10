@@ -1,4 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
+// تغییر:
+//   ۱) slug محصول — sanitize + یکتاییِ دوستانه + جست‌وجوی detail با UUID یا
+//        slug (productById) + عبور slug در همه‌ی DTOها (withSizes)
+//   ۲) تصویر مستقل هر variant — SizeInput.image + درج/آپدیت سایزها + DTO
+//   ۳) updateProduct پیام‌دار شد برای clashِ slug (پاسخ دوستانه)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -17,7 +27,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/menu/menu.service.ts
-import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, inArray, ne, sql, type SQL } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
@@ -38,7 +48,8 @@ import {
   type ProductId,
 } from '#/domain/shared/brand'
 import { nullIfEmpty, pickAr, pickArArr, type Lang } from '#/domain/shared/lang'
-import { likePattern } from '#/domain/shared/pg'
+import { isUniqueViolation, likePattern } from '#/domain/shared/pg'
+import { UUID_RE } from '#/domain/shared/ids'
 import type { Product } from '@sinshin/shared'
 
 const CACHE_TTL_SECONDS = 30
@@ -134,12 +145,33 @@ export interface SizeInput {
   discountPercentage?: number
   discountStartsAt?: Date | string | null
   discountEndsAt?: Date | string | null
+  /**
+   * stage-56 — تصویر مستقل این variant (آپلودی؛ null/خالی = بدون تصویر →
+   * گالری همان تصاویر مشترک محصول). در آپدیت: undefined = دست‌نخورده.
+   */
+  image?: string | null
 }
 
 /** stage-47 — گیره‌ی درصد ۰..۱۰۰ (مقدار خارج محدوده → قیچی، نه خطا) */
 function clampPercent(n: number): number {
   if (!Number.isFinite(n) || n <= 0) return 0
   return Math.min(100, Math.round(n))
+}
+
+/**
+ * stage-56 — نرمال‌سازی slug محصول برای URL سئوپسند:
+ *  • حروف کوچک + هر رانِ غیرمجاز → یک خط تیره + قیچی خط‌تیره‌های ابتدا/انها
+ *  • محدود به ۸۰ کاراکتر (هم‌عرض ستون DB)
+ *  • ورودی خالی/بی‌حرفِ لاتین → null (یعنی «بدون slug» → URL همان UUID)
+ */
+function sanitizeProductSlug(raw: string | null | undefined): string | null {
+  const clean = (raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return clean.length > 0 ? clean.slice(0, 80) : null
 }
 
 export type ProductRow = typeof products.$inferSelect
@@ -376,11 +408,15 @@ export class MenuService {
   }
 
   async productById(id: string, lang: Lang = 'fa'): Promise<ProductDto | null> {
-    const pid = asProductId(id)
+    // stage-56 — پذیرش UUID یا slug: الگوی دقیق UUID → جست‌وجو با id؛
+    // در غیر این صورت رشته = slug (کاراکترهای a-z0-9-). مسیر روت با الگوی
+    // SLUG_OR_ID_VALIDATE هر دو را می‌پذیرد؛ slugهایی که «عین UUID» باشند
+    // مسیر id می‌گیرند (شکاف عملی ندارند — چنین slugای قابل تولید نیست).
+    const pid = UUID_RE.test(id) ? asProductId(id) : null
 
     const load = async (): Promise<ProductDto | null> => {
       const row = await this.deps.db.query.products.findFirst({
-        where: eq(products.id, pid),
+        where: pid ? eq(products.id, pid) : eq(products.slug, id),
       })
       if (!row) return null
       const cat = await this.deps.db.query.categories.findFirst({
@@ -708,41 +744,65 @@ export class MenuService {
     courierAllowed?: boolean
     takeawayAllowed?: boolean
     dineInAllowed?: boolean
+    /**
+     * stage-56 — slug انگلیسی سئوپسند (اختیاری؛ خالی = بدون slug → URL با UUID).
+     * نرمال‌سازی سروری + پیام دوستانه در تکرار.
+     */
+    slug?: string | null
   }): Promise<{ success: boolean; id?: string; message?: string }> {
     const nameAr = nullIfEmpty(input.nameAr)
     const descriptionAr = nullIfEmpty(input.descriptionAr)
     // stage-47 — درصد صفر ⇒ پنجره بی‌معناست؛ تمیز ذخیره می‌کنیم (null)
     const pct = clampPercent(input.discountPercentage)
     const hasWindow = pct > 0
-    const [created] = await this.deps.db
-      .insert(products)
-      .values({
-        name: input.name,
-        description: input.description,
-        // round-34 — ذخیره‌ی دستی ادمین: arAuto=false (بج «دستی»)
-        nameAr,
-        descriptionAr,
-        ingredientsAr: input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null,
-        arAuto: false,
-        originalPrice: input.originalPrice,
-        discountPercentage: pct,
-        discountStartsAt: hasWindow ? asDiscountDate(input.discountStartsAt) : null,
-        discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
-        prepTime: input.prepTime,
-        packagingCost: input.packagingCost ?? 0,
-        categoryId: asCategoryId(input.categoryId),
-        profileImage: input.profileImage ?? null,
-        galleryImages: input.galleryImages ?? [],
-        sizesEnabled: input.sizesEnabled ?? false,
-        ingredients: input.ingredients ?? [],
-        status: 'ACTIVE',
-        // stage-48 — موجودی + حالت‌های سفارش (پیش‌فرض روشن = ارث از دسته)
-        isAvailable: input.isAvailable ?? true,
-        courierAllowed: input.courierAllowed ?? true,
-        takeawayAllowed: input.takeawayAllowed ?? true,
-        dineInAllowed: input.dineInAllowed ?? true,
-      } as typeof products.$inferInsert)
-      .returning()
+    // stage-56 — slug نرمال‌شده (خالی → null) + پیش‌چکِ دوستانه‌ی تکرار
+    const slug = sanitizeProductSlug(input.slug)
+    if (slug) {
+      const clash = await this.deps.db.query.products.findFirst({
+        where: eq(products.slug, slug),
+      })
+      if (clash) return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
+    }
+    let created: typeof products.$inferSelect | undefined
+    try {
+      ;[created] = await this.deps.db
+        .insert(products)
+        .values({
+          name: input.name,
+          description: input.description,
+          // round-34 — ذخیره‌ی دستی ادمین: arAuto=false (بج «دستی»)
+          nameAr,
+          descriptionAr,
+          // stage-56 — slug سئوپسند (null = URL با UUID)
+          slug,
+          ingredientsAr: input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null,
+          arAuto: false,
+          originalPrice: input.originalPrice,
+          discountPercentage: pct,
+          discountStartsAt: hasWindow ? asDiscountDate(input.discountStartsAt) : null,
+          discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
+          prepTime: input.prepTime,
+          packagingCost: input.packagingCost ?? 0,
+          categoryId: asCategoryId(input.categoryId),
+          profileImage: input.profileImage ?? null,
+          galleryImages: input.galleryImages ?? [],
+          sizesEnabled: input.sizesEnabled ?? false,
+          ingredients: input.ingredients ?? [],
+          status: 'ACTIVE',
+          // stage-48 — موجودی + حالت‌های سفارش (پیش‌فرض روشن = ارث از دسته)
+          isAvailable: input.isAvailable ?? true,
+          courierAllowed: input.courierAllowed ?? true,
+          takeawayAllowed: input.takeawayAllowed ?? true,
+          dineInAllowed: input.dineInAllowed ?? true,
+        } as typeof products.$inferInsert)
+        .returning()
+    } catch (e) {
+      // stage-56 — رقابت همزمان روی slug (۲۳۵۰۵) → پیام دوستانه، نه 500
+      if (isUniqueViolation(e)) {
+        return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
+      }
+      throw e
+    }
     if (!created) return { success: false, message: 'ذخیره‌سازی ناموفق بود' }
 
     if (input.sizesEnabled && input.sizes?.length) {
@@ -782,7 +842,12 @@ export class MenuService {
     courierAllowed?: boolean
     takeawayAllowed?: boolean
     dineInAllowed?: boolean
-  }): Promise<void> {
+    /**
+     * stage-56 — slug سئوپسند: undefined = دست‌نخورده (کلاینت قدیمی)؛
+     * رشته/null = تنظیم/پاک‌سازی (نرمال‌سازی سروری؛ خالی → null = UUID URL).
+     */
+    slug?: string | null
+  }): Promise<{ success: boolean; message?: string }> {
     const pid = asProductId(input.id)
     // stage-48 — ردیف قبلی: تشخیص تغییر موجودی/حالت (SSE) + تغییر تخفیف (پخش)
     const before = await this.deps.db.query.products.findFirst({
@@ -805,37 +870,56 @@ export class MenuService {
             discountStartsAt: hasWindow ? asDiscountDate(input.discountStartsAt) : null,
             discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
           }
-    await this.deps.db
-      .update(products)
-      .set({
-        name: input.name,
-        description: input.description,
-        // round-34 — ذخیره‌ی دستی ادمین همیشه پرچم «خودکار» را برمی‌گرداند:
-        // مقدار عربی دارد → «دستی»؛ همه خالی → بدون ترجمه (NULL ها بالا مشخص شدند)
-        nameAr,
-        descriptionAr,
-        ingredientsAr,
-        arAuto: false,
-        originalPrice: input.originalPrice,
-        discountPercentage: pct,
-        ...windowFields,
-        prepTime: input.prepTime,
-        // round-11 (اسکن M-3): undefined یعنی «فیلد نیامده» (کلاینت قدیمی/اسکریپت)
-        // → مقدار موجود حفظ می‌شود، نه صفرِ بی‌صدا (درآمد بسته‌بندی از دست نمی‌رود).
-        // drizzle مقدار undefined را از SET حذف می‌کند.
-        ...(input.packagingCost !== undefined ? { packagingCost: input.packagingCost } : {}),
-        profileImage: input.profileImage ?? null,
-        galleryImages: input.galleryImages ?? [],
-        sizesEnabled: input.sizesEnabled ?? false,
-        ingredients: input.ingredients ?? [],
-        // stage-48 — موجودی/حالت‌ها: undefined = حفظ مقدار قبلی (دراپ Removes undefined از SET)
-        ...(input.isAvailable !== undefined ? { isAvailable: input.isAvailable } : {}),
-        ...(input.courierAllowed !== undefined ? { courierAllowed: input.courierAllowed } : {}),
-        ...(input.takeawayAllowed !== undefined ? { takeawayAllowed: input.takeawayAllowed } : {}),
-        ...(input.dineInAllowed !== undefined ? { dineInAllowed: input.dineInAllowed } : {}),
-        updatedAt: new Date(),
+    // stage-56 — slug نرمال‌شده + پیش‌چکِ تکرار (خود محصول مستثناست).
+    // undefined = دست‌نخورده؛ رشته/خالی = تنظیم/پاک‌سازی.
+    const slug = input.slug === undefined ? undefined : sanitizeProductSlug(input.slug)
+    if (slug) {
+      const clash = await this.deps.db.query.products.findFirst({
+        where: and(eq(products.slug, slug), ne(products.id, pid)),
       })
-      .where(eq(products.id, pid))
+      if (clash) return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
+    }
+    try {
+      await this.deps.db
+        .update(products)
+        .set({
+          name: input.name,
+          description: input.description,
+          // round-34 — ذخیره‌ی دستی ادمین همیشه پرچم «خودکار» را برمی‌گرداند:
+          // مقدار عربی دارد → «دستی»؛ همه خالی → بدون ترجمه (NULL ها بالا مشخص شدند)
+          nameAr,
+          descriptionAr,
+          ingredientsAr,
+          arAuto: false,
+          originalPrice: input.originalPrice,
+          discountPercentage: pct,
+          ...windowFields,
+          prepTime: input.prepTime,
+          // round-11 (اسکن M-3): undefined یعنی «فیلد نیامده» (کلاینت قدیمی/اسکریپت)
+          // → مقدار موجود حفظ می‌شود، نه صفرِ بی‌صدا (درآمد بسته‌بندی از دست نمی‌رود).
+          // drizzle مقدار undefined را از SET حذف می‌کند.
+          ...(input.packagingCost !== undefined ? { packagingCost: input.packagingCost } : {}),
+          // stage-56 — slug: undefined = حفظ؛ رشته/خالی = تنظیم/پاک‌سازی
+          ...(slug !== undefined ? { slug } : {}),
+          profileImage: input.profileImage ?? null,
+          galleryImages: input.galleryImages ?? [],
+          sizesEnabled: input.sizesEnabled ?? false,
+          ingredients: input.ingredients ?? [],
+          // stage-48 — موجودی/حالت‌ها: undefined = حفظ مقدار قبلی (دراپ Removes undefined از SET)
+          ...(input.isAvailable !== undefined ? { isAvailable: input.isAvailable } : {}),
+          ...(input.courierAllowed !== undefined ? { courierAllowed: input.courierAllowed } : {}),
+          ...(input.takeawayAllowed !== undefined ? { takeawayAllowed: input.takeawayAllowed } : {}),
+          ...(input.dineInAllowed !== undefined ? { dineInAllowed: input.dineInAllowed } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, pid))
+    } catch (e) {
+      // stage-56 — رقابت همزمان روی slug (۲۳۵۰۵) → پیام دوستانه، نه 500
+      if (isUniqueViolation(e)) {
+        return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
+      }
+      throw e
+    }
 
     // ── phase-2: آیدی پایدار سایزها ──
     // قبلاً: حذف همه + اینسرت با UUID جدید → سبدِ مشتری که sizeId قدیمی
@@ -869,7 +953,15 @@ export class MenuService {
           if (match) {
             await tx
               .update(productSizes)
-              .set({ price: s.price, sortOrder: order, nameAr: nullIfEmpty(s.nameAr), ...sizeWindow })
+              .set({
+                price: s.price,
+                sortOrder: order,
+                nameAr: nullIfEmpty(s.nameAr),
+                ...sizeWindow,
+                // stage-56 — تصویر variant: undefined = دست‌نخورده؛
+                // رشته/خالی = تنظیم/پاک‌سازی
+                ...(s.image !== undefined ? { image: nullIfEmpty(s.image) } : {}),
+              })
               .where(eq(productSizes.id, match.id))
             keepIds.add(match.id)
           } else {
@@ -881,6 +973,8 @@ export class MenuService {
                 nameAr: nullIfEmpty(s.nameAr),
                 price: s.price,
                 sortOrder: order,
+                // stage-56 — تصویر مستقل این variant
+                image: nullIfEmpty(s.image),
                 ...sizeWindow,
               })
               .returning({ id: productSizes.id })
@@ -916,6 +1010,8 @@ export class MenuService {
       // ۲) تخفیف مادی/جدید فعال شد ⇒ پخش فوری نوتیفیکیشن به همه
       await this.broadcastDiscountIfActive(after, before)
     }
+    // stage-56 — نتیجه‌ی پیام‌دار (clashِ slug بالاتر return می‌شود)
+    return { success: true }
   }
 
   async toggleProductStatus(id: string): Promise<void> {
@@ -973,6 +1069,8 @@ export class MenuService {
           discountPercentage: sizePct,
           discountStartsAt: sizePct > 0 ? asDiscountDate(s.discountStartsAt) : null,
           discountEndsAt: sizePct > 0 ? asDiscountDate(s.discountEndsAt) : null,
+          // stage-56 — تصویر مستقل این variant (null = تصویر مشترک محصول)
+          image: nullIfEmpty(s.image),
           sortOrder: i,
         }
       }),
@@ -1010,6 +1108,8 @@ export class MenuService {
     return rows.map((r) => ({
       id: r.id,
       name: pickAr(lang, r.nameAr, r.name),
+      // stage-56 — slug سئو (null = URL همان UUID) — در همه‌ی لیست‌ها حاضر
+      slug: r.slug ?? null,
       description: pickAr(lang, r.descriptionAr, r.description ?? ''),
       originalPrice: r.originalPrice,
       finalPrice: finalPriceOf(r, now),
@@ -1034,6 +1134,8 @@ export class MenuService {
         finalPrice: sizeFinalPriceOf(s, now),
         discountStartsAt: s.discountStartsAt?.toISOString() ?? null,
         discountEndsAt: s.discountEndsAt?.toISOString() ?? null,
+        // stage-56 — تصویر مستقل این variant (null = تصویر مشترک محصول)
+        image: s.image ?? null,
         // round-34 — فقط پاسخ ادمین: نام عربی خام سایز برای فرم ویرایش
         ...(opts?.includeAr ? { nameAr: s.nameAr ?? null } : {}),
       })),

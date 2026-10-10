@@ -1,4 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery — فرم ادمین محصول
+// مسیر مقصد: apps/web/src/components/admin/ProductForm.tsx
+// تغییر: slug انگلیسی سئو + تصویر مستقل هر سایز —
+//   • slug: فیلد جدا با «پیشنهاد از نام» و پیش‌نمایش /products/<slug>
+//     (خالی = آدرس با UUID؛ گارد کلاینت: ^[a-zA-Z0-9-]+$ و ≤ ۸۰ نویسه)
+//   • هر سایز: ImageField مستقل (خالی = تصویر مشترک محصول)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-47 — sinshin-food-delivery — فایل ۶
 // مسیر مقصد: apps/web/src/components/admin/ProductForm.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -91,6 +100,17 @@ function windowValid(startsAt: string | null, endsAt: string | null): boolean {
 	if (!Number.isFinite(s) || !Number.isFinite(e)) return true // خراب → سرور null می‌کند
 	return e > s
 }
+
+/**
+ * stage-56 — ساخت slug از نام: کوچک‌سازی، غیرِ [a-z0-9]+ → خط تیره
+ * (تجمیع‌شده)، حذف خط تیره‌ی ابتدا/انتها، سقف ۸۰ نویسه (قرارداد سرور).
+ */
+const slugifyName = (name: string): string =>
+	name
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-') // غیر از حرف/عدد انگلیسی → '-' (تجمیع)
+		.replace(/^-+|-+$/g, '') // خط تیره‌ی ابتدا/انتهایی حذف
+		.slice(0, 80)
 
 interface DiscountWindowEditorProps {
 	startsAt: string | null
@@ -269,6 +289,8 @@ const EMPTY_SIZE: ProductFormSize = {
 	discountPercentage: 0,
 	discountStartsAt: null,
 	discountEndsAt: null,
+	// stage-56 — تصویر مستقل این سایز (خالی = تصویر مشترک محصول)
+	image: '',
 }
 
 export function ProductForm({
@@ -284,6 +306,8 @@ export function ProductForm({
 	const [formData, setFormData] = useState<ProductFormData>({
 		name: '',
 		description: '',
+		// stage-56 — slug انگلیسی سئو (خالی = آدرس با UUID)
+		slug: '',
 		originalPrice: 0,
 		discountPercentage: 0,
 		// stage-47 — پنجره‌ی تخفیف محصول (null = دائمی)
@@ -315,6 +339,8 @@ export function ProductForm({
 			setFormData({
 				name: initialData.name || '',
 				description: initialData.description || '',
+				// stage-56 — slug سئو از سرور (null/نیامد = خالی)
+				slug: initialData.slug ?? '',
 				originalPrice: initialData.originalPrice || 0,
 				discountPercentage: initialData.discountPercentage || 0,
 				// stage-47 — هیدراته‌کردن پنجره‌ی زمانی از سرور
@@ -335,6 +361,8 @@ export function ProductForm({
 						discountPercentage: s.discountPercentage ?? 0,
 						discountStartsAt: s.discountStartsAt ?? null,
 						discountEndsAt: s.discountEndsAt ?? null,
+						// stage-56 — تصویر مستقل این سایز از سرور
+						image: s.image ?? '',
 					})) || [],
 				sizesEnabled: initialData.sizesEnabled ?? false,
 				// stage-48 — موجودی + حالت‌های مؤثر (سروری) برای سوئیچ‌ها
@@ -434,6 +462,15 @@ export function ProductForm({
 		setFormData((prev) => ({ ...prev, sizes: newSizes }))
 	}
 
+	/** stage-56 — تصویر مستقل این سایز (url = آپلود؛ '' = حذف → تصویر مشترک) */
+	const handleSizeImage = (index: number, url: string) => {
+		setFormData((prev) => {
+			const next = [...(prev.sizes || [])]
+			next[index] = { ...next[index], image: url }
+			return { ...prev, sizes: next }
+		})
+	}
+
 	const addSize = () =>
 		setFormData((prev) => ({
 			...prev,
@@ -472,6 +509,13 @@ export function ProductForm({
 		[],
 	)
 
+	// stage-56 — «پیشنهاد از نام»: فقط وقتی نام حرف لاتین دارد فعال است
+	const canSuggestSlug = /[a-zA-Z]/.test(formData.name)
+	const handleSuggestSlug = () => {
+		if (!canSuggestSlug) return
+		setFormData((prev) => ({ ...prev, slug: slugifyName(prev.name) }))
+	}
+
 	// --- مواد اولیه ---
 	const handleAddIngredient = () => {
 		if (ingredientInput.trim()) {
@@ -500,6 +544,18 @@ export function ProductForm({
 		}
 		if (!formData.galleryImages || formData.galleryImages.length === 0) {
 			showToast('افزودن حداقل یک عکس برای گالری محصول اجباری است.', 'error')
+			return
+		}
+
+		// stage-56 — گارد کلاینت slug (سرور خودش sanitize می‌کند) —
+		// فقط حروف/عدد انگلیسی و خط تیره؛ حداکثر ۸۰ نویسه
+		const slugVal = formData.slug.trim()
+		if (slugVal && !/^[a-zA-Z0-9-]+$/.test(slugVal)) {
+			showToast('slug فقط می‌تواند حروف انگلیسی، عدد و خط تیره باشد.', 'error')
+			return
+		}
+		if (slugVal.length > 80) {
+			showToast('slug حداکثر ۸۰ نویسه می‌تواند باشد.', 'error')
 			return
 		}
 
@@ -726,6 +782,51 @@ export function ProductForm({
 					rows={3}
 					maxLength={2000}
 				/>
+
+				{/* stage-56 — slug انگلیسی سئو (اختیاری؛ خالی = آدرس با UUID) */}
+				<div>
+					<div className="flex items-center justify-between mb-2">
+						<label
+							htmlFor="product-slug"
+							className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300"
+						>
+							slug انگلیسی (آدرس سئو)
+						</label>
+						{/* stage-56 — پیشنهاد از نام: فقط وقتی نام حرف لاتین دارد */}
+						<button
+							type="button"
+							onClick={handleSuggestSlug}
+							disabled={!canSuggestSlug}
+							className="text-xs text-primary dark:text-dark-primary hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+						>
+							پیشنهاد از نام
+						</button>
+					</div>
+					<input
+						id="product-slug"
+						type="text"
+						name="slug"
+						dir="ltr"
+						value={formData.slug}
+						onChange={handleChange}
+						placeholder="pepperoni-pizza"
+						maxLength={80}
+						className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none font-mono text-left"
+					/>
+					<p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+						فقط حروف انگلیسی کوچک، عدد و خط تیره — خالی بگذارید تا آدرس با
+						شناسه‌ی پیش‌فرض بماند.
+					</p>
+					{/* stage-56 — پیش‌نمایش زنده‌ی آدرس — فقط وقتی slug پر است */}
+					{formData.slug.trim() !== '' && (
+						<p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 font-DanaMedium">
+							آدرس: {' '}
+							<span dir="ltr" className="font-mono">
+								/products/{formData.slug.trim()}
+							</span>
+						</p>
+					)}
+				</div>
 
 				{/* ⬅ سوئیچ سایزبندی — کلید اصلی (پرسش ۱) */}
 				<div
@@ -1047,6 +1148,18 @@ export function ProductForm({
 										>
 											<X size={16} />
 										</button>
+									</div>
+
+									{/* stage-56 — تصویر مستقل این سایز (اختیاری؛ خالی = تصویر مشترک) */}
+									<div className="p-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c]">
+										<ImageField
+											label="تصویر این سایز (اختیاری)"
+											accept="image/webp"
+											fileTypeText="افزودن WebP"
+											images={size.image ? [size.image] : []}
+											onAdd={(url) => handleSizeImage(index, url)}
+											onRemove={() => handleSizeImage(index, '')}
+										/>
 									</div>
 
 									{/* ردیف ۲ (stage-47): تخفیف مستقِ این سایز + سوییچ زمان‌دار */}

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/menu.routes.ts
+// تغییر: GET /menu/products/:id حالا UUID یا slug انگلیسی می‌پذیرد
+//        (الگوی SLUG_OR_ID) — پایه‌ی URLهای سئوپسند /products/<slug>
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/menu.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -14,7 +21,7 @@ import type { CartService } from '#/domain/cart/cart.service'
 import type { RedisService } from '#/infra/redis/redis'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { sha256 } from '#/domain/shared/crypto'
-import { UUID_PATTERN } from '#/domain/shared/ids'
+import { SLUG_OR_ID_PATTERN } from '#/domain/shared/ids'
 import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
 import { cartItemSchema } from '#/http/schemas'
 
@@ -98,8 +105,14 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
       '/products/:id',
       (ctx) => withMenuCache(ctx, () => deps.menu.productById(ctx.params.id, langFromHeaders(ctx.headers))),
       {
-        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        detail: { summary: 'Single product with sizes (null when not found)' },
+        // stage-56 — پذیرش UUID یا slug انگلیسی (a-z0-9-)؛ سرویس با UUID_RE
+        // دقیق مسیر را تشخیص می‌دهد. لینک‌های سئوپسند: /menu/products/pepperoni-pizza
+        params: t.Object({ id: t.String({ pattern: SLUG_OR_ID_PATTERN }) }),
+        detail: {
+          summary: 'Single product by id or slug (null when not found)',
+          description:
+            'Accepts product UUID (legacy/cart links) or English slug (SEO URLs). Sizes include per-variant image (stage-56).',
+        },
       },
     )
 

@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/hooks/site/useCheckoutPage.ts
+// تغییر: بعد از ثبت سفارشِ موفق، پریفکس my-orders هم نامعتبر شود
+// ═══════════════════════════════════════════════════════════════
+
 // src/hooks/site/useCheckoutPage.ts
 
 import type { CheckoutItemInput } from '@sinshin/shared'
@@ -310,6 +316,8 @@ export function useCheckoutPage(deps: {
 		onSuccess: async (res) => {
 			queryClient.invalidateQueries({ queryKey: qk.userProfile })
 			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
+			// stage-56 — سفارش تازه باید در «سفارشات من» (صفحه‌بندی سروری) ظاهر شود
+			queryClient.invalidateQueries({ queryKey: qk.myOrdersPrefix })
 
 			// ── تمام-کیف‌پول: همین، نتیجه است ──
 			if (res.orderCompleted && res.orderId) {

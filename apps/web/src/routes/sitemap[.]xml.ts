@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/routes/sitemap[.]xml.ts
+// تغییر: URL محصولات از slug انگلیسی (اگر تعیین شده باشد) — همان
+//        مسیرهای canonical؛ بدون slug همان UUID قبلی
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-38 — sinshin-food-delivery — فایل 18 از 18
 // مسیر مقصد: web/src/routes/sitemap[.]xml.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -59,8 +66,9 @@ export const Route = createFileRoute('/sitemap.xml')({
 						for (const p of products) {
 							if (seen.has(p.id)) continue
 							seen.add(p.id)
+							// stage-56 — URL سئوپسند: slug اگر باشد، وگرنه UUID
 							entries.push({
-								path: `/products/${p.id}`,
+								path: `/products/${p.slug || p.id}`,
 								changefreq: 'weekly',
 								priority: '0.8',
 							})

@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery — فایل 5 از 5
+// مسیر مقصد: apps/web/src/types/shared/ui.ts
+// تغییر: GalleryProps.leadImage + ProductCardProps (slug + تصویر سایز) —
+//        همه اختیاری و افزایشی؛ مصرف‌کننده‌های فعلی دست‌نخورده می‌مانند
+// ═══════════════════════════════════════════════════════════════
+
 // src/types/ui.ts
 
 import type { AmountSortDir, UserSortDir } from '#/utils/queryOptions'
@@ -20,6 +27,11 @@ export interface EmptyStateProps {
 export interface ProductCardProps {
         product: {
                 id: string
+                /**
+                 * stage-56 — slug سئوپسند محصول (null = URL با UUID). لینک‌های
+                 * کارت slug را ترجیح می‌دهند؛ سرور هر دو را می‌پذیرد.
+                 */
+                slug?: string | null
                 name: string
                 description: string | null
                 originalPrice: number
@@ -41,6 +53,8 @@ export interface ProductCardProps {
                         id: string
                         name: string
                         price: number
+                        /** stage-56 — تصویر مستقل سایز (سازگاری تایپ با پیش‌نمایش فرم؛ کارت چیپ بندانگشتی ندارد) */
+                        image?: string | null
                         discountPercentage?: number
                         discountStartsAt?: string | null
                         discountEndsAt?: string | null
@@ -92,6 +106,11 @@ export interface CategoryScrollerProps {
 
 export interface GalleryProps {
         images: string[]
+        /**
+         * stage-56 — تصویر مستقل سایزِ انتخاب‌شده (variant): اسلاید نخست گالری؛
+         * تغییر آن → slideTo(0). null = بدون تصویر سایز (گالری مشترک محصول).
+         */
+        leadImage?: string | null
 }
 
 export interface FileUploaderProps {

@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/hooks/dashboard/useOrderDetailPage.ts
+// تغییر: بعد از تایید تحویل، پریفکس my-orders هم نامعتبر شود
+// ═══════════════════════════════════════════════════════════════
+
 // src/hooks/dashboard/useOrderDetailPage.ts
 import { useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -20,6 +26,8 @@ export function useOrderDetailPage(orderId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.orderDetails(orderId) })
       queryClient.invalidateQueries({ queryKey: qk.userProfile })
+      // stage-56 — آمار/ردیف‌های «سفارشات من» از سرور → پریفکس my-orders
+      queryClient.invalidateQueries({ queryKey: qk.myOrdersPrefix })
       setActiveOrderId(null)
       showToast(t['dash.orders.deliverToast'])
     },

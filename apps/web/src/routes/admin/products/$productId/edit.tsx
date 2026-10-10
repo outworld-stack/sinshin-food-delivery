@@ -31,7 +31,13 @@ function EditProductPage() {
 	const mutation = useMutation({
 		mutationFn: (data: ProductFormData) =>
 			updateAdminProduct({ data: { id: productId, ...data } }),
-		onSuccess: () => {
+		onSuccess: (res) => {
+			// stage-56 — HTTP 200 با success=false (مثل slug تکراری): پیام سرور
+			// نمایش داده شود؛ بدون invalidate/ناوبری — کاربر روی فرم اصلاح می‌کند
+			if (!res.success) {
+				showToast(res.message ?? 'ویرایش محصول ناموفق بود.', 'error')
+				return
+			}
 			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
 			queryClient.invalidateQueries({
 				queryKey: qk.adminProductDetails(productId),
@@ -44,6 +50,8 @@ function EditProductPage() {
 			showToast('محصول با موفقیت ویرایش شد')
 			navigate({ to: '/admin/products' })
 		},
+		// stage-56 — خطای شبکه/اعتبارسنجی (استثنا) هم پیام‌دار دیده شود
+		onError: (err) => showToast(err.message, 'error'),
 	})
 
 	// گارد — فقط productsWrite اجازه ویرایش دارد

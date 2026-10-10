@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery — فایل 4 از 5
+// مسیر مقصد: apps/web/src/components/ProductCard.tsx
+// تغییر: هر دو لینک محصول با slug سئوپسند (وگرنه UUID) — سرور هر دو
+//        پارامتر را در GET /menu/products/:id می‌پذیرد
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/ProductCard.tsx
 // وضعیت: ویرایش فایل موجود (انیمیشن‌های CSS-only)
@@ -235,7 +242,8 @@ export const ProductCard = memo(function ProductCard({
 			{interactive ? (
 				<Link
 					to="/products/$productId"
-					params={{ productId: product.id }}
+					// stage-56 — سئو: slug اگر باشد وگرنه UUID (همان ترجیح canonical/sitemap)
+					params={{ productId: product.slug || product.id }}
 					className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]"
 				>
 					{product.profileImage ? (
@@ -274,7 +282,10 @@ export const ProductCard = memo(function ProductCard({
 			{/* round-14 — موبایل: پدینگ جمع‌تر، قیمت/«تومان» و آیکون سبد کوچک‌تر تا کارت در عرض کم نشکند */}
 			<div className="p-3 sm:p-4 flex flex-col flex-1">
 				{interactive ? (
-					<Link to="/products/$productId" params={{ productId: product.id }}>
+					<Link
+						to="/products/$productId"
+						params={{ productId: product.slug || product.id }}
+					>
 						<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-1 hover:text-primary dark:hover:text-dark-primary transition-colors">
 							{product.name}
 						</h3>

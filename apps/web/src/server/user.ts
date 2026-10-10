@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/server/user.ts
+// تغییر: getMyOrders — «سفارشات من» با صفحه‌بندی سروری (page/limit/
+//        sort + پاکتِ { orders, total, totalSpent })
+// ═══════════════════════════════════════════════════════════════
+
 // src/server/user.ts — پروفایل + سفارشات + نظرات + آدرس — تماماً API
 // بدون هیچ موک
 
@@ -7,6 +14,7 @@ import type {
 	ProductId,
 	ProductReviewDto,
 	UserOrder,
+	UserOrdersData,
 	UserProfileDto,
 } from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
@@ -32,6 +40,20 @@ export async function getUserProfile(
 	// کار-۶: light — حالت سبک برای لایه‌های همیشگی (هدر/لایوت/چک‌اوت)
 	const qs = opts.light ? '?light=true' : ''
 	return authJson<UserProfileDto>(`/orders/profile${qs}`, 'GET')
+}
+
+// ── stage-56 — «سفارشات من» با صفحه‌بندی سروری ──
+// صفحه/حد/مرتب‌سازی به GET /orders می‌روند؛ پاسخ { orders, total, totalSpent }.
+// sort همان مقادیر صفحه‌ی داشبورد است (newest/oldest/expensive/cheap).
+export async function getMyOrders(
+	opts: { page?: number; limit?: number; sort?: string } = {},
+): Promise<UserOrdersData> {
+	const params = new URLSearchParams()
+	if (opts.page) params.set('page', String(opts.page))
+	if (opts.limit) params.set('limit', String(opts.limit))
+	if (opts.sort) params.set('sort', opts.sort)
+	const q = params.toString()
+	return authJson<UserOrdersData>(`/orders${q ? `?${q}` : ''}`, 'GET')
 }
 
 // round-12 — bind معرف پس از ثبت‌نام (اسکن QR / ورود دستی کد در داشبورد کاربر)

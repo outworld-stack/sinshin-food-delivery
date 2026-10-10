@@ -1,3 +1,12 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
+// تغییر:
+//   ۱) slug اختیاری محصول در create/patch (a-z0-9-؛ خالی = بدون slug)
+//   ۲) image اختیاری هر سایز (آپلود؛ خالی = تصویر مشترک محصول)
+//   ۳) PATCH نتیجه‌ی سرویس را برمی‌گرداند (پیام دوستانه‌ی slug تکراری)
+// ═══════════════════════════════════════════════════════════════
+
 // ═══════════════════════════════════════════════════════════
 // stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
@@ -33,6 +42,8 @@ const sizeInput = t.Object({
   discountPercentage: t.Optional(t.Numeric({ minimum: 0, maximum: 100 })),
   discountStartsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
   discountEndsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
+  // stage-56 — تصویر مستقل این variant (آپلودی؛ خالی = تصویر مشترک محصول)
+  image: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
 })
 
 export interface AdminMenuRoutesDeps {
@@ -253,6 +264,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           courierAllowed: t.Optional(t.Boolean()),
           takeawayAllowed: t.Optional(t.Boolean()),
           dineInAllowed: t.Optional(t.Boolean()),
+          // stage-56 — slug انگلیسی سئوپسند (اختیاری؛ خالی = URL با UUID).
+          // نرمال‌سازی + پیام دوستانه‌ی تکرار در سرویس انجام می‌شود.
+          slug: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
         }),
         detail: { summary: 'Create product (sizes replace-all on update)' },
       },
@@ -260,8 +274,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .patch(
       '/products/:id',
       async ({ params, body, user }) => {
-        await deps.menu.updateProduct({ id: params.id, ...body })
-        if (user.role === 'admin') {
+        // stage-56 — نتیجه‌ی پیام‌دار (clashِ slug → پیام دوستانه در پاسخ)
+        const res = await deps.menu.updateProduct({ id: params.id, ...body })
+        if (res.success && user.role === 'admin') {
           await deps.audit.log({
             actorId: user.id,
             action: 'PRODUCT_UPDATE',
@@ -270,7 +285,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
             metadata: { name: body.name, packagingCost: body.packagingCost ?? 0 },
           })
         }
-        return { success: true }
+        return res
       },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
@@ -299,6 +314,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           courierAllowed: t.Optional(t.Boolean()),
           takeawayAllowed: t.Optional(t.Boolean()),
           dineInAllowed: t.Optional(t.Boolean()),
+          // stage-56 — slug سئو (نیامد = دست‌نخورده؛ رشته/خالی = تنظیم/پاک‌سازی)
+          slug: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
         }),
         detail: { summary: 'Update product — categoryId immutable (frontend contract)' },
       },

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: packages/shared/src/contracts.ts
+// تغییر: Product.slug + ProductSize.image + UserOrdersData/MyOrdersSort
+//        (صفحه‌بندی سروریِ سفارشات من)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-43 — sinshin-food-delivery — فایل 1 از 14
 // مسیر مقصد: packages/shared/src/contracts.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -122,11 +129,23 @@ export interface ProductSize {
   discountEndsAt?: string | null
   /** round-34 — نام عربی سایز (فقط پاسخ ادمین؛ NULL = پشتیبان فارسی) */
   nameAr?: string | null
+  /**
+   * stage-56 — تصویر مستقل این variant/سایز (آدرس آپلودشده؛ null = بدون
+   * تصویر → گالری همان تصاویر مشترک محصول). انتخاب سایز → این تصویر اسلاید
+   * نخستِ گالری می‌شود و در چیپ سایز بندانگشتی می‌گیرد.
+   */
+  image?: string | null
 }
 
 export interface Product {
   id: ProductId
   name: string
+  /**
+   * stage-56 — slug انگلیسیِ سئوپسند برای URL (/products/pepperoni-pizza).
+   * null = بدون slug → URL همان UUID قبلی است. لینک‌های sitemap/canonical/
+   * کارت‌ها slug را ترجیح می‌دهند؛ GET /menu/products/:id هر دو را می‌پذیرد.
+   */
+  slug?: string | null
   description: string | null
   originalPrice: number
   finalPrice: number
@@ -344,6 +363,25 @@ export interface UserOrder {
   paymentStatus: string
   breakdown: OrderBreakdown
   queued: boolean
+}
+
+/**
+ * stage-56 — مرتب‌سازی سروریِ «سفارشات من» — همان مقادیرِ sort صفحه‌ی
+ * داشبورد (کلیدهای i18n موجود)؛ پیش‌فرض newest.
+ */
+export type MyOrdersSort = 'newest' | 'oldest' | 'expensive' | 'cheap'
+
+/**
+ * stage-56 — صفحه‌بندی سروریِ «سفارشات من» (GET /orders?page&limit&sort):
+ *  • orders: ردیف‌های همان صفحه (newest اول به‌جز sortهای دیگر)
+ *  • total: کل سفارش‌های کاربر (بدون سقف ۲۰۰) — مبنای شمار صفحات
+ *  • totalSpent: جمع مبلغ همه‌ی سفارش‌ها (همان چیزی که قبلاً ردیف‌های
+ *    سقف‌دار در کلاینت جمع می‌زدند — الان از SQL واقعی می‌آید)
+ */
+export interface UserOrdersData {
+  orders: UserOrder[]
+  total: number
+  totalSpent: number
 }
 
 // ═══════════ کیف پول ═══════════

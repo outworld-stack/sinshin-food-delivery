@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/lib/seo.ts
+// تغییر: ۱) viewport-fit=cover (ناچ — با pt-safe در لایه‌ها) ۲) URLهای
+//        JSON-LD از slug ۳) تصاویر variantها در imageهای Product
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-40 — sinshin-food-delivery — فایل 3 از 7
 // مسیر مقصد: apps/web/src/lib/seo.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -195,7 +202,14 @@ export function siteHead(ctx: HeadFnCtx) {
     return {
         meta: [
             { charSet: 'utf-8' },
-            { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+            // stage-56 — viewport-fit=cover: محتوا تا لبه‌ی ناچ/home-bar
+            // امتداد می‌یابد؛ خودِ ناچ با کلاس‌های pt-safe (هدرهای sticky) و
+            // pb-safe (نوارهای پایین) رعایت می‌شود. در گوشی‌های بدون ناچ
+            // env()=0 است و هیچ چیز تغییر نمی‌کند.
+            {
+                name: 'viewport',
+                content: 'width=device-width, initial-scale=1, viewport-fit=cover',
+            },
             { title: s.home.title },
             { name: 'description', content: s.home.description },
             ...(s.home.keywords
@@ -292,7 +306,17 @@ export function productJsonLd(product: Product, lang: Lang) {
             .map((g) => absoluteUrl(g))
             .filter((u): u is string => !!u)
             .slice(0, 3),
+        // stage-56 — تصاویر variantها هم candidateهای image JSON-LD
+        // (گوگل مرتبط‌ترین را انتخاب می‌کند؛ dedupe پایین)
+        ...product.sizes
+            .map((s) => s.image ?? null)
+            .filter((u): u is string => !!u)
+            .map((g) => absoluteUrl(g))
+            .filter((u): u is string => !!u)
+            .slice(0, 3),
     ].filter((v, i, arr) => arr.indexOf(v) === i)
+    // stage-56 — مسیرِ سئوپسند: slug اگر باشد، وگرنه UUID (همان canonical)
+    const productPath = `/products/${product.slug || product.id}`
     return {
         '@context': 'https://schema.org',
         '@graph': [
@@ -304,7 +328,7 @@ export function productJsonLd(product: Product, lang: Lang) {
                 inLanguage: LOCALE_TAG[lang],
                 offers: {
                     '@type': 'Offer',
-                    url: langUrl(`/products/${product.id}`, lang),
+                    url: langUrl(productPath, lang),
                     // قیمت‌های دامنه تومان‌اند؛ ارز رسمی ایران ریال است (IRR) → ×۱۰
                     price: String(product.finalPrice * 10),
                     priceCurrency: 'IRR',
@@ -318,7 +342,7 @@ export function productJsonLd(product: Product, lang: Lang) {
                 [
                     { name: s.breadcrumb.home, path: '/' },
                     { name: s.breadcrumb.products, path: '/products' },
-                    { name, path: `/products/${product.id}` },
+                    { name, path: productPath },
                 ],
                 lang,
             ),

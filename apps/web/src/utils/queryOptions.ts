@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/utils/queryOptions.ts
+// تغییر: productByIdOptions پارامتر رشته (UUID یا slug) + myOrdersOptions
+//        با keepPreviousData (صفحه‌بندی سروری سفارشات من)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-48 — sinshin-food-delivery — فایل 89 از 97
 // مسیر مقصد: apps/web/src/utils/queryOptions.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -27,7 +34,7 @@ import {
 import { getArticleCategories, getArticles, getAdminArticles, getAdminArticleDetails } from '#/server/articles'
 import {
   getUserProfile, getApprovedProductReviews, getOrderDetails, getLiveTracking,
-  getOrderReviewedProducts, getAdminReviews,
+  getOrderReviewedProducts, getAdminReviews, getMyOrders,
 } from '#/server/user'
 import { getGalleryImages, getAdminGalleryImages } from '#/server/gallery'
 import { getAboutContent } from '#/server/about'
@@ -100,7 +107,9 @@ export const productsByMainOptions = (mainSlug: string | null) =>
 
 // محصول تکی — loader صفحه‌ی جزئیات از همین پرش می‌کنه؛
 // نتیجه: برگشت از لیست به جزئیات، آنی از کش (gcTime ۵ دقیقه)
-export const productByIdOptions = (productId: ProductId) =>
+// stage-56 — پارامتر UUID یا slug انگلیسی است (لینک‌های سئو slug می‌فرستند؛
+// مسیرهای قدیمی/سبد UUID — سرور هر دو را می‌پذیرد)
+export const productByIdOptions = (productId: ProductId | string) =>
   queryOptions({
     queryKey: qk.productById(productId),
     queryFn: () => getProductById({ data: { id: productId } }),
@@ -128,6 +137,17 @@ export const userProfileOptions = queryOptions({
   queryFn: () => getUserProfile(),
   staleTime: 60_000,
 });
+
+// stage-56 — «سفارشات من» با صفحه‌بندی سروری (page/limit/sort).
+// keepPreviousData: هنگام چرخش صفحه، ردیف‌های قبلی تا رسیدن پاسخ تازه می‌مانند
+// (همان الگوی adminOrdersOptions — بدون پرش/سوسو).
+export const myOrdersOptions = (page: number, limit: number, sort: string) =>
+  queryOptions({
+    queryKey: qk.myOrders(page, limit, sort),
+    queryFn: () => getMyOrders({ page, limit, sort }),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
 
 // کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).
 // همان DTO ولی بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها.

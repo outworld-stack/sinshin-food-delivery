@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/infra/db/schema/menu.ts
+// تغییر: ۱) products.slug (varchar 80 اختیاری + ایندکس یکتا — slug انگلیسی
+//        سئوپسند برای URL؛ NULL = همان UUID قبلی)  ۲) product_sizes.image
+//        (تصویر مستقل هر variant — NULL = تصویر مشترک محصول)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/infra/db/schema/menu.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -97,6 +105,12 @@ export const products = pgTable(
       .references(() => categories.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 120 }).notNull(),
     description: text('description'),
+    /**
+     * stage-56 — slug انگلیسیِ سئوپسند (a-z0-9 و خط تیره). NULL = بدون slug →
+     * URL همان UUID است (لینک‌های قدیمی/سبد/جزئیات سفارش دست‌نخورده می‌مانند).
+     * canonical/sitemap/cardها به‌محض تعیین slug از آن استفاده می‌کنند.
+     */
+    slug: varchar('slug', { length: 80 }),
     /** round-34 — محتوای عربی (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 120 }),
     descriptionAr: text('description_ar'),
@@ -149,6 +163,8 @@ export const products = pgTable(
   (t) => [
     index('products_category_idx').on(t.categoryId),
     index('products_status_idx').on(t.status),
+    /** stage-56 — یکتاییِ slug (NULLهای تکراری مجازند — محصولات بدون slug) */
+    uniqueIndex('products_slug_key').on(t.slug),
   ],
 )
 
@@ -172,6 +188,12 @@ export const productSizes = pgTable(
     /** stage-47 — پنجره‌ی زمانی تخفیف این سایز (NULL = بدون محدودیت) */
     discountStartsAt: timestamp('discount_starts_at', { withTimezone: true }),
     discountEndsAt: timestamp('discount_ends_at', { withTimezone: true }),
+    /**
+     * stage-56 — تصویر مستقل این سایز/variant (آدرس آپلودشده؛ NULL = بدون تصویر
+     * → گالری محصول همان تصاویر مشترک را نشان می‌دهد). با انتخاب سایز، تصویرِ
+     * variant به‌عنوان اسلاید نخست گالری + بندانگشتی چیپ سایز ظاهر می‌شود.
+     */
+    image: text('image'),
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => [

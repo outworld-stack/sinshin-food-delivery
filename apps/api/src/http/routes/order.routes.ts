@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/order.routes.ts
+// تغییر: GET /orders — صفحه‌بندی سروری (page/limit/sort اختیاری؛
+//        پیش‌فرض ۱/۱۰/newest) + پاکتِ { orders, total, totalSpent }
+//        — جایگزینِ آرایه‌ی خامِ سقف‌دار (مصرف‌کننده‌ای نداشت)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/order.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -320,9 +328,37 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       },
     )
 
-    .get('/', ({ user }) => deps.orders.myOrders(user.id), {
-      detail: { summary: 'My orders (newest first, with items)' },
-    })
+    // stage-56 — صفحه‌بندی سروری: پارامترها اختیاری‌اند (کلاینت قدیمی که
+    // چیزی نمی‌فرستد → صفحه‌ی ۱ با ۱۰ ردیف newest می‌گیرد). sort همان
+    // مقادیر صفحه‌ی داشبورد است. total/totalSpent از SQL واقعی می‌آیند.
+    .get(
+      '/',
+      ({ user, query }) =>
+        deps.orders.myOrdersPage(user.id, {
+          page: query.page ?? 1,
+          limit: query.limit ?? 10,
+          sort: query.sort ?? 'newest',
+        }),
+      {
+        query: t.Object({
+          page: t.Optional(t.Numeric({ minimum: 1, maximum: 10_000 })),
+          limit: t.Optional(t.Numeric({ minimum: 5, maximum: 100 })),
+          sort: t.Optional(
+            t.Union([
+              t.Literal('newest'),
+              t.Literal('oldest'),
+              t.Literal('expensive'),
+              t.Literal('cheap'),
+            ]),
+          ),
+        }),
+        detail: {
+          summary: 'My orders — server-side pagination (page/limit/sort)',
+          description:
+            'Offset pagination over ALL user orders (no 200 cap). Envelope: { orders, total, totalSpent } — totalSpent = SUM(total_amount) of all orders (dashboard stats). Sort: newest (default) / oldest / expensive / cheap.',
+        },
+      },
+    )
 
     .get(
       '/:displayId',

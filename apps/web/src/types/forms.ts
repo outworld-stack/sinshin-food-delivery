@@ -53,6 +53,8 @@ export interface ProductFormSize {
   discountStartsAt: string | null;
   /** ISO میلادی | null — پایان پنجره‌ی تخفیف (شمارنده‌ی معکوس) */
   discountEndsAt: string | null;
+  /** stage-56 — تصویر مستقل این variant (آپلود؛ '' = بدون تصویر → تصویر مشترک محصول) */
+  image: string;
 }
 
 export interface ProductFormData {
@@ -83,6 +85,8 @@ export interface ProductFormData {
   descriptionAr: string;
   /** هر خط = یک ماده اولیه (مثل ادیتور قوانین) — خالی = بازگشت به فارسی */
   ingredientsArText: string;
+  /** stage-56 — slug انگلیسی سئوپسند ('' = بدون slug → URL با UUID) */
+  slug: string;
 }
 
 export interface ProductFormProps {

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/server/products.ts
+// تغییر: getProductById حالا UUID یا slug می‌پذیرد؛ payloadهای create/
+//        update شامل slug + تصویر هر سایز؛ update نتیجه‌ی پیام‌دار
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-48 — sinshin-food-delivery — فایل 86 از 97
 // مسیر مقصد: apps/web/src/server/products.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -52,8 +59,10 @@ export async function getCategories(): Promise<Category[]> {
 	return getJson<Category[]>('/menu/categories')
 }
 
+// stage-56 — پارامتر UUID یا slug انگلیسی است (هر دو توسط سرور پذیرفته
+// می‌شوند؛ لینک‌های سئو slug می‌فرستند، مسیرهای قدیمی/سبد UUID).
 export async function getProductById(input: {
-	data: { id: ProductId }
+	data: { id: ProductId | string }
 }): Promise<Product | null> {
 	return getJson<Product | null>(`/menu/products/${input.data.id}`)
 }
@@ -237,6 +246,7 @@ function productArPayload(data: ProductFormData) {
 		nameAr: data.nameAr.trim() || null,
 		descriptionAr: data.descriptionAr.trim() || null,
 		ingredientsAr: parseLines(data.ingredientsArText),
+		// stage-56 — تصویر مستقل هر variant (خالی = null = تصویر مشترک)
 		sizes: data.sizes.map((s) => ({
 			name: s.name,
 			nameAr: s.nameAr.trim() || null,
@@ -247,8 +257,14 @@ function productArPayload(data: ProductFormData) {
 				s.discountEndsAt,
 			),
 			discountPercentage: s.discountPercentage,
+			image: s.image?.trim() || null,
 		})),
 	}
+}
+
+/** stage-56 — slug انگلیسی سئوپسند در پیلود (خالی = null = URL با UUID) */
+function productSlugPayload(data: ProductFormData) {
+	return { slug: data.slug?.trim() || null }
 }
 
 export async function getAdminProducts(input: {
@@ -320,37 +336,45 @@ export async function createAdminProduct(input: {
 			ingredients: input.data.ingredients ?? [],
 			// stage-48 — موجودی + حالت‌های سفارش
 			...productModePayload(input.data),
+			// stage-56 — slug سئوپسند
+			...productSlugPayload(input.data),
 			...ar,
 		},
 	)
 }
 
+// stage-56 — پاسخِ پیام‌دار: clashِ slug پیام دوستانه‌ی سرور را برمی‌گرداند
 export async function updateAdminProduct(input: {
 	data: ProductFormData & { id?: string }
-}): Promise<{ success: boolean }> {
+}): Promise<{ success: boolean; message?: string }> {
 	const ar = productArPayload(input.data)
-	await authJson<unknown>(`/admin/menu/products/${input.data.id}`, 'PATCH', {
-		name: input.data.name,
-		description: input.data.description,
-		originalPrice: input.data.originalPrice,
-		discountPercentage: input.data.discountPercentage,
-		// stage-47 — پنجره‌ی زمانی تخفیف محصول
-		...discountWindow(
-			input.data.discountPercentage,
-			input.data.discountStartsAt,
-			input.data.discountEndsAt,
-		),
-		prepTime: input.data.prepTime,
-		packagingCost: input.data.packagingCost ?? 0,
-		profileImage: input.data.profileImage || null,
-		galleryImages: input.data.galleryImages ?? [],
-		sizesEnabled: input.data.sizesEnabled ?? false,
-		ingredients: input.data.ingredients ?? [],
-		// stage-48 — موجودی + حالت‌های سفارش
-		...productModePayload(input.data),
-		...ar,
-	})
-	return { success: true }
+	return authJson<{ success: boolean; message?: string }>(
+		`/admin/menu/products/${input.data.id}`,
+		'PATCH',
+		{
+			name: input.data.name,
+			description: input.data.description,
+			originalPrice: input.data.originalPrice,
+			discountPercentage: input.data.discountPercentage,
+			// stage-47 — پنجره‌ی زمانی تخفیف محصول
+			...discountWindow(
+				input.data.discountPercentage,
+				input.data.discountStartsAt,
+				input.data.discountEndsAt,
+			),
+			prepTime: input.data.prepTime,
+			packagingCost: input.data.packagingCost ?? 0,
+			profileImage: input.data.profileImage || null,
+			galleryImages: input.data.galleryImages ?? [],
+			sizesEnabled: input.data.sizesEnabled ?? false,
+			ingredients: input.data.ingredients ?? [],
+			// stage-48 — موجودی + حالت‌های سفارش
+			...productModePayload(input.data),
+			// stage-56 — slug سئوپسند
+			...productSlugPayload(input.data),
+			...ar,
+		},
+	)
 }
 
 /**

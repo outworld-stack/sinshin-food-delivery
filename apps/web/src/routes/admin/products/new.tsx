@@ -23,7 +23,13 @@ function NewProductPage() {
 	// ProductFormData دقیقاً با اسکیمای createAdminProduct مپ می‌شه
 	const mutation = useMutation({
 		mutationFn: (data: ProductFormData) => createAdminProduct({ data }),
-		onSuccess: () => {
+		onSuccess: (res) => {
+			// stage-56 — HTTP 200 با success=false (مثل slug تکراری): پیام سرور
+			// نمایش داده شود؛ بدون invalidate/ناوبری — کاربر روی فرم اصلاح می‌کند
+			if (!res.success) {
+				showToast(res.message ?? 'افزودن محصول ناموفق بود.', 'error')
+				return
+			}
 			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
 			// phase-3: منوی عمومی هم تازه شود — محصول جدید باید در /products دیده شود
 			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
@@ -32,6 +38,8 @@ function NewProductPage() {
 			showToast('محصول جدید با موفقیت افزوده شد')
 			navigate({ to: '/admin/products' })
 		},
+		// stage-56 — خطای شبکه/اعتبارسنجی (استثنا) هم پیام‌دار دیده شود
+		onError: (err) => showToast(err.message, 'error'),
 	})
 
 	// گارد — فقط productsWrite اجازه ساخت دارد

@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/order/order.service.ts
+// تغییر: myOrdersPage — صفحه‌بندی سروریِ «سفارشات من» (page/limit/sort +
+//        total + totalSpent از SQL واقعی؛ بدون سقف ۲۰۰) — myOrders قدیمی
+//        برای پروفایل دست‌نخورده ماند (سازگاری کامل)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/order/order.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -19,7 +27,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/order/order.service.ts
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import type { Db, DbOrTx } from "#/infra/db/client";
 import {
@@ -66,8 +74,10 @@ import type { NotificationService } from "../notification/notification.service";
 import type {
         CheckoutInput,
         CheckoutPreviewData,
+        MyOrdersSort,
         OrderBreakdown,
         StaffInvoice,
+        UserOrdersData,
 } from "@sinshin/shared";
 import { requireOrder, requireOwnedOrder, findOrder } from './order-lookup'
 
@@ -984,6 +994,61 @@ export class OrderService {
                         if (!seen.has(r.id)) merged.push(r);
                 }
                 return this.mapRows(merged);
+        }
+
+        /**
+         * stage-56 — صفحه‌بندی سروریِ «سفارشات من» (GET /orders?page&limit&sort).
+         *
+         * چرا جدا از myOrders؟ آن متد قراردادِ پروفایل است (سقف دفاعی ۲۰۰ +
+         * ادغام سفارش‌های فعال) و مصرف‌کننده‌های زنده دارد؛ این متد قراردادِ
+         * صفحه‌ی «سفارشات من» را با offset-pagination واقعی می‌دهد:
+         *  • هیچ سقفی نیست — مشتری وفادار با هزار سفارش همه را صفحه‌به‌صفحه می‌بیند
+         *  • total = count(*)::int — مبنای شمار صفحات (الگوی getAdminOrders)
+         *  • totalSpent = sum(total_amount) — همان آماری که قبلاً کلاینت روی
+         *    ردیف‌های سقف‌دار می‌زد؛ الان دقیق و کامل از SQL می‌آید
+         *  • sort: newest (پیش‌فرض) / oldest / expensive / cheap — همان مقادیرِ
+         *    sort صفحه‌ی داشبورد؛ مرتب‌سازی در DB، نه در کلاینت
+         */
+        async myOrdersPage(
+                userId: string,
+                opts: { page?: number; limit?: number; sort?: MyOrdersSort } = {},
+        ): Promise<UserOrdersData> {
+                // قیچی امن — همان الگوی getAdminOrders (admin.service)
+                const page = Math.min(Math.max(1, opts.page ?? 1), 10_000);
+                const limit = Math.min(Math.max(5, opts.limit ?? 10), 100);
+                const sort: MyOrdersSort = opts.sort ?? "newest";
+                const where = eq(orders.userId, userId);
+                const orderBy =
+                        sort === "oldest"
+                                ? asc(orders.createdAt)
+                                : sort === "expensive"
+                                  ? desc(orders.totalAmount)
+                                  : sort === "cheap"
+                                    ? asc(orders.totalAmount)
+                                    : desc(orders.createdAt);
+                // ردیف‌های همان صفحه + تجمیع کل — موازی روی همان شرط
+                const [rows, agg] = await Promise.all([
+                        this.deps.db
+                                .select()
+                                .from(orders)
+                                .where(where)
+                                .orderBy(orderBy)
+                                .limit(limit)
+                                .offset((page - 1) * limit),
+                        this.deps.db
+                                .select({
+                                        count: sql<number>`count(*)::int`,
+                                        totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
+                                })
+                                .from(orders)
+                                .where(where),
+                ]);
+                return {
+                        orders: await this.mapRows(rows),
+                        total: agg[0]?.count ?? 0,
+                        // bigint در Bun.sql به string برمی‌گردد — الگوی رارد C1
+                        totalSpent: Number(agg[0]?.totalSpent ?? 0),
+                };
         }
 
         /**

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery — فایل 1 از 5
+// مسیر مقصد: apps/web/src/routes/products/$productId.tsx
+// تغییر: URL سئو با slug (لودر: نظرات با UUID حل‌شده + canonical/hreflang
+//        با slug) و تصویر مستقل هر سایز = اسلاید نخست گالری
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-39 — sinshin-food-delivery — فایل 4 از 5
 // مسیر مقصد: apps/web/src/routes/products/$productId.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -7,7 +14,6 @@
 
 // src/routes/products/$productId.tsx
 
-import { asProductId } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, notFound } from '@tanstack/react-router'
 import { ChevronRight } from 'reicon-react'
@@ -39,17 +45,20 @@ export const Route = createFileRoute('/products/$productId')({
         component: ProductDetailPage,
 
         loader: async ({ context, params }) => {
-                // ⬅ تبدیل نوع اینجا — مرز پارامتر URL → دامنه
-                const productId = asProductId(params.productId)
-                const [product] = await Promise.all([
-                        context.queryClient.query(productByIdOptions(productId)),
-                        context.queryClient
-                                .query(productReviewsOptions(params.productId))
-                                .catch(() => undefined),
-                ])
+                // stage-56 — پارامتر مسیر UUID یا slug سئویی است که سرور هر دو را
+                // می‌پذیرد؛ اما نظرات باید با UUID حل‌شدهٔ محصول بیایند چون
+                // endpoint نظرات slug نمی‌فهمد → اول محصول، بعد نظرات (دیگر موازی نیست).
+                const product = await context.queryClient.query(
+                        productByIdOptions(params.productId),
+                )
                 if (!product) {
                         throw notFound()
                 }
+                // stage-56 — prefetch نظرات با UUID حل‌شده (کامپوننت همین کش را
+                // می‌خواند). خطا = بدون نظر — صفحه نمی‌شکند (fail-soft قبلی).
+                await context.queryClient
+                        .query(productReviewsOptions(product.id))
+                        .catch(() => undefined)
                 return product
         },
 
@@ -73,7 +82,9 @@ export const Route = createFileRoute('/products/$productId')({
                         loaderData.descriptionAr,
                         loaderData.description,
                 )
-                const canonical = langUrl(`/products/${loaderData.id}`, lang)
+                // stage-56 — URL سئو: slug اگر باشد وگرنه UUID (null = بدون slug)
+                const productPath = loaderData.slug || loaderData.id
+                const canonical = langUrl(`/products/${productPath}`, lang)
                 const title = withBrand(name, lang)
                 return {
                         meta: [
@@ -89,7 +100,7 @@ export const Route = createFileRoute('/products/$productId')({
                         ],
                         links: [
                                 { rel: 'canonical', href: canonical },
-                                ...alternateLinks(`/products/${loaderData.id}`),
+                                ...alternateLinks(`/products/${productPath}`),
                         ],
                 }
         },
@@ -108,6 +119,10 @@ function ProductDetailPage() {
                                 'from-green-400 to-teal-500',
                                 'from-orange-400 to-red-500',
                         ]
+
+        // stage-56 — تصویر مستقل سایزِ انتخاب‌شده (variant): اسلاید نخست گالری؛
+        // null = سایز تصویر خود را ندارد → گالری همان تصاویر مشترک محصول
+        const leadImage = page.selectedSize?.image ?? null
 
         const { data: reviews } = useQuery(productReviewsOptions(product.id))
 
@@ -150,7 +165,10 @@ function ProductDetailPage() {
                                 </div>
 
                                 <div className="w-full lg:w-1/2 lg:pt-14">
-                                        <Gallery images={galleryImages} />
+                                        <Gallery
+                                                images={galleryImages}
+                                                leadImage={leadImage}
+                                        />
                                 </div>
                         </div>
 

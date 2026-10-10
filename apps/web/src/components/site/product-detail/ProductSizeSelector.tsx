@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery — فایل 3 از 5
+// مسیر مقصد: apps/web/src/components/site/product-detail/ProductSizeSelector.tsx
+// تغییر: بندانگشتی تصویر مستقل هر سایز (اگر باشد) در چیپ — RTL: ابتدای
+//        محتوای دکمه، فقط URL واقعی (گرادیانت موک رندر نمی‌شود)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-47 — sinshin-food-delivery — فایل ۹
 // مسیر مقصد: apps/web/src/components/site/product-detail/ProductSizeSelector.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -9,6 +16,7 @@
 import { memo } from 'react'
 import type { ProductSize } from '#/server/products'
 import { useI18n } from '#/i18n'
+import { isRealImageUrl } from '#/utils/image'
 
 interface ProductSizeSelectorProps {
   sizes: ProductSize[]
@@ -62,6 +70,17 @@ export const ProductSizeSelector = memo(function ProductSizeSelector({
                   : 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c]'
               }`}
             >
+              {/* stage-56 — بندانگشتی تصویر مستقل این سایز (اگر باشد)؛
+                  فقط URL واقعی رندر می‌شود — رشته گرادیانت موک نه */}
+              {size.image && isRealImageUrl(size.image) && (
+                <img
+                  src={size.image}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="h-9 w-9 rounded-lg object-cover shrink-0"
+                />
+              )}
               {size.name}
               <span className={`flex items-baseline gap-1.5 text-[11px] font-DanaMedium ${isSelected ? 'text-white/80' : 'text-gray-400'}`}>
                 {active && (

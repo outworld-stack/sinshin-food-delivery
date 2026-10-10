@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-56 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/utils/queryKeys.ts
+// تغییر: کلیدهای «سفارشات من» صفحه‌بندی‌شده‌ی سروری (myOrders + پریفکس)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-39 — sinshin-food-delivery — فایل 2 از 5
 // مسیر مقصد: apps/web/src/utils/queryKeys.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -26,6 +32,11 @@ export const qk = {
   // پریفکس — بعد از تغییر تنظیم ردیابی زنده، پرچم همه‌ی سفارش‌ها رفرش می‌شه
   liveTrackingPrefix: ['live-tracking'] as const,
   orderReviewed: (orderId: string) => ['order-reviewed', orderId] as const,
+  // stage-56 — «سفارشات من» صفحه‌بندی‌شده‌ی سروری؛ کلید = (صفحه، حد، مرتب‌سازی)
+  myOrders: (page: number, limit: number, sort: string) =>
+    ['my-orders', page, limit, sort] as const,
+  // پریفکس — بعد از ثبت سفارش/تحویل‌تأییدشده، همه‌ی صفحات یکجا رفرش می‌شن
+  myOrdersPrefix: ['my-orders'] as const,
 
   // --- منو / محصولات ---
   activeMainCategories: ['active-main-categories'] as const,
