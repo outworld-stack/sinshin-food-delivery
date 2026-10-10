@@ -336,6 +336,7 @@ CREATE TABLE "product_sizes" (
 	"discount_percentage" integer DEFAULT 0 NOT NULL,
 	"discount_starts_at" timestamp with time zone,
 	"discount_ends_at" timestamp with time zone,
+	"image" text,
 	"sort_order" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
@@ -344,6 +345,7 @@ CREATE TABLE "products" (
 	"category_id" uuid NOT NULL,
 	"name" varchar(120) NOT NULL,
 	"description" text,
+	"slug" varchar(80),
 	"name_ar" varchar(120),
 	"description_ar" text,
 	"ar_auto" boolean DEFAULT false NOT NULL,
@@ -675,6 +677,7 @@ CREATE INDEX "product_sizes_product_idx" ON "product_sizes" USING btree ("produc
 CREATE UNIQUE INDEX "product_sizes_product_name_key" ON "product_sizes" USING btree ("product_id","name");--> statement-breakpoint
 CREATE INDEX "products_category_idx" ON "products" USING btree ("category_id");--> statement-breakpoint
 CREATE INDEX "products_status_idx" ON "products" USING btree ("status");--> statement-breakpoint
+CREATE UNIQUE INDEX "products_slug_key" ON "products" USING btree ("slug");--> statement-breakpoint
 CREATE INDEX "order_items_order_idx" ON "order_items" USING btree ("order_id");--> statement-breakpoint
 CREATE INDEX "order_items_product_idx" ON "order_items" USING btree ("product_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "orders_display_id_key" ON "orders" USING btree ("display_id");--> statement-breakpoint
