@@ -1,4 +1,13 @@
 # ═══════════════════════════════════════════════════════════════
+# stage-57 — sinshin-food-delivery — فاز دیپلوی
+# مسیر مقصد: .gitea/workflows/deploy.yml
+# وضعیت: جایگزینی کامل فایل موجود
+# تغییر: دروازه‌ی کیفیت داخل ایمیج پین‌شده‌ی oven/bun اجرا می‌شود
+#        (bug-fix استیج-۵۷ — نسخه‌ی قبلی مستقیم bun را صدا می‌زد
+#        در حالی که ایمیج رانر bun ندارد → job همیشه در گام ۲
+#        fail می‌شد) + کش نصب باندل بین اجراها
+# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # round-50 — sinshin-food-delivery — فایل 4 از 10
 # مسیر مقصد: .gitea/workflows/deploy.yml
 # وضعیت: فایل جدید
@@ -7,15 +16,16 @@
 # ═══════════════════════════════════════════════════════════════
 # CI/CD سین‌شین — استقرار خودکار روی خودِ سرور
 #
-# هر push به main این سه کار را پشت‌سرهم انجام می‌دهد:
+# هر push به main این چهار کار را پشت‌سرهم انجام می‌دهد:
 #   ۱) کد ‎/opt/sinshin-food-delivery به آخرین کامیت می‌رسد
-#   ۲) ‎docker compose up -d --build (مهاجرت‌ها خودکار قبل از api)
-#   ۳) سلامت‌سنجی — تا سرویس جواب ندهد job سبز نمی‌شود
+#   ۲) دروازه‌ی کیفیت: typecheck + lint (داخل oven/bun پین‌شده)
+#   ۳) ‎docker compose build → تگ SHA → up -d (مهاجرت‌ها قبل از api)
+#   ۴) سلامت‌سنجی — تا سرویس جواب ندهد job سبز نمی‌شود
 #
 # رانر (deploy/gitea) با برچسب deploy:host اجرایش می‌کند؛ دستورها
 # داخل کانتینر رانر هستند — جایی که سوکت داکر و ‎/opt ماونت است.
 # هیچ اکشن بیرونی (uses:) استفاده نشده تا سرور به گیت‌هاب نیاز
-# نداشته باشد. شرح کامل: README گام ۵ و ۱۳.
+# نداشته باشد. شرح کامل: README گام ۱۴ و REFERENCE بخش ۹.
 # ═══════════════════════════════════════════════════════════════
 
 name: deploy
@@ -44,18 +54,33 @@ jobs:
 
       # ═══ رارد H1 — دروازه‌ی کیفیت: جلوی رسیدن کد خراب به production ═══
       # typecheck هر دو اپ (اسکریپت آماده در package.json ها) + lint biome.
+      #
+      # استیج-۵۷ (bug-fix): رانر bun ندارد — پس دروازه داخل ایمیج
+      # oven/bun:1.3.14-slim اجرا می‌شود (docker run). همین ایمیج پایه‌ی
+      # buildهای api/web است → از کش موجود، بدون دانلود جدید. کش نصبِ
+      # باندل هم در volume نام‌دار sinshin_ci_bun_cache بین اجراها
+      # می‌ماند (روی SSD، کنار بقیه‌ی داده‌ی داکر).
       - name: دروازه‌ی کیفیت (typecheck + lint)
         run: |
           set -e
           cd /opt/sinshin-food-delivery
-          bun install --frozen-lockfile
-          echo "── typecheck API ──"
-          bun run --filter '@sinshin/api' typecheck
-          echo "── typecheck Web ──"
-          cd apps/web && bunx tsc --noEmit && cd ../..
-          echo "── lint Web (biome) ──"
-          cd apps/web && bun run lint && cd ../..
-          echo "✅ دروازه‌ی کیفیت پاس شد"
+          docker run --rm \
+            -v /opt/sinshin-food-delivery:/app \
+            -v sinshin_ci_bun_cache:/root/.bun/install/cache \
+            -e BUN_TELEMETRY_DISABLED=1 \
+            oven/bun:1.3.14-slim \
+            sh -c "set -e && cd /app \
+              && bun install --frozen-lockfile --network-concurrency 8 \
+              && echo '── typecheck API ──' \
+              && bun run --filter '@sinshin/api' typecheck \
+              && echo '── typecheck Web ──' \
+              && cd apps/web && bunx tsc --noEmit && cd /app \
+              && echo '── lint Web (biome) ──' \
+              && cd apps/web && bun run lint && cd /app \
+              && echo '✅ دروازه‌ی کیفیت پاس شد'"
+          # NOTE: bun install روی volume می‌نویسد (node_modules روی میزبان
+          # در همان ریپو) — .dockerignore آن را از buildها بیرون نگه
+          # می‌دارد؛ اجراهای بعدی از همان node_modules سرعت می‌گیرند.
 
       - name: بیلد و بالا آوردن استک
         run: |

@@ -13,6 +13,7 @@
     "db:migrate": "bun src/infra/db/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "bun drizzle/seed.ts",
+    "db:seed:deploy": "bun drizzle/seed.deploy.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

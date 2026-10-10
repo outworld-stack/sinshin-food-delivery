@@ -1,11 +1,11 @@
 # ═══════════════════════════════════════════════════════════════
-# phase-2 — sinshin-food-delivery
+# stage-57 — sinshin-food-delivery — فاز دیپلوی
 # مسیر مقصد: docker-compose.yml
-# وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱/رارد ۵۰)
-# تغییر فاز-۲:
-#   • docker.sock به api (لاگ روزانه + truncate) + group_add DOCKER_GID
-#   • TRANSLATOR_TOKEN به api و translator (راز مشترک M15)
-#   • VITE_NESHAN_MAP_KEY به build وب (کلید web نشان)
+# وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۲/رارد ۵۰)
+# تغییر استیج-۵۷:
+#   • کالیبره‌ی منابع برای سرور ۸ هسته / ۱۶GB RAM
+#   • بکاپ روی HDD میزبان (BACKUP_DIR_HOST — bind mount به‌جای volume)
+#   • سرویس جدید seed-deploy (سید مخصوص تولید — profile seed)
 # ═══════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════
 # round-49 — sinshin-food-delivery — فایل 4 از 6
@@ -30,10 +30,11 @@ name: sinshin
 #
 #  • سقف منابع هر سرویس با deploy.resources.limits تنظیم شده و
 #    docker compose v2 همان‌ها را هنگام up اعمال می‌کند (بدون swarm).
-#    کالیبره برای سرور ۴ هسته / ۸GB RAM / ۴۰GB دیسک. اینها سقف‌اند
-#    نه رزرو — مصرف عادی خیلی پایین‌تر است؛ هدف فقط است که نشتِ
-#    حافظه‌ی یک کانتینر نتواند بقیه‌ی استک و میزبان را بکُشد.
-# ══════════════════════════════════════════════════════════════
+#    کالیبره برای سرور ۸ هسته / ۱۶GB RAM / دیتاروت داکر روی SSD
+#    (README گام ۲ و ۳). اینها سقف‌اند نه رزرو — مصرف عادی خیلی
+#    پایین‌تر است؛ هدف فقط است که نشتِ حافظه‌ی یک کانتینر نتواند
+#    بقیه‌ی استک و میزبان را بکُشد. جدول منطق: REFERENCE بخش ۸.
+# ═══════════════════════════════════════════════════════════════
 
 # ══════════════════════════════════════════════════════════════
 # Shared API configuration
@@ -110,8 +111,8 @@ x-api-service: &api-service
   deploy:
     resources:
       limits:
-        cpus: "2"
-        memory: 1g
+        cpus: "4"
+        memory: 2g
 
   networks:
     - edge
@@ -144,9 +145,8 @@ services:
 
       ACME_EMAIL: ${ACME_EMAIL:-dev@sinshin.localhost}
 
-      # رارد ۵۰ — زیردامنه‌ی اختیاری گیتا؛ فقط وقتی معنا دارد که
-      # بلوک کامنت‌شده‌ی انتهای Caddyfile فعال شده باشد (پیش‌فرض
-      # بی‌اثر و بی‌ضرر است).
+      # رارد ۵۰ — زیردامنه‌ی گیتا؛ باید همان GIT_DOMAIN در
+      # deploy/gitea/.env باشد (README گام ۴ و ۸).
       GIT_DOMAIN: ${GIT_DOMAIN:-git.sinshin.localhost}
 
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
@@ -267,7 +267,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 768m
+          memory: 1536m
 
     networks:
       - edge
@@ -314,7 +314,7 @@ services:
 
 
   # ════════════════════════════════════════════════════════════
-  # Database seed
+  # Database seed — sample data (dev-style)
   #
   # Explicit operation only.
   #
@@ -322,7 +322,8 @@ services:
   #
   #   docker compose --profile seed run --rm seed
   #
-  # NEVER run automatically as part of normal production startup.
+  # NEVER runs automatically as part of production startup.
+  # برای تولید، سرویس seed-deploy (پایین‌تر) را ترجیح بده.
   # ════════════════════════════════════════════════════════════
 
   seed:
@@ -365,6 +366,63 @@ services:
 
 
   # ════════════════════════════════════════════════════════════
+  # Database seed — DEPLOYMENT (stage-57)
+  #
+  # سید مخصوص تولید — دیتای اولیه‌ی آماده‌ی انتشار:
+  #   • قوانین نسخه ۲ (شامل بند «ناموجودیِ لحظه‌ای در سبد/چک‌اوت»)
+  #   • ساختار منو + ۱۲ محصول پایه با slug انگلیسی سئوپسند
+  #   • تنظیمات/نواحی ارسال/مقالات/کوپن افتتاحیه (غیرفعال)
+  # روی دیتای موجود کاملاً idempotent است — ردیف‌های موجود دست نمی‌خورند.
+  #
+  # Explicit operation only — هرگز خودکار اجرا نمی‌شود:
+  #
+  #   docker compose --profile seed run --rm seed-deploy
+  #
+  # (همین سرویس ابزار دیگری هم دارد — تولید کلید VAPID روی سرور:
+  #   docker compose --profile seed run --rm --no-deps seed-deploy
+  #     bun scripts/generate-vapid-keys.ts)
+  # ════════════════════════════════════════════════════════════
+
+  seed-deploy:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+
+    image: sinshin/api:migrate
+
+    container_name: sinshin-seed-deploy
+
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: production
+
+    command:
+      - bun
+      - drizzle/seed.deploy.ts
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+    restart: "no"
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
+    profiles:
+      - seed
+
+    networks:
+      - internal
+
+
+  # ════════════════════════════════════════════════════════════
   # PostgreSQL
   # ════════════════════════════════════════════════════════════
 
@@ -381,8 +439,8 @@ services:
 
     command:
       - postgres
-      # رارد ۴۵ — تیونینگ پارامتری (پیش‌فرض‌ها = مقادیر قبلی، کالیبره برای
-      # سرور ۴ هسته/۸GB)؛ از ‎.env ریشه قابل تغییر — شرح: بند ۴-۲ README
+      # رارد ۴۵ — تیونینگ پارامتری؛ از ‎.env ریشه قابل تغییر — شرح:
+      # REFERENCE بخش ۸ (پیش‌فرض‌های ‎.env.example برای ۸ هسته/۱۶GB کالیبره‌اند)
       - -c
       - max_connections=${PG_MAX_CONNECTIONS:-200}
       - -c
@@ -398,8 +456,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 1536m
+          cpus: "4"
+          memory: 4g
 
     networks:
       - internal
@@ -421,17 +479,21 @@ services:
   # Database backup — daily pg_dump with retention
   #
   # Same postgres image as the server → pg_dump is always
-  # version-matched and the image is already in local cache
-  # (no new download). Fully decoupled from the API: no API
-  # crash/restart can ever stop a backup.
+  # version-matched and the image is already in local cache.
+  # Fully decoupled from the API: no API crash/restart can ever
+  # stop a backup.
   #
   # Schedule/retention via env (see .env.example):
   #   BACKUP_HOUR (default 5) — Tehran time
-  #   BACKUP_KEEP (default 7) — versions kept
+  #   BACKUP_KEEP (default 30) — versions kept (a month on HDD)
   #
-  # To store backups on the host instead of a named volume,
-  # replace the backups_data mount with:
-  #   - ./backups:/backups
+  # stage-57 — مقصد بکاپ روی HDD میزبان است (bind mount):
+  #   BACKUP_DIR_HOST (default /srv/hdd/sinshin/backups)
+  # پوشه را README گام ۲ ساخته — دیتابیس/سایت روی SSD می‌مانند و
+  # آرشیو روی HDD. اگر نصبِ قدیمی با volume داری، یک‌بار منتقل کن:
+  #   docker run --rm -v sinshin_backups_data:/from \
+  #     -v /srv/hdd/sinshin/backups:/to alpine \
+  #     sh -c "cp -a /from/. /to/"
   # ════════════════════════════════════════════════════════════
 
   backup:
@@ -454,12 +516,12 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
 
       BACKUP_HOUR: ${BACKUP_HOUR:-5}
-      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+      BACKUP_KEEP: ${BACKUP_KEEP:-30}
       BACKUP_DIR: /backups
 
     volumes:
       - ./deploy/backup/backup.sh:/usr/local/bin/sinshin-backup:ro
-      - backups_data:/backups
+      - ${BACKUP_DIR_HOST:-/srv/hdd/sinshin/backups}:/backups
 
     depends_on:
       postgres:
@@ -504,7 +566,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 768m
+          memory: 1g
 
     networks:
       - internal
@@ -532,7 +594,7 @@ services:
   # دومرحله‌ای است؛ اولین بیلد یک‌بار اینترنت می‌خواهد (دانلود مدل)
   # اما زمان اجرا کاملاً آفلاین است — جزئیات: services/translator/README.md
   #
-  # سقف ۲.۵GB: مدل int8 + beam search. جدا از api بلند/پایین می‌شود —
+  # سقف ۳GB: مدل int8 + beam search. جدا از api بلند/پایین می‌شود —
   # وابستگی boot ندارد (صف ترجمه تا برگشتش pending می‌ماند).
   # ════════════════════════════════════════════════════════════
 
@@ -556,8 +618,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 2500m
+          cpus: "4"
+          memory: 3g
 
     healthcheck:
       test:
@@ -578,16 +640,13 @@ services:
 
 
 # ══════════════════════════════════════════════════════════════
-# Persistent storage
+# Persistent storage — همه روی SSD (دیتاروت داکر — README گام ۳)
 # ══════════════════════════════════════════════════════════════
 
 volumes:
 
   pg_data:
     name: sinshin_pg_data
-
-  backups_data:
-    name: sinshin_backups_data
 
   redis_data:
     name: sinshin_redis_data

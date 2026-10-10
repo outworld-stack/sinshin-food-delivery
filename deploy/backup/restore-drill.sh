@@ -1,5 +1,12 @@
 #!/bin/sh
 # ═══════════════════════════════════════════════════════════════
+# stage-57 — sinshin-food-delivery — فاز دیپلوی
+# مسیر مقصد: deploy/backup/restore-drill.sh
+# وضعیت: جایگزینی کامل فایل موجود
+# تغییر: مسیر پیش‌فرض بکاپ → HDD میزبان (BACKUP_DIR_HOST) هم‌راستا
+#        با compose استیج-۵۷ (قبلاً مسیر volume قدیمی بود)
+# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # restore-drill.sh — رارد H7: تمرین ماهانه‌ی بازیابی بکاپ
 # فایل جدید — آخرین بکاپ را در یک Postgres موقت restore می‌کند و
 # جداول کلیدی را می‌شمارد. خرابیِ خاموش کشف می‌شود، نه در روز حادثه.
@@ -10,7 +17,9 @@
 # ═══════════════════════════════════════════════════════════════
 set -eu
 
-BACKUPS_DIR="${1:-/var/lib/docker/volumes/sinshin-food-delivery_backups_data/_data}"
+# stage-57 — بکاپ‌ها روی HDD میزبان (bind-mount سرویس backup در
+# compose)؛ اگر BACKUP_DIR_HOST را در .env عوض کرده‌ای، همین‌جا هم بده:
+BACKUPS_DIR="${1:-/srv/hdd/sinshin/backups}"
 LOG_FILE="/var/log/sinshin-restore-drill.log"
 DRILL_PG="sinshin-postgres-drill"
 
