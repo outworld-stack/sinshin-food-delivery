@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/DashboardLayout.tsx
+// وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
+// تغییر: inert روی منوی موبایلِ بسته — فوکوس داخل درِ بسته نمی‌رود
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-49 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/DashboardLayout.tsx
 // تغییر (بازخورد ۳): زنگ نوتیفیکیشن (NotificationBell) از سایدبار
@@ -130,7 +137,10 @@ export function DashboardLayout() {
           </header>
 
           {/* منوی کشویی موبایل */}
-          <div className={`md:hidden fixed inset-0 z-50 ${isMobileMenuOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+          {/* stage-55 — درِ بسته دیگر فوکوس‌پذیر نیست (Tab نمی‌رود داخل منوی بسته) */}
+          <div
+            inert={!isMobileMenuOpen}
+            className={`md:hidden fixed inset-0 z-50 ${isMobileMenuOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
             <div
               className={`absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-300 ${isMobileMenuOpen ? 'opacity-100' : 'opacity-0'}`}
               onClick={() => setIsMobileMenuOpen(false)}

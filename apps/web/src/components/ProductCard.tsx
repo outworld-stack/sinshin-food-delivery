@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/ProductCard.tsx
+// وضعیت: ویرایش فایل موجود (انیمیشن‌های CSS-only)
+// تغییر: bump دکمه‌ی سبد + ورود بج تخفیف/ناموجودی با badge-in
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-53 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/ProductCard.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -81,6 +88,8 @@ export const ProductCard = memo(function ProductCard({
 	const hasSizes =
 		product.sizesEnabled && product.sizes && product.sizes.length > 0
 	const [selectedSizeId, setSelectedSizeId] = useState<string | null>(null)
+	// stage-55 — bump لمسی دکمه‌ی افزودن به سبد (CSS-only — animate-cart-bump)
+	const [cartBump, setCartBump] = useState(false)
 	const effectiveSizeId = hasSizes
 		? (selectedSizeId ?? product.sizes[0].id)
 		: null
@@ -149,7 +158,7 @@ export const ProductCard = memo(function ProductCard({
 	// stage-47 — بج + شمارنده (روی تصویر؛ پنل زنده‌ی پیش‌نمایش هم همین را می‌بیند)
 	const badge =
 		showDiscount && activePct > 0 ? (
-			<div className="absolute top-3 left-3 bg-white/90 dark:bg-[#1a0a0e]/90 backdrop-blur-sm text-primary dark:text-dark-primary text-xs font-DanaDemiBold px-3 py-1 rounded-full shadow-md">
+			<div className="absolute top-3 left-3 bg-white/90 dark:bg-[#1a0a0e]/90 backdrop-blur-sm text-primary dark:text-dark-primary text-xs font-DanaDemiBold px-3 py-1 rounded-full shadow-md animate-badge-in">
 				{tpl(t['common.discountBadge'], { n: fmt.num(activePct) })}
 			</div>
 		) : null
@@ -170,7 +179,7 @@ export const ProductCard = memo(function ProductCard({
 			className="absolute inset-0 flex items-center justify-center bg-black/45 backdrop-blur-[3px]"
 			aria-hidden="true"
 		>
-			<span className="px-3 py-1.5 rounded-xl bg-orange-500/90 text-white text-xs font-DanaDemiBold shadow-lg text-center leading-relaxed">
+			<span className="px-3 py-1.5 rounded-xl bg-orange-500/90 text-white text-xs font-DanaDemiBold shadow-lg text-center leading-relaxed animate-badge-in">
 				{t['common.temporarilyUnavailable']}
 			</span>
 		</div>
@@ -332,8 +341,18 @@ export const ProductCard = memo(function ProductCard({
 					همان رفتار همیشگیِ add-to-cart باقی است */}
 					<button
 						type="button"
-						onClick={interactive ? handleAddToCart : undefined}
+						onClick={
+							// stage-55 — bump لمسی دکمه‌ی افزودن به سبد: پایان انیمیشن
+							// استیت را برمی‌گرداند تا دفعه‌ی بعد دوباره اجرا شود (CSS-only)
+							interactive
+								? () => {
+										handleAddToCart()
+										setCartBump(true)
+									}
+								: undefined
+						}
 						disabled={unavailable}
+						onAnimationEnd={() => setCartBump(false)}
 						tabIndex={interactive ? 0 : -1}
 						aria-label={
 							unavailable
@@ -341,7 +360,7 @@ export const ProductCard = memo(function ProductCard({
 								: t['pdetail.addToCart']
 						}
 						title={unavailable ? t['common.temporarilyUnavailable'] : undefined}
-						className={`${cartBaseClass} ${cartLookClass}`}
+						className={`${cartBaseClass} ${cartLookClass}${cartBump ? ' animate-cart-bump' : ''}`}
 					>
 						<Cart size={24} className="h-4.5 w-4.5 sm:h-6 sm:w-6" />
 					</button>

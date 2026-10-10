@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/report/report-query.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: آمار گزارش‌ها از تجمیع SQL واقعی (count/sum::bigint) به‌جای reduce روی ردیف‌های سقف‌دار — رارد C1
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/report/report-query.service.ts
 import { and, desc, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm'
 
@@ -120,28 +127,43 @@ export class ReportQueryService {
     ): Promise<AdminReportResult> {
         const conditions = this.orderConditions(from, to, input)
 
-        const rows = await this.deps.db
-            .select({ o: orders, u: users })
-            .from(orders)
-            .innerJoin(users, eq(users.id, orders.userId))
-            .where(conditions.length > 0 ? and(...conditions) : undefined)
-            .orderBy(desc(orders.createdAt))
-            // رارد M8 — سقف ۵۰۰ ردیف (۲۰۰۰ × ردیف کاملِ orders خیلی سنگین بود)
-            .limit(500)
-
-        const paid = rows.filter(({ o }) => o.status !== 'CANCELED')
-        const sum = (fn: (o: typeof orders.$inferSelect) => number) =>
-            paid.reduce((s, { o }) => s + fn(o), 0)
+        // stage-55 — آمار از تجمیعِ واقعی SQL با همان conditions (قبلاً:
+        // rows.length و reduce روی حداکثر ۵۰۰ ردیف → با سفارش‌های بیشتر از
+        // سقف، آمار فقط توصیفِ جدیدترین زیرمجموعه بود). ردیف‌ها با همان سقف
+        // فقط برای جدول می‌مانند؛ همان join به users هم آینه‌شده تا شرط‌ها
+        // همیشه همان‌جا کامپایل شوند. رارد C1 — ::bigint (بدون سقفِ int)؛
+        // Number() چون Bun.sql مقدار bigint را string برمی‌گرداند.
+        const [rows, aggRows] = await Promise.all([
+            this.deps.db
+                .select({ o: orders, u: users })
+                .from(orders)
+                .innerJoin(users, eq(users.id, orders.userId))
+                .where(conditions.length > 0 ? and(...conditions) : undefined)
+                .orderBy(desc(orders.createdAt))
+                // رارد M8 — سقف ۵۰۰ ردیف (۲۰۰۰ × ردیف کاملِ orders خیلی سنگین بود)
+                .limit(500),
+            this.deps.db
+                .select({
+                    count: sql<number>`count(*)::int`,
+                    total: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.status} <> 'CANCELED'), 0)::bigint`,
+                    online: sql<number>`coalesce(sum((${orders.breakdown} ->> 'amountPaidOnline')::bigint) filter (where ${orders.status} <> 'CANCELED'), 0)::bigint`,
+                    discount: sql<number>`coalesce(sum((${orders.breakdown} ->> 'discount')::bigint) filter (where ${orders.status} <> 'CANCELED'), 0)::bigint`,
+                })
+                .from(orders)
+                .innerJoin(users, eq(users.id, orders.userId))
+                .where(conditions.length > 0 ? and(...conditions) : undefined),
+        ])
+        const agg = aggRows[0]
 
         return {
             title: 'گزارش سفارشات',
             subtitle,
             generatedAt,
             stats: [
-                { label: 'تعداد سفارش', value: faNum(rows.length) },
-                { label: 'مبلغ کل (تومان)', value: faNum(sum((o) => o.totalAmount)) },
-                { label: 'پرداخت آنلاین (تومان)', value: faNum(sum((o) => o.breakdown.amountPaidOnline)) },
-                { label: 'تخفیف (تومان)', value: faNum(sum((o) => o.breakdown.discount)) },
+                { label: 'تعداد سفارش', value: faNum(Number(agg?.count ?? 0)) },
+                { label: 'مبلغ کل (تومان)', value: faNum(Number(agg?.total ?? 0)) },
+                { label: 'پرداخت آنلاین (تومان)', value: faNum(Number(agg?.online ?? 0)) },
+                { label: 'تخفیف (تومان)', value: faNum(Number(agg?.discount ?? 0)) },
             ],
             tables: [
                 {
@@ -169,13 +191,25 @@ export class ReportQueryService {
             conditions.push(eq(admin2Activities.adminUserId, input.adminUserId as UserId))
         }
 
-        const rows = await this.deps.db
-            .select({ a: admin2Activities, u: users })
-            .from(admin2Activities)
-            .innerJoin(users, eq(users.id, admin2Activities.adminUserId))
-            .where(conditions.length > 0 ? and(...conditions) : undefined)
-            .orderBy(desc(admin2Activities.createdAt))
-            .limit(2000)
+        // stage-55 — «تعداد فعالیت» از count واقعی SQL با همان conditions
+        // (قبلاً: rows.length روی حداکثر ۲۰۰۰ ردیف → با فعالیت‌های بیشتر از
+        // سقف، آمار ناقص می‌شد). ردیف‌ها فقط برای جدول و Map خلاصه‌ی هر ادمین
+        // می‌مانند (داده‌ی نمایشی).
+        const [rows, aggRows] = await Promise.all([
+            this.deps.db
+                .select({ a: admin2Activities, u: users })
+                .from(admin2Activities)
+                .innerJoin(users, eq(users.id, admin2Activities.adminUserId))
+                .where(conditions.length > 0 ? and(...conditions) : undefined)
+                .orderBy(desc(admin2Activities.createdAt))
+                .limit(2000),
+            this.deps.db
+                .select({ count: sql<number>`count(*)::int` })
+                .from(admin2Activities)
+                .innerJoin(users, eq(users.id, admin2Activities.adminUserId))
+                .where(conditions.length > 0 ? and(...conditions) : undefined),
+        ])
+        const agg = aggRows[0]
 
         const byAdmin = new Map<string, number>()
         for (const { u } of rows) byAdmin.set(u.phone, (byAdmin.get(u.phone) ?? 0) + 1)
@@ -185,7 +219,7 @@ export class ReportQueryService {
             subtitle,
             generatedAt,
             stats: [
-                { label: 'تعداد فعالیت', value: faNum(rows.length) },
+                { label: 'تعداد فعالیت', value: faNum(Number(agg?.count ?? 0)) },
                 { label: 'تعداد ادمین فعال‌شده', value: faNum(byAdmin.size) },
             ],
             tables: [
@@ -232,23 +266,42 @@ export class ReportQueryService {
             conditions.push(eq(courierTrips.courierId, input.courierId as never))
         }
 
-        const rows = await this.deps.db
-            .select({ d: courierDeliveries, c: couriers, displayId: orders.displayId })
-            .from(courierDeliveries)
-            .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
-            .innerJoin(couriers, eq(couriers.id, courierTrips.courierId))
-            .leftJoin(orders, eq(orders.id, courierDeliveries.orderId))
-            .where(conditions.length > 0 ? and(...conditions) : undefined)
-            .orderBy(desc(courierDeliveries.deliveredAt))
-            .limit(2000)
+        // stage-55 — آمار از تجمیع SQL واقعی با همان from/joins/شرط‌ها
+        // (قبلاً: rows.length و reduce روی حداکثر ۲۰۰۰ ردیف → با تحویل‌های
+        // بیشتر از سقف، «مجموع مبالغ» فقط زیرمجموعه‌ی جدید را جمع می‌کرد).
+        // join به courierTrips لازم است چون شرطِ پیک روی آن است. ردیف‌ها با
+        // همان سقف فقط برای جدول می‌مانند. رارد C1 — ::bigint + Number()
+        // (Bun.sql مقدار bigint را string برمی‌گرداند).
+        const [rows, aggRows] = await Promise.all([
+            this.deps.db
+                .select({ d: courierDeliveries, c: couriers, displayId: orders.displayId })
+                .from(courierDeliveries)
+                .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
+                .innerJoin(couriers, eq(couriers.id, courierTrips.courierId))
+                .leftJoin(orders, eq(orders.id, courierDeliveries.orderId))
+                .where(conditions.length > 0 ? and(...conditions) : undefined)
+                .orderBy(desc(courierDeliveries.deliveredAt))
+                .limit(2000),
+            this.deps.db
+                .select({
+                    count: sql<number>`count(*)::int`,
+                    total: sql<number>`coalesce(sum(${courierDeliveries.amount}), 0)::bigint`,
+                })
+                .from(courierDeliveries)
+                .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
+                .innerJoin(couriers, eq(couriers.id, courierTrips.courierId))
+                .leftJoin(orders, eq(orders.id, courierDeliveries.orderId))
+                .where(conditions.length > 0 ? and(...conditions) : undefined),
+        ])
+        const agg = aggRows[0]
 
         return {
             title: 'گزارش پیک‌ها',
             subtitle,
             generatedAt,
             stats: [
-                { label: 'تعداد تحویل', value: faNum(rows.length) },
-                { label: 'مجموع مبالغ (تومان)', value: faNum(rows.reduce((s, r) => s + r.d.amount, 0)) },
+                { label: 'تعداد تحویل', value: faNum(Number(agg?.count ?? 0)) },
+                { label: 'مجموع مبالغ (تومان)', value: faNum(Number(agg?.total ?? 0)) },
             ],
             tables: [
                 {
@@ -279,12 +332,27 @@ export class ReportQueryService {
         if (from) conditions.push(gte(coupons.createdAt, from))
         if (to) conditions.push(lte(coupons.createdAt, to))
 
-        const rows = await this.deps.db
-            .select()
-            .from(coupons)
-            .where(conditions.length > 0 ? and(...conditions) : undefined)
-            .orderBy(desc(coupons.createdAt))
-            .limit(1000)
+        // stage-55 — آمار از تجمیع SQL واقعی با همان conditions (قبلاً:
+        // rows.length/filter/reduce روی حداکثر ۱۰۰۰ کوپن → با کوپن‌های بیشتر
+        // از سقف، آمار ناقص می‌شد). ردیف‌ها فقط برای جدول می‌مانند. رارد C1 —
+        // ::bigint + Number().
+        const [rows, aggRows] = await Promise.all([
+            this.deps.db
+                .select()
+                .from(coupons)
+                .where(conditions.length > 0 ? and(...conditions) : undefined)
+                .orderBy(desc(coupons.createdAt))
+                .limit(1000),
+            this.deps.db
+                .select({
+                    count: sql<number>`count(*)::int`,
+                    active: sql<number>`count(*) filter (where ${coupons.isActive})::int`,
+                    used: sql<number>`coalesce(sum(${coupons.usedCount}), 0)::bigint`,
+                })
+                .from(coupons)
+                .where(conditions.length > 0 ? and(...conditions) : undefined),
+        ])
+        const agg = aggRows[0]
 
         const ids = rows.map((r) => r.id)
         const [grants, redemptions] = await Promise.all([
@@ -311,9 +379,9 @@ export class ReportQueryService {
             subtitle,
             generatedAt,
             stats: [
-                { label: 'تعداد کوپن', value: faNum(rows.length) },
-                { label: 'کوپن‌های فعال', value: faNum(rows.filter((c) => c.isActive).length) },
-                { label: 'مجموع مصرف', value: faNum(rows.reduce((s, c) => s + c.usedCount, 0)) },
+                { label: 'تعداد کوپن', value: faNum(Number(agg?.count ?? 0)) },
+                { label: 'کوپن‌های فعال', value: faNum(Number(agg?.active ?? 0)) },
+                { label: 'مجموع مصرف', value: faNum(Number(agg?.used ?? 0)) },
             ],
             tables: [
                 {
@@ -461,7 +529,11 @@ export class ReportQueryService {
         if (from) walletConds.push(gte(walletTransactions.createdAt, from))
         if (to) walletConds.push(lte(walletTransactions.createdAt, to))
 
-        const [orderRows, walletRows, walletTotalRow] = await Promise.all([
+        // stage-55 — آمار سفارش کاربر از تجمیع SQL واقعی با همان orderConds
+        // (قبلاً: orderRows.length و reduce روی حداکثر ۵۰۰ ردیف آخر → برای
+        // کاربر پرحجم غلط بود). ردیف‌ها فقط برای جدول می‌مانند. رارد C1 —
+        // ::bigint + Number() چون Bun.sql مقدار bigint را string برمی‌گرداند.
+        const [orderRows, walletRows, walletTotalRow, orderAggRow] = await Promise.all([
             this.deps.db
                 .select()
                 .from(orders)
@@ -476,25 +548,28 @@ export class ReportQueryService {
                 .limit(200),
             this.deps.db
                 .select({
-                    balance: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::int`,
+                    balance: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::bigint`,
                 })
                 .from(walletTransactions)
                 .where(eq(walletTransactions.userId, target.id))
-                .then((r) => r[0]?.balance ?? 0),
+                .then((r) => Number(r[0]?.balance ?? 0)),
+            this.deps.db
+                .select({
+                    count: sql<number>`count(*)::int`,
+                    totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.status} <> 'CANCELED' and ${orders.paymentStatus} = 'SUCCESS'), 0)::bigint`,
+                })
+                .from(orders)
+                .where(and(...orderConds))
+                .then((r) => r[0]),
         ])
-
-        const paid = orderRows.filter((o) => o.status !== 'CANCELED')
-        const totalSpent = paid
-            .filter((o) => o.paymentStatus === 'SUCCESS')
-            .reduce((s, o) => s + o.totalAmount, 0)
 
         return {
             title: `گزارش کاربر ${target.name ?? target.phone}`,
             subtitle: `موبایل: ${target.phone} — ${target.bannedAt ? 'مسدود' : 'فعال'} — ${subtitle}`,
             generatedAt,
             stats: [
-                { label: 'تعداد سفارش (بازه)', value: faNum(orderRows.length) },
-                { label: 'مجموع خرید (تومان)', value: faNum(totalSpent) },
+                { label: 'تعداد سفارش (بازه)', value: faNum(Number(orderAggRow?.count ?? 0)) },
+                { label: 'مجموع خرید (تومان)', value: faNum(Number(orderAggRow?.totalSpent ?? 0)) },
                 { label: 'موجودی کیف پول (تومان)', value: faNum(walletTotalRow) },
                 { label: 'تعداد ارجاع', value: faNum(referralCount) },
             ],

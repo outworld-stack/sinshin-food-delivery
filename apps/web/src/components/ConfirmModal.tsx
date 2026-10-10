@@ -1,6 +1,7 @@
 // src/components/ConfirmModal.tsx
 
 import { useI18nSafe } from '#/i18n'
+import { useEffect } from 'react'
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -12,12 +13,24 @@ interface ConfirmModalProps {
 
 // رارد ۳۲ — دوزبانه با useI18nSafe: ۱۴ مصرف‌کننده‌ی ادمین (خارج Provider)
 // همان فارسیِ قبلی را می‌بینند؛ مصرف‌کنندگان سایت دوزبانه.
+// stage-55 — Escape هم مدال را می‌بندد (هم‌ارزِ انصراف)؛
+// role="dialog" برای صفحه‌خوان‌ها.
 export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }: ConfirmModalProps) {
   const { t } = useI18nSafe();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onCancel]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-100 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancel}></div>
       <div className="relative bg-white dark:bg-[#2a1015] p-6 rounded-2xl shadow-xl w-full max-w-sm text-center space-y-4">
         <div className="w-16 h-16 mx-auto rounded-full bg-red-100 dark:bg-red-500/10 flex items-center justify-center text-red-500">

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/translation/translation.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: isUniqueViolation مشترک از shared/pg (حذف کپی محلی)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-48 — sinshin-food-delivery — فایل 30 از 97
 // مسیر مقصد: apps/api/src/domain/translation/translation.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -41,6 +48,7 @@ import {
   asSizeId,
 } from '#/domain/shared/brand'
 import { AppError, Err } from '#/domain/shared/errors'
+import { isUniqueViolation } from '#/domain/shared/pg'
 import { TranslateClient } from '#/domain/translation/translate-client'
 import { planText, type TextPlan } from '#/domain/translation/markdown'
 import {
@@ -101,9 +109,7 @@ const isFilled = (v: unknown): boolean => {
 const clamp = (v: string, maxLen: number): string =>
   v.length <= maxLen ? v : v.slice(0, maxLen).trimEnd()
 
-/** خطای یکتایی Postgres (dedupe concurrent) */
-const isUniqueViolation = (e: unknown): boolean =>
-  typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505'
+// stage-55 — isUniqueViolation به shared/pg رفت (DRY — همان 23505)
 
 export class TranslationService {
   private readonly client: TranslateClient

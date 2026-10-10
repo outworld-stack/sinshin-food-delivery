@@ -1,6 +1,14 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/live/live.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: ماسک شماره‌ی مشتری (userPhone/userName) در نمای زنده و آمار
+//        داشبورد ادمین۲ — PII خام دیگر به پنل سطح ۲ نمی‌رسد
+// ═══════════════════════════════════════════════════════════════
 //src/domain/live/live.service.ts
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { buildRangeCharts, currentPeriodStart } from "#/domain/shared/charts";
+import { maskPhone } from "#/domain/shared/pg";
 import type { Db } from "#/infra/db/client";
 import {
 	admin2Profiles,
@@ -169,7 +177,7 @@ export class LiveService {
 		return {
 			totalOrders: agg?.count ?? 0,
 			totalAmount: Number(agg?.sum ?? 0),
-			recentOrders,
+			recentOrders: recentOrders.map(maskRecentUserName),
 			// ⬅ phase-3: نمودار از دادهٔ واقعی — مبلغ سفارشات تأییدشدهٔ خودم
 			chartData: buildRangeCharts(chartRows),
 		};
@@ -511,8 +519,9 @@ export class LiveService {
 				(o.confirmedBy ? (confirmerNameMap.get(o.confirmedBy) ?? "") : "");
 			return {
 				id: o.displayId,
-				userPhone: buyer.phone,
-				userName: `${buyer.name ?? ""}`.trim() || buyer.phone,
+				// stage-55 — ماسک شماره‌ی مشتری در نمای ادمین۲
+				userPhone: maskPhone(buyer.phone),
+				userName: `${buyer.name ?? ""}`.trim() || maskPhone(buyer.phone),
 				amount: o.totalAmount,
 				date: o.createdAt,
 				status: o.status,
@@ -530,4 +539,15 @@ export class LiveService {
 			};
 		});
 	}
+}
+
+/**
+ * stage-55 — ماسک شماره‌ی مشتری در آمار داشبورد ادمین۲: fallback نام
+ * در SQL (coalesce(nullif(trim(name), ''), phone)) وقتی نام خالی است
+ * «شماره‌ی خام» برمی‌گرداند — اگر مقدار الگوی شماره‌ی موبایل باشد، ماسک
+ * می‌شود تا PII خام به پنل سطح ۲ نرسد.
+ */
+function maskRecentUserName<T extends { userName: string }>(row: T): T {
+	if (/^09\d{9}$/.test(row.userName)) row.userName = maskPhone(row.userName);
+	return row;
 }

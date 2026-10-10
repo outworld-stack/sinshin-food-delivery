@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/admin.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: پاس فلگ ماسک شماره برای نمای ادمین۲
+// ═══════════════════════════════════════════════════════════════
+
 // src/http/routes/admin.routes.ts
 import { Elysia, t } from 'elysia'
 
@@ -91,15 +98,19 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
     .use(requireAdmin2Permission(guards, 'usersRead'))
     .get(
       '/users',
-      ({ query }) =>
-        deps.admin.getAdminUsers({
-          page: query.page,
-          limit: query.limit,
-          search: query.search || undefined,
-          device: query.device || undefined,
-          status: query.status || undefined,
-          sorts: parseSorts(query.sorts),
-        }),
+      // stage-55 — شماره‌ی کامل مشتری فقط برای ادمین اصلی — نمای ادمین۲ ماسک می‌شود
+      ({ query, user }) =>
+        deps.admin.getAdminUsers(
+          {
+            page: query.page,
+            limit: query.limit,
+            search: query.search || undefined,
+            device: query.device || undefined,
+            status: query.status || undefined,
+            sorts: parseSorts(query.sorts),
+          },
+          user.role === 'admin2' ? { maskPhones: true } : undefined,
+        ),
       {
         query: t.Object({
           // رارد M5 — سقف page
@@ -115,7 +126,12 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
     )
     .get(
       '/users/:id',
-      ({ params }) => deps.admin.getAdminUserDetails(params.id),
+      // stage-55 — شماره‌ی کامل مشتری فقط برای ادمین اصلی — نمای ادمین۲ ماسک می‌شود
+      ({ params, user }) =>
+        deps.admin.getAdminUserDetails(
+          params.id,
+          user.role === 'admin2' ? { maskPhones: true } : undefined,
+        ),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
         detail: { summary: 'User details (usersRead)' },
@@ -202,18 +218,22 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
     .use(requireAdmin2Permission(guards, 'orderDetailsRead'))
     .get(
       '/orders',
+      // stage-55 — شماره‌ی کامل مشتری فقط برای ادمین اصلی — نمای ادمین۲ ماسک می‌شود
       ({ query, user }) =>
-        deps.admin.getAdminOrders({
-          page: query.page,
-          limit: query.limit,
-          search: query.search || undefined,
-          status: query.status || undefined,
-          sortDate: query.sortDate || undefined,
-          sortAmount: query.sortAmount || undefined,
-          confirmedBy:
-            user.role === 'admin2' ? user.id : query.confirmedBy || undefined,
-          courierId: query.courierId || undefined,
-        }),
+        deps.admin.getAdminOrders(
+          {
+            page: query.page,
+            limit: query.limit,
+            search: query.search || undefined,
+            status: query.status || undefined,
+            sortDate: query.sortDate || undefined,
+            sortAmount: query.sortAmount || undefined,
+            confirmedBy:
+              user.role === 'admin2' ? user.id : query.confirmedBy || undefined,
+            courierId: query.courierId || undefined,
+          },
+          user.role === 'admin2' ? { maskPhones: true } : undefined,
+        ),
       {
         query: t.Object({
           // رارد M5 — سقف page

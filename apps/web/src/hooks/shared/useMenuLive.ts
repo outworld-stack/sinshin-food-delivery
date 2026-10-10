@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/hooks/shared/useMenuLive.ts
+// وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
+// تغییر: گوش دادن به connected برای resync بعد از reconnect
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-48 — sinshin-food-delivery — فایل جدید
 // مسیر مقصد: apps/web/src/hooks/shared/useMenuLive.ts
 // ═══════════════════════════════════════════════════════════════
@@ -43,6 +50,12 @@ export function useMenuLive(onMenuEvent?: (data: MenuLiveEvent) => void) {
 					} catch {
 						/* payload خراب — رد */
 					}
+				})
+				// stage-55 — resync بعد از reconnect: سرور روی هر اتصالِ (جدید) رویداد
+				// «connected» می‌فرستد؛ مصرف‌کننده داده‌های سروری‌اش را رفرش می‌کند
+				// تا تغییراتِ حین قطعی (موجودی/حالت ارسال) گم نشوند
+				source.addEventListener('connected', () => {
+					handlerRef.current?.({ productId: null, reason: 'connected-resync' })
 				})
 				source.onerror = () => {
 					// بستن + تلاش مجدد با فاصله (EventSource خودش هم reconnect می‌کند؛

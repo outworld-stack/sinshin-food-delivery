@@ -1,3 +1,9 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/health.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: بدنه‌ی حداقلی برای /health عمومی (حذف env/latency/uptime)
+// ═══════════════════════════════════════════════════════════════
 //src/http/routes/health.routes.ts
 import { Elysia } from 'elysia'
 
@@ -34,7 +40,9 @@ export const healthRoutes = (deps: HealthDeps) =>
     .get(
       '/',
       async ({ set }) => {
-        const { dbUp, dbMs, redisUp, redisMs } = await probe(deps.db, deps.redis)
+        // stage-55 — بدنه‌ی حداقلی — اطلاعات زیرساخت (env/latency/uptime)
+        // فقط در /health/metrics ادمین؛ پاسخ عمومی فقط status + checks.
+        const { dbUp, redisUp } = await probe(deps.db, deps.redis)
         const uploadsUp = deps.uploads.storageReady
         // round-20 — فقط database «سخت» است: تقریباً هیچ روتی بدون آن
         // کار نمی‌کند (auth/منو/سفارش/پرداخت) → 503 یعنی Caddy/compose
@@ -44,11 +52,7 @@ export const healthRoutes = (deps: HealthDeps) =>
         if (!dbUp) set.status = 503
         return {
           status: dbUp && redisUp && uploadsUp ? 'ok' : 'degraded',
-          env: deps.config.env,
           checks: { database: dbUp, redis: redisUp, uploads: uploadsUp },
-          // round-18 — افزایشی؛ مصرف‌کننده‌های موجود فقط status HTTP را می‌بینند
-          latencyMs: { database: dbMs, redis: redisMs },
-          uptimeSeconds: Math.round((Date.now() - deps.startedAt) / 1000),
         }
       },
       {

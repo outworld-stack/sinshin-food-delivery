@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/AdminLayout.tsx
+// وضعیت: ویرایش فایل موجود (سه تغییر نقطه‌ای)
+// تغییر: z-30→z-40 هم‌تراز stage-47 + inert برای منوی موبایلِ بسته
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/AdminLayout.tsx
 // تغییر: آیتم «نوتیفیکیشن» در منوی ادمین اصلی
@@ -201,7 +208,8 @@ export const AdminLayout = memo(function AdminLayout() {
 			{hydrated ? (
 				<>
 					{/* سایدبار دسکتاپ */}
-					<aside className="hidden md:flex flex-col w-64 bg-white dark:bg-[#2a1015] border-l border-gray-200 dark:border-[#3a151c] p-6 fixed right-0 top-0 bottom-0 z-30">
+					{/* stage-55 — z-40 هم‌ترازِ stage-47 DashboardLayout */}
+					<aside className="hidden md:flex flex-col w-64 bg-white dark:bg-[#2a1015] border-l border-gray-200 dark:border-[#3a151c] p-6 fixed right-0 top-0 bottom-0 z-40">
 						<div className="flex items-center justify-between mb-6">
 							<Brand textSize="text-lg sm:text-2xl" />
 							<ThemeToggle />
@@ -218,7 +226,8 @@ export const AdminLayout = memo(function AdminLayout() {
 					</aside>
 
 					{/* هدر موبایل */}
-					<header className="md:hidden flex items-center justify-between p-4 bg-white dark:bg-[#2a1015] border-b border-gray-200 dark:border-[#3a151c] sticky top-0 z-30">
+					{/* stage-55 — z-40 هم‌ترازِ stage-47 DashboardLayout */}
+					<header className="md:hidden flex items-center justify-between p-4 bg-white dark:bg-[#2a1015] border-b border-gray-200 dark:border-[#3a151c] sticky top-0 z-40">
 						<Brand textSize="text-lg" />
 						<div className="flex items-center gap-4">
 							<ThemeToggle />
@@ -233,6 +242,8 @@ export const AdminLayout = memo(function AdminLayout() {
 
 					{/* منوی کشویی موبایل */}
 					<div
+						// stage-55 — درِ بسته دیگر فوکوس‌پذیر نیست (Tab نمی‌رود داخل منوی بسته)
+						inert={!isMobileMenuOpen}
 						className={`md:hidden fixed inset-0 z-50 ${isMobileMenuOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
 					>
 						<div

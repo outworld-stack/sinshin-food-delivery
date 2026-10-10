@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/site/product-detail/ProductMobileBar.tsx
+// وضعیت: ویرایش فایل موجود (چهار تغییر نقطه‌ای)
+// تغییر: pb-safe برای home indicator + bump دکمه‌ی سبد + فونت DanaBold
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/site/product-detail/ProductMobileBar.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -6,7 +13,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/site/product-detail/ProductMobileBar.tsx
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { Cart, BoxRemove } from 'reicon-react'
 import { useI18n } from '#/i18n'
 import { CountdownTimer } from '#/components/shared/CountdownTimer'
@@ -41,9 +48,12 @@ export const ProductMobileBar = memo(function ProductMobileBar({
 	onAddToCart,
 }: ProductMobileBarProps) {
 	const { t, fmt } = useI18n()
+	// stage-55 — bump لمسی دکمه‌ی افزودن به سبد (CSS-only — animate-cart-bump)
+	const [bump, setBump] = useState(false)
 
-	return (
-		<div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 p-4 bg-white dark:bg-[#1a0a0e] border-t border-gray-200 dark:border-[#3a151c] shadow-[0_-4px_15px_rgba(0,0,0,0.05)]">
+	// stage-55 — ارتفاع ناحیه‌ی امن آیفون (home indicator)
+return (
+		<div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 pt-4 px-4 pb-safe bg-white dark:bg-[#1a0a0e] border-t border-gray-200 dark:border-[#3a151c] shadow-[0_-4px_15px_rgba(0,0,0,0.05)]">
 			<div className="flex items-center justify-between gap-3">
 				<div className="flex flex-col min-w-0">
 					{hasDiscount && (
@@ -76,7 +86,7 @@ export const ProductMobileBar = memo(function ProductMobileBar({
 						<button
 							type="button"
 							onClick={onIncrement}
-							className="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaBold cursor-pointer"
+							className="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaDemiBold cursor-pointer"
 						>
 							+
 						</button>
@@ -86,15 +96,20 @@ export const ProductMobileBar = memo(function ProductMobileBar({
 						<button
 							type="button"
 							onClick={onDecrement}
-							className="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaBold cursor-pointer"
+							className="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaDemiBold cursor-pointer"
 						>
 							-
 						</button>
 					</div>
 					<button
 						type="button"
-						onClick={onAddToCart}
+						onClick={() => {
+							// stage-55 — bump لمسی: پایان انیمیشن استیت را صفر می‌کند (CSS-only)
+							onAddToCart()
+							setBump(true)
+						}}
 						disabled={!isAvailable}
+						onAnimationEnd={() => setBump(false)}
 						aria-label={
 							isAvailable
 								? t['pdetail.addToCart']
@@ -104,7 +119,7 @@ export const ProductMobileBar = memo(function ProductMobileBar({
 							isAvailable
 								? 'bg-primary dark:bg-dark-primary text-white shadow-sm cursor-pointer'
 								: 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
-						}`}
+						}${bump ? ' animate-cart-bump' : ''}`}
 					>
 						<Cart size={24} />
 					</button>

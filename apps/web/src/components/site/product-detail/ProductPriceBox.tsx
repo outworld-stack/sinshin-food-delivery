@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/site/product-detail/ProductPriceBox.tsx
+// وضعیت: ویرایش فایل موجود (سه تغییر نقطه‌ای)
+// تغییر: bump دکمه‌ی سبد + فونت‌های خراب font-DanaBold → DanaDemiBold
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/site/product-detail/ProductPriceBox.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -7,7 +14,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/site/product-detail/ProductPriceBox.tsx
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { Cart, BoxRemove } from 'reicon-react'
 import { useI18n } from '#/i18n'
 import { CountdownTimer } from '#/components/shared/CountdownTimer'
@@ -41,6 +48,8 @@ export const ProductPriceBox = memo(function ProductPriceBox({
 	onAddToCart,
 }: ProductPriceBoxProps) {
 	const { t, fmt } = useI18n()
+	// stage-55 — bump لمسی دکمه‌ی افزودن به سبد (CSS-only — animate-cart-bump)
+	const [bump, setBump] = useState(false)
 
 	return (
 		<div className="hidden lg:flex mt-auto p-6 bg-white dark:bg-[#2a1015] rounded-2xl border border-gray-300 dark:border-[#3a151c] shadow-sm flex-col gap-4">
@@ -66,7 +75,7 @@ export const ProductPriceBox = memo(function ProductPriceBox({
 					<button
 						type="button"
 						onClick={onIncrement}
-						className="w-10 h-10 flex items-center justify-center rounded-lg bg-white dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#3a151c] transition font-DanaBold text-lg cursor-pointer"
+						className="w-10 h-10 flex items-center justify-center rounded-lg bg-white dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#3a151c] transition font-DanaDemiBold text-lg cursor-pointer"
 					>
 						+
 					</button>
@@ -76,7 +85,7 @@ export const ProductPriceBox = memo(function ProductPriceBox({
 					<button
 						type="button"
 						onClick={onDecrement}
-						className="w-10 h-10 flex items-center justify-center rounded-lg bg-white dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#3a151c] transition font-DanaBold text-lg cursor-pointer"
+						className="w-10 h-10 flex items-center justify-center rounded-lg bg-white dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#3a151c] transition font-DanaDemiBold text-lg cursor-pointer"
 					>
 						-
 					</button>
@@ -96,13 +105,18 @@ export const ProductPriceBox = memo(function ProductPriceBox({
 
 			<button
 				type="button"
-				onClick={onAddToCart}
+				onClick={() => {
+					// stage-55 — bump لمسی: پایان انیمیشن استیت را صفر می‌کند (CSS-only)
+					onAddToCart()
+					setBump(true)
+				}}
 				disabled={!isAvailable}
+				onAnimationEnd={() => setBump(false)}
 				className={`w-full py-4 rounded-xl font-DanaDemiBold text-lg transition flex items-center justify-center gap-2 ${
 					isAvailable
 						? 'bg-primary dark:bg-dark-primary text-white hover:opacity-90 shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30 cursor-pointer'
 						: 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
-				}`}
+				}${bump ? ' animate-cart-bump' : ''}`}
 			>
 				<Cart size={24} />
 				{t['pdetail.addToCart']}

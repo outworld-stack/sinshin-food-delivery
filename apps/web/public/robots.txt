@@ -1,3 +1,10 @@
+# ═══════════════════════════════════════════════════════════
+# stage-55 — sinshin-food-delivery
+# مسیر مقصد: apps/web/public/robots.txt
+# وضعیت: ویرایش فایل موجود (یک افزودنی)
+# تغییر: Disallow: /api — حذف API از بودجه‌ی کرال
+# ═══════════════════════════════════════════════════════════
+
 # سین‌شین فودپارک — https://www.sinshin-foodpark.ir
 # صفحات عمومی آزادند؛ بخش‌های خصوصی/تراکنشی از بودجه‌ی کرال حذف می‌شوند.
 # (noindex متای صفحاتِ خصوصی از قبل داخل خود صفحات هست — این Disallow ها
@@ -11,6 +18,8 @@ Disallow: /dashboard
 Disallow: /checkout
 Disallow: /cart
 Disallow: /geo-blocked
+# API برای کرالر بی‌فایده است — حذف از بودجه‌ی کرال
+Disallow: /api
 Disallow: /referral/
 Disallow: /courier
 Disallow: /offline.html

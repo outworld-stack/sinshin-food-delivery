@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/report/report.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: جمع درآمد تجمیعی گزارش‌های cron با ::bigint + Number — رارد C1 (سرریز int)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/report/report.service.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M22)
@@ -329,7 +336,9 @@ export class ReportService {
     const r = await this.deps.db
       .select({
         count: sql<number>`count(*)::int`,
-        amount: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
+        // رارد C1 — سرریز int برای درآمد تجمعی: ::bigint (بدون سقف)؛
+        // Number() چون Bun.sql مقدار bigint را string برمی‌گرداند.
+        amount: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
       })
       .from(orders)
       .where(
@@ -340,7 +349,7 @@ export class ReportService {
         ),
       )
     const count = r[0]?.count ?? 0
-    const amount = r[0]?.amount ?? 0
+    const amount = Number(r[0]?.amount ?? 0)
     return { count, amount, avg: count > 0 ? Math.round(amount / count) : 0 }
   }
 

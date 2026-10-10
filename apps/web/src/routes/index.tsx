@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/routes/index.tsx
+// وضعیت: ویرایش فایل موجود (دو تغییر نقطه‌ای)
+// تغییر: فونتِ خراب font-da → font-DanaDemiBold + ورود پلکانی هیرو
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-40 — sinshin-food-delivery — فایل 4 از 7
 // مسیر مقصد: apps/web/src/routes/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -136,13 +143,15 @@ function LandingPage({ showBanner }: { showBanner: boolean }) {
 				<div className="absolute top-0 -right-20 w-72.5 h-62.5 sm:w-150 sm:h-150 sm:-right-40 bg-primary/20 dark:bg-dark-primary/10 rounded-full blur-[100px] pointer-events-none"></div>
 				<div className="absolute bottom-0 -left-20 w-62.5 h-62.5 sm:w-150 sm:h-150 sm:-left-40 bg-dark-primary/35 dark:bg-[#4a1a24]/30 rounded-full blur-[100px] pointer-events-none"></div>
 
-				<div className="relative z-10 text-center max-w-4xl mx-auto flex flex-col items-center">
+				{/* stage-55 — ورود پلکانی هیرو (CSS-only — hero-stagger) */}
+				<div className="relative z-10 text-center max-w-4xl mx-auto flex flex-col items-center hero-stagger">
 					<Brand />
 					<div className="flex items-center mt-[18vh] sm:mt-[13vh] md:mt-[15vh] lg:mt-[22vh] text-2xl sm:text-4xl md:text-5xl max-sm:-mr-5">
 						<div className="font-DanaRegular flex items-center">
 							<span>{t['landing.sliderPrefix']}</span>
 							<WordSlider
-								className="text-primary dark:text-dark-primary font-da mt-1 mr-1 sm:mr-1.5"
+								/* stage-55 — فونت تعریف‌نشده font-da → DanaDemiBold */
+								className="text-primary dark:text-dark-primary font-DanaDemiBold mt-1 mr-1 sm:mr-1.5"
 								words={sliderWords}
 							/>
 						</div>

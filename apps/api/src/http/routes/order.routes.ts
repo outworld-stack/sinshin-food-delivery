@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/order.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: هدر Idempotency-Key در چک‌اوت اجباری شد (دِداپ همه‌جانبه؛
+//        قبلاً کلاینتِ بدون-کلید از دِداپ DB عبور می‌کرد)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-52 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/order.routes.ts
 // تغییر: چک‌اوت تمام-کیف‌پول (سفارش PAID بلافاصله وارد صف زنده می‌شود) علاوه بر
@@ -179,18 +186,18 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         // روی PK مرکب (user_id, key) است و برخلاف نسخهٔ Redis در قطعی و
         // ری‌استارت ردیس هم پابرجا می‌ماند (مسیر پول از ردیس جدا شد).
         const idemKey = headers['idempotency-key']
-        if (idemKey !== undefined && !/^[A-Za-z0-9-]{8,64}$/.test(idemKey)) {
-          throw Err.validation('Idempotency-Key باید ۸ تا ۶۴ کاراکتر حرفی/عددی باشد.')
+        // stage-55 — کلید اجباری: بدون آن چک‌اوت بدون دِداپ همه‌جانبه می‌ماند
+        // (فقط سقف نرخ per-user محافظت می‌کرد). کلاینت رسمی از قبل همیشه می‌فرستد.
+        if (typeof idemKey !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(idemKey)) {
+          throw Err.validation('Idempotency-Key (۸ تا ۶۴ کاراکتر حرفی/عددی) الزامی است.')
         }
-        if (idemKey) {
-          const claim = await deps.idempotency.claim(user.id, idemKey)
-          // replay: همان پاسخ قبلی — بدون ساخت سفارش
-          if (claim.kind === 'replay') return claim.response
-          // تصرف زندهٔ دیگری (درخواست موازی/تاخیرافتن) — 409؛ تلاش مجدد با
-          // کلید تازه بی‌درنگ موفق می‌شود
-          if (claim.kind === 'in-flight') {
-            throw Err.conflict('درخواست قبلی هنوز در حال پردازش است — چند لحظه صبر کنید.')
-          }
+        const claim = await deps.idempotency.claim(user.id, idemKey)
+        // replay: همان پاسخ قبلی — بدون ساخت سفارش
+        if (claim.kind === 'replay') return claim.response
+        // تصرف زندهٔ دیگری (درخواست موازی/تاخیرافتن) — 409؛ تلاش مجدد با
+        // کلید تازه بی‌درنگ موفق می‌شود
+        if (claim.kind === 'in-flight') {
+          throw Err.conflict('درخواست قبلی هنوز در حال پردازش است — چند لحظه صبر کنید.')
         }
 
         // رارد ۴۳ — پاسخ چک‌اوت با قرارداد مشترک تایپ‌دار شد
@@ -284,7 +291,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         detail: {
           summary: 'Checkout — server-priced order + payment initiation (idempotent)',
           description:
-            'All pricing server-side (size/discount/coupon/zone-aware delivery fee). Wallet-only orders settle instantly. Send Idempotency-Key header (UUID per purchase intent) so network retries never create a second order — the claim lives in the database (atomic composite PK), independent of Redis. Response is replayed for 48h per key.',
+            'All pricing server-side (size/discount/coupon/zone-aware delivery fee). Wallet-only orders settle instantly. Idempotency-Key header (UUID per purchase intent) is required (stage-55) — network retries never create a second order; the claim lives in the database (atomic composite PK), independent of Redis. Response is replayed for 48h per key.',
         },
       },
     )

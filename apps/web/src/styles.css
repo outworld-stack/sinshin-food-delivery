@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════
+   stage-55 — sinshin-food-delivery
+   مسیر مقصد: apps/web/src/styles.css
+   وضعیت: ویرایش فایل موجود (افزودن بخش‌های stage-55)
+   تغییر: ۷ انیمیشن CSS-only + کلاس‌های پلکانی + pb-safe + reduced-motion
+   ═══════════════════════════════════════════════════════════════ */
+
 * {
   box-sizing: border-box;
 }
@@ -28,6 +35,15 @@
 
   --animate-pop-in: pop-in 0.18s ease-out;
   --animate-fade-in: fade-in 0.18s ease-out;
+
+  /* stage-55 — ۷ انیمیشن CSS-only (بدون کتابخانه) + احترام به reduced-motion */
+  --animate-hero-stagger: hero-stagger 0.6s ease-out both;
+  --animate-card-in: card-in 0.45s ease-out both;
+  --animate-cart-bump: cart-bump 0.35s ease-out;
+  --animate-sheet-up: sheet-up 0.3s ease-out both;
+  --animate-float-soft: float-soft 3s ease-in-out infinite;
+  --animate-reveal-up: reveal-up 0.5s ease-out both;
+  --animate-badge-in: badge-in 0.3s ease-out both;
 }
 
 @keyframes pop-in {
@@ -47,6 +63,85 @@
   }
   to {
     opacity: 1;
+  }
+}
+
+/* ═══ stage-55 — کی‌فریم‌های انیمیشن‌های جدید (CSS-only — سازگار با SSR) ═══ */
+
+@keyframes hero-stagger {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes cart-bump {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -123,6 +218,53 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* stage-55 — ورود پلکانی فرزندان (هیرو و گرید محصولات) — CSS-only */
+.hero-stagger > * { animation: hero-stagger 0.6s ease-out both; }
+.hero-stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.hero-stagger > *:nth-child(2) { animation-delay: 0.15s; }
+.hero-stagger > *:nth-child(3) { animation-delay: 0.25s; }
+.hero-stagger > *:nth-child(4) { animation-delay: 0.35s; }
+.hero-stagger > *:nth-child(5) { animation-delay: 0.45s; }
+
+.grid-anim > * { animation: card-in 0.45s ease-out both; }
+.grid-anim > *:nth-child(2) { animation-delay: 0.05s; }
+.grid-anim > *:nth-child(3) { animation-delay: 0.1s; }
+.grid-anim > *:nth-child(4) { animation-delay: 0.15s; }
+.grid-anim > *:nth-child(5) { animation-delay: 0.2s; }
+.grid-anim > *:nth-child(6) { animation-delay: 0.25s; }
+.grid-anim > *:nth-child(7) { animation-delay: 0.3s; }
+.grid-anim > *:nth-child(8) { animation-delay: 0.35s; }
+.grid-anim > *:nth-child(n + 9) { animation-delay: 0.4s; }
+
+/* stage-55 — احترام به prefers-reduced-motion — انیمیشن‌ها عملاً خاموش */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* stage-55 — ناحیه‌ی امن iOS (home indicator) — سه کلاس CSS خالص به‌جای
+   arbitrary value با env() (خروجی همیشه تضمینی، صفر ریسک کامپایل):
+   pb-safe → نوارهای فیکسِ موبایل | pb-safe-lg → شیت پایین | bottom-safe → FAB
+   (قواعد لایه‌نشده در cascade از utility های لایه‌دارِ Tailwind قوی‌ترند،
+   پس حتی روی p-4/p-6 هم به‌طور قابل‌اتکا override می‌شوند.) */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.pb-safe-lg {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}
+
+.bottom-safe {
+  bottom: max(1.5rem, env(safe-area-inset-bottom));
 }
 
 

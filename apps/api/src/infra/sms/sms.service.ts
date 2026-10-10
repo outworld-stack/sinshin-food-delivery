@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/infra/sms/sms.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: ماسک PII در لاگ — شماره کامل هرگز وارد لاگ نمی‌شود
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/infra/sms/sms.service.ts
 // وضعیت: جایگزینی کامل فایل موجود — درگاه SMS.ir (verify API)
@@ -6,6 +12,7 @@
 
 // src/infra/sms/sms.service.ts
 import type { AppConfig, SmsConfig } from '#/infra/config/env'
+import { maskPhone } from '#/domain/shared/pg'
 
 /**
  * آداپتر SMS.ir — تنها نقطه‌ی ارسال SMS در کل سیستم.
@@ -110,6 +117,7 @@ export class SmsService {
 
   // ═══════════ هسته — POST /v1/send/verify ═══════════
 
+  // stage-55 — ماسک PII در لاگ — شماره کامل هرگز وارد لاگ نمی‌شود
   /**
    * ارسال با قالب — عمومی و safe:
    *  • console → چاپ در لاگ
@@ -120,7 +128,7 @@ export class SmsService {
   async sendVerify(phone: string, templateId: number, params: SmsParam[]): Promise<SmsSendResult> {
     if (this.sms.provider !== 'real') {
       console.log(
-        `[sms:console] → ${phone} (قالب ${templateId}): ` +
+        `[sms:console] → ${maskPhone(phone)} (قالب ${templateId}): ` +
         params.map((p) => `${p.name}=${p.value}`).join(' , '),
       )
       return { ok: true }
@@ -130,7 +138,7 @@ export class SmsService {
       return { ok: false, error: 'no-api-key' }
     }
     if (!Number.isInteger(templateId) || templateId <= 0) {
-      console.error(`[sms] شناسه‌ی قالب نامعتبر برای ${phone}: ${templateId}`)
+      console.error(`[sms] شناسه‌ی قالب نامعتبر برای ${maskPhone(phone)}: ${templateId}`)
       return { ok: false, error: 'invalid-template-id' }
     }
 
@@ -162,7 +170,7 @@ export class SmsService {
         // خطاهای ۴xx (احراز/قالب/پارامتر) با تلاش مجدد درست نمی‌شوند
         if (res.status >= 400 && res.status < 500 && res.status !== 429) {
           const text = await res.text().catch(() => '')
-          console.error(`[sms] SMS.ir ${res.status} برای ${phone}: ${text.slice(0, 200)}`)
+          console.error(`[sms] SMS.ir ${res.status} برای ${maskPhone(phone)}: ${text.slice(0, 200)}`)
           return { ok: false, error: `http-${res.status}` }
         }
         if (res.status >= 500 || res.status === 429) {
@@ -171,7 +179,7 @@ export class SmsService {
             await sleep(700)
             continue
           }
-          console.error(`[sms] SMS.ir ${res.status} برای ${phone} (پس از تلاش مجدد)`)
+          console.error(`[sms] SMS.ir ${res.status} برای ${maskPhone(phone)} (پس از تلاش مجدد)`)
           return { ok: false, error: lastError }
         }
 
@@ -190,7 +198,7 @@ export class SmsService {
         }
         lastError = `status-${json?.status ?? 'parse'}: ${json?.message ?? ''}`
         // پاسخ ۲۰۰ با status != 1 معمولاً خطای منطقی (شماره/قالب) است — تلاش مجدد بی‌فایده
-        console.error(`[sms] SMS.ir پاسخ ناموفق برای ${phone}: ${lastError.slice(0, 200)}`)
+        console.error(`[sms] SMS.ir پاسخ ناموفق برای ${maskPhone(phone)}: ${lastError.slice(0, 200)}`)
         return { ok: false, error: lastError }
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
@@ -198,7 +206,7 @@ export class SmsService {
           await sleep(700)
           continue
         }
-        console.error(`[sms] درگاه در دسترس نیست (${phone}):`, lastError)
+        console.error(`[sms] درگاه در دسترس نیست (${maskPhone(phone)}):`, lastError)
         return { ok: false, error: 'network' }
       }
     }

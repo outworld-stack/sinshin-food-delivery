@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/site/products/ProductsGrid.tsx
+// وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
+// تغییر: ورود پلکانی کارت‌ها با کلاس grid-anim (CSS-only)
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/site/products/ProductsGrid.tsx
 import { memo } from 'react'
 import { ProductCard } from '#/components/ProductCard'
@@ -25,7 +32,8 @@ export const ProductsGrid = memo(function ProductsGrid({ products, hasMore, onLo
 
   return (
     <div className="flex-1">
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+      {/* stage-55 — ورود پلکانی کارت‌ها (grid-anim — CSS-only) */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 grid-anim">
         {products.map((product) => (
           <ProductCard key={product.id} product={product} />
         ))}

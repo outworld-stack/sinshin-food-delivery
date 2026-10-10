@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/admin/admin.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: ماسک شماره برای ادمین۲ + likePattern + ::bigint بدون سقف
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // round-48 — sinshin-food-delivery — فایل 12 از 97
 // مسیر مقصد: apps/api/src/domain/admin/admin.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -25,6 +32,7 @@ import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain
 import { Err } from '#/domain/shared/errors'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
+import { likePattern, maskPhone } from '#/domain/shared/pg'
 import type { AdminOrdersData, AdminStatsDto, AdminUserSort, AdminUsersData } from '@sinshin/shared'
 
 // رارد ۴۷ — AdminUserSort به قرارداد مشترک رفت (کپی محلی حذف شد) —
@@ -109,19 +117,24 @@ export class AdminService {
 
     // ═════════════ کاربران ═════════════
 
-    async getAdminUsers(filters: {
-        page: number
-        limit: number
-        search?: string
-        device?: string
-        status?: string
-        sorts?: AdminUserSort[]
-    }): Promise<AdminUsersData> {
+    async getAdminUsers(
+        filters: {
+            page: number
+            limit: number
+            search?: string
+            device?: string
+            status?: string
+            sorts?: AdminUserSort[]
+        },
+        /** stage-55 — ماسک شماره برای نمای ادمین۲ (undefined = شماره کامل) */
+        opts?: { maskPhones?: boolean },
+    ): Promise<AdminUsersData> {
         const { db } = this.deps
         const conditions = []
 
         if (filters.search) {
-            const q = `%${filters.search}%`
+            // stage-55 — escape wildcard جستجو (٪ و _ و \) — الگوی امنِ «شامل»
+            const q = likePattern(filters.search)
             const clause = or(ilike(users.phone, q), ilike(users.name, q))
             if (clause) conditions.push(clause)
         }
@@ -212,7 +225,8 @@ export class AdminService {
                     id: asUserId(r.id),
                     firstName: r.name?.split(' ')[0] ?? null,
                     lastName: r.name?.split(' ').slice(1).join(' ') || null,
-                    phone: r.phone,
+                    // stage-55 — شماره‌ی کامل فقط برای ادمین اصلی؛ ادمین۲ ماسک
+                    phone: opts?.maskPhones ? maskPhone(r.phone) : r.phone,
                     device: '—',
                     status: r.bannedAt ? 'SUSPENDED' : 'ACTIVE',
                     walletBalance: Number(r.balance ?? 0),
@@ -225,7 +239,8 @@ export class AdminService {
         }
     }
 
-    async getAdminUserDetails(userId: string): Promise<{
+    /** stage-55 — opts.maskPhones: ماسک شماره‌ی کاربر/معرف‌ها برای ادمین۲ */
+    async getAdminUserDetails(userId: string, opts?: { maskPhones?: boolean }): Promise<{
         id: UserId
         phone: string
         referralCode: string | null
@@ -253,15 +268,18 @@ export class AdminService {
 
         const [walletRow, spentRow, referralCount, deviceRows, orderRows, refRows, addressRows, eventRows] =
             await Promise.all([
+                // رارد C1 — bigint بدون سقف؛ Number() چون Bun.sql مقدار bigint
+                // را string برمی‌گرداند (الگو: live.service.ts).
                 db.select({
-                    balance: sql<number>`sum(${signedWalletAmount})::int`,
-                }).from(walletTransactions).where(eq(walletTransactions.userId, uid)).then((r) => r[0]?.balance ?? 0),
+                    balance: sql<number>`sum(${signedWalletAmount})::bigint`,
+                }).from(walletTransactions).where(eq(walletTransactions.userId, uid)).then((r) => Number(r[0]?.balance ?? 0)),
 
+                // رارد C1 — هم‌الگوی کیف پول بالا
                 db.select({
-                    total: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
+                    total: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
                 }).from(orders)
                     .where(and(eq(orders.userId, uid), eq(orders.paymentStatus, 'SUCCESS'), ne(orders.status, 'CANCELED')))
-                    .then((r) => r[0]?.total ?? 0),
+                    .then((r) => Number(r[0]?.total ?? 0)),
 
                 db.select({ count: sql<number>`count(*)::int` }).from(users)
                     .where(eq(users.referredBy, uid)).then((r) => r[0]?.count ?? 0),
@@ -328,7 +346,8 @@ export class AdminService {
 
         return {
             id: uid,
-            phone: user.phone,
+            // stage-55 — شماره‌ی کامل فقط برای ادمین اصلی؛ نمای ادمین۲ ماسک
+            phone: opts?.maskPhones ? maskPhone(user.phone) : user.phone,
             referralCode: user.referralCode,
             name: user.name,
             email: user.email,
@@ -355,7 +374,8 @@ export class AdminService {
             })),
             referrals: refRows.map((r) => ({
                 id: asUserId(r.id),
-                phone: r.phone,
+                // stage-55 — شماره‌ی معرف‌ها هم در نمای ادمین۲ ماسک می‌شود
+                phone: opts?.maskPhones ? maskPhone(r.phone) : r.phone,
                 registeredAt: r.registeredAt,
                 totalOrders: 0, // ساده — گسترش بعدی
             })),
@@ -503,21 +523,26 @@ export class AdminService {
     // رارد ۴۶ — تایپ درون‌خطیِ خروجی با قرارداد مشترک AdminOrdersData جایگزین شد؛
     // فیلدهای note این سرویس required بودند و در قرارداد optional اند — جهت
     // انتساب بی‌صدا مشکلی نیست (required → optional همیشه مجاز است).
-    async getAdminOrders(filters: {
-        page: number
-        limit: number
-        search?: string
-        status?: string
-        sortDate?: string
-        sortAmount?: string
-        confirmedBy?: string
-        courierId?: string
-    }): Promise<AdminOrdersData> {
+    async getAdminOrders(
+        filters: {
+            page: number
+            limit: number
+            search?: string
+            status?: string
+            sortDate?: string
+            sortAmount?: string
+            confirmedBy?: string
+            courierId?: string
+        },
+        /** stage-55 — ماسک شماره‌ی مشتری برای نمای ادمین۲ */
+        opts?: { maskPhones?: boolean },
+    ): Promise<AdminOrdersData> {
         const { db } = this.deps
         const conditions = []
 
         if (filters.search) {
-            const q = `%${filters.search}%`
+            // stage-55 — escape wildcard جستجو (٪ و _ و \) — الگوی امنِ «شامل»
+            const q = likePattern(filters.search)
             const clause = or(ilike(orders.displayId, q), ilike(users.phone, q))
             if (clause) conditions.push(clause)
         }
@@ -579,20 +604,25 @@ export class AdminService {
             .offset((page - 1) * limit)
 
         return {
-            orders: rows.map((r) => ({
-                id: r.id,
-                userPhone: r.userPhone,
-                userName: r.userName ?? r.userPhone,
-                amount: r.amount,
-                date: r.date,
-                status: r.status,
-                customerNote: r.customerNote,
-                confirmedByName:
-                    r.confirmedFirst || r.confirmedLast
-                        ? `${r.confirmedFirst ?? ''} ${r.confirmedLast ?? ''}`.trim()
-                        : null,
-                courierName: r.courierName ?? null,
-            })),
+            orders: rows.map((r) => {
+                // stage-55 — شماره‌ی کامل مشتری فقط برای ادمین اصلی؛ نمای
+                // ادمین۲ ماسک می‌شود (حتی در fallback نام).
+                const userPhone = opts?.maskPhones ? maskPhone(r.userPhone) : r.userPhone
+                return {
+                    id: r.id,
+                    userPhone,
+                    userName: r.userName ?? userPhone,
+                    amount: r.amount,
+                    date: r.date,
+                    status: r.status,
+                    customerNote: r.customerNote,
+                    confirmedByName:
+                        r.confirmedFirst || r.confirmedLast
+                            ? `${r.confirmedFirst ?? ''} ${r.confirmedLast ?? ''}`.trim()
+                            : null,
+                    courierName: r.courierName ?? null,
+                }
+            }),
             total,
         }
     }

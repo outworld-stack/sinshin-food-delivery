@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: escape wildcard جستجو با likePattern
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -31,6 +38,7 @@ import {
   type ProductId,
 } from '#/domain/shared/brand'
 import { nullIfEmpty, pickAr, pickArArr, type Lang } from '#/domain/shared/lang'
+import { likePattern } from '#/domain/shared/pg'
 import type { Product } from '@sinshin/shared'
 
 const CACHE_TTL_SECONDS = 30
@@ -605,7 +613,8 @@ export class MenuService {
     categoryId?: string
   }): Promise<{ products: ProductDto[]; total: number }> {
     const conditions: SQL[] = []
-    if (filters.search) conditions.push(ilike(products.name, `%${filters.search}%`))
+    // stage-55 — escape wildcard جستجو (٪ و _ و \) — الگوی امنِ «شامل»
+    if (filters.search) conditions.push(ilike(products.name, likePattern(filters.search)))
     if (filters.status && filters.status !== 'all') {
       conditions.push(eq(products.status, filters.status))
     }

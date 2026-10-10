@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/courier/courier.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: escape جستجو + مجموع تحویل‌ها با SQL aggregate
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/courier/courier.service.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با H3+M10+L4)
@@ -13,6 +20,7 @@ import { courierDeliveries, courierTrips, couriers, orders, type OrderRow } from
 import type { CourierListRowDto } from '@sinshin/shared'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { likePattern } from '#/domain/shared/pg'
 import type { RedisService } from '#/infra/redis/redis'
 import type { SmsService } from '#/infra/sms/sms.service'
 import { sendOtp, verifyOtp, type OtpKeys } from '#/domain/shared/otp-core'
@@ -257,8 +265,9 @@ export class CourierService {
 
     // فیلتر متن روی نام/موبایل (مثل «محمد یا 0912...»)
     const text = filters.search?.trim()
+    // stage-55 — escape wildcard جستجو (٪ و _ و \) — الگوی امنِ «شامل»
     const courierWhere = text
-      ? or(ilike(couriers.name, `%${text}%`), ilike(couriers.phone, `%${text}%`))
+      ? or(ilike(couriers.name, likePattern(text)), ilike(couriers.phone, likePattern(text)))
       : undefined
 
     // بازهٔ تحویل — تاریخ‌های خراب بی‌اثرند (نه ۵۰۰)
@@ -408,14 +417,27 @@ export class CourierService {
         .where(sql`${inArray(courierDeliveries.tripId, tripIds)} ${ownership}`)
       : []
 
+    // stage-55 — مجموع از SQL واقعی (قبلاً: fetch همه‌ی ردیف‌ها + reduce در JS).
+    // ردیف‌ها برای chartData/trips همچنان لازم‌اند؛ فقط جمع/شمارش به دیتابیس رفت.
+    // ::bigint بدون سقف + Number() چون Bun.sql مقدار bigint را string برمی‌گرداند.
+    const [totals] = tripIds.length
+      ? await this.deps.db
+        .select({
+          count: sql<number>`count(*)::int`,
+          total: sql<number>`coalesce(sum(${courierDeliveries.amount}), 0)::bigint`,
+        })
+        .from(courierDeliveries)
+        .where(sql`${inArray(courierDeliveries.tripId, tripIds)} ${ownership}`)
+      : [{ count: 0, total: 0 }]
+
     return {
       courier,
       trips: trips.map((t) => ({
         ...t,
         deliveries: deliveries.filter((d) => d.tripId === t.id),
       })),
-      totalDeliveries: deliveries.length,
-      totalAmount: deliveries.reduce((s, d) => s + d.amount, 0),
+      totalDeliveries: totals?.count ?? 0,
+      totalAmount: Number(totals?.total ?? 0),
       // ⬅ phase-3: نمودار از تحویل‌های واقعی — نقش‌محور
       // (ادمین۲ فقط تحویل‌های سفارشات خودش را می‌بیند)
       chartData: buildRangeCharts(

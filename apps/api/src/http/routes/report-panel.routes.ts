@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/report-panel.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: آمار پنل‌های زنده از تجمیع SQL واقعی (count/sum::bigint) به‌جای reduce روی ردیف‌های سقف‌دار — رارد C1
+// ═══════════════════════════════════════════════════════════════
+
 //src/http/routes/report-panel.routes.ts
 import { Elysia, t } from 'elysia'
 import { html } from '@elysia/html'
@@ -57,19 +64,34 @@ export const reportPanelRoutes = (deps: ReportPanelRoutesDeps) =>
 // ══ renderer ها — در همین فایل ══
 
 async function myOrdersReport(deps: ReportPanelRoutesDeps, adminUserId: string) {
-  const rows = await deps.db
-    .select({ o: orders })
-    .from(orders)
-    .where(and(eq(orders.confirmedBy, adminUserId), sql`${orders.status} <> 'CANCELED'`))
-    .orderBy(desc(orders.createdAt))
-    .limit(500)
+  // stage-55 — آمار از تجمیع SQL واقعی با همان شرط‌ها (قبلاً: rows.length و
+  // reduce روی حداکثر ۵۰۰ ردیف → با تاییدهای بیشتر از سقف، آمار فقط
+  // توصیفِ جدیدترین زیرمجموعه بود). ردیف‌ها با همان سقف فقط برای جدول
+  // می‌مانند. رارد C1 — ::bigint (بدون سقفِ int)؛ Number() چون Bun.sql
+  // مقدار bigint را string برمی‌گرداند.
+  const [rows, aggRows] = await Promise.all([
+    deps.db
+      .select({ o: orders })
+      .from(orders)
+      .where(and(eq(orders.confirmedBy, adminUserId), sql`${orders.status} <> 'CANCELED'`))
+      .orderBy(desc(orders.createdAt))
+      .limit(500),
+    deps.db
+      .select({
+        count: sql<number>`count(*)::int`,
+        total: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
+      })
+      .from(orders)
+      .where(and(eq(orders.confirmedBy, adminUserId), sql`${orders.status} <> 'CANCELED'`)),
+  ])
+  const agg = aggRows[0]
 
   return MiniReportPage({
     title: 'سفارشات تاییدشده‌ی من',
     subtitle: 'ادمین سطح ۲ — سین‌شین',
     stats: [
-      { label: 'تعداد', value: faNum(rows.length) },
-      { label: 'مبلغ کل (تومان)', value: faNum(rows.reduce((s, r) => s + r.o.totalAmount, 0)) },
+      { label: 'تعداد', value: faNum(Number(agg?.count ?? 0)) },
+      { label: 'مبلغ کل (تومان)', value: faNum(Number(agg?.total ?? 0)) },
     ],
     tables: [
       {
@@ -118,21 +140,37 @@ async function courierDeliveriesReport(
   filters: Record<string, string>,
 ) {
   const courierId = filters.courierId
-  const rows = await deps.db
-    .select({ d: courierDeliveries, c: couriers })
-    .from(courierDeliveries)
-    .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
-    .innerJoin(couriers, eq(couriers.id, courierTrips.courierId))
-    .where(courierId ? eq(courierTrips.courierId, asCourierId(courierId)) : sql`true`)
-    .orderBy(desc(courierDeliveries.deliveredAt))
-    .limit(1000)
+  // stage-55 — آمار از تجمیع SQL واقعی با همان from/joins/شرط‌ها (قبلاً:
+  // rows.length و reduce روی حداکثر ۱۰۰۰ ردیف → با تحویل‌های بیشتر از سقف،
+  // «مجموع مبالغ» فقط زیرمجموعه‌ی جدید را جمع می‌کرد). ردیف‌ها با همان سقف
+  // فقط برای جدول می‌مانند. رارد C1 — ::bigint + Number().
+  const [rows, aggRows] = await Promise.all([
+    deps.db
+      .select({ d: courierDeliveries, c: couriers })
+      .from(courierDeliveries)
+      .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
+      .innerJoin(couriers, eq(couriers.id, courierTrips.courierId))
+      .where(courierId ? eq(courierTrips.courierId, asCourierId(courierId)) : sql`true`)
+      .orderBy(desc(courierDeliveries.deliveredAt))
+      .limit(1000),
+    deps.db
+      .select({
+        count: sql<number>`count(*)::int`,
+        total: sql<number>`coalesce(sum(${courierDeliveries.amount}), 0)::bigint`,
+      })
+      .from(courierDeliveries)
+      .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
+      .innerJoin(couriers, eq(couriers.id, courierTrips.courierId))
+      .where(courierId ? eq(courierTrips.courierId, asCourierId(courierId)) : sql`true`),
+  ])
+  const agg = aggRows[0]
 
   return MiniReportPage({
     title: 'تحویل‌های پیک',
     subtitle: courierId ? `پیک انتخابی` : 'همه‌ی پیک‌ها',
     stats: [
-      { label: 'تعداد تحویل', value: faNum(rows.length) },
-      { label: 'مجموع مبالغ (تومان)', value: faNum(rows.reduce((s, r) => s + r.d.amount, 0)) },
+      { label: 'تعداد تحویل', value: faNum(Number(agg?.count ?? 0)) },
+      { label: 'مجموع مبالغ (تومان)', value: faNum(Number(agg?.total ?? 0)) },
     ],
     tables: [
       {

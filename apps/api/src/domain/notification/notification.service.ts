@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: جلوگیری از تسخیر اشتراک پوش توسط کاربر دیگر + escape جستجو
+//        + آمار پوش دسته‌ای (۲۰k اشتراک ⇒ ۲۰k UPDATE → حداکثر ۳)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-52 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-50)
@@ -25,6 +32,7 @@ import type { NotificationType } from '#/infra/db/schema/notifications'
 import type { AppConfig } from '#/infra/config/env'
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import { sendWebPush, type PushPayload } from '#/infra/push/web-push'
+import { likePattern } from '#/domain/shared/pg'
 
 /**
  * فاز-۲ — سیستم نوتیفیکیشن مرکزی.
@@ -134,6 +142,12 @@ const DELIVERY_LABELS: Record<'DELIVERY' | 'PICKUP' | 'DINE_IN', string> = {
   DELIVERY: 'ارسال با پیک',
   PICKUP: 'بیرون‌بر',
   DINE_IN: 'سرو در سالن',
+}
+
+/** stage-55 — آیتم نتیجه‌ی ارسال پوش (برای آمارداری/غیرفعال‌سازی دسته‌ای) */
+type PushOutcomeItem = {
+  sub: { id: string }
+  outcome: Awaited<ReturnType<typeof sendWebPush>>
 }
 
 export class NotificationService {
@@ -333,6 +347,9 @@ export class NotificationService {
       // ۳) فان‌آوت سقف‌دار + همان آمار/غیرفعال‌سازی بقیه‌ی مسیرهای پوش:
       //    ok ⇒ failures صفر؛ fail ⇒ شمارنده (سقف ۵ ⇒ غیرفعال)؛
       //    gone (404/410) ⇒ همان‌جا غیرفعال.
+      // stage-55 — شمارنده‌ها همان‌قدر دقیق؛ UPDATEها دسته‌ای.
+      const outcomes: PushOutcomeItem[] = []
+      const goneIds: string[] = []
       for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
         const batch = subs.slice(i, i + PUSH_CONCURRENCY)
         const results = await Promise.all(
@@ -341,16 +358,18 @@ export class NotificationService {
             outcome: await sendWebPush(this.deps.config, sub, pushPayload),
           })),
         )
-        for (const { sub, outcome } of results) {
-          stats.targeted++
-          if (outcome.kind === 'ok') stats.delivered++
-          if (outcome.kind === 'gone') {
-            stats.gone++
-            await this.disableSubscription(sub.id)
-          }
-          await this.recordPushOutcome(sub.id, outcome)
+        outcomes.push(...results)
+      }
+      for (const { sub, outcome } of outcomes) {
+        stats.targeted++
+        if (outcome.kind === 'ok') stats.delivered++
+        if (outcome.kind === 'gone') {
+          stats.gone++
+          goneIds.push(sub.id)
         }
       }
+      await this.recordPushOutcomesBatch(outcomes)
+      await this.disableSubscriptionsBatch(goneIds)
       console.log(
         `[notify] سفارش زنده ${input.displayId}: پوش به ${stats.targeted} اشتراک ادمین۲ ` +
           `(تحویل ${stats.delivered}${stats.gone > 0 ? `، مرده ${stats.gone}` : ''})`,
@@ -367,7 +386,9 @@ export class NotificationService {
   ): Promise<{ items: NotificationLogDto[]; total: number }> {
     const conditions = []
     if (filter.search) {
-      const q = `%${filter.search}%`
+      // stage-55 — escape کراکترهای wildcard (% _ \) تا الگوی جستجوی
+      // کاربر کل جدول را اسکن نکند (likePattern خودش % دورش می‌گذارد)
+      const q = likePattern(filter.search)
       conditions.push(or(ilike(notificationLog.title, q), ilike(notificationLog.body, q)))
     }
     if (filter.type && filter.type !== 'all') {
@@ -443,8 +464,10 @@ export class NotificationService {
 
   /**
    * ثبت/تازه‌سازی اشتراک — upsert روی endpoint (یونیک).
-   * اگر endpoint از کاربر دیگری باشد → مالکش همین کاربر می‌شود
-   * (لاگین روی مرورگر جدید؛ رفتار درستِ Web Push).
+   * stage-55 — اگر endpoint از قبل به کاربر دیگری تعلق داشته باشد، ثبت
+   * رد می‌شود (reason=owned-by-other): بدون مدرک مالکیت، انتقال اشتراک
+   * ممنوع است (قبلاً upsert بی‌صدا مالک را عوض می‌کرد و قربانی دیگر
+   * نمی‌توانست اشتراکش را حذف کند).
    * سقف اشتراک فعال هر کاربر — قدیمی‌ترین غیرفعال می‌شود.
    */
   async registerSubscription(
@@ -458,6 +481,17 @@ export class NotificationService {
       return { ok: false, reason: 'keys-invalid' }
     }
     try {
+      // stage-55 — جلوگیری از «تسخیر اشتراک پوش»: اگر endpoint از قبل به
+      // کاربر دیگری تعلق دارد، بدون مدرکِ مالکیت (proof-of-possession)
+      // انتقال ممنوع است. قبلاً onConflictDoUpdate بی‌صدا مالک را عوض
+      // می‌کرد و قربانی دیگر نمی‌توانست اشتراکش را حذف کند.
+      // (داخل try: شکست DB همان reason='db' قبلی را می‌دهد، نه 500)
+      const [existing] = await this.deps.db
+        .select({ userId: pushSubscriptions.userId })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.endpoint, sub.endpoint))
+        .limit(1)
+      if (existing && existing.userId !== userId) return { ok: false, reason: 'owned-by-other' }
       await this.deps.db
         .insert(pushSubscriptions)
         .values({
@@ -619,10 +653,7 @@ export class NotificationService {
       }
 
       let attempted = 0
-      const outcomes: Array<{
-        sub: typeof pushSubscriptions.$inferSelect
-        outcome: Awaited<ReturnType<typeof sendWebPush>>
-      }> = []
+      const outcomes: PushOutcomeItem[] = []
       for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
         const batch = subs.slice(i, i + PUSH_CONCURRENCY)
         const results = await Promise.all(
@@ -636,15 +667,18 @@ export class NotificationService {
 
       // stage-48 — آمار پیاپی/غیرفعال‌سازی: ok ⇒ صفر + lastPushAt؛
       // fail ⇒ شمارنده بالا (تا ۵) و بعد از سقف غیرفعال؛ gone ⇒ همیشه غیرفعال.
+      // stage-55 — شمارنده‌ها همان‌قدر دقیق؛ UPDATEها دسته‌ای (حداکثر ۳).
+      const goneIds: string[] = []
       for (const { sub, outcome } of outcomes) {
         attempted++
         if (outcome.kind === 'ok') delivered++
         if (outcome.kind === 'gone') {
           gone++
-          await this.disableSubscription(sub.id)
+          goneIds.push(sub.id)
         }
-        await this.recordPushOutcome(sub.id, outcome)
       }
+      await this.recordPushOutcomesBatch(outcomes)
+      await this.disableSubscriptionsBatch(goneIds)
 
       // آمار تحویل روی ردیف نوتیفیکیشن
       if (notificationId) {
@@ -675,6 +709,7 @@ export class NotificationService {
         tag: input.type,
         data: input.data,
       }
+      const outcomes: PushOutcomeItem[] = []
       const goneIds: string[] = []
       for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
         const batch = subs.slice(i, i + PUSH_CONCURRENCY)
@@ -684,19 +719,16 @@ export class NotificationService {
             outcome: await sendWebPush(this.deps.config, sub, pushPayload),
           })),
         )
-        for (const { sub, outcome } of results) {
-          if (outcome.kind === 'gone') goneIds.push(sub.id)
-          // stage-48 — همان آمار خطای پیاپی (تلاش مجدد دوره‌ای بعدی تصمیم می‌گیرد)
-          await this.recordPushOutcome(sub.id, outcome)
-        }
+        outcomes.push(...results)
       }
-      // غیرفعال‌سازی اشتراک‌های مرده — دسته‌ای
+      for (const { sub, outcome } of outcomes) {
+        if (outcome.kind === 'gone') goneIds.push(sub.id)
+      }
+      // stage-48 — همان آمار خطای پیاپی (تلاش مجدد دوره‌ای بعدی تصمیم می‌گیرد)
+      // stage-55 — آمار دسته‌ای + غیرفعال‌سازی مرده‌ها دسته‌ای (حداکثر ۳ کوئری)
+      await this.recordPushOutcomesBatch(outcomes)
+      await this.disableSubscriptionsBatch(goneIds)
       if (goneIds.length > 0) {
-        await this.deps.db
-          .update(pushSubscriptions)
-          .set({ disabledAt: new Date() })
-          .where(inArray(pushSubscriptions.id, goneIds))
-          .catch(() => { /* آماری است */ })
         console.log(`[notify] broadcast: ${goneIds.length} اشتراک مرده غیرفعال شد`)
       }
     } catch (err) {
@@ -705,35 +737,57 @@ export class NotificationService {
   }
 
   /**
-   * stage-48 — آمار تحویل هر اشتراک (fail-soft):
+   * stage-55 — آمار پوشِ دسته‌ای: قبلاً به‌ازای هر اشتراک یک UPDATE
+   * مستقل (۲۰k اشتراک = ۲۰k کوئری)؛ حالا حداکثر ۳ کوئری.
    *  • ok ⇒ failures=0 + lastPushAt (سلامت اشتراک تأیید شد)
    *  • fail (شبکه/429/5xx — خطای موقت) ⇒ failures+1؛ با رسیدن به سقف،
    *    اشتراک غیرفعال می‌شود تا فان‌آوت‌های بعدی مسدود نمانند.
    */
-  private async recordPushOutcome(
-    subId: string,
-    outcome: Awaited<ReturnType<typeof sendWebPush>>,
-  ): Promise<void> {
+  private async recordPushOutcomesBatch(outcomes: PushOutcomeItem[]): Promise<void> {
+    if (outcomes.length === 0) return
+    const okIds: string[] = []
+    const failIds: string[] = []
+    for (const { sub, outcome } of outcomes) {
+      if (outcome.kind === 'ok') okIds.push(sub.id)
+      else if (outcome.kind === 'fail') failIds.push(sub.id)
+    }
     try {
-      if (outcome.kind === 'ok') {
+      if (okIds.length > 0) {
         await this.deps.db
           .update(pushSubscriptions)
           .set({ failures: 0, lastPushAt: new Date() })
-          .where(eq(pushSubscriptions.id, subId))
-      } else if (outcome.kind === 'fail') {
+          .where(inArray(pushSubscriptions.id, okIds))
+      }
+      if (failIds.length > 0) {
         const rows = await this.deps.db
           .update(pushSubscriptions)
           .set({ failures: sql`${pushSubscriptions.failures} + 1` })
-          .where(eq(pushSubscriptions.id, subId))
-          .returning({ failures: pushSubscriptions.failures })
-        const failures = rows[0]?.failures ?? 0
-        if (failures >= PUSH_MAX_FAILURES) {
-          await this.disableSubscription(subId)
-          console.warn(`[notify] اشتراک ${subId} بعد از ${failures} شکست پیاپی غیرفعال شد`)
+          .where(inArray(pushSubscriptions.id, failIds))
+          .returning({ id: pushSubscriptions.id, failures: pushSubscriptions.failures })
+        const over = rows.filter((r) => (r.failures ?? 0) >= PUSH_MAX_FAILURES).map((r) => r.id)
+        if (over.length > 0) {
+          console.warn(`[notify] ${over.length} اشتراک بعد از شکست پیاپی غیرفعال شد`)
+          await this.disableSubscriptionsBatch(over)
         }
       }
     } catch {
       /* آماری است — سکوت */
+    }
+  }
+
+  /**
+   * stage-55 — غیرفعال‌سازی دسته‌ای (هم‌ارزِ disableSubscription قبلی:
+   * فقط disabledAt — تاریخچه می‌ماند؛ prune بعدی پاک می‌کند).
+   */
+  private async disableSubscriptionsBatch(ids: string[]): Promise<void> {
+    if (ids.length === 0) return
+    try {
+      await this.deps.db
+        .update(pushSubscriptions)
+        .set({ disabledAt: new Date() })
+        .where(inArray(pushSubscriptions.id, ids))
+    } catch {
+      /* سکوت — دفعه‌ی بعد دوباره غیرفعال می‌شود */
     }
   }
 
@@ -752,17 +806,6 @@ export class NotificationService {
       senderRole: sender?.role ?? 'system',
       senderName: sender?.name?.slice(0, 120) ?? null,
     })
-  }
-
-  private async disableSubscription(subId: string): Promise<void> {
-    try {
-      await this.deps.db
-        .update(pushSubscriptions)
-        .set({ disabledAt: new Date() })
-        .where(eq(pushSubscriptions.id, subId))
-    } catch {
-      /* سکوت — دفعه‌ی بعد دوباره غیرفعال می‌شود */
-    }
   }
 
   /** سقف اشتراک فعال — قدیمی‌ترین‌ها غیرفعال (نه حذف؛ تاریخچه بماند) */

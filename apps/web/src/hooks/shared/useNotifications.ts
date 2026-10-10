@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/hooks/shared/useNotifications.ts
+// وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
+// تغییر: resync روی رویداد connected (پس از هر reconnect یک ریفچ)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery — فایل جدید
 // مسیر مقصد: apps/web/src/hooks/shared/useNotifications.ts
 // ═══════════════════════════════════════════════════════════════
@@ -104,6 +111,9 @@ export function useNotifications(userId: string | null | undefined) {
             for (const line of frame.split('\n')) {
               if (line.startsWith('event:')) eventName = line.slice(6).trim()
             }
+            // stage-55 — resync بعد از هر (re)connect: اگر حین قطعی نوتیف آمد،
+            // اینجا کش می‌شود تازه می‌شود (قبلاً تا رویدادِ بعدی گم می‌شد)
+            if (eventName === 'connected') void refresh()
             if (eventName === 'notification') void refresh()
           }
         }

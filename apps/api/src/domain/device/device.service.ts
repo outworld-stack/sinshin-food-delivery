@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/device/device.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: escape wildcard جستجو با likePattern (هر دو مسیر)
+// ═══════════════════════════════════════════════════════════════
+
 //src/domain/device/device.service.ts
 import { and, desc, eq, gte, ilike, inArray, ne, or, sql, type SQL } from 'drizzle-orm'
 
@@ -12,6 +19,7 @@ import {
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { likePattern } from '#/domain/shared/pg'
 import { asDeviceId, asUserId, type DeviceId } from '#/domain/shared/brand'
 import {
   compositeFingerprintHash,
@@ -339,15 +347,17 @@ export class DeviceService {
       const digits = filters.search.replace(/\D/g, '')
       if (digits.startsWith('09')) {
         // جستجوی شماره → دستگاه‌های دارای آن هویت
+        // stage-55 — escape wildcard (٪ و _ و \) تا «%» کل جدول را اسکن نکند
         const ids = await db
           .selectDistinct({ deviceId: deviceIdentities.deviceId })
           .from(deviceIdentities)
-          .where(ilike(deviceIdentities.phone, `%${filters.search}%`))
+          .where(ilike(deviceIdentities.phone, likePattern(filters.search)))
         conditions.push(
           ids.length > 0 ? inArray(devices.id, ids.map((x) => x.deviceId)) : sql`false`,
         )
       } else {
-        const q = `%${filters.search}%`
+        // stage-55 — الگوی امنِ «شامل» با escape کاراکترهای خاصِ LIKE
+        const q = likePattern(filters.search)
         const clause = or(
           ilike(devices.platform, q),
           ilike(devices.label, q),

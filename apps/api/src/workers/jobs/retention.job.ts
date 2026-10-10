@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/retention.job.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: هدف پاک‌سازی notification_log — رشد بی‌سقف بسته شد
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/workers/jobs/retention.job.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱)
@@ -28,6 +35,10 @@ import type { DailyJob } from '#/workers/scheduler'
  * round-20 — checkout_idempotency: پنجرهٔ replay چک‌اوت؛ ردیف‌های
  * ۴۸-ساعته (تکمیل‌شده یا رهاشده) حذف می‌شوند — ادعای زنده هرگز
  * این‌قدر قدیمی نیست (تصرف خودکار بعد از ۶۰ ثانیه).
+ *
+ * stage-55 — notification_log هم به جمع رشد-بی‌سقف اضافه شد: یک ردیف
+ * به‌ازای هر broadcast/ارسال ادمین + پخش خودکار (تخفیف محصول)؛ با
+ * همان برشِ ۱۸۰ روزه‌ی جدول‌های لاگ پاک‌سازی می‌شود.
  */
 export class RetentionJob implements DailyJob {
   readonly name = 'retention'
@@ -120,6 +131,18 @@ export class RetentionJob implements DailyJob {
           where id in (
             select id from coupon_nudges
             where scan_date < current_date - 90
+            limit ${BATCH}
+          )
+        `,
+      },
+      {
+        // stage-55 — رشد بی‌سقف بسته شد (یک ردیف به‌ازای هر broadcast/ارسال ادمین)
+        label: 'notification_log',
+        stmt: sql`
+          delete from notification_log
+          where id in (
+            select id from notification_log
+            where created_at < ${logCutoff}
             limit ${BATCH}
           )
         `,

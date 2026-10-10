@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/shared/BottomSheet.tsx
+// وضعیت: ویرایش فایل موجود (دو تغییر نقطه‌ای)
+// تغییر: انیمیشن ورود شیت (sheet-up) + pb-safe-lg برای home indicator
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/shared/BottomSheet.tsx
 import { memo, useCallback, useEffect, type ReactNode } from 'react'
 
@@ -37,7 +44,8 @@ export const BottomSheet = memo(function BottomSheet({
   return (
     <div className={`fixed inset-0 z-100 ${hideOnDesktop}`}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleBackdrop}></div>
-      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a0a0e] p-6 pt-2 rounded-t-3xl border-t border-gray-200 dark:border-[#3a151c] max-h-[85vh] overflow-y-auto">
+      {/* stage-55 — ورود نرم شیت از پایین (CSS-only) + پدینگ امن iOS */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a0a0e] p-6 pt-2 pb-safe-lg rounded-t-3xl border-t border-gray-200 dark:border-[#3a151c] max-h-[85vh] overflow-y-auto animate-sheet-up">
         <div className="w-10 h-1 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mb-6"></div>
         <h2 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-6">{title}</h2>
         {children}

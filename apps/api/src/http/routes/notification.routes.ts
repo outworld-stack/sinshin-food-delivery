@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: سقف نرخ IP روی ثبت اشتراک پوش + پاسخ 409 دوستانه برای
+//        اشتراک متعلق به حساب دیگری (PUSH_SUB_OWNED)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-51 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -26,14 +33,18 @@ import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { NotificationService } from '#/domain/notification/notification.service'
+import type { RedisService } from '#/infra/redis/redis'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
+import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
 
 export interface NotificationRoutesDeps {
   sessions: SessionService
   notifications: NotificationService
   /** stage-48 — گارد مجوز ادمین۲ (notificationsSend / notificationsRead) */
   admin2: Admin2Service
+  /** stage-55 — سقف نرخ IP برای ثبت اشتراک پوش */
+  redis: RedisService
 }
 
 /**
@@ -129,6 +140,14 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           userAgent: request.headers.get('user-agent') ?? undefined,
         })
         if (!res.ok) {
+          // stage-55 — تسخیر اشتراک کاربر دیگری: 409 اختصاصی (نه 422 کلی)
+          // تا فرانت پیام روشن نشان دهد و قربانی بداند اشتراکش ربوده نشده
+          if (res.reason === 'owned-by-other') {
+            return new Response(
+              JSON.stringify({ error: { code: 'PUSH_SUB_OWNED', message: 'این اشتراک به حساب دیگری تعلق دارد.', reason: res.reason } }),
+              { status: 409, headers: { 'content-type': 'application/json' } },
+            )
+          }
           return new Response(
             JSON.stringify({ error: { code: 'PUSH_SUB_INVALID', message: 'اشتراک پوش معتبر نیست.', reason: res.reason } }),
             { status: 422, headers: { 'content-type': 'application/json' } },
@@ -137,6 +156,14 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
         return { success: true }
       },
       {
+        // stage-55 — ثبت اشتراک بدون سقف، به abuse بعدی تبدیل می‌شد
+        // (چرخه‌ی ثبت/حذف + SELECT مالکیت در هر فراخوانی)
+        beforeHandle: ipRateLimit({
+          redis: deps.redis,
+          scope: 'push-subscriptions',
+          limit: 20,
+          windowSeconds: 60,
+        }),
         body: t.Object({
           endpoint: t.String({ maxLength: 2048 }),
           keys: t.Object({

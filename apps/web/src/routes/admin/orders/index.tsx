@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/routes/admin/orders/index.tsx
+// وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
+// تغییر: اصلاح className ناتمامِ placeholder در دو لینک «مشاهده جزئیات»
+// ═══════════════════════════════════════════════════════════════
+
 // src/routes/admin/orders/index.tsx
 // ⬅ NEW: فیلترها/صفحه‌بندی شهروند URL شدن (validateSearch + loaderDeps + loader)
 // + پیش‌واکشی روی هاور (defaultPreload: 'intent' روتر)
@@ -46,7 +53,7 @@ const OrderCard = memo(function OrderCard({ order }: { order: AdminOrderRowDto }
         </div>
         <div className="flex flex-col gap-2 items-center justify-center">
           <StatusBadge status={order.status} size="sm" perspective="admin" />
-          <Link to="/admin/orders/$orderId" params={{ orderId: order.id }} className="p-2 rounded-lg text-gray-500 ..." title="مشاهده جزئیات">
+          <Link to="/admin/orders/$orderId" params={{ orderId: order.id }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2a1015] transition cursor-pointer" title="مشاهده جزئیات">
             <Eye size={18} />
           </Link>
         </div>
@@ -62,7 +69,7 @@ const OrderCard = memo(function OrderCard({ order }: { order: AdminOrderRowDto }
         <div className="text-xs text-gray-500 dark:text-gray-400">{formatDate(order.date)}</div>
         <div><StatusBadge status={order.status} perspective="admin" /></div>
         <div className="flex items-center justify-end gap-2">
-          <Link to="/admin/orders/$orderId" params={{ orderId: order.id }} className="p-2 rounded-lg text-gray-500 ..." title="مشاهده جزئیات">
+          <Link to="/admin/orders/$orderId" params={{ orderId: order.id }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2a1015] transition cursor-pointer" title="مشاهده جزئیات">
             <Eye size={18} />
           </Link>
         </div>

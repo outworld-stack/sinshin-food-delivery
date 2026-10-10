@@ -1,3 +1,13 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/admin/products/AdminProductCard.tsx
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: «موجود کردن» کالای ناموجود حالا مثل «غیر فعال کردن» اول
+//        ConfirmModal «تایید موجود کردن» می‌آورد → «بله» → POST
+//        available:true + توست + فلیپ بج/آیکون. «ناموجود کردن»
+//        همان مستقیمِ قبل ماند.
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/admin/products/AdminProductCard.tsx
 // round-13 — ستون عکس حذف شد (درخواست صریح): زیر «محصول» نام محصول،
 // زیر «دسته‌بندی» دسته‌بندی. عکس فقط در فرم/جزئیات دیده می‌شود.
@@ -13,8 +23,9 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { Ban, BoxRemove, Check, Package, Pen } from 'reicon-react'
+import { ConfirmModal } from '#/components/ConfirmModal'
 import { Can } from '#/components/shared/PermissionGate'
 import { setProductAvailability } from '#/server/products'
 import { useToastStore } from '#/stores/toastStore'
@@ -50,6 +61,10 @@ export const AdminProductCard = memo(function AdminProductCard({
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
 
+	// stage-55 — مدال تایید «موجود کردن» (فقط برای کالای ناموجود؛
+	// ناموجود کردن عمداً مستقیم می‌ماند).
+	const [confirmAvailable, setConfirmAvailable] = useState(false)
+
 	const handleToggle = useCallback(
 		() => onToggle(product.id, product.status),
 		[onToggle, product.id, product.status],
@@ -83,12 +98,13 @@ export const AdminProductCard = memo(function AdminProductCard({
 
 	const availabilityButton = canToggleAvailability ? (
 		<button
-			// stage-54 — مقدارِ «هدف» فرستاده می‌شود (معکوسِ وضعیت فعلی):
-			//   موجود + «ناموجود کردن»  ⇒ available=false
-			//   ناموجود + «موجود کردن»    ⇒ available=true
-			// قبلاً !unavailable فرستاده می‌شد که برای کالای موجود یعنی
-			// available:true ⇒ نو-آپِ بی‌اثر روی سرور.
-			onClick={() => availabilityMut.mutate(!product.isAvailable)}
+			// stage-55 — مقدارِ «هدف» + گیت تایید برای «موجود کردن»:
+			//   ناموجود + «موجود کردن»  ⇒ اول ConfirmModal → available=true
+			//   موجود + «ناموجود کردن»   ⇒ مستقیم available=false (رفتار قبل)
+			onClick={() => {
+				if (unavailable) setConfirmAvailable(true)
+				else availabilityMut.mutate(false)
+			}}
 			disabled={availabilityMut.isPending}
 			title={unavailable ? 'موجود کردن' : 'ناموجود کردن (فعلاً از فروش خارج)'}
 			className={`p-2 rounded-lg transition cursor-pointer disabled:opacity-50 ${
@@ -203,6 +219,18 @@ export const AdminProductCard = memo(function AdminProductCard({
 					{availabilityButton}
 				</div>
 			</div>
+
+			{/* stage-55 — تایید «موجود کردن» (کالای ناموجود) — مثل غیر فعال کردن */}
+			<ConfirmModal
+				isOpen={confirmAvailable}
+				title="تایید موجود کردن"
+				message={`آیا از موجود کردن «${product.name}» مطمئن هستید؟`}
+				onConfirm={() => {
+					setConfirmAvailable(false)
+					availabilityMut.mutate(true)
+				}}
+				onCancel={() => setConfirmAvailable(false)}
+			/>
 		</div>
 	)
 })

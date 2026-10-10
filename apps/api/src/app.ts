@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/app.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: سیم‌کشی redis به menuRoutes و notificationRoutes (سقف نرخ IP stage-55)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-52 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/app.ts
 // تغییر: سیم‌کشی orderRoutes — notifications پاس داده می‌شود (پوش سفارش زنده).
@@ -219,7 +225,7 @@ export const buildApp = (deps: AppDeps) => {
       }),
     )
     .use(articlesRoutes({ sessions: deps.sessions, articles: deps.articles }))
-    .use(menuRoutes({ menu: deps.menu, cart: deps.cart }))
+    .use(menuRoutes({ menu: deps.menu, cart: deps.cart, redis: deps.redis }))
     .use(addressRoutes({ sessions: deps.sessions, addresses: deps.addresses }))
     .use(
       adminMenuRoutes({
@@ -288,6 +294,8 @@ export const buildApp = (deps: AppDeps) => {
         sessions: deps.sessions,
         notifications: deps.notifications,
         admin2: deps.admin2,
+        // stage-55 — سقف نرخ IP روی ثبت اشتراک پوش
+        redis: deps.redis,
       }),
     )
 

@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: create/update اتمیک در تراکنش + مدیریت رقابت روی کد یکتا
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // phase-2 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M9)
@@ -16,6 +23,7 @@ import {
 } from '#/infra/db/schema'
 import { asCampaignId, type CampaignId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
+import { isUniqueViolation } from '#/domain/shared/pg'
 import { buildUserCondition, type ConditionType } from './coupon-evaluators'
 import { UUID_RE } from '#/domain/shared/ids'
 
@@ -340,34 +348,45 @@ export class CouponService {
     if (input.expiryDate && Number.isNaN(new Date(input.expiryDate).getTime())) {
       throw Err.validation('تاریخ انقضا معتبر نیست')
     }
-    const clash = await this.deps.db.query.coupons.findFirst({ where: eq(coupons.code, code) })
-    if (clash) throw Err.conflict('این کد قبلاً ثبت شده است')
+    try {
+      return await this.deps.db.transaction(async (tx) => {
+        // stage-55 — کل فرایند اتمی: قبلاً بین insert کوپن و insert شرط‌ها
+        // پنجره‌ای بود که کوپنِ بی‌شرط (کمپین عمومی!) قابل استفاده می‌شد.
+        // onConflictDoNothing روی کد یکتا → مسیر race-safe بدون 500.
+        const [created] = await tx
+          .insert(coupons)
+          .values({
+            code,
+            title: input.title ?? null,
+            discountPercentage: input.discountPercentage,
+            maxUses: input.maxUses,
+            isPublic: input.isPublic,
+            isActive: true,
+            // stage-48 — ورود به فرآیند بررسی کرون (سوییچ فرم؛ پیش‌فرض خاموش)
+            cronEnabled: input.cronEnabled ?? false,
+            ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : {}),
+          })
+          .onConflictDoNothing({ target: coupons.code })
+          .returning()
+        if (!created) throw Err.conflict('این کد قبلاً ثبت شده است')
 
-    const [created] = await this.deps.db
-      .insert(coupons)
-      .values({
-        code,
-        title: input.title ?? null,
-        discountPercentage: input.discountPercentage,
-        maxUses: input.maxUses,
-        isPublic: input.isPublic,
-        isActive: true,
-        // stage-48 — ورود به فرآیند بررسی کرون (سوییچ فرم؛ پیش‌فرض خاموش)
-        cronEnabled: input.cronEnabled ?? false,
-        ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : {}),
-      })
-      .returning()
-    if (!created) throw Err.validation('ذخیره‌سازی ناموفق بود')
+        if (input.rules.length > 0) {
+          await tx.insert(couponConditions).values(
+            input.rules.map((rule) => ({
+              couponId: created.id,
+              type: rule.type as never,
+              params: rule.params,
+            })),
+          )
+        }
 
-    for (const rule of input.rules) {
-      await this.deps.db.insert(couponConditions).values({
-        couponId: created.id,
-        type: rule.type as never,
-        params: rule.params,
+        return { success: true, id: created.id }
       })
+    } catch (e) {
+      // stage-55 — رقابت هم‌زمان روی کدِ یکتا → پیام دوستانه نه 500
+      if (isUniqueViolation(e)) throw Err.conflict('این کد قبلاً ثبت شده است')
+      throw e
     }
-
-    return { success: true, id: created.id }
   }
 
   /** phase-5: ویرایش — کوپن + جایگزینی شرط‌ها (حذف+اینسرت؛ nudges با cascade می‌روند) */
@@ -404,31 +423,43 @@ export class CouponService {
     }
 
     const cid = asCampaignId(id)
-    const [updated] = await db
-      .update(coupons)
-      .set({
-        code,
-        title: input.title ?? null,
-        discountPercentage: input.discountPercentage,
-        maxUses: input.maxUses,
-        isPublic: input.isPublic,
-        // stage-48 — سوییچ کرون (نیامد = دست‌نخورده)
-        ...(input.cronEnabled !== undefined ? { cronEnabled: input.cronEnabled } : {}),
-        ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : { endsAt: null }),
-      })
-      .where(eq(coupons.id, cid))
-      .returning()
-    if (!updated) throw Err.notFound('کوپن پیدا نشد')
+    // stage-55 — پنجره‌ی delete-then-reinsert بسته شد؛ کرشِ وسط کار دیگر
+    // کوپنِ بی‌شرط نمی‌سازد (کل ویرایش + جایگزینی شرط‌ها یکجا اتمیک است).
+    try {
+      return await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(coupons)
+          .set({
+            code,
+            title: input.title ?? null,
+            discountPercentage: input.discountPercentage,
+            maxUses: input.maxUses,
+            isPublic: input.isPublic,
+            // stage-48 — سوییچ کرون (نیامد = دست‌نخورده)
+            ...(input.cronEnabled !== undefined ? { cronEnabled: input.cronEnabled } : {}),
+            ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : { endsAt: null }),
+          })
+          .where(eq(coupons.id, cid))
+          .returning()
+        if (!updated) throw Err.notFound('کوپن پیدا نشد')
 
-    await db.delete(couponConditions).where(eq(couponConditions.couponId, cid))
-    for (const rule of input.rules) {
-      await db.insert(couponConditions).values({
-        couponId: cid,
-        type: rule.type as never,
-        params: rule.params,
+        await tx.delete(couponConditions).where(eq(couponConditions.couponId, cid))
+        if (input.rules.length > 0) {
+          await tx.insert(couponConditions).values(
+            input.rules.map((rule) => ({
+              couponId: cid,
+              type: rule.type as never,
+              params: rule.params,
+            })),
+          )
+        }
+        return { success: true }
       })
+    } catch (e) {
+      // stage-55 — رقابت هم‌زمان روی کدِ یکتا → پیام دوستانه نه 500
+      if (isUniqueViolation(e)) throw Err.conflict('این کد قبلاً ثبت شده است')
+      throw e
     }
-    return { success: true }
   }
 
   /**

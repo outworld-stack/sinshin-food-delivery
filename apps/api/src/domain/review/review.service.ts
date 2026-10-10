@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/review/review.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: مدیریت ثبتِ هم‌زمان نظر (23505) + maskPhone مشترک از shared/pg
+// ═══════════════════════════════════════════════════════════════
+
 // src/domain/review/review.service.ts
 import { and, desc, eq, sql } from 'drizzle-orm'
 
@@ -5,12 +12,9 @@ import type { Db } from '#/infra/db/client'
 import { orderItems, orders, products, reviews, users } from '#/infra/db/schema'
 import { asProductId, asReviewId, asUserId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
+import { isUniqueViolation, maskPhone } from '#/domain/shared/pg'
 import { requireOwnedOrder } from '#/domain/order/order-lookup'
 
-
-/** ماسک شماره در API عمومی — شماره کامل فقط برای ادمین */
-const maskPhone = (p: string): string =>
-  p.length >= 7 ? `${p.slice(0, 4)}***${p.slice(-3)}` : '***'
 
 /**
  * نظرات — سه‌حالته با مودریشن.
@@ -39,12 +43,21 @@ export class ReviewService {
     })
     if (already) return { success: false, message: 'برای این محصول قبلاً نظر ثبت کرده‌اید' }
 
-    await this.deps.db.insert(reviews).values({
-      orderId: order.id,
-      productId: pid,
-      userId: asUserId(userId),
-      comment: feedback.slice(0, 500),
-    })
+    try {
+      await this.deps.db.insert(reviews).values({
+        orderId: order.id,
+        productId: pid,
+        userId: asUserId(userId),
+        comment: feedback.slice(0, 500),
+      })
+    } catch (e) {
+      // stage-55 — دو ثبتِ هم‌زمان (دابل‌کلیک/دو تب) → 23505؛
+      // قبلاً ۵۰۰ می‌شد. پیام دوستانه مثل مسیر غیرهم‌زمان.
+      if (isUniqueViolation(e)) {
+        return { success: false, message: 'برای این محصول قبلاً نظر ثبت کرده‌اید' }
+      }
+      throw e
+    }
     return { success: true }
   }
 

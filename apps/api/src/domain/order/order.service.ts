@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/order/order.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: ماسک شماره‌ی مشتری در فاکتور کارکنه (ادمین۲)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // round-48 — sinshin-food-delivery — فایل 21 از 97
 // مسیر مقصد: apps/api/src/domain/order/order.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -45,6 +51,7 @@ import {
 } from "#/domain/shared/brand";
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
+import { maskPhone } from "#/domain/shared/pg";
 import { signedWalletAmount } from "#/domain/shared/wallet-sql";
 import {
         finalPriceOf,
@@ -1049,12 +1056,15 @@ export class OrderService {
                         this.courierOf(row.courierId),
                 ]);
 
+                const buyerPhone = user[0]?.phone;
+
                 return {
                         orderId: row.displayId,
                         date: row.createdAt,
                         status: row.status,
                         userName: user[0]?.name ?? null,
-                        userPhone: user[0]?.phone ?? null,
+                        // stage-55 — ماسک شماره‌ی مشتری در فاکتور کارکنه (ادمین۲)
+                        userPhone: buyerPhone ? maskPhone(buyerPhone) : null,
                         deliveryType: row.deliveryType,
                         address: row.addressSnapshot,
                         customerNote: row.customerNote,

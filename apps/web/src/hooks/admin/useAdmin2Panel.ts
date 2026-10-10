@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/hooks/admin/useAdmin2Panel.ts
+// وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
+// تغییر: ریفچ فوری روی رویداد connected — بستن شکاف قطعی SSE
+// ═══════════════════════════════════════════════════════════════
+
 // src/hooks/admin/useAdmin2Panel.ts
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
@@ -124,7 +131,12 @@ export function useAdmin2Panel() {
       for (const line of frame.split('\n')) {
         if (line.startsWith('event:')) eventName = line.slice(6).trim()
       }
-      if (eventName === 'connected') setSseConnected(true)
+      if (eventName === 'connected') {
+        setSseConnected(true)
+        // stage-55 — resync بعد از هر (re)connect: یک ریفچ فوری (debounce شده)
+        // شکاف قطعی را می‌بندد — پولِ تطبیقی فقط تور ایمنی است
+        requestRefetch()
+      }
       if ((SSE_EVENTS as readonly string[]).includes(eventName)) requestRefetch()
     }
 

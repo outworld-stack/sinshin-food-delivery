@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-55 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/site/cart/CartItemRow.tsx
+// وضعیت: ویرایش فایل موجود (یک تغییر نقطه‌ای)
+// تغییر: فونت‌های خراب font-DanaBold → font-DanaDemiBold (دو دکمه)
+// ═══════════════════════════════════════════════════════════════
+
 // src/components/site/cart/CartItemRow.tsx
 // stage-48 — هشدار نارنجی در باکس هر محصول: ناموجودی + محدودیت حالت سفارش
 // (مؤثر = دسته AND محصول؛ از سرور با جزئیات سبد می‌آید).
@@ -116,7 +123,7 @@ export const CartItemRow = memo(function CartItemRow({
 							type="button"
 							onClick={handleInc}
 							disabled={unavailable || item.quantity >= CART_MAX_QTY}
-							className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c] transition font-DanaBold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+							className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c] transition font-DanaDemiBold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
 							aria-label={t['cart.incQty']}
 						>
 							+
@@ -128,7 +135,7 @@ export const CartItemRow = memo(function CartItemRow({
 							type="button"
 							onClick={handleDec}
 							disabled={unavailable}
-							className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c] transition font-DanaBold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+							className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c] transition font-DanaDemiBold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
 							aria-label={t['cart.decQty']}
 						>
 							-
