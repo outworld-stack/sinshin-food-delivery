@@ -1,11 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-48 — sinshin-food-delivery
+// stage-53 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/ProductCard.tsx
 // وضعیت: جایگزینی کامل فایل موجود
 // تغییر:
-//   • سه بج حالت سفارش (پیک/بیرون‌بر/سرو در محل) — سبز = مجاز،
-//     قرمز = غیرمجاز (مؤثر = دسته AND محصول؛ از سرور)
-//   • ناموجود: عکس تار + نوشته‌ی نارنجی روی عکس + قفل دکمه‌ی سبد
+//   • بگ ۱ — سه بج حالت سفارش (پیک/بیرون‌بر/سرو در محل) همیشه در
+//     کارت دیده می‌شوند — چه کالا موجود باشد چه ناموجود، چه حالتی
+//     محدود باشد چه آزاد؛ سبز = مجاز، قرمز = غیرمجاز (مؤثر = دسته AND محصول)
+//   • بگ ۲ — پیش‌نمایش زنده‌ی فرم محصول ادمین (interactive=false):
+//     دکمه‌ی سبد فقط نمایشی — ایونت کلیک کاملاً برداشته شد
+//   • میراث stage-47/48 محفوظ: تخفیف/شمارنده/سایز/لایه‌ی ناموجودی
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/ProductCard.tsx
@@ -111,7 +114,6 @@ export const ProductCard = memo(function ProductCard({
 	const courierOk = product.courierAllowed !== false
 	const takeawayOk = product.takeawayAllowed !== false
 	const dineInOk = product.dineInAllowed !== false
-	const anyModeRestricted = !courierOk || !takeawayOk || !dineInOk
 
 	const handleAddToCart = useCallback(() => {
 		if (unavailable) return
@@ -131,6 +133,18 @@ export const ProductCard = memo(function ProductCard({
 		unavailable,
 		t,
 	])
+
+	// stage-53 — کلاس‌های دکمه‌ی سبد (رفع بگ ۲): ناموجود = قفلِ خاکستری؛
+	// کارتِ واقعی = کلیک‌پذیر با هاور؛ پیش‌نمایش فرم ادمین
+	// (interactive=false) = فقط نمایش — بدون cursor-pointer و افکت‌های
+	// هاورِ فریبنده؛ دکمه‌ی واقعی سایت هیچ تغییری نمی‌کند
+	const cartBaseClass =
+		'flex items-center justify-center p-2 sm:p-3 rounded-xl transition-colors duration-300 shrink-0'
+	const cartLookClass = unavailable
+		? 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+		: interactive
+			? 'bg-primary dark:bg-dark-primary text-white hover:opacity-90 shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30 cursor-pointer'
+			: 'bg-primary dark:bg-dark-primary text-white shadow-sm cursor-default'
 
 	// stage-47 — بج + شمارنده (روی تصویر؛ پنل زنده‌ی پیش‌نمایش هم همین را می‌بیند)
 	const badge =
@@ -266,10 +280,10 @@ export const ProductCard = memo(function ProductCard({
 					{product.description ?? ''}
 				</p>
 
-				{/* stage-48 — بج‌های حالت سفارش (فقط وقتی محدودیتی هست که فضا نگیرد؛ همه‌مجاز = بدون بج) */}
-				{(anyModeRestricted || unavailable) && (
-					<div className="mb-2">{modeBadges}</div>
-				)}
+				{/* stage-53 — بج‌های حالت سفارش: همیشه نمایش (رفع بگ ۱) — چه
+				کالا موجود باشد چه ناموجود، چه حالتی محدود باشد چه آزاد؛
+				همان سه بجِ صفحه‌ی اختصاصی محصول، اینجا در نسخه‌ی فشرده‌ی کارت */}
+				<div className="mb-2">{modeBadges}</div>
 
 				{hasSizes && (
 					<div className="flex flex-wrap gap-1.5 mb-2">
@@ -313,21 +327,21 @@ export const ProductCard = memo(function ProductCard({
 						</div>
 					</div>
 
+					{/* stage-53 — پیش‌نمایش (interactive=false): دکمه‌ی سبد فقط نمایشی
+					است — ایونت کلیک کاملاً برداشته شد (رفع بگ ۲)؛ در سایت عادی،
+					همان رفتار همیشگیِ add-to-cart باقی است */}
 					<button
 						type="button"
-						onClick={handleAddToCart}
+						onClick={interactive ? handleAddToCart : undefined}
 						disabled={unavailable}
+						tabIndex={interactive ? 0 : -1}
 						aria-label={
 							unavailable
 								? t['common.temporarilyUnavailable']
 								: t['pdetail.addToCart']
 						}
 						title={unavailable ? t['common.temporarilyUnavailable'] : undefined}
-						className={`cursor-pointer flex items-center justify-center p-2 sm:p-3 rounded-xl transition-colors duration-300 shrink-0 ${
-							unavailable
-								? 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
-								: 'bg-primary dark:bg-dark-primary text-white hover:opacity-90 shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30'
-						}`}
+						className={`${cartBaseClass} ${cartLookClass}`}
 					>
 						<Cart size={24} className="h-4.5 w-4.5 sm:h-6 sm:w-6" />
 					</button>
