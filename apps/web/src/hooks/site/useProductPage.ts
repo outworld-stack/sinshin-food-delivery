@@ -81,7 +81,12 @@ export function useProductPage(product: Product) {
   const { t } = useI18n()
 
   // ── stage-48 — موجودی فروش (سروری؛ جداست از وضعیت منو) ──
-  const isAvailable = product.isAvailable !== false
+  // stage-54 — کالای «غیرفعال» (status≠ACTIVE) هم دقیقاً مثل «ناموجود»
+  // رفتار می‌کند: دکمه‌ی خرید قفل + هشدار نارنجی (همان برخورد سبد/چک‌اوت
+  // سروری از stage-48). صفحه‌ی جزئیات با لینکِ ردیف سبد قابل دسترس است —
+  // بدون این گارد، کالای غیرفعالِ داخل سبد در صفحه‌اش هنوز «قابل خرید»
+  // دیده می‌شد و کاربر دوباره آن را اضافه می‌کرد تا در سبد خطا بگیرد.
+  const isAvailable = product.isAvailable !== false && product.status === 'ACTIVE'
 
   // --- سایزبندی ---
   const hasSizes = product.sizesEnabled && product.sizes.length > 0

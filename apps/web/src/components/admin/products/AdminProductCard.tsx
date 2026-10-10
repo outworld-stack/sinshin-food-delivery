@@ -3,6 +3,13 @@
 // زیر «دسته‌بندی» دسته‌بندی. عکس فقط در فرم/جزئیات دیده می‌شود.
 // stage-48 — دکمه‌ی موجود/ناموجود سریع (مجوز productsAvailability) +
 // بج وضعیتِ فروش در کنار وضعیت منو.
+//
+// stage-54 — رفع باگ دکمه‌ی موجود/ناموجود سریع:
+//   قبلاً onClick مقدار «وضعیت فعلی» را می‌فرستاد (!unavailable برای کالای
+//   موجود یعنی available:true) ⇒ سرور «از قبل همین است» می‌داد و هیچ چیز
+//   عوض نمی‌شد — ولی توستِ ساخته‌شده از پراپِ کهنه، «ناموجود شد» را نشان
+//   می‌داد (توستِ کذب). حالا «معکوسِ وضعیت فعلی» فرستاده می‌شود و پیامِ
+//   سرور (مثل «از قبل ناموجود است») بر توست محلی اولویت دارد.
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
@@ -52,7 +59,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 	const availabilityMut = useMutation({
 		mutationFn: (available: boolean) =>
 			setProductAvailability({ data: { id: product.id, available } }),
-		onSuccess: (res) => {
+		onSuccess: (res, available) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
@@ -62,10 +69,11 @@ export const AdminProductCard = memo(function AdminProductCard({
 			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
 			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
 			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
+			// stage-54 — available (آرگومان دوم onSuccess) = همان مقداری که خودِ
+			// میوتیشن فرستاده — نه پراپِ کهنه؛ پیام سرور (نو-آپ) هم بر توست مقدم است.
 			showToast(
-				product.isAvailable === false
-					? 'محصول موجود شد'
-					: 'محصول فعلاً ناموجود شد',
+				res.message ??
+					(available ? 'محصول موجود شد' : 'محصول فعلاً ناموجود شد'),
 			)
 		},
 		onError: () => showToast('تغییر موجودی ناموفق بود', 'error'),
@@ -75,7 +83,12 @@ export const AdminProductCard = memo(function AdminProductCard({
 
 	const availabilityButton = canToggleAvailability ? (
 		<button
-			onClick={() => availabilityMut.mutate(!unavailable)}
+			// stage-54 — مقدارِ «هدف» فرستاده می‌شود (معکوسِ وضعیت فعلی):
+			//   موجود + «ناموجود کردن»  ⇒ available=false
+			//   ناموجود + «موجود کردن»    ⇒ available=true
+			// قبلاً !unavailable فرستاده می‌شد که برای کالای موجود یعنی
+			// available:true ⇒ نو-آپِ بی‌اثر روی سرور.
+			onClick={() => availabilityMut.mutate(!product.isAvailable)}
 			disabled={availabilityMut.isPending}
 			title={unavailable ? 'موجود کردن' : 'ناموجود کردن (فعلاً از فروش خارج)'}
 			className={`p-2 rounded-lg transition cursor-pointer disabled:opacity-50 ${
