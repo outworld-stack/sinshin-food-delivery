@@ -50,7 +50,8 @@ RUN pip install --no-cache-dir \
         sentencepiece==0.2.0
 
 # تبدیل مدل به فرمت CT2 با کوانتیزه‌سازی int8 (خروجی ~۶۰۰MB در /model)
-RUN ct2-transformers-converter \
+RUN --mount=type=cache,id=sinshin-huggingface,target=/root/.cache/huggingface \
+    ct2-transformers-converter \
         --model facebook/nllb-200-distilled-600M \
         --output_dir /model \
         --quantization int8 \
