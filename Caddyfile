@@ -81,7 +81,7 @@
             # رارد M18 — سقف‌های انتظار: هدر پاسخِ کند = قطع (نه معلق ابدی).
             # SSE با flush_interval -1 استریم فعال دارد و بعد از هدر اولیه
             # از این سقف‌ها عبور نمی‌کند.
-            transport {
+            transport http {
                 read_timeout 60s
                 response_header_timeout 15s
             }
