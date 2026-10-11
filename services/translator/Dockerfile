@@ -44,6 +44,7 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 
 # ابزار تبدیل + توکنایزر — نسخه‌ها با requirements.txt runtime هم‌خانواده‌اند
 RUN pip install --no-cache-dir \
+        numpy==1.26.4 \
         ctranslate2==4.6.0 \
         transformers==4.44.2 \
         sentencepiece==0.2.0
