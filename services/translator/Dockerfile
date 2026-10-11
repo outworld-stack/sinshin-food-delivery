@@ -40,10 +40,13 @@ FROM python:3.11-slim AS converter
 # torch فقط برای ابزار تبدیل لازم است؛ واریانت CPU از ایندکس رسمی
 # pytorch نصب می‌شود (~۱۹۰MB به‌جای ~۸۰۰MB نسخه‌ی CUDA). ایندکس CPU
 # وابستگی‌های torch را هم خودش میزبانی می‌کند، پس --index-url کافی است.
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.2.2
+RUN pip install --no-cache-dir --timeout=120 --retries=10 \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.2.2
 
 # ابزار تبدیل + توکنایزر — نسخه‌ها با requirements.txt runtime هم‌خانواده‌اند
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir --timeout=120 --retries=10 \
+        --index-url https://mirror.novin.cloud/artifactory/api/pypi/pypi/simple/ \
         numpy==1.26.4 \
         ctranslate2==4.6.0 \
         transformers==4.44.2 \
@@ -74,7 +77,9 @@ WORKDIR /app
 
 # اول وابستگی‌ها (لایه‌ی کش‌پذیر) — torch عمداً غایب است؛ ببینید requirements.txt
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout=120 --retries=10 \
+    --index-url https://mirror.novin.cloud/artifactory/api/pypi/pypi/simple/ \
+    -r requirements.txt
 
 # مدل پخته‌شده از مرحله‌ی converter + کد سرویس
 COPY --from=converter /model /model
