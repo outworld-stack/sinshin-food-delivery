@@ -13,7 +13,7 @@
 //   راستی‌آزمایی: ثبت همان اسکریپت در Chrome واقعی → rejected.
 //
 //   این نسخه «صفر وابستگی» است: بدون import، بدون workbox، بدون باندلر —
-//   همان منطقِ قبل با Cache API خام. build-sw.mjs فقط self.__WB_MANIFEST
+//   همان منطقِ قبل با Cache API خام. build-sw.mjs فقط
 //   را تزریق می‌کند (string-replacement) و همان build:pwa جواب می‌دهد.
 // ═══════════════════════════════════════════════════════════════
 // sw.template.js — منبع؛ build-sw.mjs (injectManifest) پرش می‌کند
