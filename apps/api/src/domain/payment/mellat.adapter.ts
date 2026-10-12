@@ -45,27 +45,56 @@ const unescapeXml = (s: string): string =>
     }
   })
 
-/** تاریخ محلی شش‌رقمی — قالب خواسته‌شده‌ی به‌پرداخت */
-const localDate = (d: Date): string => {
-  const yy = String(d.getFullYear()).slice(2).padStart(2, '0')
-  return `${yy}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+/**
+ * تاریخ/ساعت محلی تهران — قالب خواسته‌شده‌ی به‌پرداخت (yymmdd / hhmmss).
+ *
+ * stage-58 — قبلاً getFullYear()/getHours() مستقیم روی Date بود؛ کانتینر
+ * API هیچ TZ ندارد (compose فقط برای web/backup ست می‌کرد) ⇒ ساعتِ ارسالی
+ * ۳:۳۰ عقب‌تر از تهران بود. حالا با Intl و timeZone صریح، مستقل از TZِ
+ * کانتینر همیشه ساعت/تاریخ تهران ارسال می‌شود.
+ */
+const tehranParts = (d: Date): Map<string, string> => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tehran',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  const map = new Map<string, string>()
+  for (const p of parts) map.set(p.type, p.value)
+  return map
 }
 
-/** ساعت محلی شش‌رقمی */
-const localTime = (d: Date): string =>
-  [d.getHours(), d.getMinutes(), d.getSeconds()]
-    .map((n) => String(n).padStart(2, '0'))
-    .join('')
+/** تاریخ تهران شش‌رقمی (yymmdd) */
+const localDate = (d: Date): string => {
+  const p = tehranParts(d)
+  const yy = (p.get('year') ?? '0000').slice(2)
+  return `${yy}${p.get('month') ?? '01'}${p.get('day') ?? '01'}`
+}
 
-/** خروجی bpPayRequest — «کد،مرجع»؛ هر دو ترتیبِ محتمل را می‌پذیرد */
+/** ساعت تهران شش‌رقمی (hhmmss) */
+const localTime = (d: Date): string => {
+  const p = tehranParts(d)
+  return `${p.get('hour') ?? '00'}${p.get('minute') ?? '00'}${p.get('second') ?? '00'}`
+}
+
+/**
+ * خروجی bpPayRequest — قالب مستندِ رسمی: «کد،مرجع».
+ *
+ * stage-58 — قبلاً هر دو ترتیب پذیرفته می‌شد و شاخه‌ی دوم («X,0») هر
+ * پاسخِ شکستِ دو‌بخشی را «موفق با refId=X» می‌خواند (مثلاً «39,0» ⇒
+ * کاربر به StartPay/39 می‌رفت = صفحه‌ی مرده). حالا فقط ترتیب مستند؛
+ * کدِ غیرصفر در بخش اول = شکست قطعی با کدِ واقعی.
+ */
 const parsePayResult = (raw: string): { code: string; refId: string } => {
   const parts = raw.split(',').map((p) => p.trim())
   const [a = '', b = ''] = parts
-  if (parts.length === 2) {
-    if (a === '0' && b !== '') return { code: '0', refId: b }
-    if (b === '0' && a !== '') return { code: '0', refId: a }
-  }
-  return { code: a, refId: '' }
+  if (parts.length === 2 && a === '0' && b !== '') return { code: '0', refId: b }
+  return { code: parts.length === 2 ? a : raw, refId: '' }
 }
 
 /**

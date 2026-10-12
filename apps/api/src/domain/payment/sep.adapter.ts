@@ -137,7 +137,15 @@ export class SepAdapter implements PaymentGateway {
         successReported: ok,
         tag: 'sep',
       })
-      return { success: ok && amountOk, gatewayRef: refNum }
+      // stage-58 — پول‌ایمنی: «موفق اعلام شده + مبلغ ناهم‌خوان» وضعیت قطعی
+      // نیست — fail قطعی یعنی failPayment/بازگشت کیف پول در حالی که پولِ
+      // مشتری در PSP گرفته شده (مبلغ واقعاً کم/زیاد واریز شده). indeterminate
+      // می‌ماند تا کارِ تایم‌اوت/R12 پنل PSP قطعی‌اش کند. شکستِ قطعی فقط
+      // وقتی خود بانک IsSuccess=false داده.
+      if (ok && !amountOk) {
+        return { success: false, gatewayRef: refNum, indeterminate: true }
+      }
+      return { success: ok, gatewayRef: refNum }
     } catch {
       // شبکه/تایم‌اوت — وضعیت نامشخص
       return { success: false, gatewayRef: refNum, indeterminate: true }

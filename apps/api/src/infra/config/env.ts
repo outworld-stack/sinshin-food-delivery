@@ -80,7 +80,6 @@ export interface GatewayConfig {
   zarinpalMerchantId: string
   /** رارد ۴۵ — سرویس تست رسمی زرین‌پال (sandbox.zarinpal.com)؛ در production ممنوع */
   zarinpalSandbox: boolean
-  payirApiKey: string
   sepTerminalId: string
   mellatTerminalId: string
   mellatUserName: string
@@ -285,7 +284,8 @@ export class AppConfig {
       mode: gwMode === 'direct' || gwMode === 'indirect' ? gwMode : 'mock',
       zarinpalMerchantId: str('ZARINPAL_MERCHANT_ID'),
       zarinpalSandbox: bool('ZARINPAL_SANDBOX', false),
-      payirApiKey: str('PAYIR_API_KEY'),
+      // stage-58 — پی‌ایر حذف شد (PAYIR_API_KEY دیگر خوانده نمی‌شود)؛
+      // درگاه‌های پشتیبانی‌شده: ملت/زرین‌پال/سامان
       sepTerminalId: str('SEP_TERMINAL_ID'),
       mellatTerminalId: str('MELLAT_TERMINAL_ID'),
       mellatUserName: str('MELLAT_USERNAME'),

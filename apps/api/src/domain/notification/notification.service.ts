@@ -536,13 +536,20 @@ export class NotificationService {
     return this.deps.config.push.vapidPublicKey
   }
 
-  /** وضعیت اشتراک پوش کاربر (برای UI) */
-  async pushStatus(userId: string): Promise<{ subscriptions: number }> {
-    const r = await this.deps.db
-      .select({ count: sql<number>`count(*)::int` })
+  /** وضعیت اشتراک پوش کاربر (برای UI)
+   *  stage-58 — endpoints هم برگردانده می‌شود تا فرانتِ فلوی خودکار بتواند
+   *  «سرور از قبل همین اشتراک را دارد؟» را بپرسد و فقط در نبودش POST بزند
+   *  (سقف نرخ ۲۰/دقیقه/IP روی NATهای اداری/رستوران با POSTهای بی‌فایده
+   *  پر نمی‌شود). فقط مالکِ خودِ کاربر و پشت requireAuth دیده می‌شود. */
+  async pushStatus(
+    userId: string,
+  ): Promise<{ subscriptions: number; endpoints: string[] }> {
+    const rows = await this.deps.db
+      .select({ endpoint: pushSubscriptions.endpoint })
       .from(pushSubscriptions)
       .where(and(eq(pushSubscriptions.userId, userId), isNull(pushSubscriptions.disabledAt)))
-    return { subscriptions: r[0]?.count ?? 0 }
+      .limit(20)
+    return { subscriptions: rows.length, endpoints: rows.map((r) => r.endpoint) }
   }
 
   // ═══ نگهداشت (RetentionJob صدا می‌زند) ═══

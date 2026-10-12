@@ -201,7 +201,27 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         }
         const claim = await deps.idempotency.claim(user.id, idemKey)
         // replay: همان پاسخ قبلی — بدون ساخت سفارش
-        if (claim.kind === 'replay') return claim.response
+        if (claim.kind === 'replay') {
+          // stage-58 — پاسخِ کش‌شده ۴۸ ساعت عمر دارد؛ اگر paymentUrl آن
+          // مدتها پیش مصرف/منقضی شده باشد (جلسه‌ی بانکی تک‌مصرفی)، replayِ
+          // خام کاربر را به صفحه‌ی مرده‌ی بانک می‌فرستاد. وضعیت واقعیِ
+          // آخرین پرداخت را می‌پرسیم: موفق ⇒ نتیجه‌ی نهایی؛ شکست/کهنه ⇒
+          // بدون paymentUrl (فرانت به صفحه‌ی سفارش می‌رود — دکمه‌ی رِتری)؛
+          // تازه ⇒ همان URL معتبر.
+          const replay = claim.response
+          const replayOrderId = typeof replay.orderId === 'string' ? replay.orderId : ''
+          const replayUrl = typeof replay.paymentUrl === 'string' ? replay.paymentUrl : ''
+          if (replay.requiresPayment === true && replayUrl && replayOrderId) {
+            const st = await deps.payments.paymentReplayState(user.id, replayOrderId)
+            if (st === 'success') {
+              return { ...replay, orderCompleted: true, requiresPayment: false, paymentUrl: undefined }
+            }
+            if (st === 'failed' || st === 'stale') {
+              return { ...replay, paymentUrl: undefined }
+            }
+          }
+          return replay
+        }
         // تصرف زندهٔ دیگری (درخواست موازی/تاخیرافتن) — 409؛ تلاش مجدد با
         // کلید تازه بی‌درنگ موفق می‌شود
         if (claim.kind === 'in-flight') {

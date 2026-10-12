@@ -46,8 +46,16 @@ FROM deps AS dev
 
 # round-49 — کلید نقشهٔ نشان: در دِو هم از همان build arg می‌آید
 # (Vite متغیرهای VITE_* را از محیط build می‌خواند؛ خالی = فرم دستی).
+# stage-58 (bug-fix «نقشه در mock ماند»): compose دو کلید را پاس می‌داد
+# (VITE_NESHAN_API_KEY قدیمی + VITE_NESHAN_MAP_KEY جدید) ولی Dockerfile
+# فقط قدیمی را تعریف کرده بود ⇒ کلیدِ «web» که MapPicker و
+# CourierTrackingMap می‌خوانند هرگز به باندل نمی‌رسید و نقشه همیشه به
+# fallback دستی (mock) می‌افتاد. حالا هر دو ARG تعریف می‌شوند.
 ARG VITE_NESHAN_API_KEY
 ENV VITE_NESHAN_API_KEY=${VITE_NESHAN_API_KEY}
+
+ARG VITE_NESHAN_MAP_KEY
+ENV VITE_NESHAN_MAP_KEY=${VITE_NESHAN_MAP_KEY}
 
 ENV NODE_ENV=development
 
@@ -67,8 +75,13 @@ FROM deps AS build
 # Vite متغیرهای VITE_* را از محیط build جایگزین می‌کند. compose این
 # مقدار را از ‎.env ریشه (VITE_NESHAN_API_KEY) به‌عنوان build arg
 # می‌رساند؛ خالی = فرم مختصات دستی جای نقشه (رفتار قبلی).
+# stage-58 — همان فیکسِ بالای فایل: ARG کلید «web» هم تعریف شد
+# (قبلاً compose پاس می‌داد ولی Dockerfile نادیده می‌گرفت).
 ARG VITE_NESHAN_API_KEY
 ENV VITE_NESHAN_API_KEY=${VITE_NESHAN_API_KEY}
+
+ARG VITE_NESHAN_MAP_KEY
+ENV VITE_NESHAN_MAP_KEY=${VITE_NESHAN_MAP_KEY}
 
 COPY packages/shared/src packages/shared/src
 COPY apps/web apps/web

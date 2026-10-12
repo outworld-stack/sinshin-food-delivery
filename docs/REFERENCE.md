@@ -92,7 +92,6 @@
 | `GATEWAY_MODE` | 🔒 | `mock` | `direct`/`indirect` = درگاه واقعی؛ `mock` در تولید بوت را می‌کُشد |
 | `ZARINPAL_MERCHANT_ID` | 💡 | خالی | کد ۳۶ کاراکتری پنل زرین‌پال |
 | `ZARINPAL_SANDBOX` | 💡 | `false` | فقط دِو — سندباکس رسمی (در production بوت را می‌کُشد) |
-| `PAYIR_API_KEY` | 💡 | خالی | کلید پنل پی‌ایر (`test` = درگاه آزمایشی) |
 | `SEP_TERMINAL_ID` | 💡 | خالی | ترمینال ۸ رقمی بانک سامان |
 | `MELLAT_TERMINAL_ID` / `_USERNAME` / `_PASSWORD` | 💡 | خالی | ترمینال به‌پرداخت ملت |
 | `PAYMENT_TIMEOUT_MS` | 💡 | `15000` | مهلت فراخوانی HTTP درگاه‌ها |
@@ -223,7 +222,6 @@
 | درگاه | کلید | تست | نکته‌ی callback |
 |---|---|---|---|
 | زرین‌پال | `ZARINPAL_MERCHANT_ID` | `ZARINPAL_SANDBOX=true` + مرچنت UUID دلخواه | در پنل زرین‌پال «سایت» را با DOMAIN ثبت کن |
-| پی‌ایر | `PAYIR_API_KEY` | کلید `test` | آدرس سایت را در پنل ثبت کن |
 | بانک سامان (SEP) | `SEP_TERMINAL_ID` | سندباکس عمومی ندارد — ترمینال تستی بانک | callback شاپرک روی آدرس ثبت‌شده |
 | بانک ملت | `MELLAT_TERMINAL_ID` + `USERNAME` + `PASSWORD` | ترمینال تستی به‌پرداخت | بعد از فعال‌سازی ترمینال، نتیجه‌ی call در پنل |
 | داخلی | — | `GATEWAY_MODE=mock` | بدون پول؛ برای دِو |

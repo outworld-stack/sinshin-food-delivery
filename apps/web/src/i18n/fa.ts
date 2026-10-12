@@ -224,7 +224,6 @@ export const fa = {
 	'checkout.payViaGateway': 'پرداخت {n} از درگاه بانکی:',
 	'checkout.gateway.MOCK': 'درگاه تست (دمو)',
 	'checkout.gateway.ZARINPAL': 'زرین‌پال',
-	'checkout.gateway.PAYIR': 'پی‌ایر',
 	'checkout.gateway.SEP': 'بانک سامان',
 	'checkout.gateway.MELLAT': 'بانک ملت',
 	'checkout.addressTitle': 'آدرس تحویل',
@@ -391,6 +390,18 @@ export const fa = {
 
 	// ── جزئیات سفارش (رارد ۳۳) ──
 	'dash.orderDetail.backToOrders': 'بازگشت به سفارشات',
+	// stage-58 — باکس ادامه‌ی پرداخت (PENDING_PAYMENT)
+	'dash.orderDetail.pendingTitle': 'این سفارش در انتظار پرداخت است',
+	'dash.orderDetail.pendingHint':
+		'برای نهایی شدن سفارش، پرداخت را همین‌جا ادامه دهید.',
+	'dash.orderDetail.pendingVerifyTitle': 'وضعیت پرداخت در حال بررسی است...',
+	'dash.orderDetail.pendingVerifyHint':
+		'اگر همین حالا پرداخت کرده‌اید چند لحظه صبر کنید — وضعیت خودکار به‌روز می‌شود.',
+	'dash.orderDetail.pendingAmount': 'مبلغ قابل پرداخت: {n}',
+	'dash.orderDetail.continuePayment': 'ادامه‌ی پرداخت',
+	'dash.orderDetail.pendingRetrying': 'در حال اتصال به درگاه...',
+	'dash.orderDetail.pendingRetryNoUrl':
+		'اتصال به درگاه برقرار نشد — چند لحظه بعد دوباره تلاش کنید.',
 	'dash.orderDetail.courierRoute': 'مسیر حرکت پیک',
 	'dash.orderDetail.details': 'جزئیات سفارش',
 	'dash.orderDetail.breakdownTitle': 'ریز مبلغ سفارش',
@@ -605,9 +616,11 @@ export const fa = {
 
 	// stage-50 — حالت denied: راهنمای گام‌به‌گام + دکمه‌ی «بررسی مجدد»
 	// (قبلاً این حالت بن‌بستِ متنی بود — هیچ دکمه‌ای نبود)
-	'notify.enable.deniedStep1': 'در نوار آدرس، روی آیکون قفل/تنظیماتِ سایت کلیک کن.',
+	'notify.enable.deniedStep1':
+		'در نوار آدرس، روی آیکون قفل/تنظیماتِ سایت کلیک کن.',
 	'notify.enable.deniedStep2': '«Notifications» را پیدا کن و روی Allow بگذار.',
-	'notify.enable.deniedStep3': 'برگرد به همین پنجره و «بررسی مجدد مجوز» را بزن.',
+	'notify.enable.deniedStep3':
+		'برگرد به همین پنجره و «بررسی مجدد مجوز» را بزن.',
 	'notify.enable.recheck': 'بررسی مجدد مجوز',
 
 	// stage-51 — پیامِ «دقیقِ همان مرحله» برای شکست فعال‌سازی (به‌جای متن کلی)

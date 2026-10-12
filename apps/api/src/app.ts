@@ -157,6 +157,17 @@ export const buildApp = (deps: AppDeps) => {
   // زنده‌ی SSE هیچ‌وقت معاف نیستند: جعل User-Agent دیگر سپر را دور نمی‌زند.
   // (تماس‌های SSR وب با API از IP خصوصی‌اند و از قبل عبور می‌کنند.)
   const geoGate = async (request: Request): Promise<Response | undefined> => {
+    // stage-58 — معافیتِ برگشت از بانک: state امضاشده‌ی HMAC خودش گارد است؛
+    // مشتری ممکن است وسط پرداخت VPN روشن/خاموش کند و IP برگشتش بیرون ایران
+    // باشد — قبلاً 403/JSON خام می‌گرفت در حالی که پولش در PSP گرفته شده
+    // بود و سفارش فقط با کارِ تایم‌اوت ۵ دقیقه‌ای خودش را درست می‌کرد.
+    // (مسیر mock/:state فقط در dev با GATEWAY_MODE=mock زنده است.)
+    try {
+      const path = new URL(request.url).pathname
+      if (/^\/api\/payments\/[^/]+\/callback$/.test(path)) return
+    } catch {
+      /* URL نامعتبر — گیت عادی ادامه می‌دهد */
+    }
     if (request.method === 'GET' || request.method === 'HEAD') {
       if (
         isTrustedCrawlerUserAgent(request.headers.get('user-agent')) &&
@@ -276,7 +287,7 @@ export const buildApp = (deps: AppDeps) => {
         notifications: deps.notifications,
       }),
     )
-    .use(paymentRoutes({ payments: deps.payments }))
+    .use(paymentRoutes({ payments: deps.payments, sessions: deps.sessions, redis: deps.redis }))
     .use(reconcileRoutes({ sessions: deps.sessions, reconcile: deps.reconcile }))
     .use(geoRoutes({ geo: deps.geo, sessions: deps.sessions, redis: deps.redis, neshan: deps.neshan }))
     // round-35 — preview/صف/وضعیت ترجمه (گارد پایه؛ قرارداد «دستی برنده» در سرویس)

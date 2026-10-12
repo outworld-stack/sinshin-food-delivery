@@ -50,12 +50,17 @@ export function PwaRegister() {
   const [standalone, setStandalone] = useState(false)
 
   useEffect(() => {
-    // standalone؟ (نصب‌شده) → هیچ بنری
+    // standalone؟ (نصب‌شده) → فقط «بنرها» خاموش می‌مانند.
+    //
+    // stage-58 — باگ 🔴 iOS: قبلاً `if (isStandalone) return` قبل از ثبتِ
+    // SW اجرا می‌شد؛ یعنی دقیقاً در «تنها» زمینه‌ای که iOS پوش پشتیبانی
+    // می‌کند (PWA نصب‌شده، 16.4+) سرویس‌ورکر ثبت نمی‌شد و پوشِ iOS برای
+    // همیشه مرده بود. حالا ثبت SW همیشه انجام می‌شود؛ رندرِ بنرها همان
+    // `if (standalone) return null` پایین کنترل می‌شود.
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       (window.navigator as any).standalone === true
     setStandalone(isStandalone)
-    if (isStandalone) return
 
     // ── ثبت SW ──
     if (!('serviceWorker' in navigator)) return
@@ -131,7 +136,16 @@ export function PwaRegister() {
           },
         )
       })
-      .catch(() => {/* SW نشد — اپ عادی */ })
+      .catch((err) => {
+        // stage-58 — قبلاً اینجا کاملاً بی‌صدا قورت داده می‌شد؛ sw.js شکسته
+        // یعنی «هیچ push handlerی در تولید نیست» — حالا: لاگ + fallback به
+        // sw-push.js (استاتیک، فقط هندلر پوش) تا پوش هرگز بی‌سرویس‌ورکر
+        // نماند و آپدیت بعدی sw.js سالم جایگزینش کند (scope یکسان).
+        console.warn('[pwa] ثبت sw.js ناموفق — fallback به sw-push.js:', err)
+        navigator.serviceWorker
+          .register('/sw-push.js')
+          .catch(() => {/* پوش در این مرورگر ممکن نیست — اپ عادی */ })
+      })
 
     // ── install-prompt اندروید ──
     const onBeforeInstall = (e: Event) => {

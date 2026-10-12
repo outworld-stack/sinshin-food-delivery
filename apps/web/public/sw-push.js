@@ -105,3 +105,55 @@ self.addEventListener('message', (event) => {
     self.skipWaiting()
   }
 })
+
+// ── stage-58 — چرخش/انقضای اشتراک (pushsubscriptionchange) ──
+// فایرفاکس ~۹۰ روزه و کروم پروفایل‌چرخشی endpoint را عوض می‌کنند؛ بدون
+// این هندلر پوش به endpoint مرده می‌رفت و سرور بعد از ۵ خطا اشتراک را
+// غیرفعال می‌کرد — کاربر بی‌صدا بی‌خبر می‌شد. دوباره subscribe + خبر به
+// تب‌های باز (PUSH_SUBSCRIPTION_CHANGED) تا صفحه‌ی لاگین‌شده در سرور
+// ثبت کند. کلید VAPID از API عمومی خودمان.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      try {
+        if (!self.registration.pushManager) return
+        let sub = await self.registration.pushManager.getSubscription()
+        if (!sub) {
+          let key = null
+          try {
+            const res = await fetch('/api/notifications/vapid-public', { credentials: 'omit' })
+            if (res.ok) {
+              const body = (await res.json()) || {}
+              if (typeof body.key === 'string' && body.key.length >= 40) {
+                const normalized = body.key.replace(/-/g, '+').replace(/_/g, '/')
+                const padded =
+                  normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+                const raw = atob(padded)
+                const out = new Uint8Array(raw.length)
+                for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+                key = out
+              }
+            }
+          } catch {
+            key = null
+          }
+          if (!key) return
+          sub = await self.registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: key,
+          })
+        }
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        for (const client of clients) {
+          try {
+            client.postMessage({ type: 'PUSH_SUBSCRIPTION_CHANGED', endpoint: sub.endpoint })
+          } catch {
+            /* تب مشغول/در حال بسته‌شدن */
+          }
+        }
+      } catch {
+        /* به‌ترین تلاش — فلوی خودکار صفحه بعدی دوباره ثبت می‌کند */
+      }
+    })(),
+  )
+})

@@ -39,7 +39,14 @@ export class ZarinpalAdapter implements PaymentGateway {
   }
 
   async init(input: GatewayInitInput): Promise<GatewayInitResult> {
-    const json = await postGatewayJson<{ data?: { authority?: string } }>(
+    // stage-58 — errors زرین‌پال خوانده می‌شود: v4 موقع رد، آرایه‌ی
+    // errors:[{code,message}] می‌فرستد (مرچنت‌نامعتبر/IP غیرمجاز/دامنه‌ی
+    // callback غیرسفید). قبلاً جزئیات دور ریخته می‌شد ⇒ «پرداخت گاهی خطا
+    // می‌دهد» بدون هیچ سرنخی. حالا هم لاگ می‌شود هم کد به پیام می‌رسد.
+    const json = await postGatewayJson<{
+      data?: { authority?: string }
+      errors?: Array<{ code?: number; message?: string }>
+    }>(
       this.requestUrl,
       {
         merchant_id: this.merchantId,
@@ -51,7 +58,15 @@ export class ZarinpalAdapter implements PaymentGateway {
       this.config.gateway.timeoutMs,
     )
     const authority = json?.data?.authority
-    if (!authority) throw Err.conflict('ایجاد پرداخت زرین‌پال ناموفق بود.')
+    if (!authority) {
+      const firstError = json?.errors?.[0]
+      if (json?.errors?.length) {
+        console.error('[zarinpal] init errors:', JSON.stringify(json.errors))
+      }
+      throw Err.conflict(
+        `ایجاد پرداخت زرین‌پال ناموفق بود${firstError?.code !== undefined ? ` (کد ${firstError.code})` : ''}.`,
+      )
+    }
     return { paymentUrl: `${this.startPay}/${authority}`, gatewayRef: authority }
   }
 

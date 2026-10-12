@@ -2,13 +2,16 @@
 import { memo, useCallback } from 'react'
 import { InfoCircle, Wallet } from 'reicon-react'
 import { Toggle } from '#/components/shared/Toggle'
+import { tpl, useI18n } from '#/i18n'
 import type { DeliveryType } from '#/types/site/checkout'
-import { useI18n, tpl } from '#/i18n'
 
 const IS_DEV = import.meta.env.DEV
 
 // رارد ۳۲ — نام درگاه‌ها از دیکشنری (چک‌اوت.gateway.*)؛ شناسه‌ها دست‌نخورده
-const GATEWAY_IDS = IS_DEV ? ['MOCK'] : ['MELLAT', 'ZARINPAL', 'PAYIR', 'SEP']
+// stage-58 — PAYIR حذف شد: بک‌اند (آداپتر/رجیستری/env) پاک شده و اگر
+// گزینه‌اش می‌ماند، اعتبارسنجی درگاه سفارش را با پیام «درگاه را انتخاب
+// کنید» رد می‌کرد در حالی که کاربر رادیویی انتخاب کرده بود.
+const GATEWAY_IDS = IS_DEV ? ['MOCK'] : ['MELLAT', 'ZARINPAL', 'SEP']
 
 interface PaymentSectionProps {
 	useWallet: boolean
@@ -43,12 +46,16 @@ export const PaymentSection = memo(function PaymentSection({
 
 	const gatewayLabel = (id: string): string => {
 		switch (id) {
-			case 'MOCK': return t['checkout.gateway.MOCK']
-			case 'ZARINPAL': return t['checkout.gateway.ZARINPAL']
-			case 'PAYIR': return t['checkout.gateway.PAYIR']
-			case 'SEP': return t['checkout.gateway.SEP']
-			case 'MELLAT': return t['checkout.gateway.MELLAT']
-			default: return id
+			case 'MOCK':
+				return t['checkout.gateway.MOCK']
+			case 'ZARINPAL':
+				return t['checkout.gateway.ZARINPAL']
+			case 'SEP':
+				return t['checkout.gateway.SEP']
+			case 'MELLAT':
+				return t['checkout.gateway.MELLAT']
+			default:
+				return id
 		}
 	}
 
@@ -60,10 +67,11 @@ export const PaymentSection = memo(function PaymentSection({
 
 			{/* آیتم ۱۱: سوییچ کسر از کیف پول — پیش‌فرض خاموش، هر مبلغی که هست */}
 			<div
-				className={`flex items-center justify-between p-4 rounded-xl border-2 mb-4 transition ${useWallet
+				className={`flex items-center justify-between p-4 rounded-xl border-2 mb-4 transition ${
+					useWallet
 						? 'border-primary dark:border-dark-primary bg-primary/5 dark:bg-dark-primary/5'
 						: 'border-gray-200 dark:border-[#3a151c]'
-					} ${!hasBalance ? 'opacity-60' : ''}`}
+				} ${!hasBalance ? 'opacity-60' : ''}`}
 			>
 				<div className="flex items-center gap-3">
 					<span className="w-10 h-10 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center">
@@ -76,8 +84,8 @@ export const PaymentSection = memo(function PaymentSection({
 						<p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
 							{hasBalance
 								? tpl(t['checkout.balance'], {
-									n: `${fmt.price(walletBalance)} ${t['common.toman']}`,
-								})
+										n: `${fmt.price(walletBalance)} ${t['common.toman']}`,
+									})
 								: t['checkout.noBalance']}
 						</p>
 						{useWallet && hasBalance && (
@@ -118,8 +126,8 @@ export const PaymentSection = memo(function PaymentSection({
 							? t['checkout.covered']
 							: t['checkout.allFromWallet']
 						: tpl(t['checkout.payViaGateway'], {
-							n: `${fmt.price(amountPaidOnline)} ${t['common.toman']}`,
-						})}
+								n: `${fmt.price(amountPaidOnline)} ${t['common.toman']}`,
+							})}
 				</p>
 				{GATEWAY_IDS.map((id) => (
 					<label

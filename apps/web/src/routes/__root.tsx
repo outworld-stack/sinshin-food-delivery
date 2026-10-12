@@ -19,6 +19,8 @@ import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { Toast } from '#/components/Toast'
 import { type Lang, readLangCookie } from '#/i18n'
 import { siteHead } from '#/lib/seo'
+// stage-58 — پرامپت خودکار مجوز نوتیف (به‌جای دکمه‌ی بنفش هدر)
+import { PushAutoPrompt } from '#/pwa/PushAutoPrompt'
 import { PwaRegister } from '#/pwa/register-sw'
 import { useThemeStore } from '#/stores/themeStore'
 import appCss from '#/styles.css?url'
@@ -106,10 +108,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 
 	useEffect(() => {
 		captureRefFromUrl()
-			// رارد ۳۱ — علامت «اپ بالا آمد» برای نگهبانِ بنر مرورگر قدیمی:
-			// اگر باندل مدرن در موتور قدیمی کرش کند، این خط هرگز اجرا نمی‌شود و
-			// اسکریپت ES5 در head بعد از ۶ ثانیه بنر را روشن می‌کند.
-			; (window as unknown as { __sinshinBooted?: boolean }).__sinshinBooted = true
+		// رارد ۳۱ — علامت «اپ بالا آمد» برای نگهبانِ بنر مرورگر قدیمی:
+		// اگر باندل مدرن در موتور قدیمی کرش کند، این خط هرگز اجرا نمی‌شود و
+		// اسکریپت ES5 در head بعد از ۶ ثانیه بنر را روشن می‌کند.
+		;(window as unknown as { __sinshinBooted?: boolean }).__sinshinBooted = true
 		// استورها سطح ماژول زنده شدن — اینجا کلاس تم و theme-color سینک می‌شن.
 		// pwa-۴: theme-color هم با «تم دستی» هم‌گام می‌شود (نه فقط سیستم‌عامل) —
 		// نوار مرورگر/وضعیت اپ نصب‌شده در دارک‌مود هم‌رنگِ اپ می‌ماند.
@@ -149,6 +151,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 			<body>
 				<Toast />
 				<PwaRegister />
+				<PushAutoPrompt />
 				{children}
 				<Scripts />
 			</body>

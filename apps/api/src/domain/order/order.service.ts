@@ -456,7 +456,25 @@ export class OrderService {
                         }
 
                         // ── ردیف پرداخت — initiate بیرون tx (شبکه) ──
-                        const gatewayId = (input.gatewayId ?? "MOCK").toUpperCase();
+                        // stage-58 — اعتبارسنجی سختِ درگاه «قبل از commit سفارش»:
+                        // قبلاً gatewayId ?? "MOCK" بود؛ اگر کلاینت (قدیمی/دستکاری‌شده)
+                        // gatewayId خالی/نامعتبر می‌فرستاد، ردیف با MOCK ثبت و بعد از
+                        // commit در gateway() (پروداکشن real) خطا می‌داد ⇒ سفارشِ
+                        // PENDING_PAYMENTِ بی‌راه‌حل + رزرو دوبل کیف/کوپن. حالا
+                        // خطای اعتبارسنجی داخل tx ⇒ rollback کامل؛ چک‌اوت تمیز 422.
+                        const REAL_GATEWAYS = ["MELLAT", "ZARINPAL", "SEP"] as const;
+                        const requestedGateway = (input.gatewayId ?? "").trim().toUpperCase();
+                        const isMockMode = this.deps.config.gateway.mode === "mock";
+                        const gatewayId = isMockMode
+                                ? "MOCK"
+                                : (REAL_GATEWAYS as readonly string[]).includes(requestedGateway)
+                                  ? requestedGateway
+                                  : "";
+                        if (!gatewayId) {
+                                throw Err.validation(
+                                        "درگاه پرداخت را انتخاب کنید (ملت / زرین‌پال / سامان).",
+                                );
+                        }
                         const paymentRow = (
                                 await tx
                                         .insert(payments)

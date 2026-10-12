@@ -399,7 +399,7 @@ stat -c '%g' /var/run/docker.sock     # ← عددش را در DOCKER_GID بگذ
 | `JWT_SECRET` | خروجی openssl بالا |
 | `SUPER_ADMIN_PHONES` | شماره‌های خودت (با کاما) — این‌ها با اولین ورود ابرمدیر می‌شوند |
 | `SMS_PROVIDER=real` + `SMS_IR_API_KEY` + شناسه‌ی قالب‌ها | از پنل SMS.ir (بخش کلیدهای API + قالب‌ها) — IP سرور را در پنل whitelist کن |
-| `GATEWAY_MODE=direct` + کلید درگاه | زرین‌پال/پی‌ایر/سامان/ملت — هر کدام داری (جزئیات: REFERENCE بخش ۷) |
+| `GATEWAY_MODE=direct` + کلید درگاه | زرین‌پال/سامان/ملت — هر کدام داری (جزئیات: REFERENCE بخش ۷) |
 | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` | خروجی اسکریپت بالا — پوش نوتیفیکیشن |
 | `VITE_NESHAN_MAP_KEY` | کلید web نقشه‌ی نشان (اختیاری — خالی = فرم مختصات دستی) |
 | `NESHAN_SERVICE_API_KEY` | کلید service نشان (اختیاری — مسیریابی واقعی) |
@@ -546,7 +546,6 @@ curl -s localhost/api/health           # ← {"status":"ok",...}
 | درگاه | روش تست (فقط دِو) |
 |---|---|
 | زرین‌پال | `ZARINPAL_SANDBOX=true` — سندباکس رسمی، مرچنت هر UUID |
-| پی‌ایر | `PAYIR_API_KEY=test` — درگاه شبیه‌سازی‌شده |
 | سامان / ملت | سندباکس عمومی ندارند — ترمینال تستی بانک |
 | همه | `GATEWAY_MODE=mock` — درگاه داخلی کامل |
 

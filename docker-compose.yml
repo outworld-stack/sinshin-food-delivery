@@ -57,6 +57,10 @@ x-api-service: &api-service
     NODE_ENV: production
     PORT: "3000"
 
+    # stage-58 — TZ برای API هم (web/backup از قبل داشتند): لاگ‌ها و
+    # تاریخ/ساعت درگاه‌ها (localDate/localTime ملت) به وقت تهران می‌شوند.
+    TZ: Asia/Tehran
+
     SITE_URL: https://${DOMAIN:-www.sinshin.localhost}
 
     DEVICE_ENFORCEMENT: ${DEVICE_ENFORCEMENT:-on}

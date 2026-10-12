@@ -221,7 +221,6 @@ export const ar: Dict = {
 	'checkout.payViaGateway': 'دفع {n} عبر البوابة المصرفية:',
 	'checkout.gateway.MOCK': 'بوابة تجريبية (عرض)',
 	'checkout.gateway.ZARINPAL': 'زرين‌بال',
-	'checkout.gateway.PAYIR': 'باي‌إير',
 	'checkout.gateway.SEP': 'بنك سامان',
 	'checkout.gateway.MELLAT': 'بنك ملت',
 	'checkout.addressTitle': 'عنوان التسليم',
@@ -385,6 +384,17 @@ export const ar: Dict = {
 
 	// ── تفاصيل الطلب (الجولة ٣٣) ──
 	'dash.orderDetail.backToOrders': 'العودة إلى الطلبات',
+	// stage-58 — صندوق متابعة الدفع (PENDING_PAYMENT)
+	'dash.orderDetail.pendingTitle': 'هذا الطلب في انتظار الدفع',
+	'dash.orderDetail.pendingHint': 'لإتمام الطلب، أكمل الدفع من هنا.',
+	'dash.orderDetail.pendingVerifyTitle': 'جارٍ التحقق من حالة الدفع...',
+	'dash.orderDetail.pendingVerifyHint':
+		'إذا كنت قد دفعت للتو، انتظر لحظات — ستتحدّث الحالة تلقائياً.',
+	'dash.orderDetail.pendingAmount': 'المبلغ المستحق للدفع: {n}',
+	'dash.orderDetail.continuePayment': 'متابعة الدفع',
+	'dash.orderDetail.pendingRetrying': 'جارٍ الاتصال ببوابة الدفع...',
+	'dash.orderDetail.pendingRetryNoUrl':
+		'تعذّر الاتصال ببوابة الدفع — حاول مرة أخرى بعد لحظات.',
 	'dash.orderDetail.courierRoute': 'مسار حركة الساعي',
 	'dash.orderDetail.details': 'تفاصيل الطلب',
 	'dash.orderDetail.breakdownTitle': 'تفاصيل مبلغ الطلب',
@@ -597,7 +607,8 @@ export const ar: Dict = {
 	// ── stage-48 — اللوحة: سجلّ الإرسال ──
 	// stage-50 — حالة الرفض: خطوات واضحة + زر «إعادة فحص الإذن»
 	// (كانت هذه الحالة نهاية مسدودة — بلا أي زر)
-	'notify.enable.deniedStep1': 'في شريط العنوان، انقر على أيقونة القفل/إعدادات الموقع.',
+	'notify.enable.deniedStep1':
+		'في شريط العنوان، انقر على أيقونة القفل/إعدادات الموقع.',
 	'notify.enable.deniedStep2': 'ابحث عن «Notifications» واجعلها Allow.',
 	'notify.enable.deniedStep3': 'عُد إلى هذه النافذة واضغط «إعادة فحص الإذن».',
 	'notify.enable.recheck': 'إعادة فحص الإذن',

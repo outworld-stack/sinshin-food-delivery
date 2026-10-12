@@ -1,43 +1,43 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-51 — sinshin-food-delivery
+// stage-58 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/lib/push-subscription.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر (ریشه‌ی «هیچ نوتیفی در هیچ مرورگری نمی‌رسد» — باگ احراز هویت):
-//   • باگ 🔴 قطعی: GET /notifications/vapid-public با fetch خام و «بدون
-//     Bearer» صدا زده می‌شد، در حالی که مسیر در بک‌اند داخل requireAuth
-//     بود ⇒ همیشه ۴۰۱ ⇒ enablePush قبل از pushManager.subscribe خارج
-//     می‌شد ⇒ اشتراک هیچ‌وقت نه در مرورگر ساخته و نه در سرور ثبت می‌شد
-//     ⇒ هیچ پوشی هرگز نمی‌رسید (ریشه‌ی «گیرنده: ۱ ولی در Edge هیچی»).
-//   • فیکس دولایه: (۱) مسیر در stage-51 عمومی شد (بک‌اند)؛ (۲) فرانت هم
-//     همان GET را با authedPushFetch می‌زند — با بک‌اند قدیمی (محافظت‌شده)
-//     هم کار می‌کند و با نشستِ منقضی هم ریتری ۴۰۱ دارد.
-//   • گزارش خطا (خواسته‌ی صریح): هر شکست حالا وضعیت HTTP / متن خطا را در
-//     کنسول ثبت می‌کند (بدون توکن) و PushState با failureReason برمی‌گردد
-//     تا UI پیام «دقیق» نشان بدهد نه یک متن کلی — علت واقعی دیگر بی‌صدا
-//     نمی‌ماند.
-// stage-50: مهلت subscribe (۳۰s)، ریتری ۴۰۱ ثبت اشتراک، ثبت سریع SW،
-//           fast-path getPushState — همه محفوظ.
+// تغییر (درخواست کاربر — پرامپت خودکار + رفع «در هیچ مرورگری نمی‌رسد»):
+//   ① enablePush حالا گرهِ 409 PUSH_SUB_OWNED را باز می‌کند (مرورگرِ
+//      اشتراک‌شده بین دو حساب): unsubscribe → subscribe تازه → ثبت مجدد.
+//      قبلاً این حالت failureReason:'register' ابدی بود و پوشِ حسابِ قبلی
+//      به مرورگر حسابِ فعلی می‌رسید.
+//   ② مهمان: permission گرفته/اشتراک ساخته می‌شود؛ ثبت سرور 401 ⇒
+//      pendingLogin:true — بعد از لاگین، reconcile ثبتش می‌کند.
+//   ③ reconcileSubscription — «سرور همین اشتراک را دارد؟» با
+//      GET /notifications/push-status (endpoints) — فقط در نبودش POST
+//      می‌زند (سقف نرخ ۲۰/min/IP روی NAT با POSTهای بی‌فایده پر نمی‌شود).
+//   ④ autoPushFlow — نقطه‌ی ورود فلوی خودکارِ صفحه‌باز (دکمه‌ی بنفش
+//      هدر حذف شد): permission==='default' + throttle ۳روزه ⇒ enablePush؛
+//      permission==='granted' ⇒ reconcile.
+//   ۵) شنونده‌ی پیام PUSH_SUBSCRIPTION_CHANGED از SW (چرخش endpoint).
+// stage-50/51 (مهلت‌ها، authedPushFetch با ریتری 401، گزارش شفاف خطا،
+//            fast-path getPushState) همه محفوظ.
 // ═══════════════════════════════════════════════════════════════
 // phase-2 — اشتراک Web Push سمت کلاینت
 
 // src/lib/push-subscription.ts
 /**
- * فاز-۲ — اشتراک Web Push سمت کلاینت.
+ * فاز-۲ + stage-58 — اشتراک Web Push سمت کلاینت.
  *
  * جریان (همه‌ی گاردها داخلی — هرگز throw به UI):
  *  ۱) SW آماده؟ — getRegistration سریع؛ اگر هیچ SWی نیست، sw-push.js
  *     (فایل استاتیکِ سبک) ثبت می‌شود — در dev و prodِ بدون build:pwa.
  *  ۲) permission — اگر default بود درخواست بگیر؛ denied = تهی
  *  ۳) کلید عمومی VAPID از API (GET /notifications/vapid-public)
- *     — stage-51: با authedPushFetch (بک‌اند قدیمی هم جواب می‌دهد)
  *  ۴) pushManager.subscribe({ userVisibleOnly, applicationServerKey })
  *     — با مهلت؛ هیچ‌وقت معلق نمی‌ماند
  *  ۵) ثبت endpoint در بک‌اند (POST /notifications/subscriptions)
- *     — با نشستِ تازه و ریتری روی ۴۰۱
+ *     — با نشستِ تازه و ریتری روی ۴۰۱ + بازیابی ۴۰۹ (تسخیر اکانت قبلی)
  *
  * نکته‌ی iOS: پوش فقط وقتی PWA روی هوم‌اسکرین نصب شده باشد کار می‌کند
  * (محدودیت اپل — 16.4+)؛ در مرورگر عادیِ iOS subscribe خطا می‌دهد که
- * همین‌جا به 'unsupported-in-ios-browser' ترجمه می‌شود.
+ * همین‌جا به 'ios-installed-only' ترجمه می‌شود.
  * دسکتاپ: Chrome/Edge/Firefox (و Safari 16.4+ مک) کاملاً پشتیبانی
  * می‌کنند — localhost هم Secure Context است، پس dev هم کار می‌کند.
  */
@@ -49,19 +49,29 @@ export type PushPermission = 'granted' | 'denied' | 'default' | 'unsupported'
 
 /** stage-51 — علتِ شکست برای پیامِ دقیق در UI (گزارش خطای شفاف) */
 export type PushFailureReason =
-  | 'vapid' /** GET vapid-public ناموفق (شبکه/401/کلید نامعتبر) */
-  | 'subscribe' /** pushManager.subscribe رد شد یا مهلت پر شد */
-  | 'register' /** POST subscriptions ناموفق (شبکه/401/اعتبارسنجی) */
-  | 'invalid' /** ساختار اشتراک ناقص (endpoint/keys) */
+	| 'vapid' /** GET vapid-public ناموفق (شبکه/401/کلید نامعتبر) */
+	| 'subscribe' /** pushManager.subscribe رد شد یا مهلت پر شد */
+	| 'register' /** POST subscriptions ناموفق (شبکه/401/اعتبارسنجی) */
+	| 'invalid' /** ساختار اشتراک ناقص (endpoint/keys) */
 
 export type PushState =
-  | { state: 'granted'; subscribed: boolean; failureReason?: PushFailureReason }
-  | { state: 'denied' }
-  | { state: 'default' }
-  | { state: 'unsupported'; reason?: string }
+	| {
+			state: 'granted'
+			subscribed: boolean
+			failureReason?: PushFailureReason
+			pendingLogin?: boolean
+	  }
+	| { state: 'denied' }
+	| { state: 'default' }
+	| { state: 'unsupported'; reason?: string }
 
 /** SW مخصوص پوش — فایل استاتیک بدون workbox؛ در dev سرو می‌شود */
 const SW_PUSH_URL = '/sw-push.js'
+
+/** stage-58 — throttle پرامپت خودکار: دوباره‌پرسیدن حداکثر هر ۳ روز
+ *  (کروم بعد از ~۳ رد خودش پرامپت را quiet می‌کند؛ ما هم اذیت نمی‌کنیم) */
+const AUTO_PROMPT_KEY = 'sinshin-push-prompt-last'
+const AUTO_PROMPT_RETRY_DAYS = 3
 
 /** مهلت‌های انتظار — هیچ await معلق نمی‌ماند */
 const READY_TIMEOUT_MS = 8_000
@@ -72,10 +82,10 @@ const SUBSCRIBE_TIMEOUT_MS = 30_000
 
 /** رقابتِ promise با تایمر — برنده‌ی اول؛ هیچ‌وقت معلق نمی‌ماند */
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ])
+	return Promise.race([
+		p,
+		new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+	])
 }
 
 /**
@@ -83,38 +93,40 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
  * (getRegistration بدون آرگومان = scope همین صفحه)
  */
 async function getRegistrationFast(): Promise<ServiceWorkerRegistration | null> {
-  if (!('serviceWorker' in navigator)) return null
-  try {
-    return (await navigator.serviceWorker.getRegistration()) ?? null
-  } catch {
-    return null
-  }
+	if (!('serviceWorker' in navigator)) return null
+	try {
+		return (await navigator.serviceWorker.getRegistration()) ?? null
+	} catch {
+		return null
+	}
 }
 
 /**
  * اطمینان از وجود سرویس‌ورکر برای پوش:
- *  • SW موجود (prod: sw.js ورک‌باکس) → همان
+ *  • SW موجود (prod: sw.js باندل‌شده / fallback: sw-push.js) → همان
  *  • هیچ SW نیست → ثبت sw-push.js (استاتیک، فقط هندلر پوش)
  * فایل در public است و vite هم در dev سرو می‌کند.
  */
 async function ensurePushRegistration(): Promise<ServiceWorkerRegistration | null> {
-  if (!('serviceWorker' in navigator)) return null
-  const existing = await getRegistrationFast()
-  if (existing) return existing
-  try {
-    return await navigator.serviceWorker.register(SW_PUSH_URL)
-  } catch {
-    return null
-  }
+	if (!('serviceWorker' in navigator)) return null
+	const existing = await getRegistrationFast()
+	if (existing) return existing
+	try {
+		return await navigator.serviceWorker.register(SW_PUSH_URL)
+	} catch {
+		return null
+	}
 }
 
 /** navigator.serviceWorker.ready با مهلت — معلق نمی‌ماند */
-async function readyWithTimeout(ms: number): Promise<ServiceWorkerRegistration | null> {
-  try {
-    return await withTimeout(navigator.serviceWorker.ready, ms, null)
-  } catch {
-    return null
-  }
+async function readyWithTimeout(
+	ms: number,
+): Promise<ServiceWorkerRegistration | null> {
+	try {
+		return await withTimeout(navigator.serviceWorker.ready, ms, null)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -126,206 +138,405 @@ async function readyWithTimeout(ms: number): Promise<ServiceWorkerRegistration |
  * خروجی null = مهلت/شبکه — کالر حالتِ «تلاش مجدد» نشان می‌دهد.
  */
 export async function authedPushFetch(
-  url: string,
-  init: RequestInit,
+	url: string,
+	init: RequestInit,
 ): Promise<Response | null> {
-  // نشست را قبل از حرکت تازه کن (توکنِ ۱۵ دقیقه‌ای ممکن است مرده باشد)
-  await ensureSession().catch(() => {})
-  const buildHeaders = (): Record<string, string> => {
-    const headers: Record<string, string> = {
-      ...(init.headers as Record<string, string> | undefined),
-    }
-    const token = getAccessToken()
-    if (token) headers.authorization = `Bearer ${token}`
-    return headers
-  }
-  const run = (): Promise<Response | null> =>
-    withTimeout(
-      fetch(url, { ...init, headers: buildHeaders(), credentials: 'include' }),
-      FETCH_TIMEOUT_MS,
-      null,
-    ).catch(() => null)
+	// نشست را قبل از حرکت تازه کن (توکنِ ۱۵ دقیقه‌ای ممکن است مرده باشد)
+	await ensureSession().catch(() => {})
+	const buildHeaders = (): Record<string, string> => {
+		const headers: Record<string, string> = {
+			...(init.headers as Record<string, string> | undefined),
+		}
+		const token = getAccessToken()
+		if (token) headers.authorization = `Bearer ${token}`
+		return headers
+	}
+	const run = (): Promise<Response | null> =>
+		withTimeout(
+			fetch(url, { ...init, headers: buildHeaders(), credentials: 'include' }),
+			FETCH_TIMEOUT_MS,
+			null,
+		).catch(() => null)
 
-  let res = await run()
-  if (res !== null && res.status === 401) {
-    // توکن کهنه — یک‌بار نوسازی و تلاش مجدد
-    const refreshed = await tryRefresh().catch(() => false)
-    if (refreshed) res = await run()
-  }
-  return res
+	let res = await run()
+	if (res !== null && res.status === 401) {
+		// توکن کهنه — یک‌بار نوسازی و تلاش مجدد
+		const refreshed = await tryRefresh().catch(() => false)
+		if (refreshed) res = await run()
+	}
+	return res
 }
 
 /** وضعیت فعلی — سبک، بدون عارضه */
 export async function getPushState(): Promise<PushState> {
-  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-    return { state: 'unsupported', reason: 'no-push-api' }
-  }
-  if (!('Notification' in window)) {
-    return { state: 'unsupported', reason: 'no-notification-api' }
-  }
-  const permission = Notification.permission
-  if (permission === 'denied') return { state: 'denied' }
-  if (permission === 'default') return { state: 'default' }
-  // granted — subscribed هست؟
-  // stage-50 — fast-path: بدون SW فوری جواب بده (قبلاً ۴ ثانیه
-  // انتظارِ بی‌نتیجه روی ready می‌کشید — حالت اولیه‌ی آیکون دیر می‌آمد)
-  const reg = await getRegistrationFast()
-  if (!reg) return { state: 'granted', subscribed: false }
-  try {
-    const existing = await withTimeout(reg.pushManager.getSubscription(), GETSTATE_TIMEOUT_MS, null)
-    return { state: 'granted', subscribed: existing !== null }
-  } catch {
-    return { state: 'granted', subscribed: false }
-  }
+	if (
+		typeof window === 'undefined' ||
+		!('serviceWorker' in navigator) ||
+		!('PushManager' in window)
+	) {
+		return { state: 'unsupported', reason: 'no-push-api' }
+	}
+	if (!('Notification' in window)) {
+		return { state: 'unsupported', reason: 'no-notification-api' }
+	}
+	const permission = Notification.permission
+	if (permission === 'denied') return { state: 'denied' }
+	if (permission === 'default') return { state: 'default' }
+	// granted — subscribed هست؟
+	// stage-50 — fast-path: بدون SW فوری جواب بده (قبلاً ۴ ثانیه
+	// انتظارِ بی‌نتیجه روی ready می‌کشید — حالت اولیه‌ی آیکون دیر می‌آمد)
+	const reg = await getRegistrationFast()
+	if (!reg) return { state: 'granted', subscribed: false }
+	try {
+		const existing = await withTimeout(
+			reg.pushManager.getSubscription(),
+			GETSTATE_TIMEOUT_MS,
+			null,
+		)
+		return { state: 'granted', subscribed: existing !== null }
+	} catch {
+		return { state: 'granted', subscribed: false }
+	}
 }
 
-/** درخواست permission + subscribe + ثبت در بک‌اند */
+// ── stage-58 — قطعه‌های قابل استفاده‌ی مجددِ جریان ──
+
+/** کلید عمومی VAPID از سرور — null یعنی همین‌جا گزارش شده و باید ول کرد */
+async function fetchVapidKey(): Promise<Uint8Array<ArrayBuffer> | null> {
+	const keyRes = await authedPushFetch(
+		`${apiBase()}/notifications/vapid-public`,
+		{
+			method: 'GET',
+		},
+	)
+	if (!keyRes || !keyRes.ok) {
+		// گزارش شفاف — علت واقعی دیگر بی‌صدا نیست (بدون توکن در لاگ)
+		console.warn(
+			'[push] vapid-public ناموفق:',
+			keyRes ? `HTTP ${keyRes.status}` : 'شبکه/مهلت',
+		)
+		return null
+	}
+	let key: string | undefined
+	try {
+		;({ key } = (await keyRes.json()) as { key?: string })
+	} catch {
+		console.warn('[push] vapid-public: JSON خراب')
+		return null
+	}
+	if (!key) {
+		console.warn('[push] vapid-public: کلید خالی برگشت')
+		return null
+	}
+	return urlBase64ToUint8Array(key)
+}
+
+/** ساخت (یا گرفتن) اشتراک روی این رجیستری — بدون POST سرور */
+async function obtainLocalSubscription(
+	reg: ServiceWorkerRegistration,
+): Promise<PushSubscription | null> {
+	const existing = await reg.pushManager.getSubscription().catch(() => null)
+	if (existing) return existing
+	const applicationServerKey = await fetchVapidKey()
+	if (!applicationServerKey) return null
+	try {
+		const sub = await withTimeout(
+			reg.pushManager.subscribe({
+				userVisibleOnly: true,
+				applicationServerKey,
+			}),
+			SUBSCRIBE_TIMEOUT_MS,
+			null,
+		)
+		if (!sub) {
+			console.warn(
+				`[push] subscribe بعد از ${SUBSCRIBE_TIMEOUT_MS / 1000}s مهلت پر شد`,
+			)
+		}
+		return sub
+	} catch (err) {
+		// رد صریح مرورگر (مثلاً AbortError فایرفاکس) — گزارش + علت دقیق
+		console.warn(
+			'[push] pushManager.subscribe رد شد:',
+			err instanceof Error ? `${err.name}: ${err.message}` : err,
+		)
+		return null
+	}
+}
+
+interface SubscriptionJson {
+	endpoint?: string
+	keys?: { p256dh?: string; auth?: string }
+}
+
+/** POST ثبت اشتراک در سرور — خروجی: کد وضعیت | null(شبکه) */
+async function postSubscription(
+	sub: PushSubscription,
+): Promise<Response | null> {
+	const raw = sub.toJSON() as SubscriptionJson
+	if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) {
+		console.warn('[push] ساختار اشتراک ناقص است (endpoint/keys)')
+		return null
+	}
+	return authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({
+			endpoint: raw.endpoint,
+			keys: { p256dh: raw.keys.p256dh, auth: raw.keys.auth },
+		}),
+	})
+}
+
+/**
+ * stage-58 — ثبتِ نهاییِ اشتراک در سرور + «بازیابی ۴۰۹»:
+ *  • 409 PUSH_SUB_OWNED = این endpoint قبلاً به حساب دیگری تعلق داشته
+ *    (مرورگرِ اشتراکی/تبادل حساب). اشتراک محلی را unsub می‌کنیم، یکی
+ *    تازه می‌سازیم و دوباره ثبت می‌کنیم — قبلاً این حالت گرهِ ابدی
+ *    failureReason:'register' بود و پوشِ حسابِ قبلی بی‌صدا می‌آمد.
+ *  • 401 = کاربر لاگین نیست (مهمان) — pendingLogin، بعد از لاگین ثبت می‌شود.
+ * خروجی: 'ok' | 'guest' | 'register-failed'
+ */
+async function registerOnServer(
+	reg: ServiceWorkerRegistration,
+	sub: PushSubscription,
+): Promise<'ok' | 'guest' | 'register-failed'> {
+	let res = await postSubscription(sub)
+	if (res === null) return 'register-failed'
+
+	// ── گره‌ی ۴۰۹: اشتراکِ متعلق به حساب قبلی — بازسازی تازه ──
+	if (res.status === 409) {
+		let owned = false
+		try {
+			const body = (await res.clone().json()) as { error?: { code?: string } }
+			owned = body.error?.code === 'PUSH_SUB_OWNED'
+		} catch {
+			owned = true // ۴۰۹ از این مسیر فقط همین معنی را دارد
+		}
+		if (owned) {
+			console.warn('[push] اشتراک به حساب دیگری تعلق داشت — بازسازی تازه')
+			try {
+				await sub.unsubscribe()
+			} catch {
+				/* بهترین تلاش */
+			}
+			const fresh = await obtainLocalSubscription(reg)
+			if (fresh) {
+				res = await postSubscription(fresh)
+				if (res?.ok) return 'ok'
+			}
+			return 'register-failed'
+		}
+		return 'register-failed'
+	}
+
+	// ── مهمان: توکنی نیست و refresh هم جواب نداد — بعد از لاگین ──
+	if (res.status === 401) return 'guest'
+
+	if (!res.ok) {
+		// گزارش شفاف — علت واقعی دیگر بی‌صدا نیست (بدون توکن در لاگ)
+		console.warn('[push] ثبت اشتراک ناموفق:', `HTTP ${res.status}`)
+		return 'register-failed'
+	}
+	return 'ok'
+}
+
+/** درخواست permission + subscribe + ثبت در بک‌اند (مسیر دستی/خودکار) */
 export async function enablePush(): Promise<PushState> {
-  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
-    return { state: 'unsupported', reason: 'no-sw' }
-  }
-  if (!('Notification' in window) || !('PushManager' in window)) {
-    return { state: 'unsupported', reason: 'no-push-api' }
-  }
-  // iOS غیرنصب‌شده — پیام روشن بده نه خطای خام
-  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
-  const isStandalone =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as unknown as { standalone?: boolean }).standalone === true
-  if (isIos && !isStandalone) {
-    return { state: 'unsupported', reason: 'ios-installed-only' }
-  }
+	if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+		return { state: 'unsupported', reason: 'no-sw' }
+	}
+	if (!('Notification' in window) || !('PushManager' in window)) {
+		return { state: 'unsupported', reason: 'no-push-api' }
+	}
+	// iOS غیرنصب‌شده — پیام روشن بده نه خطای خام
+	const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
+	const isStandalone =
+		window.matchMedia('(display-mode: standalone)').matches ||
+		(window.navigator as unknown as { standalone?: boolean }).standalone ===
+			true
+	if (isIos && !isStandalone) {
+		return { state: 'unsupported', reason: 'ios-installed-only' }
+	}
 
-  try {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') {
-      return permission === 'denied' ? { state: 'denied' } : { state: 'default' }
-    }
+	try {
+		const permission = await Notification.requestPermission()
+		if (permission !== 'granted') {
+			return permission === 'denied'
+				? { state: 'denied' }
+				: { state: 'default' }
+		}
 
-    // stage-50 — SW: اول ثبت‌شده را ببین (سریع)؛ نبود ⇒ همین‌جا ثبت
-    // sw-push.js؛ فقط بعدش منتظر فعال‌شدن بمان. (قبلاً در نبود SW، ۸
-    // ثانیه waiting قبل از ثبت می‌ماند — بخشی از «گیر کردن دکمه».)
-    let reg = await ensurePushRegistration()
-    if (reg) reg = (await readyWithTimeout(READY_TIMEOUT_MS)) ?? reg
-    if (!reg) return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
+		// stage-50 — SW: اول ثبت‌شده را ببین (سریع)؛ نبود ⇒ همین‌جا ثبت
+		// sw-push.js؛ فقط بعدش منتظر فعال‌شدن بمان.
+		let reg = await ensurePushRegistration()
+		if (reg) reg = (await readyWithTimeout(READY_TIMEOUT_MS)) ?? reg
+		if (!reg)
+			return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
 
-    let sub = await reg.pushManager.getSubscription()
+		let sub = await reg.pushManager.getSubscription().catch(() => null)
+		if (!sub) {
+			sub = await obtainLocalSubscription(reg)
+			if (!sub) {
+				return {
+					state: 'granted',
+					subscribed: false,
+					failureReason: 'subscribe',
+				}
+			}
+		}
 
-    if (!sub) {
-      // کلید عمومی VAPID از سرور (base64url ۶۵ بایت)
-      // stage-51 — 🔴 باگ ریشه‌ای: این GET قبلاً بدون Bearer بود و مسیر
-      // در بک‌اند requireAuth داشت ⇒ همیشه ۴۰۱ ⇒ subscribe هیچ‌وقت اجرا
-      // نمی‌شد ⇒ هیچ پوشی نمی‌رسید. حالا با authedPushFetch: روی بک‌اند
-      // جدید (عمومی) و قدیمی (محافظت‌شده) هر دو کار می‌کند.
-      const keyRes = await authedPushFetch(`${apiBase()}/notifications/vapid-public`, {
-        method: 'GET',
-      })
-      if (!keyRes || !keyRes.ok) {
-        // گزارش شفاف — علت واقعی دیگر بی‌صدا نیست (بدون توکن در لاگ)
-        console.warn(
-          '[push] vapid-public ناموفق:',
-          keyRes ? `HTTP ${keyRes.status}` : 'شبکه/مهلت',
-        )
-        return { state: 'granted', subscribed: false, failureReason: 'vapid' }
-      }
-      let key: string | undefined
-      try {
-        ;({ key } = (await keyRes.json()) as { key?: string })
-      } catch (err) {
-        console.warn('[push] vapid-public: JSON خراب:', err)
-        return { state: 'granted', subscribed: false, failureReason: 'vapid' }
-      }
-      if (!key) {
-        console.warn('[push] vapid-public: کلید خالی برگشت')
-        return { state: 'granted', subscribed: false, failureReason: 'vapid' }
-      }
+		const outcome = await registerOnServer(reg, sub)
+		if (outcome === 'ok') return { state: 'granted', subscribed: true }
+		if (outcome === 'guest') {
+			// stage-58 — مهمان: اشتراک محلی ساخته شد؛ ثبت سرور بعد از لاگین
+			return { state: 'granted', subscribed: false, pendingLogin: true }
+		}
+		return { state: 'granted', subscribed: false, failureReason: 'register' }
+	} catch (err) {
+		console.error('[push] enablePush ناموفق:', err)
+		return { state: 'granted', subscribed: false, failureReason: 'register' }
+	}
+}
 
-      const applicationServerKey = urlBase64ToUint8Array(key)
-      // stage-50 — مهلتِ صریح: subscribe در فایرفاکس/شبکه‌ی کند می‌توانست
-      // تا ابد معلق بماند (بقیه‌ی «گیر کردن دکمه»). timeout ⇒ subscribed=false
-      // با پیام تلاش‌مجدد در UI — نه دکمه‌ی قفل‌شده.
-      try {
-        sub = await withTimeout(
-          reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey,
-          }),
-          SUBSCRIBE_TIMEOUT_MS,
-          null,
-        )
-      } catch (err) {
-        // رد صریح مرورگر (مثلاً AbortError فایرفاکس) — گزارش + علت دقیق
-        console.warn(
-          '[push] pushManager.subscribe رد شد:',
-          err instanceof Error ? `${err.name}: ${err.message}` : err,
-        )
-        return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
-      }
-      if (!sub) {
-        console.warn(`[push] subscribe بعد از ${SUBSCRIBE_TIMEOUT_MS / 1000}s مهلت پر شد`)
-        return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
-      }
-    }
+/**
+ * stage-58 — آشتیِ وضعیت برای کاربرِ لاگین‌شده:
+ * «اشتراک محلی هست؟ سرور همین را دارد؟» — فقط در نبودش POST می‌زند.
+ * GET push-status خودش ارزان است (SELECT کوچک) و POST فقط وقتی واقعاً
+ * لازم است رخ می‌دهد (نرخ‌سقف ۲۰/min/IP هم برای NATها نگرانی نیست).
+ */
+export async function reconcileSubscription(): Promise<PushState> {
+	if (
+		typeof window === 'undefined' ||
+		!('serviceWorker' in navigator) ||
+		!('PushManager' in window)
+	) {
+		return { state: 'unsupported', reason: 'no-push-api' }
+	}
+	if (!('Notification' in window) || Notification.permission !== 'granted') {
+		return Notification.permission === 'denied'
+			? { state: 'denied' }
+			: { state: 'default' }
+	}
+	try {
+		const reg = await ensurePushRegistration()
+		if (!reg) return { state: 'granted', subscribed: false }
 
-    // ثبت در بک‌اند — stage-50: با نشست تازه + ریتری ۴۰۱ (authedPushFetch)
-    const raw = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
-    if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) {
-      console.warn('[push] ساختار اشتراک ناقص است (endpoint/keys)')
-      return { state: 'granted', subscribed: false, failureReason: 'invalid' }
-    }
-    const regRes = await authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        endpoint: raw.endpoint,
-        keys: { p256dh: raw.keys.p256dh, auth: raw.keys.auth },
-      }),
-    })
-    if (!regRes || !regRes.ok) {
-      // گزارش شفاف — علت واقعی دیگر بی‌صدا نیست (بدون توکن در لاگ)
-      console.warn(
-        '[push] ثبت اشتراک ناموفق:',
-        regRes ? `HTTP ${regRes.status}` : 'شبکه/مهلت',
-      )
-      return { state: 'granted', subscribed: false, failureReason: 'register' }
-    }
-    return { state: 'granted', subscribed: true }
-  } catch (err) {
-    console.error('[push] enablePush ناموفق:', err)
-    return { state: 'granted', subscribed: false, failureReason: 'register' }
-  }
+		const sub = await reg.pushManager.getSubscription().catch(() => null)
+		if (!sub) return { state: 'granted', subscribed: false }
+
+		// سرور چه اشتراک‌هایی برای «این کاربر» دارد؟ (لاگین‌نشده = 401)
+		const statusRes = await authedPushFetch(
+			`${apiBase()}/notifications/push-status`,
+			{
+				method: 'GET',
+			},
+		)
+		if (statusRes === null) {
+			return { state: 'granted', subscribed: false, failureReason: 'register' }
+		}
+		if (statusRes.status === 401) {
+			// مهمان — بعد از لاگین reconcile دوباره صدا زده می‌شود
+			return { state: 'granted', subscribed: false, pendingLogin: true }
+		}
+		if (!statusRes.ok) {
+			return { state: 'granted', subscribed: false, failureReason: 'register' }
+		}
+		let endpoints: string[] = []
+		try {
+			const body = (await statusRes.json()) as { endpoints?: string[] }
+			endpoints = Array.isArray(body.endpoints) ? body.endpoints : []
+		} catch {
+			/* بدنه‌ی نامفهوم — محافظه‌کارانه: POST نمی‌زنیم */
+			return { state: 'granted', subscribed: false }
+		}
+
+		if (endpoints.includes(sub.endpoint)) {
+			return { state: 'granted', subscribed: true }
+		}
+		// سرور ندارد — ثبت (با بازیابی ۴۰۹)
+		const outcome = await registerOnServer(reg, sub)
+		if (outcome === 'ok') return { state: 'granted', subscribed: true }
+		if (outcome === 'guest')
+			return { state: 'granted', subscribed: false, pendingLogin: true }
+		return { state: 'granted', subscribed: false, failureReason: 'register' }
+	} catch (err) {
+		console.error('[push] reconcile ناموفق:', err)
+		return { state: 'granted', subscribed: false, failureReason: 'register' }
+	}
+}
+
+/**
+ * stage-58 — فلوی خودکارِ «باز شدن صفحه» (دکمه‌ی بنفش هدر حذف شد):
+ *  • permission === 'default' + پشتیبانی + iOS-نصب‌شده + throttle ۳روزه
+ *    ⇒ enablePush (پرامپتِ خودِ مرورگر پرسیده می‌شود)
+ *  • permission === 'granted' ⇒ reconcileSubscription (درست‌سازی ثبت)
+ *  • denied/unsupported ⇒ هیچ (مزاحم نیست)
+ */
+export async function autoPushFlow(): Promise<PushState | null> {
+	if (typeof window === 'undefined' || !('Notification' in window)) return null
+	if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null
+
+	// iOS مرورگر (غیرنصب‌شده) — پرامپت بی‌معنا و خطادار؛ رد
+	const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
+	const isStandalone =
+		window.matchMedia('(display-mode: standalone)').matches ||
+		(window.navigator as unknown as { standalone?: boolean }).standalone ===
+			true
+	if (isIos && !isStandalone) return null
+
+	const permission = Notification.permission
+	if (permission === 'denied') return null
+
+	if (permission === 'default') {
+		// throttle — هر ۳ روز یک‌بار بیشتر نمی‌پرسیم
+		try {
+			const last = Number(localStorage.getItem(AUTO_PROMPT_KEY) ?? '0')
+			if (
+				Number.isFinite(last) &&
+				Date.now() - last < AUTO_PROMPT_RETRY_DAYS * 86400000
+			) {
+				return null
+			}
+			localStorage.setItem(AUTO_PROMPT_KEY, String(Date.now()))
+		} catch {
+			/* حافظه‌ی پر/معمولی — پرامپت می‌پرسیم */
+		}
+		return enablePush()
+	}
+	return reconcileSubscription()
 }
 
 /** لغو اشتراک — هم مرورگر هم بک‌اند */
 export async function disablePush(): Promise<PushState> {
-  try {
-    const reg = await getRegistrationFast()
-    const sub = reg ? await reg.pushManager.getSubscription() : null
-    if (sub) {
-      const raw = sub.toJSON() as { endpoint?: string }
-      if (raw.endpoint) {
-        await authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
-          method: 'DELETE',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ endpoint: raw.endpoint }),
-        })
-      }
-      await sub.unsubscribe()
-    }
-  } catch (err) {
-    console.error('[push] disablePush ناموفق:', err)
-  }
-  return { state: 'granted', subscribed: false }
+	try {
+		const reg = await getRegistrationFast()
+		const sub = reg ? await reg.pushManager.getSubscription() : null
+		if (sub) {
+			const raw = sub.toJSON() as { endpoint?: string }
+			if (raw.endpoint) {
+				await authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
+					method: 'DELETE',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ endpoint: raw.endpoint }),
+				})
+			}
+			await sub.unsubscribe()
+		}
+	} catch (err) {
+		console.error('[push] disablePush ناموفق:', err)
+	}
+	return { state: 'granted', subscribed: false }
 }
 
 // ── helpers ──
 
 /** base64url → Uint8Array<ArrayBuffer> برای applicationServerKey (BufferSource) */
 function urlBase64ToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
-  const normalized = base64Url.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
-  const raw = atob(padded)
-  const out = new Uint8Array(new ArrayBuffer(raw.length))
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
-  return out
+	const normalized = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+	const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+	const raw = atob(padded)
+	const out = new Uint8Array(new ArrayBuffer(raw.length))
+	for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+	return out
 }
