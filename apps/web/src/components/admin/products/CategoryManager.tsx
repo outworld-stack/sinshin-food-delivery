@@ -149,7 +149,14 @@ export const CategoryManager = memo(function CategoryManager({
 				return
 			}
 			queryClient.invalidateQueries({ queryKey: qk.categories })
-			showToast('دسته‌بندی حذف شد')
+			// stage-63 — حذف آبشاری: محصولاتِ این دسته هم رفته‌اند؛ کش‌های
+			// منو/لیست ادمین/سبد/چک‌اوت باید همان لحظه تازه شوند
+			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
+			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
+			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
+			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
+			showToast(res.message ?? 'دسته‌بندی حذف شد')
 			set({ confirmDeleteId: null })
 		},
 	})
@@ -441,7 +448,7 @@ export const CategoryManager = memo(function CategoryManager({
 			<ConfirmModal
 				isOpen={form.confirmDeleteId !== null}
 				title="حذف دسته‌بندی"
-				message="آیا از حذف این دسته‌بندی مطمئن هستید؟"
+				message="آیا از حذف این دسته‌بندی مطمئن هستید؟ تمام محصولاتِ زیر آن هم حذف می‌شوند. این عملیات قابل بازگشت نیست."
 				onConfirm={() => {
 					if (form.confirmDeleteId) deleteMut.mutate(form.confirmDeleteId)
 				}}

@@ -6,6 +6,11 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════
+// stage-63 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/articles.routes.ts
+// تغییر: DELETE /admin/articles/categories/:id از این پس آبشاری —
+//        مقالاتِ دسته هم حذف می‌شوند (منطق در article.service)
+//
 // stage-60 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/articles.routes.ts
 // تغییر: articleBody += isFeatured (پرچم سنجاق ویژه — create/patch)
@@ -147,7 +152,10 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
       ({ params }) => deps.articles.deleteCategory(params.id),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        detail: { summary: 'Delete category (rejected while articles exist)' },
+        detail: {
+          summary:
+            'Delete category — stage-63: cascade deletes its articles (sub-categories cascade)',
+        },
       },
     )
 

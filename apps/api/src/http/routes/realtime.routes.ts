@@ -7,6 +7,19 @@
 //        حالت ارسال در سبد و چک‌اوت. سقف به‌ازای IP + سقف کلی.
 // ═══════════════════════════════════════════════════════════════
 
+// ═════════════════════════════════════════════════════════════
+// stage-63 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/realtime.routes.ts
+// تغییر: رفع باگ تولیدیِ «دوبل‌پریفیکس» — دو نمونه‌ی داخلی
+//        (authed/menuStream) هرکدام prefix '/realtime' داشتند و
+//        روت‌ها با پریفیکس بیرونی «دوبار» جمع می‌شدند:
+//        /api/realtime/realtime/menu-stream. کلاینت‌ها (useMenuLive
+//        و useAdmin2Panel) از اول فقط /api/realtime/... صدا
+//        می‌زنند ⇒ SSE عمومی منو (stage-48) و استریم سفارشاتِ
+//        ادمین۲ (stage-46) در عمل ۴۰۴ می‌گرفتند و مرده بودند.
+//        پریفیکسِ نمونه‌های داخلی حذف شد (بیرونی ماند) — حالا
+//        مسیرها با چیزی که کلاینت همیشه صدا زده یکی است.
+//
 // src/http/routes/realtime.routes.ts
 import { Elysia, t } from 'elysia'
 import { eq } from 'drizzle-orm'
@@ -110,7 +123,8 @@ async function authorizeChannel(
 
 export const realtimeRoutes = (deps: RealtimeDeps) => {
   // ── استریم‌های احرازشده (کانال شخصی/پنلی) ──
-  const authed = new Elysia({ prefix: '/realtime', tags: ['Realtime'] })
+  // stage-63 — پریفیکس داخلی حذف شد (دوبل‌شدن با پریفیکس بیرونی '/realtime')
+  const authed = new Elysia({ tags: ['Realtime'] })
     .use(requireAuth(deps.sessions))
     .get(
       '/stream',
@@ -246,7 +260,8 @@ export const realtimeRoutes = (deps: RealtimeDeps) => {
   // محصول → رویداد «menu» → کلاینت جزئیات سبد/پیش‌نمایش چک‌اوت را رفرش
   // می‌کند. کانال فقط همین یکی است (نه پارامتر)؛ سقف به‌ازای IP.
   // دروازه‌ی ژئو (app.ts onRequest) همچنان اعمال می‌شود.
-  const menuStream = new Elysia({ prefix: '/realtime', tags: ['Realtime'] })
+  // stage-63 — پریفیکس داخلی حذف شد (دوبل‌شدن با پریفیکس بیرونی '/realtime')
+  const menuStream = new Elysia({ tags: ['Realtime'] })
     .get(
       '/menu-stream',
       async ({ set, request, server }) => {

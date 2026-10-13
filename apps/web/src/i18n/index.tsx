@@ -29,7 +29,9 @@ import {
 	type ReactNode,
 	useCallback,
 	useContext,
+	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from 'react'
 import {
@@ -232,43 +234,89 @@ export function I18nProvider({
 	const queryClient = useQueryClient()
 	const router = useRouter()
 
+	// stage-63 — تایمرِ رقصِ محو برای تعویض زبان (پاک‌سازی در جداشدن Provider)
+	const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+	useEffect(
+		() => () => {
+			if (fadeTimer.current) clearTimeout(fadeTimer.current)
+			document.documentElement.classList.remove('lang-switching')
+		},
+		[],
+	)
+
 	const setLang = useCallback(
 		(next: Lang) => {
 			// کلیک روی زبانِ فعال — بی‌اثر؛ قبلاً کوکی/وضعیت همان مقدار بازنویسی
 			// می‌شد که حالا با نامعتبرسازیِ پرهزینه هم بود.
 			if (next === lang) return
-			writeLangCookie(next)
-			setLangState(next)
-			// اتریبیوت زبان سند — پنل ادمین/پیک هرگز Provider ندارد و همیشه fa می‌ماند
-			try {
-				document.documentElement.lang = next
-			} catch {
-				/* هیچ‌کاری نمی‌کند */
-			}
-			// رارد ۳۹ — ریشه‌ی باگ «تأخیر ترجمه» همین‌جا بسته شد: رشته‌های UI
-			// از دیکشنری کلاینت همان لحظه عوض می‌شدند، اما داده‌ی محتوایی
-			// (اسم غذاها، توضیحات، منوها، محتویات، مقاله‌ها، گالری، درباره،
-			// قوانین، سبد…) در کشِ React Query با کلیدِ بدونِ زبان می‌ماند و
-			// فقط بعد از staleTime + رفرش/رفکوس دوباره فچ می‌شد → «با تأخیر
-			// زیاد عربی/فارسی می‌شد». ترتیب مهم است — کوکی از قبل نوشته شده،
-			// پس فچ‌های زیر هدر x-sinshin-lang تازه می‌فرستند (langHeaders از
-			// همان کوکی می‌خواند):
-			//   ① لغو — فچِ در-پروازِ زبانِ قبل، نتیجه‌ی قدیمی ننویسد
-			//   ② نامعتبرسازی — کوئری‌های فعال همان لحظه ریفچ؛ غیرفعال‌ها کهنه
-			//      می‌شوند و در مونت/ناوبری بعدی تازه می‌آیند
-			//   ③ router.invalidate — لودرهای روت‌های فعال (جزئیات محصول/مقاله)
-			//      و beforeLoad ریشه دوباره اجرا می‌شوند (کوکی تازه را می‌خوانند)
-			try {
-				for (const key of langSensitiveKeys) {
-					queryClient.cancelQueries({ queryKey: key })
+
+			// stage-63 — تعویضِ تمام‌صفحه (رشته‌های UI + داده‌های سروری + لودرها)
+			// از «فلشِ یک-فریمی» به محوِ سریع تبدیل شد (خواسته‌ی کارفرما):
+			//   ① کلاس lang-switching روی <html> ⇒ محوی ۱۳۰ms
+			//   ② «در تاریکی»: کوکی + state + کوئری‌ها + لودرها تعویض می‌شوند
+			//   ③ دو rAF بعد از کامیتِ ری‌اکت (حداقل یک فریم رندر با محتوای
+			//      تازه در تاریکی) ⇒ کلاس برداشته می‌شود و نور ۱۶۰ms برمی‌گردد
+			// کل چرخه ≈ ۳۰۰ms — سریع و بدون فلش. prefers-reduced-motion یا
+			// نبودِ DOM ⇒ همان تعویضِ آنیِ قبل.
+			const swap = () => {
+				writeLangCookie(next)
+				setLangState(next)
+				// اتریبیوت زبان سند — پنل ادمین/پیک هرگز Provider ندارد و همیشه fa می‌ماند
+				try {
+					document.documentElement.lang = next
+				} catch {
+					/* هیچ‌کاری نمی‌کند */
 				}
-				for (const key of langSensitiveKeys) {
-					queryClient.invalidateQueries({ queryKey: key })
+				// رارد ۳۹ — ریشه‌ی باگ «تأخیر ترجمه» همین‌جا بسته شد: رشته‌های UI
+				// از دیکشنری کلاینت همان لحظه عوض می‌شدند، اما داده‌ی محتوایی
+				// (اسم غذاها، توضیحات، منوها، محتویات، مقاله‌ها، گالری، درباره،
+				// قوانین، سبد…) در کشِ React Query با کلیدِ بدونِ زبان می‌ماند و
+				// فقط بعد از staleTime + رفرش/رفکوس دوباره فچ می‌شد → «با تأخیر
+				// زیاد عربی/فارسی می‌شد». ترتیب مهم است — کوکی از قبل نوشته شده،
+				// پس فچ‌های زیر هدر x-sinshin-lang تازه می‌فرستند (langHeaders از
+				// همان کوکی می‌خواند):
+				//   ① لغو — فچِ در-پروازِ زبانِ قبل، نتیجه‌ی قدیمی ننویسد
+				//   ② نامعتبرسازی — کوئری‌های فعال همان لحظه ریفچ؛ غیرفعال‌ها کهنه
+				//      می‌شوند و در مونت/ناوبری بعدی تازه می‌آیند
+				//   ③ router.invalidate — لودرهای روت‌های فعال (جزئیات محصول/مقاله)
+				//      و beforeLoad ریشه دوباره اجرا می‌شوند (کوکی تازه را می‌خوانند)
+				try {
+					for (const key of langSensitiveKeys) {
+						queryClient.cancelQueries({ queryKey: key })
+					}
+					for (const key of langSensitiveKeys) {
+						queryClient.invalidateQueries({ queryKey: key })
+					}
+					router.invalidate()
+				} catch {
+					/* هیچ‌کاری نمی‌کند — تعویض زبان هرگز نباید خطا بدهد */
 				}
-				router.invalidate()
-			} catch {
-				/* هیچ‌کاری نمی‌کند — تعویض زبان هرگز نباید خطا بدهد */
 			}
+
+			const reducedMotion =
+				typeof window !== 'undefined' &&
+				typeof window.matchMedia === 'function' &&
+				window.matchMedia('(prefers-reduced-motion: reduce)').matches
+			if (reducedMotion || typeof document === 'undefined') {
+				swap()
+				return
+			}
+
+			const root = document.documentElement
+			// رقصِ محوِ در-جریان را قطع و از نو شروع کن (کلیکِ سریعِ پشت‌سرهم)
+			if (fadeTimer.current) clearTimeout(fadeTimer.current)
+			root.classList.add('lang-switching')
+			fadeTimer.current = setTimeout(() => {
+				swap()
+				// دو rAF ⇒ حداقل یک فریم با محتوای تازه در تاریکی رندر شده؛ سپس
+				// نور برمی‌گردد — هیچ «فلشی» دیده نمی‌شود.
+				requestAnimationFrame(() =>
+					requestAnimationFrame(() => {
+						root.classList.remove('lang-switching')
+						fadeTimer.current = null
+					}),
+				)
+			}, 130)
 		},
 		[lang, queryClient, router],
 	)

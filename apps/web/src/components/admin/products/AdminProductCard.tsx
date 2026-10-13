@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-63 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/admin/products/AdminProductCard.tsx
+// تغییر: دکمه‌ی حذف کامل محصول (Trash2 قرمز + ConfirmModal هشدارِ
+//        آبشاری + نامعتبرسازی کش‌های منو/سبد/چک‌اوت) — درخواست صریح
+//        کارفرما: «امکان حذف محصولات باید فراهم بشه»
+//
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/admin/products/AdminProductCard.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -24,10 +30,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { memo, useCallback, useState } from 'react'
-import { Ban, BoxRemove, Check, Package, Pen } from 'reicon-react'
+import { Ban, BoxRemove, Check, Package, Pen, Trash2 } from 'reicon-react'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Can } from '#/components/shared/PermissionGate'
-import { setProductAvailability } from '#/server/products'
+import { deleteProduct, setProductAvailability } from '#/server/products'
 import { useToastStore } from '#/stores/toastStore'
 import { formatPrice } from '#/utils/format'
 import { qk } from '#/utils/queryKeys'
@@ -65,6 +71,9 @@ export const AdminProductCard = memo(function AdminProductCard({
 	// ناموجود کردن عمداً مستقیم می‌ماند).
 	const [confirmAvailable, setConfirmAvailable] = useState(false)
 
+	// stage-63 — مدال تایید حذف کامل (آبشاری: سایزها/دسته‌های اضافه/نقدی‌ها)
+	const [confirmDelete, setConfirmDelete] = useState(false)
+
 	const handleToggle = useCallback(
 		() => onToggle(product.id, product.status),
 		[onToggle, product.id, product.status],
@@ -95,6 +104,39 @@ export const AdminProductCard = memo(function AdminProductCard({
 	})
 
 	const unavailable = product.isAvailable === false
+
+	// stage-63 — حذف کامل محصول + نامعتبرسازی کش‌های وابسته
+	// (لیست ادمین/منوی عمومی/جزئیات/سبد/چک‌اوت — عین availabilityMut)
+	const deleteMut = useMutation({
+		mutationFn: () => deleteProduct({ data: { id: product.id } }),
+		onSuccess: (res) => {
+			if (!res.success) {
+				showToast(res.message ?? 'خطا', 'error')
+				return
+			}
+			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
+			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
+			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
+			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
+			showToast(res.message ?? 'محصول حذف شد')
+			setConfirmDelete(false)
+		},
+		onError: () => showToast('حذف محصول ناموفق بود', 'error'),
+	})
+
+	// stage-63 — دکمه‌ی حذف (فقط با productsWrite؛ همیشه پشت ConfirmModal)
+	const deleteButton = (
+		<button
+			type="button"
+			onClick={() => setConfirmDelete(true)}
+			disabled={deleteMut.isPending}
+			title="حذف کامل"
+			className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer disabled:opacity-50"
+		>
+			<Trash2 size={18} />
+		</button>
+	)
 
 	const availabilityButton = canToggleAvailability ? (
 		<button
@@ -167,6 +209,8 @@ export const AdminProductCard = memo(function AdminProductCard({
 								<Check size={18} />
 							)}
 						</button>
+						{/* stage-63 — حذف کامل محصول */}
+						{deleteButton}
 					</Can>
 					{availabilityButton}
 				</div>
@@ -215,6 +259,8 @@ export const AdminProductCard = memo(function AdminProductCard({
 								<Check size={18} />
 							)}
 						</button>
+						{/* stage-63 — حذف کامل محصول */}
+						{deleteButton}
 					</Can>
 					{availabilityButton}
 				</div>
@@ -230,6 +276,15 @@ export const AdminProductCard = memo(function AdminProductCard({
 					availabilityMut.mutate(true)
 				}}
 				onCancel={() => setConfirmAvailable(false)}
+			/>
+
+			{/* stage-63 — تایید حذف کامل (آبشاری + غیرقابل بازگشت) */}
+			<ConfirmModal
+				isOpen={confirmDelete}
+				title="حذف محصول"
+				message={`آیا از حذف «${product.name}» مطمئن هستید؟ سایزها، دسته‌های اضافه و نقدی‌های آن هم حذف می‌شوند. این عملیات قابل بازگشت نیست.`}
+				onConfirm={() => deleteMut.mutate()}
+				onCancel={() => setConfirmDelete(false)}
 			/>
 		</div>
 	)

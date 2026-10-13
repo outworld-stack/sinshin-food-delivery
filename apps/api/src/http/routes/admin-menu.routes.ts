@@ -1,4 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-63 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
+// تغییر:
+//   ۱) DELETE /admin/menu/products/:id — حذف کامل محصول (cascade
+//        سایزها/لینک‌های M2M/نقدی‌ها؛ سفارش‌ها snapshot) + ممیزی
+//        PRODUCT_DELETE برای ادمین اصلی
+//   ۲) DELETE /admin/menu/categories/:id — از این پس آبشاری: محصولاتِ
+//        دسته هم حذف می‌شوند (منطق در menu.service؛ مستندات detail به‌روز شد)
+//
 // stage-60 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
 // تغییر:
@@ -205,7 +214,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       ({ params }) => deps.menu.deleteCategory(params.id),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        detail: { summary: 'Delete category (rejected while products exist)' },
+        detail: {
+          summary:
+            'Delete category — stage-63: cascade deletes its products (sizes/M2M/reviews; orders keep snapshots)',
+        },
       },
     )
 
@@ -376,6 +388,28 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
       detail: { summary: 'Toggle product ACTIVE / INACTIVE' },
     })
+    // stage-63 — حذف کامل محصول (سایزها/لینک‌های M2M/نقدی‌ها با cascade DB)
+    .delete(
+      '/products/:id',
+      async ({ params, user }) => {
+        const res = await deps.menu.deleteProduct(params.id)
+        if (res.success && user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: 'PRODUCT_DELETE',
+            entity: 'product',
+            entityId: params.id,
+          })
+        }
+        return res
+      },
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        detail: {
+          summary: 'Delete product (sizes/M2M links/reviews cascade; orders keep snapshots)',
+        },
+      },
+    )
 
   // ── stage-48 — موجود/ناموجود سریع ──
   // گارد: ادمین اصلی همیشه؛ ادمین۲ فقط با productsAvailability

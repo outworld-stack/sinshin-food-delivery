@@ -783,20 +783,33 @@ export class MenuService {
 
   async deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
     const catId = asCategoryId(id)
-    // stage-60 — فقط محصولاتِ «دسته‌ی اولیه» مانع حذف‌اند (cascade آنها را
-    // می‌کشد)؛ لینک‌های product_categories با cascade پاک می‌شوند و محصول
-    // در دسته‌ی اولیه‌اش می‌ماند — بی‌خطر.
+    // stage-63 — حذف آبشاری (خواسته‌ی صریح کارفرما): با حذف دسته،
+    // «تمام محصولات زیرش» هم حذف می‌شوند. زنجیره‌ی حذف را خودِ DB
+    // هم‌اتمیک اجرا می‌کند (ON DELETE CASCADE روی FKها):
+    //   categories → products (دسته‌ی اولیه) → product_sizes /
+    //   product_categories / reviews
+    // محصولاتِ M2M که «دسته‌ی اولیه‌ی»‌شان جای دیگری است فقط لینکِ
+    // اضافه‌شان به این دسته جدا می‌شود (cascade روی product_categories)
+    // و در دسته‌ی اولیه‌شان زنده می‌مانند — اشتراک دسته‌ها (stage-60)
+    // نابود نمی‌شود. سفارش‌ها snapshot دارند (productId بدون FK) و
+    // سبدِ باز، آیتمِ حذف‌شده را بی‌صدا skip می‌کند (cart.service).
     const productCount = await this.deps.db
       .select({ count: sql<number>`count(*)::int` })
       .from(products)
       .where(eq(products.categoryId, catId))
       .then((r) => r[0]?.count ?? 0)
-    if (productCount > 0) {
-      return { success: false, message: 'ابتدا محصولات این دسته را منتقل یا حذف کنید' }
-    }
     await this.deps.db.delete(categories).where(eq(categories.id, catId))
     await this.cache.invalidate()
-    return { success: true }
+    // سبد/چک‌اوت‌های باز (حتی مهمان) باید فوراً داده‌ی سروری‌شان را
+    // رفرش کنند — محصولاتِ این دسته دیگر وجود ندارند (عین updateCategory).
+    this.publishMenuLive({ productId: null, reason: 'category' })
+    return {
+      success: true,
+      message:
+        productCount > 0
+          ? `دسته و ${productCount.toLocaleString('fa-IR')} محصولِ زیرش حذف شدند`
+          : 'دسته‌بندی حذف شد',
+    }
   }
 
   // ── ادمین: محصولات ──
@@ -1323,6 +1336,36 @@ export class MenuService {
     await this.cache.invalidate()
     await this.publishProductLive({ ...row, isAvailable: available })
     return { success: true }
+  }
+
+  /**
+   * stage-63 — حذف کامل محصول (درخواست صریح کارفرما: «امکان حذف
+   * محصولات باید فراهم بشه»). زنجیره‌ی حذف با ON DELETE CASCADE خودِ DB
+   * هم‌اتمیک اجرا می‌شود: product_sizes / product_categories (لینک‌های
+   * M2M) / reviews. آیتم‌های سفارش snapshot اند (productId بدون FK) و
+   * می‌مانند؛ سبدِ باز آیتمِ حذف‌شده را skip می‌کند (cart.service) و
+   * چک‌اوتِ بازِ همان آیتم، خطای واضح می‌گیرد — رویداد menu:live هم
+   * آن‌ها را همان لحظه به رفرش وا می‌دارد.
+   */
+  async deleteProduct(id: string): Promise<{ success: boolean; message?: string }> {
+    const pid = asProductId(id)
+    const row = await this.deps.db.query.products.findFirst({
+      where: eq(products.id, pid),
+    })
+    if (!row) return { success: false, message: 'محصول پیدا نشد' }
+    await this.deps.db.delete(products).where(eq(products.id, pid))
+    await this.cache.invalidate()
+    // سبد/چک‌اوتِ باز باید فوراً بداند — دیگر وجود ندارد (هر سه حالت
+    // سفارش + موجودی خاموش تا مصرف‌کننده‌ی SSE قفل/رفرش را نشان دهد).
+    await this.publishMenuLive({
+      productId: pid,
+      reason: 'product',
+      isAvailable: false,
+      courierAllowed: false,
+      takeawayAllowed: false,
+      dineInAllowed: false,
+    })
+    return { success: true, message: `«${row.name}» حذف شد` }
   }
 
   // ── داخلی ──

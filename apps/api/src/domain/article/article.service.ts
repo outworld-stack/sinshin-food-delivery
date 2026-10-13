@@ -457,17 +457,27 @@ export class ArticleService {
     }
 
     async deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
+        // stage-63 — حذف آبشاری (خواسته‌ی صریح کارفرما): با حذف دسته‌ی
+        // مقاله، «تمام مقالات زیرش» هم حذف می‌شوند. FK مقاله→دسته
+        // restrict است، پس مقالات اول در همان تراکنش حذف می‌شوند؛
+        // ساب‌دسته‌ها با cascade خود DB کنار می‌روند.
         const count = await this.deps.db
             .select({ count: sql<number>`count(*)::int` })
             .from(articles)
             .where(eq(articles.categoryId, id))
             .then((r) => r[0]?.count ?? 0)
-        if (count > 0) {
-            return { success: false, message: 'ابتدا مقالات این دسته را منتقل یا حذف کنید' }
-        }
-        await this.deps.db.delete(articleCategories).where(eq(articleCategories.id, id))
+        await this.deps.db.transaction(async (tx) => {
+            await tx.delete(articles).where(eq(articles.categoryId, id))
+            await tx.delete(articleCategories).where(eq(articleCategories.id, id))
+        })
         await this.cache.invalidate()
-        return { success: true }
+        return {
+            success: true,
+            message:
+                count > 0
+                    ? `دسته و ${count.toLocaleString('fa-IR')} مقاله‌ی زیرش حذف شدند`
+                    : 'دسته حذف شد',
+        }
     }
 
     // ── داخلی ──

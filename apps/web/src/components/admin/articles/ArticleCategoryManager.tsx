@@ -91,7 +91,11 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
     onSuccess: (res) => {
       if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
       queryClient.invalidateQueries({ queryKey: qk.articleCategories })
-      showToast('حذف شد')
+      // stage-63 — حذف آبشاری: مقالاتِ این دسته هم رفته‌اند؛ لیست ادمین و
+      // لیست عمومی مقالات باید همان لحظه تازه شوند
+      queryClient.invalidateQueries({ queryKey: qk.adminArticles })
+      queryClient.invalidateQueries({ queryKey: qk.articlesAll })
+      showToast(res.message ?? 'حذف شد')
       set({ confirmDeleteId: null })
     },
   })
@@ -238,7 +242,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
       <ConfirmModal
         isOpen={form.confirmDeleteId !== null}
         title="حذف دسته‌بندی"
-        message="آیا از حذف این دسته‌بندی مطمئن هستید؟"
+        message="آیا از حذف این دسته‌بندی مطمئن هستید؟ تمام مقالاتِ زیر آن هم حذف می‌شوند. این عملیات قابل بازگشت نیست."
         onConfirm={() => { if (form.confirmDeleteId) deleteMut.mutate(form.confirmDeleteId) }}
         onCancel={() => set({ confirmDeleteId: null })}
       />

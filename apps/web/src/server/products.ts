@@ -304,6 +304,20 @@ export async function toggleProductStatus(input: {
 	return { success: true }
 }
 
+/**
+ * stage-63 — حذف کامل محصول (کارت لیست ادمین — درخواست صریح کارفرما).
+ * گارد سرور: productsWrite. سایزها/لینک‌های M2M/نقدی‌ها با cascade خودِ
+ * DB حذف می‌شوند؛ آیتم‌های سفارش snapshot دارند و می‌مانند.
+ */
+export async function deleteProduct(input: {
+	data: { id: string }
+}): Promise<AdminMutationResult> {
+	return authJson<AdminMutationResult>(
+		`/admin/menu/products/${input.data.id}`,
+		'DELETE',
+	)
+}
+
 export async function getAdminProductDetails(input: {
 	data: { id: string }
 }): Promise<Product | null> {
