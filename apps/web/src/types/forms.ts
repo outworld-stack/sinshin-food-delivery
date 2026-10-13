@@ -24,6 +24,8 @@ export interface ArticleFormData {
   // مسیرها موقع ارسال با ?? null نرمال می‌کنن (اسکیمای سرور null می‌خواد)
   subCategoryId?: string | null;
   processes: { title: string, items: string[] }[];
+  /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + پس‌زمینه Aurora) */
+  isFeatured: boolean;
   // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
   titleAr: string;
   excerptAr: string;
@@ -68,7 +70,13 @@ export interface ProductFormData {
   prepTime: number;
   // stage-10: هزینه بسته‌بندی هر واحد — پیک و بیرون‌بر؛ سرو در محل ندارد
   packagingCost: number;
-  categoryId: string;
+  /**
+   * stage-60 — همه‌ی دسته‌های این محصول (دسته‌ی اول = اصلی/مبنا؛ بقیه M2M).
+   * اولین عضو همان categoryId قبلی است و مبنای ارث‌بری حالت‌های سفارش.
+   */
+  categoryIds: string[];
+  /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + پس‌زمینه Aurora) */
+  isFeatured: boolean;
   profileImage: string;
   galleryImages: string[];
   sizesEnabled: boolean;

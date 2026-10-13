@@ -70,6 +70,11 @@ export interface ProductCardProps {
                 courierAllowed?: boolean
                 takeawayAllowed?: boolean
                 dineInAllowed?: boolean
+                /**
+                 * stage-60 — پرچم «ویژه/سنجاق»: کارت پس‌زمینه‌ی Aurora می‌گیرد و
+                 * (در لیست) جزو ۴ آیتم اول می‌نشیند.
+                 */
+                isFeatured?: boolean | null
         }
         /**
          * round-12 — false = حالت پیش‌نمایش (فرم محصول): بدون Link.
@@ -86,6 +91,8 @@ export interface ArticleCardProps {
                 profileImage: string | null
                 author: string
                 publishedAt: Date
+                /** stage-60 — پرچم «ویژه/سنجاق»: کارت پس‌زمینه‌ی Aurora می‌گیرد */
+                isFeatured?: boolean | null
         }
 }
 

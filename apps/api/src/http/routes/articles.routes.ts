@@ -5,6 +5,11 @@
 // کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// stage-60 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/articles.routes.ts
+// تغییر: articleBody += isFeatured (پرچم سنجاق ویژه — create/patch)
+//
 // src/http/routes/articles.routes.ts
 import { Elysia, t } from 'elysia'
 
@@ -35,6 +40,8 @@ const articleBody = t.Object({
   excerptAr: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
   contentAr: t.Optional(t.Nullable(t.String({ maxLength: 100000 }))),
   processesAr: t.Optional(t.Nullable(t.Array(processSchema, { maxItems: 10 }))),
+  // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora؛ نیامد = false/دست‌نخورده)
+  isFeatured: t.Optional(t.Boolean()),
 })
 
 const categoryBody = t.Object({

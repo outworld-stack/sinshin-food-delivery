@@ -96,7 +96,7 @@ export const CartItemRow = memo(function CartItemRow({
                                         <Link
                                                 to="/products/$productId"
                                                 params={{ productId: item.id }}
-                                                className="font-DanaDemiBold text-sm sm:text-base text-gray-800 dark:text-white leading-relaxed break-words hover:text-primary dark:hover:text-dark-primary transition cursor-pointer"
+                                                className="font-DanaDemiBold text-sm sm:text-base text-gray-800 dark:text-white leading-relaxed wrap-break-word hover:text-primary dark:hover:text-dark-primary transition cursor-pointer"
                                         >
                                                 {item.name}
                                         </Link>

@@ -58,6 +58,8 @@ function EditArticlePage() {
         ...article,
         profileImage: article.profileImage ?? '',
         // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = پشتیبان فارسی)
+        // stage-60 — پرچم «ویژه» (نیامد = خاموش)
+        isFeatured: article.isFeatured ?? false,
         titleAr: article.titleAr ?? '',
         excerptAr: article.excerptAr ?? '',
         contentAr: article.contentAr ?? '',

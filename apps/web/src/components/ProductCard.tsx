@@ -127,6 +127,8 @@ export const ProductCard = memo(function ProductCard({
 
 	// ── stage-48 — موجودی + حالت‌های مؤثر سفارش ──
 	const unavailable = product.isAvailable === false
+	// stage-60 — کارت ویژه: پس‌زمینه‌ی Aurora + متن‌های روشن (خوانایی)
+	const aurora = product.isFeatured === true
 	const courierOk = product.courierAllowed !== false
 	const takeawayOk = product.takeawayAllowed !== false
 	const dineInOk = product.dineInAllowed !== false
@@ -234,7 +236,9 @@ export const ProductCard = memo(function ProductCard({
 	)
 
 	return (
-		<div className="group flex flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+		<div
+			className={`group flex flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1${aurora ? ' aurora-card' : ''}`}
+	>
 			{/* سئو-۸: <img> واقعی به‌جای تصویر پس‌زمینه — alt + lazy + دیده‌شدن در Google Images
       round-12 — interactive=false (پیش‌نمایش فرم محصول): بدون Link — لینک با
       id سنتینل «preview»، preload روی هاور/فوکوس می‌ساخت و 422 پترن UUID
@@ -286,17 +290,17 @@ export const ProductCard = memo(function ProductCard({
 						to="/products/$productId"
 						params={{ productId: product.slug || product.id }}
 					>
-						<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-1 hover:text-primary dark:hover:text-dark-primary transition-colors">
+						<h3 className={`font-DanaDemiBold text-lg ${aurora ? 'text-white' : 'text-gray-800 dark:text-white'} mb-1 hover:text-primary dark:hover:text-dark-primary transition-colors`}>
 							{product.name}
 						</h3>
 					</Link>
 				) : (
-					<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-1">
+					<h3 className={`font-DanaDemiBold text-lg ${aurora ? 'text-white' : 'text-gray-800 dark:text-white'} mb-1`}>
 						{product.name}
 					</h3>
 				)}
 
-				<p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 font-DanaRegular mb-2 h-10 overflow-hidden">
+				<p className={`text-sm ${aurora ? 'text-white/75' : 'text-gray-500 dark:text-gray-400'} line-clamp-2 font-DanaRegular mb-2 h-10 overflow-hidden`}>
 					{product.description ?? ''}
 				</p>
 
@@ -333,15 +337,15 @@ export const ProductCard = memo(function ProductCard({
 				<div className="mt-auto flex items-center justify-between gap-2 pt-3 border-t border-gray-100 dark:border-white/5">
 					<div className="flex flex-col">
 						{showDiscount && crossedPrice > displayPrice && (
-							<span className="text-[11px] sm:text-xs text-gray-400 line-through font-DanaRegular">
+							<span className={`text-[11px] sm:text-xs ${aurora ? 'text-white/60' : 'text-gray-400'} line-through font-DanaRegular`}>
 								{fmt.price(crossedPrice)}
 							</span>
 						)}
 						<div className="flex items-center gap-1">
-							<span className="font-DanaDemiBold text-[15px] sm:text-lg text-gray-900 dark:text-white">
+							<span className={`font-DanaDemiBold text-[15px] sm:text-lg ${aurora ? 'text-white' : 'text-gray-900 dark:text-white'}`}>
 								{fmt.price(displayPrice)}
 							</span>
-							<span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 font-DanaMedium mr-0.5 sm:mr-1">
+							<span className={`text-[10px] sm:text-xs ${aurora ? 'text-white/70' : 'text-gray-500 dark:text-gray-400'} font-DanaMedium mr-0.5 sm:mr-1`}>
 								{t['common.toman']}
 							</span>
 						</div>

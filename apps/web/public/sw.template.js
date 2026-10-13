@@ -91,11 +91,38 @@ async function offlineResponse() {
   )
 }
 
+/**
+ * stage-60 — سقفِ زمانیِ fetch (باگ «فریز PWA بعد از ~۲ ساعت»): اتصالِ
+ * سیاه‌چاله‌ی موبایل fetch را برای همیشه معلق می‌گذاشت — بدون پاسخ، بدون
+ * خطا، روت pending. حالا بعد از سقف، AbortController اتصال را «واقعاً»
+ * قطع می‌کند و مسیرِ آفلاین/503 همان قبلی است (مثل خطای شبکه).
+ * (بدون AbortSignal.timeout — مرورگرهای قدیمیِ PWA پشتیبانیش ندارند.)
+ */
+const NAV_FETCH_TIMEOUT_MS = 20_000
+const API_FETCH_TIMEOUT_MS = 20_000
+
+/** رقابتِ promise با تایمر — برنده‌ی اول؛ اتصالِ بازنده abort می‌شود */
+async function fetchWithTimeout(request, ms) {
+  const controller = new AbortController()
+  let timer = null
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      reject(new Error(`[sw] fetch timeout after ${ms}ms`))
+    }, ms)
+  })
+  try {
+    return await Promise.race([fetch(request, { signal: controller.signal }), timeoutPromise])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 /** ناوبری — شبکه با یک retry؛ آفلاین → offline.html */
 async function handleNavigation(request) {
   // تلاش اول
   try {
-    return await fetch(request)
+    return await fetchWithTimeout(request, NAV_FETCH_TIMEOUT_MS)
   } catch {
     // نادیده — پایین retry می‌کنیم
   }
@@ -103,7 +130,7 @@ async function handleNavigation(request) {
   // فشار لحظه‌ای سرور) با یک تلاش دوم و مکث کوتاه رفع می‌شوند.
   await new Promise((r) => setTimeout(r, 600))
   try {
-    return await fetch(request)
+    return await fetchWithTimeout(request, NAV_FETCH_TIMEOUT_MS)
   } catch {
     return offlineResponse()
   }
@@ -112,7 +139,7 @@ async function handleNavigation(request) {
 /** API — network-only (بدون کش؛ مالی هرگز کش نمی‌شود) */
 async function handleApi(request) {
   try {
-    return await fetch(request)
+    return await fetchWithTimeout(request, API_FETCH_TIMEOUT_MS)
   } catch {
     return new Response(
       JSON.stringify({ error: { code: 'OFFLINE', message: 'اتصال اینترنت قطع است.' } }),

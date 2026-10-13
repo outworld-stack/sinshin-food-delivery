@@ -7,7 +7,7 @@
 
 // src/i18n/apiErrors.ts
 // رارد ۳۳ — نقشه‌ی خطای API برای زبان عربی (تصمیم کاربر):
-//   ۱) «۱۰ کد عمومی» apps/api/src/domain/shared/errors.ts — VALIDATION_ERROR
+//   ۱) «۱۱ کد عمومی» apps/api/src/domain/shared/errors.ts — VALIDATION_ERROR
 //      تا INTERNAL_ERROR (به‌جز DEVICE_LIMIT_REACHED که عدد دارد و جدا رندر
 //      می‌شود).
 //   ۲) «پیام‌های مسیر مشتری» — متن‌های فارسیِ سرور که در توست‌های مشتری دیده
@@ -34,6 +34,9 @@ const CODES_AR: Record<string, string> = {
         NOT_FOUND: 'لم يتم العثور على العنصر المطلوب.',
         CONFLICT: 'هذا العنصر موجود مسبقاً.',
         RATE_LIMITED: 'عدد الطلبات كبير؛ حاول مرة أخرى بعد قليل.',
+        // stage-60 — سقف شماره‌های هر دستگاه (پیام ثابت؛ فارسی = همان پیام سرور)
+        DEVICE_PHONE_LIMIT:
+                'هذا الجهاز مسجل مسبقاً بأرقام أخرى ووصل إلى الحد المسموح. تواصل مع الدعم لإضافة رقم آخر.',
         BANNED: 'تم حظر حسابك.',
         SERVICE_UNAVAILABLE: 'الخدمة غير متاحة مؤقتاً؛ حاول بعد قليل.',
         INTERNAL_ERROR: 'حدث خطأ داخلي في الخادم.',
@@ -177,7 +180,7 @@ export function arApiErrorMessage(
                 return 'تم بلوغ الحد الأقصى للأجهزة. لإضافة جهاز جديد، احذف أحد الأجهزة السابقة.'
         }
 
-        // ۴) کد عمومی — ۹ کد باقی
+        // ۴) کد عمومی — ۱۰ کد باقی
         const byCode = code ? CODES_AR[code] : undefined
         if (byCode) return byCode
 

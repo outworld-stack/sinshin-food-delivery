@@ -14,8 +14,11 @@ export function ArticleCard({ article }: ArticleCardProps) {
   const month = dateObj.toLocaleDateString(locale, { month: 'long' });
   const year = dateObj.toLocaleDateString(locale, { year: 'numeric' });
 
+  // stage-60 — کارت ویژه: پس‌زمینه‌ی Aurora + عنوان روشن
+  const aurora = article.isFeatured === true;
+
   return (
-    <div className="flex h-fit gap-x-2.5 sm:block p-2.5 md:pb-2 bg-gray-50 dark:bg-[#2a1015]/50 border border-gray-300 dark:border-[#3a151c] hover:shadow-md hover:shadow-gray-200/50 dark:hover:shadow-black/20 rounded-2xl transition-shadow duration-300">
+    <div className={`flex h-fit gap-x-2.5 sm:block p-2.5 md:pb-2 bg-gray-50 dark:bg-[#2a1015]/50 border border-gray-300 dark:border-[#3a151c] hover:shadow-md hover:shadow-gray-200/50 dark:hover:shadow-black/20 rounded-2xl transition-shadow duration-300${aurora ? ' aurora-card' : ''}`}>
 
       {/* عکس مقاله — سئو-۸: <img> واقعی به‌جای تصویر پس‌زمینه (alt + lazy) */}
       <Link
@@ -42,7 +45,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
         <Link
           to="/articles/$articleId"
           params={{ articleId: article.id }}
-          className="font-DanaMedium text-sm/7 mt-2.5 ml-1.5 sm:ml-0 sm:mt-0 md:text-lg line-clamp-2 max-w-48 text-zinc-700 dark:text-white hover:text-primary dark:hover:text-dark-primary transition-colors"
+          className={`font-DanaMedium text-sm/7 mt-2.5 ml-1.5 sm:ml-0 sm:mt-0 md:text-lg line-clamp-2 max-w-48 ${aurora ? 'text-white' : 'text-zinc-700 dark:text-white'} hover:text-primary dark:hover:text-dark-primary transition-colors`}
         >
           {article.title}
         </Link>

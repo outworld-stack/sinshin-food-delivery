@@ -17,6 +17,21 @@
 //        و product_sizes (discount_percentage + پنجره). NULL = بدون محدودیت (رفتار قبلی).
 // ═══════════════════════════════════════════════════════════════
 
+// ═════════════════════════════════════════════════════════════
+// stage-60 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/infra/db/schema/menu.ts
+// تغییر (راند ۲ — سه قابلیت):
+//   ۱) category_mains — اشتراک یک دسته بین چند دسته‌ی اصلی (دسته‌ی
+//        «نوشیدنی» زیر هم «رستوران» و «فست‌فود»). mainCategoryId
+//        می‌ماند = والد اولیه (primary)؛ جدول فقط لینک‌های اضافه را
+//        نگه می‌دارد تا کوئری‌های FK قدیمی دست‌نخورده بمانند.
+//   ۲) product_categories — چند-دسته‌ای شدن محصول (M2M). categoryId
+//        می‌ماند = دسته‌ی اولیه (primary؛ مسیر پول/کوپن/SSE همان
+//        می‌ماند)؛ جدول فقط دسته‌های اضافه را نگه می‌دارد.
+//   ۳) products.is_featured — پرچم «همیشه جزو ۴ آیتم اول» با فیلتر/دسته
+//        هرچه باشد (UI فرانت پس‌زمینه Aurora می‌گیرد).
+// ═════════════════════════════════════════════════════════════
+
 //src/infra/db/schema/menu.ts
 import {
   boolean,
@@ -24,6 +39,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -159,12 +175,21 @@ export const products = pgTable(
     dineInAllowed: boolean('dine_in_allowed').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * stage-60 — پرچم «ویژه/سنجاق» محصول: آیتم علامت‌خورده در فرانت
+     * فارغ از فیلتر/مرتب‌سازی/دسته‌ی انتخابی کاربر، همیشه در ۴ خانه‌ی
+     * اول لیست (جای دقیق تصادفی) می‌نشیند و کارتش پس‌زمینه Aurora
+     * می‌گیرد. صرفاً پرچم داده است — منطق چینش کامل سمت فرانت است.
+     */
+    isFeatured: boolean('is_featured').notNull().default(false),
   },
   (t) => [
     index('products_category_idx').on(t.categoryId),
     index('products_status_idx').on(t.status),
     /** stage-56 — یکتاییِ slug (NULLهای تکراری مجازند — محصولات بدون slug) */
     uniqueIndex('products_slug_key').on(t.slug),
+    /** stage-60 — جست‌وجوی سریع آیتم‌های سنجاق‌شده (لیست عمومی/ادمین) */
+    index('products_featured_idx').on(t.isFeatured),
   ],
 )
 
@@ -199,5 +224,59 @@ export const productSizes = pgTable(
   (t) => [
     index('product_sizes_product_idx').on(t.productId),
     uniqueIndex('product_sizes_product_name_key').on(t.productId, t.name),
+  ],
+)
+
+/**
+ * stage-60 — اشتراک دسته بین چند دسته‌ی اصلی (رستوران + فست‌فود).
+ * ⚠️ فقط «لینک‌های اضافه» را نگه می‌دارد؛ والدِ اولیه همان
+ * categories.mainCategoryId است و هرگز در این جدول تکرار نمی‌شود
+ * (کوئری‌های خواندن = FK اصلی ∪ این جدول؛ بدون ریسک تکرار ردیف).
+ * حذف دسته/والد → cascade لینک‌ها؛ ردیف دسته یکی می‌ماند.
+ */
+export const categoryMains = pgTable(
+  'category_mains',
+  {
+    categoryId: uuid('category_id')
+      .notNull()
+      .$type<CategoryId>()
+      .references(() => categories.id, { onDelete: 'cascade' }),
+    mainId: uuid('main_id')
+      .notNull()
+      .$type<MainCategoryId>()
+      .references(() => mainCategories.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.categoryId, t.mainId] }),
+    index('category_mains_main_idx').on(t.mainId),
+  ],
+)
+
+/**
+ * stage-60 — چند-دسته‌ای شدن محصول (M2M): یک محصول با دسته‌ی اولیه‌ی
+ * «کباب‌ها» می‌تواند در «خوش‌مزه‌ها» هم دیده شود.
+ * ⚠️ فقط «دسته‌های اضافه» را نگه می‌دارد؛ دسته‌ی اولیه همان
+ * products.categoryId است و هرگز در این جدول تکرار نمی‌شود:
+ *   • مسیر پول (سبد/چک‌اوت/کوپن با p.category_id خام) دست‌نخورده
+ *   • SSE/حالت‌های سفارش از دسته‌ی اولیه ارث می‌برند (سازگار با قبل)
+ *   • کوئری‌ها = FK اصلی ∪ این جدول (بدون join → بدون تکرار محصول)
+ */
+export const productCategories = pgTable(
+  'product_categories',
+  {
+    productId: uuid('product_id')
+      .notNull()
+      .$type<ProductId>()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    categoryId: uuid('category_id')
+      .notNull()
+      .$type<CategoryId>()
+      .references(() => categories.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.productId, t.categoryId] }),
+    index('product_categories_category_idx').on(t.categoryId),
   ],
 )

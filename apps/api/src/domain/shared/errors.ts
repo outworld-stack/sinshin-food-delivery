@@ -7,6 +7,7 @@ export type AppErrorCode =
   | 'CONFLICT'
   | 'RATE_LIMITED'
   | 'DEVICE_LIMIT_REACHED'
+  | 'DEVICE_PHONE_LIMIT'
   | 'BANNED'
   | 'INTERNAL_ERROR'
   | 'SERVICE_UNAVAILABLE'
@@ -66,6 +67,15 @@ export const Err = {
       `حداکثر ${max} دستگاه مجاز است. برای افزودن دستگاه جدید، یکی از دستگاه‌های قبلی را حذف کنید.`,
       409,
       { max },
+    ),
+
+  /** stage-60 — سقف شماره‌های متمایزِ هر دستگاه (ثبت‌نام شماره‌ی جدید فراتر از سقف) */
+  devicePhoneLimit: (limit: number) =>
+    new AppError(
+      'DEVICE_PHONE_LIMIT',
+      'این دستگاه قبلاً با شماره‌های دیگری ثبت‌نام شده و به سقف مجاز رسیده است. برای افزودن شماره‌ی بیشتر با پشتیبانی تماس بگیرید.',
+      409,
+      { limit },
     ),
 
   banned: (msg = 'حساب کاربری شما مسدود شده است.') =>

@@ -8,7 +8,8 @@
 // src/lib/api-client.ts
 import { treaty } from '@elysiajs/eden'
 import { apiRoot } from '#/lib/api'
-import { getAccessToken, onUnauthorized, tryRefresh } from '#/lib/auth-session'
+import { fetchWithTimeout } from '#/lib/api-fetch'
+import { getAccessToken, tryRefresh } from '#/lib/auth-session'
 import { langHeaders } from '#/lib/lang-header'
 import type { App } from '../../../api/src/app-type'
 
@@ -22,16 +23,18 @@ async function authFetch(url: any, options: any): Promise<Response> {
   }
   if (token) headers['authorization'] = `Bearer ${token}`
 
-  const res = await fetch(url, { ...options, headers, credentials: 'include' })
+  // stage-60 — سقف ۳۰s (همان api-fetch) — treaty خودش سیگنالی نمی‌فرستاد
+  const res = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' })
 
   if (res.status === 401) {
     const refreshed = await tryRefresh()
     if (refreshed) {
       const newToken = getAccessToken()
       if (newToken) headers['authorization'] = `Bearer ${newToken}`
-      return fetch(url, { ...options, headers, credentials: 'include' })
+      return fetchWithTimeout(url, { ...options, headers, credentials: 'include' })
     }
-    onUnauthorized()
+    // stage-60 — خروج فقط داخلِ خود tryRefresh (401/403 قطعی از refresh)؛
+    // 429/5xx/شبکه → بدون خروج — همین res (401) به Eden برمی‌گردد.
   }
   return res
 }

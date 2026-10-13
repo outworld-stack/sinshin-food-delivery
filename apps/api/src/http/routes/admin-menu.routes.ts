@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-60 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
+// تغییر:
+//   ۱) دسته‌ها: mainCategoryIds[] (چند-والدی؛ اول = والدِ اولیه) —
+//        mainCategoryId تک‌مقداری برای سازگاری باقی می‌ماند (اختیاری)
+//   ۲) محصولات: categoryIds[] (M2M؛ اول = دسته‌ی اولیه) در POST و
+//        PATCH (دیگر immutable نیست) + isFeatured (پرچم سنجاق)
+//
 // stage-56 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/admin-menu.routes.ts
 // تغییر:
@@ -117,6 +125,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       ({ body }) =>
         deps.menu.createCategory({
           name: body.name,
+          // stage-60 — چند-والدی: آرایه مبناست؛ کلاینت قدیمی = تک‌مقداری
+          mainCategoryIds: body.mainCategoryIds,
           mainCategoryId: body.mainCategoryId,
           hasSizes: body.hasSizes ?? false,
           sizeNames: body.sizeNames ?? [],
@@ -130,7 +140,12 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 60 }),
-          mainCategoryId: t.String({ pattern: UUID_PATTERN }),
+          // stage-60 — چند-والدی: همه‌ی والدها (اول = والدِ اولیه؛ ≤۸)
+          mainCategoryIds: t.Optional(
+            t.Array(t.String({ pattern: UUID_PATTERN }), { minItems: 1, maxItems: 8 }),
+          ),
+          // سازگاری با کلاینت قدیمی (تک‌والد) — سرویس آرایه را ترجیح می‌دهد
+          mainCategoryId: t.Optional(t.String({ pattern: UUID_PATTERN })),
           hasSizes: t.Optional(t.Boolean()),
           sizeNames: t.Optional(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 })),
           // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
@@ -150,6 +165,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         deps.menu.updateCategory({
           id: params.id,
           name: body.name,
+          // stage-60 — چند-والدی: آرایه مبناست (نیامد = دست‌نخورده)
+          mainCategoryIds: body.mainCategoryIds,
           mainCategoryId: body.mainCategoryId,
           hasSizes: body.hasSizes ?? false,
           sizeNames: body.sizeNames ?? [],
@@ -164,7 +181,12 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 60 }),
-          mainCategoryId: t.String({ pattern: UUID_PATTERN }),
+          // stage-60 — چند-والدی: همه‌ی والدها (اول = والدِ اولیه؛ ≤۸)
+          mainCategoryIds: t.Optional(
+            t.Array(t.String({ pattern: UUID_PATTERN }), { minItems: 1, maxItems: 8 }),
+          ),
+          // سازگاری با کلاینت قدیمی (تک‌والد) — نیامد = دست‌نخورده
+          mainCategoryId: t.Optional(t.String({ pattern: UUID_PATTERN })),
           hasSizes: t.Optional(t.Boolean()),
           sizeNames: t.Optional(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 })),
           // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
@@ -252,7 +274,12 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           discountEndsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
           packagingCost: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
-          categoryId: t.String({ pattern: UUID_PATTERN }),
+          // stage-60 — M2M: همه‌ی دسته‌ها (اول = دسته‌ی اولیه؛ ≤۸).
+          // سازگاری: categoryId تک‌مقداری قدیمی هنوز پذیرفته می‌شود.
+          categoryIds: t.Optional(
+            t.Array(t.String({ pattern: UUID_PATTERN }), { minItems: 1, maxItems: 8 }),
+          ),
+          categoryId: t.Optional(t.String({ pattern: UUID_PATTERN })),
           profileImage: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
           galleryImages: t.Optional(t.Array(t.String({ maxLength: 500 }), { maxItems: 12 })),
           sizesEnabled: t.Optional(t.Boolean()),
@@ -267,6 +294,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           // stage-56 — slug انگلیسی سئوپسند (اختیاری؛ خالی = URL با UUID).
           // نرمال‌سازی + پیام دوستانه‌ی تکرار در سرویس انجام می‌شود.
           slug: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
+          // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora در فرانت)
+          isFeatured: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Create product (sizes replace-all on update)' },
       },
@@ -316,8 +345,18 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           dineInAllowed: t.Optional(t.Boolean()),
           // stage-56 — slug سئو (نیامد = دست‌نخورده؛ رشته/خالی = تنظیم/پاک‌سازی)
           slug: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
+          // stage-60 — M2M: همه‌ی دسته‌ها (اول = دسته‌ی اولیه؛ ≤۸).
+          // نیامد = دست‌نخورده؛ آرایه = همگام‌سازی کامل (دسته دیگر immutable نیست)
+          categoryIds: t.Optional(
+            t.Array(t.String({ pattern: UUID_PATTERN }), { minItems: 1, maxItems: 8 }),
+          ),
+          // stage-60 — پرچم ویژه/سنجاق (نیامد = دست‌نخورده)
+          isFeatured: t.Optional(t.Boolean()),
         }),
-        detail: { summary: 'Update product — categoryId immutable (frontend contract)' },
+        detail: {
+          summary:
+            'Update product — categoryIds optional (undefined = untouched; array = full M2M sync)',
+        },
       },
     )
     .post(

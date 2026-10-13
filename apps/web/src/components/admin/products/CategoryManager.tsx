@@ -32,7 +32,8 @@ interface CategoryFormState {
 	name: string
 	/** round-34 — نام عربی دسته */
 	nameAr: string
-	mainCategoryId: string
+	/** stage-60 — همه‌ی والدهای دسته (اولین = والد اصلی؛ تا ۸ عدد) */
+	mainCategoryIds: string[]
 	/** stage-48 — حالت‌های سفارش پایه (پیش‌فرض هر سه روشن = ارث کامل) */
 	courierEnabled: boolean
 	takeawayEnabled: boolean
@@ -45,7 +46,7 @@ const EMPTY_FORM: CategoryFormState = {
 	editingId: null,
 	name: '',
 	nameAr: '',
-	mainCategoryId: '',
+	mainCategoryIds: [],
 	courierEnabled: true,
 	takeawayEnabled: true,
 	dineInEnabled: true,
@@ -96,7 +97,7 @@ export const CategoryManager = memo(function CategoryManager({
 		mutationFn: (data: {
 			name: string
 			nameAr?: string | null
-			mainCategoryId: string
+			mainCategoryIds: string[]
 			courierEnabled: boolean
 			takeawayEnabled: boolean
 			dineInEnabled: boolean
@@ -117,7 +118,7 @@ export const CategoryManager = memo(function CategoryManager({
 			id: string
 			name: string
 			nameAr?: string | null
-			mainCategoryId: string
+			mainCategoryIds: string[]
 			courierEnabled: boolean
 			takeawayEnabled: boolean
 			dineInEnabled: boolean
@@ -162,7 +163,10 @@ export const CategoryManager = memo(function CategoryManager({
 					editingId: cat.id,
 					name: cat.name,
 					nameAr: cat.nameAr ?? '',
-					mainCategoryId: cat.mainCategoryId,
+					// stage-60 — همه‌ی والدها از سرور (fallback: والد قدیمی)
+					mainCategoryIds: cat.mainCategoryIds?.length
+							? [...cat.mainCategoryIds]
+							: [cat.mainCategoryId],
 					// stage-48 — هیدراته از حالت‌های دسته (بدون مقدار = legacy ⇒ روشن)
 					courierEnabled: cat.courierEnabled ?? true,
 					takeawayEnabled: cat.takeawayEnabled ?? true,
@@ -174,7 +178,7 @@ export const CategoryManager = memo(function CategoryManager({
 					editingId: null,
 					name: '',
 					nameAr: '',
-					mainCategoryId: '',
+					mainCategoryIds: [],
 					courierEnabled: true,
 					takeawayEnabled: true,
 					dineInEnabled: true,
@@ -191,14 +195,16 @@ export const CategoryManager = memo(function CategoryManager({
 			showToast('لطفا نام دسته را وارد کنید', 'error')
 			return
 		}
-		if (!form.mainCategoryId) {
+		// stage-60 — حداقل یک والد (چیپ‌های چند-والدی)
+		if (form.mainCategoryIds.length === 0) {
 			showToast('دسته اصلی را انتخاب کنید', 'error')
 			return
 		}
 		const payload = {
 			name: form.name.trim(),
 			nameAr: form.nameAr.trim() || null,
-			mainCategoryId: form.mainCategoryId,
+			// stage-60 — آرایه‌ی والدها (اولین = والد اصلی)
+			mainCategoryIds: form.mainCategoryIds,
 			courierEnabled: form.courierEnabled,
 			takeawayEnabled: form.takeawayEnabled,
 			dineInEnabled: form.dineInEnabled,
@@ -288,22 +294,52 @@ export const CategoryManager = memo(function CategoryManager({
 						<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white">
 							{form.editingId ? 'ویرایش دسته' : 'دسته جدید'}
 						</h3>
+						{/* stage-60 — والدین دسته: چیپ‌های چند-والدی (اشتراک بین تب‌ها) */}
 						<div>
 							<label className="block text-xs text-gray-400 mb-1">
-								دسته اصلی (والد)
+								دسته‌های اصلی (والدها)
 							</label>
-							<select
-								value={form.mainCategoryId}
-								onChange={(e) => set({ mainCategoryId: e.target.value })}
-								className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer"
-							>
-								<option value="">انتخاب کنید...</option>
-								{(allMains ?? []).map((mc) => (
-									<option key={mc.id} value={mc.id}>
-										{mc.name}
-									</option>
-								))}
-							</select>
+							<div className="p-2.5 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
+								<div className="flex flex-wrap gap-2">
+									{(allMains ?? []).map((mc) => {
+										const idx = form.mainCategoryIds.indexOf(mc.id)
+										const selected = idx !== -1
+										const isPrimary = idx === 0
+										const atLimit = !selected && form.mainCategoryIds.length >= 8
+										return (
+											<button
+												key={mc.id}
+												type="button"
+												aria-pressed={selected}
+												disabled={atLimit}
+												onClick={() =>
+													set({
+														mainCategoryIds: selected
+															? form.mainCategoryIds.filter((id) => id !== mc.id)
+															: [...form.mainCategoryIds, mc.id],
+													})
+												}
+												className={`px-3 py-1.5 rounded-lg border text-xs font-DanaMedium transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+														selected
+																? 'border-primary dark:border-dark-primary bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary'
+																: 'border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-[#4a1a23]'
+														}`}
+											>
+												{mc.name}
+												{isPrimary && (
+													<span className="mr-1.5 px-1.5 py-0.5 rounded-md bg-primary dark:bg-dark-primary text-white text-[9px] font-DanaDemiBold">
+														والد اصلی
+													</span>
+												)}
+											</button>
+										)
+									})}
+								</div>
+								<p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
+									اولین والد = والد اصلی؛ بقیه = والدهای اشتراکی (دسته در همه‌ی تب‌های
+									انتخاب‌شده دیده می‌شود) — حداکثر ۸ والد.
+								</p>
+							</div>
 						</div>
 
 						<div>

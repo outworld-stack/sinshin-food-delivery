@@ -5,6 +5,13 @@
 // کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// stage-60 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/article/article.service.ts
+// تغییر: isFeatured (پرچم سنجاق ویژه) — ورودی create/update +
+//        گذر کامل در toView/toSummary/joinedSummary (۴ آیتم اول فرانت)
+//
+
 // src/domain/article/article.service.ts
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 
@@ -46,6 +53,8 @@ export interface ArticleView {
     contentAr?: string | null
     processesAr?: { title: string; items: string[] }[] | null
     arAuto?: boolean
+    /** stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora در فرانت) */
+    isFeatured?: boolean
 }
 
 /**
@@ -82,13 +91,15 @@ export interface ArticleInput {
     excerptAr?: string | null
     contentAr?: string | null
     processesAr?: { title: string; items: string[] }[] | null
+    /** stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora) */
+    isFeatured?: boolean
 }
 
 type ArticleRow = typeof articles.$inferSelect
 /** ردیف سبک لیست — دقیقاً ستون‌هایی که joinedSummary انتخاب می‌کند */
 type ArticleSummaryRow = Pick<
     ArticleRow,
-    'id' | 'title' | 'excerpt' | 'author' | 'profileImage' | 'categoryId' | 'subCategoryId' | 'views' | 'status' | 'createdAt' | 'titleAr' | 'excerptAr'
+    'id' | 'title' | 'excerpt' | 'author' | 'profileImage' | 'categoryId' | 'subCategoryId' | 'views' | 'status' | 'createdAt' | 'titleAr' | 'excerptAr' | 'isFeatured'
 >
 type CategoryRow = typeof articleCategories.$inferSelect
 type SubRow = typeof articleSubCategories.$inferSelect
@@ -272,6 +283,8 @@ export class ArticleService {
                 galleryImages: input.galleryImages ?? [],
                 processes: input.processes ?? [],
                 status: 'ACTIVE',
+                // stage-60 — پرچم ویژه/سنجاق
+                isFeatured: input.isFeatured ?? false,
             })
             .returning()
         if (!created) throw Err.internal('ذخیره‌سازی مقاله ناموفق بود.')
@@ -301,6 +314,8 @@ export class ArticleService {
                 galleryImages: input.galleryImages ?? [],
                 processes: input.processes ?? [],
                 updatedAt: new Date(),
+                // stage-60 — پرچم ویژه/سنجاق (undefined = دست‌نخورده)
+                ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
                 // author فقط وقتی فرستاده شده — ویرایشِ بدون author، نویسنده را ریست نمی‌کند
                 ...(input.author !== undefined ? { author: input.author.trim() || 'سین شین' } : {}),
             })
@@ -479,6 +494,8 @@ export class ArticleService {
                     // round-34 — برای COALESCE در toSummary (بدون content سنگین)
                     titleAr: articles.titleAr,
                     excerptAr: articles.excerptAr,
+                    // stage-60 — پرچم سنجاق ویژه در لیست سبک
+                    isFeatured: articles.isFeatured,
                 },
                 c: articleCategories,
                 s: articleSubCategories,
@@ -564,6 +581,8 @@ export class ArticleService {
                     arAuto: a.arAuto,
                 }
                 : {}),
+            // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora)
+            isFeatured: a.isFeatured ?? false,
         }
     }
 
@@ -589,6 +608,8 @@ export class ArticleService {
             categoryName: c ? pickAr(lang, c.nameAr, c.name) : null,
             subCategorySlug: s?.slug ?? null,
             subCategoryName: s ? pickAr(lang, s.nameAr, s.name) : null,
+            // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora)
+            isFeatured: a.isFeatured ?? false,
         }
     }
 }

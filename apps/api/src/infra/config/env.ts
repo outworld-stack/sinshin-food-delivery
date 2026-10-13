@@ -98,6 +98,8 @@ export interface DeviceConfig {
   autoblockScore: number
   referralBlockAfter: number
   similarityWindowDays: number
+  /** stage-60 — سقف شماره‌های متمایزِ مجاز برای هر دستگاه؛ ۰ = خاموش (پیش‌فرض ۲) */
+  maxPhonesPerDevice: number
 }
 
 /** round-19 — دیده‌بان سلامت: پیامک هنگام قطعی/برگشت db/redis/uploads */
@@ -293,11 +295,16 @@ export class AppConfig {
       timeoutMs: num('PAYMENT_TIMEOUT_MS', 15_000),
     }
 
+    // stage-60 — سقف شماره‌های هر دستگاه؛ الگوی Number(x) || default عددِ صفر
+    // را می‌بلعد، پس جداگانه parse می‌شود: خالی/NaN/منفی → پیش‌فرض ۲، صفر → خاموش
+    const maxPhonesRaw = source['DEVICE_MAX_PHONES_PER_DEVICE']?.trim()
+    const maxPhones = maxPhonesRaw ? Number(maxPhonesRaw) : NaN
     this.device = {
       linkThreshold: Number(source['DEVICE_LINK_THRESHOLD']) || 0.7,
       autoblockScore: Number(source['DEVICE_AUTOBLOCK_SCORE']) || 80,
       referralBlockAfter: Number(source['DEVICE_REFERRAL_BLOCK_AFTER']) || 3,
       similarityWindowDays: Number(source['DEVICE_SIMILARITY_WINDOW_DAYS']) || 7,
+      maxPhonesPerDevice: Number.isFinite(maxPhones) && maxPhones >= 0 ? maxPhones : 2,
     }
 
     // round-19 — بدون HEALTH_ALERT_PHONES، ادمین‌های اصلی گیرنده‌اند

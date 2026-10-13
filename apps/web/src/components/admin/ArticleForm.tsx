@@ -10,6 +10,8 @@ import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { articleCategoriesOptions } from '#/utils/queryOptions'
 import { ImageField } from '#/components/shared/ImageField'
+import { Toggle } from '#/components/shared/Toggle'
+import { Star } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
 import { Link } from '@tanstack/react-router'
 import { useToastStore } from '#/stores/toastStore'
@@ -30,6 +32,8 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     categoryId: '',
     subCategoryId: null,
     processes: [],
+    // stage-60 — پرچم «ویژه/سنجاق‌شده»
+    isFeatured: false,
     // round-34 — فیلدهای عربی (خالی = پشتیبان فارسی)
     titleAr: '',
     excerptAr: '',
@@ -50,6 +54,8 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         galleryImages: initialData.galleryImages || [],
         categoryId: initialData.categoryId || '',
         subCategoryId: initialData.subCategoryId || null,
+        // stage-60 — پرچم «ویژه» (نیامد = خاموش)
+        isFeatured: initialData.isFeatured ?? false,
         processes: initialData.processes?.map((p) => ({ title: p.title, items: p.items || [] })) || [],
         // round-34 — مقادیر عربی ذخیره‌شده (روندها: موازی با ایندکس processes)
         titleAr: initialData.titleAr || '',
@@ -162,6 +168,25 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
           </select>
         </div>
       )}
+
+      {/* stage-60 — مقاله ویژه (سنجاق‌شده): همیشه جزو ۴ آیتم اول + Aurora */}
+      <div className={`flex items-center justify-between gap-3 p-3 rounded-xl border transition ${formData.isFeatured ? 'border-primary bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/5' : 'border-gray-200 dark:border-[#3a151c]'}`}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${formData.isFeatured ? 'bg-primary/10 text-primary dark:bg-dark-primary/10 dark:text-dark-primary' : 'bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500'}`}>
+            <Star size={16} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-DanaDemiBold text-gray-700 dark:text-gray-200">مقاله ویژه (سنجاق‌شده)</p>
+            <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+              این مقاله فارغ از فیلتر دسته/زیردسته و مرتب‌سازی، همیشه در ۴ آیتم اول لیست می‌نشیند و کارتش پس‌زمینه‌ی Aurora می‌گیرد.
+            </p>
+          </div>
+        </div>
+        <Toggle
+          isOn={formData.isFeatured}
+          onToggle={() => setFormData(prev => ({ ...prev, isFeatured: !prev.isFeatured }))}
+        />
+      </div>
 
       <div>
         <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">خلاصه مقاله (Excerpt)</label>

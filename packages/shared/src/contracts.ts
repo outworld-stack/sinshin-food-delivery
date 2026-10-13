@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-60 — sinshin-food-delivery
+// مسیر مقصد: packages/shared/src/contracts.ts
+// تغییر: Category.mainCategoryIds (اشتراک دسته بین چند والد) +
+//        Product.categoryIds (M2M محصول↔دسته) +
+//        Product.isFeatured / ArticleDto.isFeatured (سنجاق ویژه)
+// ═══════════════════════════════════════════════════════════════
+
 // stage-56 — sinshin-food-delivery
 // مسیر مقصد: packages/shared/src/contracts.ts
 // تغییر: Product.slug + ProductSize.image + UserOrdersData/MyOrdersSort
@@ -94,6 +101,11 @@ export interface MainCategory {
 export interface Category {
   id: CategoryId
   mainCategoryId: MainCategoryId
+  /**
+   * stage-60 — همه‌ی والدهای این دسته (اولیه اول، بعد لینک‌های اضافه از
+   * جدول category_mains). دسته‌ی مشترک در تب‌های چند والد دیده می‌شود.
+   */
+  mainCategoryIds?: MainCategoryId[]
   name: string
   /** round-34 — نام عربی (NULL = پشتیبان فارسی) */
   nameAr?: string | null
@@ -162,6 +174,12 @@ export interface Product {
   /** stage-10: هزینه بسته‌بندی هر واحد — فقط DELIVERY/PICKUP */
   packagingCost: number
   categoryId: CategoryId
+  /**
+   * stage-60 — همه‌ی دسته‌های این محصول (دسته‌ی اولیه اول، بعد دسته‌های
+   * اضافه از product_categories). فیلتر دسته‌ی فرانت با includes این
+   * آرایه کار می‌کند؛ categoryId/حالت‌های سفارش مبنای اولیه می‌مانند.
+   */
+  categoryIds?: CategoryId[]
   categoryName?: string
   profileImage: string | null
   galleryImages: string[]
@@ -177,6 +195,11 @@ export interface Product {
    * سرور روی هر پاسخ پرش می‌کند (منو/جزئیات/ادمین).
    */
   isAvailable: boolean
+  /**
+   * stage-60 — پرچم «ویژه/سنجاق»: آیتم علامت‌دار فارغ از فیلتر/دسته/مرتب‌سازی
+   * همیشه جزو ۴ آیتم اول لیست فرانت است + پس‌زمینه Aurora. گذر سروری صرف.
+   */
+  isFeatured?: boolean
   /** stage-48 — حالت‌های مؤثر سفارش = دسته AND محصول (سروری) */
   courierAllowed: boolean
   takeawayAllowed: boolean
@@ -539,6 +562,8 @@ export interface ArticleDto {
   contentAr?: string | null
   processesAr?: { title: string; items: string[] }[] | null
   arAuto?: boolean
+  /** stage-60 — پرچم «ویژه/سنجاق» مقاله (۴ آیتم اول لیست + Aurora) */
+  isFeatured?: boolean
 }
 
 /**

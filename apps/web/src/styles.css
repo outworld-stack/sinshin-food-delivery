@@ -314,6 +314,48 @@
   }
 }
 
+/* ═══ stage-60 — پس‌زمینه‌ی Aurora برای کارت‌های ویژه (سنجاق‌شده) ═══
+   چهار رنگ: primary + dark-primary + زرد + بنفش؛ انیمیشن جابه‌جایی نرم.
+   «در هر دو حالت روشن/تیره یکسان» — کلاس عام است و dark: ندارد.
+   نکته‌ی خوانایی: bg-white/bg-gray-50 کارت‌ها فقط background-color
+   می‌گذارند؛ background-image این کلاس روی آن می‌نشیند (کلاس‌های
+   تم دست نخورده می‌مانند). متن‌های مستقیم روی گرادیان (عنوان/توضیح/
+   قیمت) در خود کامپوننت‌ها با کلاس شرطی سفید می‌شوند — قانون
+   سراسری `.aurora-card *` عمداً نوشته نشد تا بج‌ها/چیپ‌های دارای
+   پس‌زمینه‌ی خودشان (تخفیف/حالت‌های سفارش/سایز) رنگ خود را
+   نگه دارند. */
+.aurora-card {
+  background-image: linear-gradient(120deg, #ed0741 0%, #2fd4d1 28%, #f5a623 55%, #8b5cf6 80%, #ed0741 100%);
+  background-size: 300% 300%;
+  animation: aurora-flow 14s ease-in-out infinite;
+  position: relative;
+}
+
+@keyframes aurora-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* پرده‌ی خوانایی: گرادیان را یکنواخت تیره می‌کند تا متن‌های روشن
+   خوانا بمانند؛ روی همه‌ی لایه‌های بدون z-index (شامل عکس) — ظاهر
+   یکدست تبلیغاتی. pointer-events:none ⇒ کلیک/هاور لینک‌ها و دکمه‌ی
+   سبد رد می‌شود؛ گوشه‌های گرد با overflow:hidden کارت کلیپ می‌شوند. */
+.aurora-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: linear-gradient(180deg, rgba(24,10,16,0.3), rgba(24,10,16,0.55));
+  pointer-events: none;
+}
+
 
 /* استایل‌های مخصوص پرینت — فقط ساختار #print-area (کارت QR معرف داشبورد
    کاربر). round-12: قواعد #dynamic-print-area حذف شدند — چاپ گزارشات/فاکتورها

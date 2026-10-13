@@ -27,7 +27,7 @@ function EditProductPage() {
 	)
 
 	// ورودی کاملاً تایپ‌دار (قبلاً data: any بود) —
-	// categoryId از اسکیمای update حذف شده — از طریق spread پاس می‌شه و سرور نادیده می‌گیره
+	// stage-60 — categoryIds حالا در PATCH هم می‌رود (دسته دیگر immutable نیست)
 	const mutation = useMutation({
 		mutationFn: (data: ProductFormData) =>
 			updateAdminProduct({ data: { id: productId, ...data } }),

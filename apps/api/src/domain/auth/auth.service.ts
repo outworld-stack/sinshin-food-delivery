@@ -110,6 +110,27 @@ export class AuthService {
       if (!opts.termsAccepted) {
         throw Err.validation('پذیرش قوانین برای ثبت‌نام الزامی است.')
       }
+
+      // ── stage-60 — سقف شماره‌های هر دستگاه: ثبت‌نام شماره‌ی جدیدِ فراتر از سقف رد ──
+      // فقط مسیر کاربر جدید؛ کاربران موجود (لاگین از همان دستگاه) هرگز بلاک نمی‌شوند.
+      const maxPhones = config.device.maxPhonesPerDevice
+      if (
+        config.deviceEnforcement &&
+        maxPhones > 0 &&
+        resolution.isNewPhoneForDevice &&
+        resolution.clusterPhoneCount >= maxPhones
+      ) {
+        await this.deps.devices.logEvent(
+          resolution.device.id,
+          phone,
+          'PHONE_LIMIT_BLOCKED',
+          ip,
+          signals.userAgent ?? null,
+          { phone, clusterPhoneCount: resolution.clusterPhoneCount, limit: maxPhones },
+        )
+        throw Err.devicePhoneLimit(maxPhones)
+      }
+
       const willBeRole = config.isSuperAdmin(phone) ? 'admin' : 'user'
 
       // ── معرف + REFERRAL_BLOCK ──

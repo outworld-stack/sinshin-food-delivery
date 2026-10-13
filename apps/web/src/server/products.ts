@@ -148,7 +148,8 @@ export async function deleteMainCategory(input: {
 export async function createCategory(input: {
 	data: {
 		name: string
-		mainCategoryId: string
+		/** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
+		mainCategoryIds: string[]
 		/** stage-48 — حالت‌های سفارش پایه (پیش‌فرض روشن) */
 		courierEnabled?: boolean
 		takeawayEnabled?: boolean
@@ -159,7 +160,8 @@ export async function createCategory(input: {
 }): Promise<AdminMutationResult> {
 	return authJson<AdminMutationResult>('/admin/menu/categories', 'POST', {
 		name: input.data.name,
-		mainCategoryId: input.data.mainCategoryId,
+		// stage-60 — آرایه‌ی والدها (اولین = والد اصلی)؛ سرور categoryId قدیمی را هم می‌پذیرد
+		mainCategoryIds: input.data.mainCategoryIds,
 		// stage-48 — حالت‌های سفارش (سایزبندی دیگر از دسته نمی‌آید)
 		courierEnabled: input.data.courierEnabled ?? true,
 		takeawayEnabled: input.data.takeawayEnabled ?? true,
@@ -172,7 +174,8 @@ export async function updateCategory(input: {
 	data: {
 		id: string
 		name: string
-		mainCategoryId: string
+		/** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
+		mainCategoryIds: string[]
 		/** stage-48 — حالت‌های سفارش پایه */
 		courierEnabled?: boolean
 		takeawayEnabled?: boolean
@@ -183,7 +186,8 @@ export async function updateCategory(input: {
 }): Promise<AdminMutationResult> {
 	await authJson<unknown>(`/admin/menu/categories/${input.data.id}`, 'PATCH', {
 		name: input.data.name,
-		mainCategoryId: input.data.mainCategoryId,
+		// stage-60 — سینک کامل والدها (اولین = والد اصلی)
+		mainCategoryIds: input.data.mainCategoryIds,
 		courierEnabled: input.data.courierEnabled ?? true,
 		takeawayEnabled: input.data.takeawayEnabled ?? true,
 		dineInEnabled: input.data.dineInEnabled ?? true,
@@ -329,7 +333,9 @@ export async function createAdminProduct(input: {
 			),
 			prepTime: input.data.prepTime,
 			packagingCost: input.data.packagingCost ?? 0,
-			categoryId: input.data.categoryId,
+			// stage-60 — آرایه‌ی دسته‌ها (اولین = اصلی) + پرچم ویژه
+			categoryIds: input.data.categoryIds,
+			isFeatured: input.data.isFeatured ?? false,
 			profileImage: input.data.profileImage || null, // '' → null
 			galleryImages: input.data.galleryImages ?? [],
 			sizesEnabled: input.data.sizesEnabled ?? false,
@@ -364,6 +370,9 @@ export async function updateAdminProduct(input: {
 			),
 			prepTime: input.data.prepTime,
 			packagingCost: input.data.packagingCost ?? 0,
+			// stage-60 — سینک کامل دسته‌ها (اولین = اصلی؛ دسته دیگر immutable نیست)
+			categoryIds: input.data.categoryIds,
+			isFeatured: input.data.isFeatured ?? false,
 			profileImage: input.data.profileImage || null,
 			galleryImages: input.data.galleryImages ?? [],
 			sizesEnabled: input.data.sizesEnabled ?? false,

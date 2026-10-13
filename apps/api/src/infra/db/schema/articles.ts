@@ -5,6 +5,13 @@
 // کامیت پیشنهادی: stage thirty
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// stage-60 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/infra/db/schema/articles.ts
+// تغییر: articles.is_featured — پرچم «ویژه/سنجاق» مقاله (همیشه جزو
+//        ۴ آیتم اول لیست مقالات + پس‌زمینه Aurora در فرانت)
+// ═══════════════════════════════════════════════════════════
+
 //src/infra/db/schema/articles.ts
 import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar, integer } from 'drizzle-orm/pg-core'
 
@@ -69,6 +76,11 @@ export const articles = pgTable(
     processesAr: jsonb('processes_ar').$type<{ title: string; items: string[] }[]>(),
     views: integer('views').notNull().default(0),
     status: varchar('status', { length: 20 }).notNull().default('ACTIVE'), // ACTIVE | INACTIVE
+    /**
+     * stage-60 — پرچم «ویژه/سنجاق» مقاله: در فرانت فارغ از فیلتر/مرتب‌سازی
+     * همیشه جزو ۴ آیتم اول (جای دقیق تصادفی) + پس‌زمینه Aurora.
+     */
+    isFeatured: boolean('is_featured').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -76,5 +88,7 @@ export const articles = pgTable(
     index('articles_category_idx').on(t.categoryId),
     index('articles_status_idx').on(t.status),
     index('articles_created_idx').on(t.createdAt),
+    /** stage-60 — جست‌وجوی سریع مقالات سنجاق‌شده */
+    index('articles_featured_idx').on(t.isFeatured),
   ],
 )

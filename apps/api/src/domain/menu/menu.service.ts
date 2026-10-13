@@ -26,8 +26,21 @@
 //   • پخش خودکار نوتیفیکیشن «تخفیف محصول» برای همه کاربران (بدون کرون)
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// stage-60 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
+// تغییر (راند ۲):
+//   ۱) اشتراک دسته بین چند والد — catsOfMain (FK ∪ category_mains)
+//        + create/updateCategory با mainCategoryIds + allCategories
+//        با mainCategoryIds در نمای عمومی
+//   ۲) M2M محصول↔دسته — productsByMain/adminProducts با شرط OR روی
+//        خودِ جدول products (بدون join → بدون تکرار) + categoryIds در
+//        همه‌ی DTOها (withSizes) + create/updateProduct با categoryIds
+//   ۳) isFeatured — ستون جدید، گذر کامل در DTO؛ منطق چینش سمت فرانت
+// ═══════════════════════════════════════════════════════════
+
 //src/domain/menu/menu.service.ts
-import { and, asc, desc, eq, ilike, inArray, ne, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, inArray, ne, or, sql, type SQL } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
@@ -36,7 +49,9 @@ import type { NotificationService } from '#/domain/notification/notification.ser
 import { VersionedCache } from '#/domain/shared/versioned-cache'
 import {
   categories,
+  categoryMains,
   mainCategories,
+  productCategories,
   productSizes,
   products,
 } from '#/infra/db/schema'
@@ -45,6 +60,7 @@ import {
   asMainCategoryId,
   asProductId,
   type CategoryId,
+  type MainCategoryId,
   type ProductId,
 } from '#/domain/shared/brand'
 import { nullIfEmpty, pickAr, pickArArr, type Lang } from '#/domain/shared/lang'
@@ -233,9 +249,11 @@ export async function loadCategoryModes(
  * nameAr/sizeNamesAr نگه داشته می‌شوند (فیلد اختیاری قرارداد shared؛ مصرف‌کننده‌ی
  * عمومی نادیده‌شان می‌گیرد، ادمین برای ویرایش می‌خواندش).
  */
-function categoryView(c: CategoryRow, lang: Lang) {
+function categoryView(c: CategoryRow, lang: Lang, mainIds?: MainCategoryId[]) {
   return {
     ...c,
+    // stage-60 — همه‌ی والدهای دسته (والدِ اولیه اول؛ برای فرم چند-والدی ادمین)
+    mainCategoryIds: mainIds ?? [c.mainCategoryId],
     name: pickAr(lang, c.nameAr, c.name),
     sizeNames: pickArArr(lang, c.sizeNamesAr, c.sizeNames ?? []),
   }
@@ -356,12 +374,36 @@ export class MenuService {
         where: and(eq(mainCategories.slug, slug), eq(mainCategories.isActive, true)),
       })
       if (!main) return []
-      const rows = await this.deps.db
-        .select()
-        .from(categories)
-        .where(eq(categories.mainCategoryId, main.id))
+      // stage-60 — دسته‌های این والد = FK اصلی ∪ لینک‌های اشتراک
+      const rows = await this.catsOfMain(main.id)
       return rows.map((c) => categoryView(c, lang))
     })
+  }
+
+  /**
+   * stage-60 — دسته‌های یک والد: فرزندانِ FK اصلی + دسته‌های مشترک از
+   * category_mains (بدون تکرار؛ والدِ اولیه اول). جدول اشتراک فقط
+   * «لینک‌های اضافه» را دارد، پس روی خودِ categories دوتایی رخ نمی‌دهد.
+   */
+  private async catsOfMain(mainId: MainCategoryId): Promise<CategoryRow[]> {
+    const primary = await this.deps.db
+      .select()
+      .from(categories)
+      .where(eq(categories.mainCategoryId, mainId))
+    const linked = await this.deps.db
+      .select({ cat: categories })
+      .from(categoryMains)
+      .innerJoin(categories, eq(categories.id, categoryMains.categoryId))
+      .where(eq(categoryMains.mainId, mainId))
+    const seen = new Set(primary.map((c) => c.id))
+    const out = [...primary]
+    for (const { cat } of linked) {
+      if (!seen.has(cat.id)) {
+        seen.add(cat.id)
+        out.push(cat)
+      }
+    }
+    return out
   }
 
   async productsByMain(slug: string, lang: Lang = 'fa') {
@@ -370,38 +412,75 @@ export class MenuService {
         where: and(eq(mainCategories.slug, slug), eq(mainCategories.isActive, true)),
       })
       if (!main) return { products: [] as ProductDto[], categories: [] }
-      const cats = await this.deps.db
-        .select()
-        .from(categories)
-        .where(eq(categories.mainCategoryId, main.id))
+      const cats = await this.catsOfMain(main.id)
       if (cats.length === 0) {
         return { products: [] as ProductDto[], categories: cats.map((c) => categoryView(c, lang)) }
       }
 
+      // stage-60 — محصولات این والد = دسته‌ی اولیه در دسته‌های این والد ∪
+      // لینک‌های اضافه‌ی product_categories به این دسته‌ها. شرط OR روی
+      // خودِ جدول products (بدون join) → هر محصول حداکثر یک‌بار برمی‌گردد.
+      const catIds = cats.map((c) => c.id)
+      const linkedIds = [
+        ...new Set(
+          (
+            await this.deps.db
+              .select({ productId: productCategories.productId })
+              .from(productCategories)
+              .where(inArray(productCategories.categoryId, catIds))
+          ).map((r) => r.productId),
+        ),
+      ]
+      const catCond = linkedIds.length
+        ? or(inArray(products.categoryId, catIds), inArray(products.id, linkedIds))
+        : inArray(products.categoryId, catIds)
+
       const rows = await this.deps.db
         .select()
         .from(products)
-        .where(
-          and(
-            inArray(
-              products.categoryId,
-              cats.map((c) => c.id),
-            ),
-            eq(products.status, 'ACTIVE'),
-          ),
-        )
+        .where(and(catCond, eq(products.status, 'ACTIVE')))
         .orderBy(desc(products.createdAt))
+
+      // stage-60 — دسته‌های اضافه‌ی هر محصول (categoryIds در DTO) +
+      // نام/حالتِ دسته‌ی اولیه‌ی محصولاتی که از والد دیگری آمده‌اند.
+      // حالت‌های سفارش همیشه از دسته‌ی اولیه — سازگار با سبد/چک‌اوت.
+      const links = rows.length
+        ? await this.deps.db
+          .select()
+          .from(productCategories)
+          .where(inArray(productCategories.productId, rows.map((r) => r.id)))
+        : []
+      const extraByProduct = new Map<ProductId, CategoryId[]>()
+      for (const l of links) {
+        const list = extraByProduct.get(l.productId) ?? []
+        list.push(l.categoryId)
+        extraByProduct.set(l.productId, list)
+      }
+      const categoryIdsMap = new Map<ProductId, CategoryId[]>(
+        rows.map((r) => [r.id, [r.categoryId, ...(extraByProduct.get(r.id) ?? [])]]),
+      )
+      const missingPrimary = [
+        ...new Set(rows.filter((r) => !cats.some((c) => c.id === r.categoryId)).map((r) => r.categoryId)),
+      ]
+      let catRows: CategoryRow[] = cats
+      if (missingPrimary.length > 0) {
+        const more = await this.deps.db
+          .select()
+          .from(categories)
+          .where(inArray(categories.id, missingPrimary))
+        catRows = [...cats, ...more]
+      }
 
       // round-34 — نام دسته هم COALESCE: categoryName در حالت عربی عربی می‌شود
       const catMap = new Map(
-        cats.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)] as const),
+        catRows.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)] as const),
       )
       // stage-48 — نقشه‌ی حالت‌های دسته برای محاسبه‌ی حالت مؤثر هر محصول
       const catModes = new Map(
-        cats.map((c) => [c.id, categoryModesOf(c)] as const),
+        catRows.map((c) => [c.id, categoryModesOf(c)] as const),
       )
       return {
-        products: await this.withSizes(rows, catMap, lang, { catModes }),
+        products: await this.withSizes(rows, catMap, lang, { catModes, categoryIdsMap }),
         categories: cats.map((c) => categoryView(c, lang)),
       }
     })
@@ -422,12 +501,20 @@ export class MenuService {
       const cat = await this.deps.db.query.categories.findFirst({
         where: eq(categories.id, row.categoryId),
       })
+      // stage-60 — دسته‌های اضافه‌ی محصول (categoryIds در جزئیات)
+      const extraCats = await this.deps.db
+        .select({ categoryId: productCategories.categoryId })
+        .from(productCategories)
+        .where(eq(productCategories.productId, row.id))
+      const categoryIdsMap = new Map<ProductId, CategoryId[]>([
+        [row.id, [row.categoryId, ...extraCats.map((l) => l.categoryId)]],
+      ])
       const list = await this.withSizes(
         [row],
         new Map([[row.categoryId, pickAr(lang, cat?.nameAr, cat?.name ?? '')]]),
         lang,
         // stage-48 — حالت مؤثر = دسته AND محصول
-        { catModes: new Map([[row.categoryId, categoryModesOf(cat)]]) },
+        { catModes: new Map([[row.categoryId, categoryModesOf(cat)]]), categoryIdsMap },
       )
       return list[0] ?? null
     }
@@ -439,11 +526,20 @@ export class MenuService {
   }
 
   async allCategories(lang: Lang = 'fa') {
-    return this.cache.cached(`cats:${lang}:all`, async () =>
-      (
-        await this.deps.db.select().from(categories).orderBy(asc(categories.name))
-      ).map((c) => categoryView(c, lang)),
-    )
+    return this.cache.cached(`cats:${lang}:all`, async () => {
+      const rows = await this.deps.db.select().from(categories).orderBy(asc(categories.name))
+      // stage-60 — والدهای اضافه‌ی هر دسته (فرم چند-والدی ادمین) — یک کوئری
+      const links = await this.deps.db.select().from(categoryMains)
+      const extraByCat = new Map<CategoryId, MainCategoryId[]>()
+      for (const l of links) {
+        const list = extraByCat.get(l.categoryId) ?? []
+        list.push(l.mainId)
+        extraByCat.set(l.categoryId, list)
+      }
+      return rows.map((c) =>
+        categoryView(c, lang, [c.mainCategoryId, ...(extraByCat.get(c.id) ?? [])]),
+      )
+    })
   }
 
   // ── قیمت‌گذاری ──
@@ -548,7 +644,9 @@ export class MenuService {
 
   async createCategory(input: {
     name: string
-    mainCategoryId: string
+    /** stage-60 — چند-والدی: همه‌ی والدها (اول = والدِ اولیه). سازگار با تک‌مقداری قدیمی */
+    mainCategoryIds?: string[]
+    mainCategoryId?: string
     hasSizes: boolean
     sizeNames: string[]
     /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
@@ -559,20 +657,43 @@ export class MenuService {
     takeawayEnabled?: boolean
     dineInEnabled?: boolean
   }): Promise<{ success: boolean; message?: string }> {
+    // stage-60 — حل والدها: آرایه مبناست؛ کلاینت قدیمی = تک‌مقداری
+    const mainList = input.mainCategoryIds?.length
+      ? input.mainCategoryIds
+      : input.mainCategoryId
+        ? [input.mainCategoryId]
+        : []
+    if (mainList.length === 0) {
+      return { success: false, message: 'انتخاب دسته‌ی اصلی (والد) الزامی است' }
+    }
+    const primaryMain = asMainCategoryId(mainList[0]!)
+    // لینک‌های اضافه = بقیه‌ی لیست (یکتا، بدون والدِ اولیه)
+    const extraMains = [...new Set(mainList.slice(1).map((m) => asMainCategoryId(m)))].filter(
+      (m) => m !== primaryMain,
+    )
     const slug = await this.uniqueCategorySlug(input.name.trim())
-    await this.deps.db.insert(categories).values({
-      name: input.name.trim(),
-      nameAr: nullIfEmpty(input.nameAr),
-      slug,
-      mainCategoryId: asMainCategoryId(input.mainCategoryId),
-      hasSizes: input.hasSizes,
-      sizeNames: input.hasSizes ? input.sizeNames : [],
-      sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
-      // stage-48 — حالت‌های سفارش (undefined = پیش‌فرض روشن)
-      courierEnabled: input.courierEnabled ?? true,
-      takeawayEnabled: input.takeawayEnabled ?? true,
-      dineInEnabled: input.dineInEnabled ?? true,
-    } as typeof categories.$inferInsert)
+    const [created] = await this.deps.db
+      .insert(categories)
+      .values({
+        name: input.name.trim(),
+        nameAr: nullIfEmpty(input.nameAr),
+        slug,
+        mainCategoryId: primaryMain,
+        hasSizes: input.hasSizes,
+        sizeNames: input.hasSizes ? input.sizeNames : [],
+        sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
+        // stage-48 — حالت‌های سفارش (undefined = پیش‌فرض روشن)
+        courierEnabled: input.courierEnabled ?? true,
+        takeawayEnabled: input.takeawayEnabled ?? true,
+        dineInEnabled: input.dineInEnabled ?? true,
+      } as typeof categories.$inferInsert)
+      .returning({ id: categories.id })
+    // stage-60 — لینک والدهای اضافه (دسته‌ی مشترک بین چند تب منو)
+    if (created && extraMains.length > 0) {
+      await this.deps.db
+        .insert(categoryMains)
+        .values(extraMains.map((mainId) => ({ categoryId: created.id, mainId })))
+    }
     await this.cache.invalidate()
     return { success: true }
   }
@@ -580,7 +701,9 @@ export class MenuService {
   async updateCategory(input: {
     id: string
     name: string
-    mainCategoryId: string
+    /** stage-60 — چند-والدی: همه‌ی والدها (اول = والدِ اولیه). نیامد = دست‌نخورده */
+    mainCategoryIds?: string[]
+    mainCategoryId?: string
     hasSizes: boolean
     sizeNames: string[]
     /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
@@ -596,12 +719,20 @@ export class MenuService {
     const before = await this.deps.db.query.categories.findFirst({
       where: eq(categories.id, catId),
     })
+    // stage-60 — والدها: آرایه مبناست (اول = والدِ اولیه)؛ نیامد = دست‌نخورده
+    const mainList =
+      input.mainCategoryIds !== undefined
+        ? input.mainCategoryIds
+        : input.mainCategoryId !== undefined
+          ? [input.mainCategoryId]
+          : undefined
+    const primaryMain = mainList?.length ? asMainCategoryId(mainList[0]!) : undefined
     await this.deps.db
       .update(categories)
       .set({
         name: input.name.trim(),
         nameAr: nullIfEmpty(input.nameAr),
-        mainCategoryId: asMainCategoryId(input.mainCategoryId),
+        ...(primaryMain !== undefined ? { mainCategoryId: primaryMain } : {}),
         hasSizes: input.hasSizes,
         sizeNames: input.hasSizes ? input.sizeNames : [],
         sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
@@ -610,6 +741,32 @@ export class MenuService {
         ...(input.dineInEnabled !== undefined ? { dineInEnabled: input.dineInEnabled } : {}),
       })
       .where(eq(categories.id, catId))
+
+    // stage-60 — همگام‌سازی والدهای اضافه (حذفِ خارج از لیست + درجِ جدید).
+    // جدول فقط لینک‌های اضافه را دارد؛ والدِ اولیه هرگز اینجا نمی‌نشیند.
+    if (mainList && mainList.length > 0 && primaryMain !== undefined) {
+      const extraMains = [...new Set(mainList.slice(1).map((m) => asMainCategoryId(m)))].filter(
+        (m) => m !== primaryMain,
+      )
+      const existing = await this.deps.db
+        .select()
+        .from(categoryMains)
+        .where(eq(categoryMains.categoryId, catId))
+      const keep = new Set(extraMains)
+      const staleMains = existing.filter((l) => !keep.has(l.mainId)).map((l) => l.mainId)
+      if (staleMains.length > 0) {
+        await this.deps.db
+          .delete(categoryMains)
+          .where(and(eq(categoryMains.categoryId, catId), inArray(categoryMains.mainId, staleMains)))
+      }
+      const have = new Set(existing.map((l) => l.mainId))
+      const missing = extraMains.filter((m) => !have.has(m))
+      if (missing.length > 0) {
+        await this.deps.db
+          .insert(categoryMains)
+          .values(missing.map((mainId) => ({ categoryId: catId, mainId })))
+      }
+    }
     await this.cache.invalidate()
 
     // stage-48 — تغییر حالت‌های دسته ⇒ همه‌ی محصولات ذیلش مؤثراً عوض می‌شوند →
@@ -626,6 +783,9 @@ export class MenuService {
 
   async deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
     const catId = asCategoryId(id)
+    // stage-60 — فقط محصولاتِ «دسته‌ی اولیه» مانع حذف‌اند (cascade آنها را
+    // می‌کشد)؛ لینک‌های product_categories با cascade پاک می‌شوند و محصول
+    // در دسته‌ی اولیه‌اش می‌ماند — بی‌خطر.
     const productCount = await this.deps.db
       .select({ count: sql<number>`count(*)::int` })
       .from(products)
@@ -655,7 +815,23 @@ export class MenuService {
       conditions.push(eq(products.status, filters.status))
     }
     if (filters.categoryId && filters.categoryId !== 'all') {
-      conditions.push(eq(products.categoryId, asCategoryId(filters.categoryId)))
+      // stage-60 — فیلتر دسته = دسته‌ی اولیه ∪ لینک اضافه (M2M)
+      const catId = asCategoryId(filters.categoryId)
+      const linkedIds = [
+        ...new Set(
+          (
+            await this.deps.db
+              .select({ productId: productCategories.productId })
+              .from(productCategories)
+              .where(eq(productCategories.categoryId, catId))
+          ).map((r) => r.productId),
+        ),
+      ]
+      conditions.push(
+        linkedIds.length
+          ? or(eq(products.categoryId, catId), inArray(products.id, linkedIds))!
+          : eq(products.categoryId, catId),
+      )
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
@@ -695,7 +871,24 @@ export class MenuService {
       ]),
     )
 
-    return { products: await this.withSizes(rows, catMap, undefined, { catModes }), total }
+    // stage-60 — دسته‌های اضافه‌ی هر محصول (categoryIds در پاسخ ادمین)
+    const links = rows.length
+      ? await this.deps.db
+        .select()
+        .from(productCategories)
+        .where(inArray(productCategories.productId, rows.map((r) => r.id)))
+      : []
+    const extraByProduct = new Map<ProductId, CategoryId[]>()
+    for (const l of links) {
+      const list = extraByProduct.get(l.productId) ?? []
+      list.push(l.categoryId)
+      extraByProduct.set(l.productId, list)
+    }
+    const categoryIdsMap = new Map<ProductId, CategoryId[]>(
+      rows.map((r) => [r.id, [r.categoryId, ...(extraByProduct.get(r.id) ?? [])]]),
+    )
+
+    return { products: await this.withSizes(rows, catMap, undefined, { catModes, categoryIdsMap }), total }
   }
 
   async adminProductDetails(id: string): Promise<ProductDto | null> {
@@ -709,10 +902,19 @@ export class MenuService {
     const cat = await this.deps.db.query.categories.findFirst({
       where: eq(categories.id, row.categoryId),
     })
+    // stage-60 — دسته‌های اضافه برای فرم ویرایش چند-دسته‌ای
+    const extraCats = await this.deps.db
+      .select({ categoryId: productCategories.categoryId })
+      .from(productCategories)
+      .where(eq(productCategories.productId, pid))
+    const categoryIdsMap = new Map<ProductId, CategoryId[]>([
+      [row.id, [row.categoryId, ...extraCats.map((l) => l.categoryId)]],
+    ])
     const list = await this.withSizes([row], new Map([[row.categoryId, cat?.name ?? '']]), 'fa', {
       includeAr: true,
       // stage-48 — حالت مؤثر = دسته AND محصول (فرم ادمین برای قفل سوئیچ‌ها)
       catModes: new Map([[row.categoryId, categoryModesOf(cat)]]),
+      categoryIdsMap,
     })
     return list[0] ?? null
   }
@@ -726,7 +928,9 @@ export class MenuService {
     discountStartsAt?: Date | string | null
     discountEndsAt?: Date | string | null
     prepTime: number
-    categoryId: string
+    /** stage-60 — چند-دسته‌ای: همه‌ی دسته‌ها (اول = دسته‌ی اولیه). سازگار با تک‌مقداری قدیمی */
+    categoryIds?: string[]
+    categoryId?: string
     packagingCost?: number
     profileImage?: string | null
     galleryImages?: string[]
@@ -749,6 +953,8 @@ export class MenuService {
      * نرمال‌سازی سروری + پیام دوستانه در تکرار.
      */
     slug?: string | null
+    /** stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora در فرانت) */
+    isFeatured?: boolean
   }): Promise<{ success: boolean; id?: string; message?: string }> {
     const nameAr = nullIfEmpty(input.nameAr)
     const descriptionAr = nullIfEmpty(input.descriptionAr)
@@ -763,6 +969,20 @@ export class MenuService {
       })
       if (clash) return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
     }
+    // stage-60 — حل دسته‌ها: آرایه مبناست؛ کلاینت قدیمی = تک‌مقداری
+    const catList = input.categoryIds?.length
+      ? input.categoryIds
+      : input.categoryId
+        ? [input.categoryId]
+        : []
+    if (catList.length === 0) {
+      return { success: false, message: 'انتخاب دسته‌ی محصول الزامی است' }
+    }
+    const primaryCat = asCategoryId(catList[0]!)
+    // لینک‌های اضافه = بقیه‌ی لیست (یکتا، بدون دسته‌ی اولیه)
+    const extraCats = [...new Set(catList.slice(1).map((c) => asCategoryId(c)))].filter(
+      (c) => c !== primaryCat,
+    )
     let created: typeof products.$inferSelect | undefined
     try {
       ;[created] = await this.deps.db
@@ -783,7 +1003,7 @@ export class MenuService {
           discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
           prepTime: input.prepTime,
           packagingCost: input.packagingCost ?? 0,
-          categoryId: asCategoryId(input.categoryId),
+          categoryId: primaryCat,
           profileImage: input.profileImage ?? null,
           galleryImages: input.galleryImages ?? [],
           sizesEnabled: input.sizesEnabled ?? false,
@@ -794,6 +1014,8 @@ export class MenuService {
           courierAllowed: input.courierAllowed ?? true,
           takeawayAllowed: input.takeawayAllowed ?? true,
           dineInAllowed: input.dineInAllowed ?? true,
+          // stage-60 — پرچم ویژه/سنجاق
+          isFeatured: input.isFeatured ?? false,
         } as typeof products.$inferInsert)
         .returning()
     } catch (e) {
@@ -807,6 +1029,12 @@ export class MenuService {
 
     if (input.sizesEnabled && input.sizes?.length) {
       await this.insertSizes(created.id, input.sizes)
+    }
+    // stage-60 — لینک دسته‌های اضافه (M2M) — فقط دسته‌های اضافه در جدول
+    if (extraCats.length > 0) {
+      await this.deps.db
+        .insert(productCategories)
+        .values(extraCats.map((categoryId) => ({ productId: created.id, categoryId })))
     }
     await this.cache.invalidate()
 
@@ -847,6 +1075,13 @@ export class MenuService {
      * رشته/null = تنظیم/پاک‌سازی (نرمال‌سازی سروری؛ خالی → null = UUID URL).
      */
     slug?: string | null
+    /**
+     * stage-60 — دسته‌های چندگانه (M2M): undefined = دست‌نخورده؛ آرایه =
+     * همگام‌سازی کامل (عنصر اول = دسته‌ی اولیه جدید؛ بقیه = لینک‌های اضافه).
+     */
+    categoryIds?: string[]
+    /** stage-60 — پرچم ویژه/سنجاق (undefined = دست‌نخورده) */
+    isFeatured?: boolean
   }): Promise<{ success: boolean; message?: string }> {
     const pid = asProductId(input.id)
     // stage-48 — ردیف قبلی: تشخیص تغییر موجودی/حالت (SSE) + تغییر تخفیف (پخش)
@@ -879,6 +1114,17 @@ export class MenuService {
       })
       if (clash) return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
     }
+    // stage-60 — دسته‌های چندگانه: undefined = دست‌نخورده؛ آرایه = همگام‌سازی
+    const catList = input.categoryIds
+    if (catList && catList.length === 0) {
+      return { success: false, message: 'لیست دسته‌های محصول نمی‌تواند خالی باشد' }
+    }
+    const primaryCat = catList ? asCategoryId(catList[0]!) : undefined
+    const extraCats = catList
+      ? [...new Set(catList.slice(1).map((c) => asCategoryId(c)))].filter(
+          (c) => c !== primaryCat,
+        )
+      : undefined
     try {
       await this.deps.db
         .update(products)
@@ -901,6 +1147,9 @@ export class MenuService {
           ...(input.packagingCost !== undefined ? { packagingCost: input.packagingCost } : {}),
           // stage-56 — slug: undefined = حفظ؛ رشته/خالی = تنظیم/پاک‌سازی
           ...(slug !== undefined ? { slug } : {}),
+          // stage-60 — دسته‌ی اولیه (undefined = حفظ) + پرچم ویژه/سنجاق
+          ...(primaryCat !== undefined ? { categoryId: primaryCat } : {}),
+          ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
           profileImage: input.profileImage ?? null,
           galleryImages: input.galleryImages ?? [],
           sizesEnabled: input.sizesEnabled ?? false,
@@ -919,6 +1168,31 @@ export class MenuService {
         return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
       }
       throw e
+    }
+
+    // ── stage-60: همگام‌سازی دسته‌های اضافه (M2M) ──
+    // حذفِ خارج از لیست + درجِ جدید؛ جدول فقط دسته‌های اضافه را دارد.
+    if (extraCats) {
+      const existing = await this.deps.db
+        .select()
+        .from(productCategories)
+        .where(eq(productCategories.productId, pid))
+      const keep = new Set(extraCats)
+      const staleCats = existing.filter((l) => !keep.has(l.categoryId)).map((l) => l.categoryId)
+      if (staleCats.length > 0) {
+        await this.deps.db
+          .delete(productCategories)
+          .where(
+            and(eq(productCategories.productId, pid), inArray(productCategories.categoryId, staleCats)),
+          )
+      }
+      const have = new Set(existing.map((l) => l.categoryId))
+      const missing = extraCats.filter((c) => !have.has(c))
+      if (missing.length > 0) {
+        await this.deps.db
+          .insert(productCategories)
+          .values(missing.map((categoryId) => ({ productId: pid, categoryId })))
+      }
     }
 
     // ── phase-2: آیدی پایدار سایزها ──
@@ -1086,6 +1360,8 @@ export class MenuService {
       includeAr?: boolean
       /** stage-48 — حالت‌های دسته برای محاسبه‌ی حالت مؤثر (نیامد = همه روشن) */
       catModes?: Map<CategoryId, OrderModes>
+      /** stage-60 — دسته‌های هر محصول (دسته‌ی اولیه اول)؛ نیامد = فقط اولیه */
+      categoryIdsMap?: Map<ProductId, CategoryId[]>
     },
   ): Promise<ProductDto[]> {
     const sizedIds = rows.filter((r) => r.sizesEnabled).map((r) => r.id)
@@ -1120,6 +1396,10 @@ export class MenuService {
       discountEndsAt: r.discountEndsAt?.toISOString() ?? null,
       packagingCost: r.packagingCost,
       categoryId: r.categoryId,
+      // stage-60 — همه‌ی دسته‌های محصول (دسته‌ی اولیه اول؛ فیلتر چند-دسته‌ای فرانت)
+      categoryIds: opts?.categoryIdsMap?.get(r.id) ?? [r.categoryId],
+      // stage-60 — پرچم ویژه/سنجاق (چینش ۴-آیتم اول + Aurora در فرانت)
+      isFeatured: r.isFeatured ?? false,
       categoryName: catMap.get(r.categoryId),
       profileImage: r.profileImage,
       galleryImages: r.galleryImages ?? [],

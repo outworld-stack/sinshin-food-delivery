@@ -130,7 +130,12 @@ function AdminProductsPage() {
 										product={product}
 										categoryName={
 											page.categories.find((c) => c.id === product.categoryId)
-												?.name
+												?.name ?? ''
+												+
+												// stage-60 — «+N»: دسته‌های اضافه (M2M) در همین ردیف
+												(product.categoryIds && product.categoryIds.length > 1
+													? ` +${product.categoryIds.length - 1}`
+													: '')
 										}
 										canWrite={page.permissions.productsWrite}
 										canToggleAvailability={

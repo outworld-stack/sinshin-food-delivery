@@ -32,6 +32,7 @@ import {
 	Bag,
 	Chair,
 	BoxRemove,
+	Star,
 } from 'reicon-react'
 import { ProductCard } from '#/components/ProductCard'
 import { ArField } from '#/components/admin/ArField'
@@ -315,7 +316,10 @@ export function ProductForm({
 		discountEndsAt: null,
 		prepTime: 15,
 		packagingCost: 0,
-		categoryId: '',
+		// stage-60 — همه‌ی دسته‌های محصول (اولین = دسته‌ی اصلی؛ تا ۸ عدد)
+		categoryIds: [],
+		// stage-60 — پرچم «ویژه/سنجاق‌شده»
+		isFeatured: false,
 		profileImage: '',
 		galleryImages: [],
 		ingredients: [],
@@ -348,7 +352,15 @@ export function ProductForm({
 				discountEndsAt: initialData.discountEndsAt ?? null,
 				prepTime: initialData.prepTime || 15,
 				packagingCost: initialData.packagingCost || 0,
-				categoryId: initialData.categoryId || '',
+				// stage-60 — همه‌ی دسته‌ها از سرور (fallback: categoryId قدیمی)
+				categoryIds:
+						initialData.categoryIds && initialData.categoryIds.length > 0
+								? [...initialData.categoryIds]
+								: initialData.categoryId
+										? [initialData.categoryId]
+										: [],
+					// stage-60 — پرچم «ویژه» (نیامد = خاموش)
+				isFeatured: initialData.isFeatured ?? false,
 				profileImage: initialData.profileImage || '',
 				galleryImages: initialData.galleryImages || [],
 				ingredients: initialData.ingredients || [],
@@ -390,8 +402,9 @@ export function ProductForm({
 		}))
 	}
 
-	// دسته‌ی انتخابی + قالب نام سایزها
-	const selectedCategory = categories?.find((c) => c.id === formData.categoryId)
+	// دسته‌ی اصلی + قالب نام سایزها — stage-60: اولین عضو categoryIds ملاک است
+	const primaryCategoryId = formData.categoryIds[0] ?? ''
+	const selectedCategory = categories?.find((c) => c.id === primaryCategoryId)
 	const sizeTemplate = selectedCategory?.hasSizes
 		? (selectedCategory.sizeNames ?? [])
 		: []
@@ -403,21 +416,36 @@ export function ProductForm({
 	const catDineIn = selectedCategory?.dineInEnabled ?? true
 
 	/**
-	 * تعویض دسته ⇒ حالت‌ها به ارثِ دسته‌ی جدید برمی‌گردند (پیش‌فرض)
-	 * و محدودیت‌های پیشین پاک می‌شوند (به‌جز آنچه دسته اجازه می‌دهد).
+	 * stage-60 — اضافه/حذف یک دسته در چیپ‌های چند-دسته‌ای (M2M).
+	 * حذفِ دسته‌ی اصلی ⇒ عضو بعدی اصلی می‌شود؛ «فقط» با تغییر دسته‌ی
+	 * اصلی، حالت‌های سفارش از دسته‌ی جدید ارث می‌گیرند (منطق stage-48).
 	 */
-	const handleCategoryChange = useCallback(
-		(e: React.ChangeEvent<HTMLSelectElement>) => {
-			const nextId = e.target.value
-			const nextCat = categories?.find((c) => c.id === nextId)
-			setFormData((prev) => ({
-				...prev,
-				categoryId: nextId,
-				// ارث از دسته‌ی تازه (نیامد = روشن — دسته legacy)
-				courierAllowed: nextCat?.courierEnabled ?? true,
-				takeawayAllowed: nextCat?.takeawayEnabled ?? true,
-				dineInAllowed: nextCat?.dineInEnabled ?? true,
-			}))
+	const handleToggleCategory = useCallback(
+		(catId: string) => {
+			setFormData((prev) => {
+				const wasPrimary = prev.categoryIds[0] === catId
+				let nextIds: string[]
+				if (prev.categoryIds.includes(catId)) {
+					nextIds = prev.categoryIds.filter((id) => id !== catId)
+				} else {
+					// حداکثر ۸ دسته (قرارداد سرور) — چیپ‌های دیگر disable
+					if (prev.categoryIds.length >= 8) return prev
+					nextIds = [...prev.categoryIds, catId]
+				}
+				// ارث‌بری حالت‌ها فقط با «تغییر دسته‌ی اصلی»
+				const primaryChanged =
+					wasPrimary || (prev.categoryIds.length === 0 && nextIds.length > 0)
+				if (!primaryChanged) return { ...prev, categoryIds: nextIds }
+				const nextCat = categories?.find((c) => c.id === nextIds[0])
+				return {
+					...prev,
+					categoryIds: nextIds,
+					// ارث از دسته‌ی اصلی‌ی تازه (نیامد = روشن — دسته legacy)
+					courierAllowed: nextCat?.courierEnabled ?? true,
+					takeawayAllowed: nextCat?.takeawayEnabled ?? true,
+					dineInAllowed: nextCat?.dineInEnabled ?? true,
+				}
+			})
 		},
 		[categories],
 	)
@@ -433,6 +461,11 @@ export function ProductForm({
 	/** سوئیچ موجودی — فقط با اجازه (ادمین۲ بدون productsAvailability نمی‌بیند) */
 	const handleAvailabilityToggle = useCallback(() => {
 		setFormData((prev) => ({ ...prev, isAvailable: !prev.isAvailable }))
+	}, [])
+
+	/** stage-60 — سوئیچ «محصول ویژه» (سنجاق در ۴ آیتم اول + Aurora) */
+	const handleFeaturedToggle = useCallback(() => {
+		setFormData((prev) => ({ ...prev, isFeatured: !prev.isFeatured }))
 	}, [])
 
 	// --- سایزها ---
@@ -533,7 +566,8 @@ export function ProductForm({
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault()
 
-		if (!formData.categoryId) {
+		// stage-60 — حداقل یک دسته لازم است (چیپ‌های چند-دسته‌ای)
+		if (formData.categoryIds.length === 0) {
 			showToast('دسته‌بندی محصول را انتخاب کنید.', 'error')
 			return
 		}
@@ -654,6 +688,8 @@ export function ProductForm({
 		sizesEnabled: formData.sizesEnabled,
 		// stage-48 — پیش‌نمایش بج‌ها/تاری با همان منطق کارت واقعی
 		isAvailable: formData.isAvailable,
+		// stage-60 — پیش‌نمایش پس‌زمینه‌ی Aurora وقتی ویژه است
+		isFeatured: formData.isFeatured,
 		courierAllowed: catCourier && formData.courierAllowed,
 		takeawayAllowed: catTakeaway && formData.takeawayAllowed,
 		dineInAllowed: catDineIn && formData.dineInAllowed,
@@ -727,22 +763,46 @@ export function ProductForm({
 							className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none"
 						/>
 					</div>
-					<div>
+					{/* stage-60 — دسته‌های محصول: چیپ‌های چند-دسته‌ای (M2M) */}
+					<div className="md:col-span-2">
 						<label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
-							دسته‌بندی
+							دسته‌بندی‌ها
 						</label>
-						<select
-							name="categoryId"
-							value={formData.categoryId}
-							onChange={handleCategoryChange}
-							className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] outline-none cursor-pointer"
-						>
-							{categories?.map((cat) => (
-								<option key={cat.id} value={cat.id}>
-									{cat.name}
-								</option>
-							))}
-						</select>
+						<div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
+								<div className="flex flex-wrap gap-2">
+										{(categories ?? []).map((cat) => {
+												const idx = formData.categoryIds.indexOf(cat.id)
+												const selected = idx !== -1
+												const isPrimary = idx === 0
+												const atLimit = !selected && formData.categoryIds.length >= 8
+												return (
+														<button
+																key={cat.id}
+																type="button"
+																aria-pressed={selected}
+																disabled={atLimit}
+																onClick={() => handleToggleCategory(cat.id)}
+																className={`px-3 py-1.5 rounded-xl border text-xs font-DanaMedium transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+																			selected
+																					? 'border-primary dark:border-dark-primary bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary'
+																					: 'border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-[#4a1a23]'
+																			}`}
+														>
+																{cat.name}
+																{isPrimary && (
+																		<span className="mr-1.5 px-1.5 py-0.5 rounded-md bg-primary dark:bg-dark-primary text-white text-[9px] font-DanaDemiBold">
+																					دسته‌ی اصلی
+																		</span>
+																)}
+														</button>
+												)
+											})}
+										</div>
+										<p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+												اولین دسته = دسته‌ی اصلی (مبنای حالت‌های سفارش)؛ بقیه = دسته‌های
+												اضافه (M2M) — حداکثر ۸ دسته.
+										</p>
+								</div>
 					</div>
 				</div>
 
@@ -891,6 +951,40 @@ export function ProductForm({
 							/>
 						</div>
 					) : null}
+
+					{/* stage-60 — محصول ویژه (سنجاق‌شده): ۴ آیتم اول + Aurora */}
+					<div
+							className={`flex items-center justify-between gap-3 p-3 rounded-lg border transition ${
+										formData.isFeatured
+													? 'border-primary bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/5'
+													: 'border-gray-200 bg-gray-50 dark:border-[#3a151c] dark:bg-[#1a0a0e]'
+									}`}
+					>
+							<div className="flex items-center gap-2.5 min-w-0">
+									<span
+												className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+															formData.isFeatured
+																	? 'bg-primary/10 text-primary dark:bg-dark-primary/10 dark:text-dark-primary'
+																	: 'bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500'
+													}`}
+									>
+											<Star size={16} />
+									</span>
+									<div className="min-w-0">
+											<p className="text-xs font-DanaDemiBold text-gray-700 dark:text-gray-200">
+													محصول ویژه (سنجاق‌شده)
+											</p>
+											<p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+													این محصول فارغ از فیلتر/مرتب‌سازی کاربر، همیشه در ۴ آیتم اول
+													لیست می‌نشیند و کارتش پس‌زمینه‌ی Aurora می‌گیرد.
+											</p>
+									</div>
+							</div>
+							<Toggle
+									isOn={formData.isFeatured}
+									onToggle={handleFeaturedToggle}
+							/>
+					</div>
 
 					{[
 						{

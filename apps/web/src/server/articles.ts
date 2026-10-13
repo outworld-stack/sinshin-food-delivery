@@ -53,6 +53,8 @@ export async function createArticle(input: {
   categoryId: string
   subCategoryId?: string | null
   processes: { title: string; items: string[] }[]
+  /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + Aurora) */
+  isFeatured?: boolean
   /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null
@@ -78,6 +80,8 @@ export async function updateArticle(input: {
   categoryId: string
   subCategoryId?: string | null
   processes: { title: string; items: string[] }[]
+  /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + Aurora) */
+  isFeatured?: boolean
   /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null

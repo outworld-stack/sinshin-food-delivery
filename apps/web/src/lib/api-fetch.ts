@@ -10,7 +10,7 @@
 // تبدیل نوع فقط اینجا (مرز serde) — به‌علاوه‌ی تبدیل نوع در هر فراخواننده با قرارداد
 
 import { apiBase, ssrFetchSignal } from '#/lib/api'
-import { getAccessToken, onUnauthorized, tryRefresh } from '#/lib/auth-session'
+import { getAccessToken, tryRefresh } from '#/lib/auth-session'
 import { langHeaders, resolveRequestLang } from '#/lib/lang-header'
 
 export interface FetchOpts {
@@ -35,20 +35,54 @@ function withLangQuery(path: string, lang: 'fa' | 'ar'): string {
   return `${path}${sep}lang=${lang}`
 }
 
+/**
+ * stage-60 — سقفِ زمانیِ fetch (باگ «فریز PWA»): در مرورگر سیگنالی نبود و
+ * اتصالِ سیاه‌چاله‌ی موبایل fetch را برای همیشه معلق می‌گذاشت — اسکلتونِ
+ * ابدی/روتِ pending. AbortController دستی (بدون AbortSignal.timeout —
+ * پشتیبانیِ مرورگرهای قدیمی) + زنجیرکردنِ سیگنالِ بیرونی (SSR: سقف ۱۰s
+ * همان قبل؛ سقفِ ۳۰s اینجا فقط پشتوانه‌ی مرورگر است). AbortController و
+ * setTimeout در Bun/Node هم هستند — همین یک پیاده‌سازی هر دو سمت را می‌پوشاند.
+ */
+const FETCH_TIMEOUT_MS = 30_000
+
+/** صادرشده برای api-client.ts (treaty) — همان سقفِ ۳۰ ثانیه‌ای */
+export async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
+  const external = init.signal ?? undefined
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () =>
+      controller.abort(
+        new DOMException('مهلت پاسخ سرور به پایان رسید.', 'TimeoutError'),
+      ),
+    FETCH_TIMEOUT_MS,
+  )
+  const onExternalAbort = () => controller.abort(external?.reason)
+  try {
+    if (external) {
+      if (external.aborted) controller.abort(external.reason)
+      else external.addEventListener('abort', onExternalAbort)
+    }
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+    if (external) external.removeEventListener('abort', onExternalAbort)
+  }
+}
+
 export async function getJson<T>(path: string): Promise<T> {
   // round-34 — x-sinshin-lang از کوکی (SSR: درخواست ورودی؛ مرورگر: document)
   // stage-59 — زبان در URL (کش HTTP per-lang) + هدر متقارن fa/ar
   const lang = await resolveRequestLang()
-  const res = await fetch(apiBase() + withLangQuery(path, lang), {
+  const res = await fetchWithTimeout(apiBase() + withLangQuery(path, lang), {
     credentials: 'include',
     headers: { 'x-sinshin-lang': lang },
-    signal: ssrFetchSignal(), // کار-۳: سقف ۱۰s فقط SSR
+    signal: ssrFetchSignal(), // کار-۳: سقف ۱۰s فقط SSR (stage-60: زنجیر می‌شود)
   })
   return handleResponse<T>(res)
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(apiBase() + path, {
+  const res = await fetchWithTimeout(apiBase() + path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(await langHeaders()) },
     body: JSON.stringify(body),
@@ -79,7 +113,7 @@ export async function authJson<T>(
   }
   if (token) headers['authorization'] = `Bearer ${token}`
 
-  let res = await fetch(apiBase() + fetchPath, {
+  let res = await fetchWithTimeout(apiBase() + fetchPath, {
     method,
     headers,
     credentials: 'include',
@@ -93,16 +127,17 @@ export async function authJson<T>(
       const newToken = getAccessToken()
       if (newToken) headers['authorization'] = `Bearer ${newToken}`
       // همان headers (شامل idempotency-key) — تلاش مجدد امن
-      res = await fetch(apiBase() + fetchPath, {
+      res = await fetchWithTimeout(apiBase() + fetchPath, {
         method,
         headers,
         credentials: 'include',
         signal: ssrFetchSignal(), // کار-۳ — سیگنال تازه برای تلاش مجدد
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       })
-    } else {
-      onUnauthorized()
     }
+    // stage-60 — خروج فقط داخلِ خود tryRefresh رخ می‌دهد (401/403 قطعی از
+    // refresh)؛ 429/5xx/شبکه → false بدون خروج — همین res خطای خودش را
+    // نشان می‌دهد و کاربر لاگین می‌ماند.
   }
 
   return handleResponse<T>(res)

@@ -49,6 +49,65 @@ function articlesReducer(state: ArticlesState, action: ArticlesAction): Articles
   }
 }
 
+// ═══ stage-60 — سنجاش ویژه (فلگ‌دارها جزو ۴ آیتم اول) با تصادفِ قطعی ═══
+// PRNG کوچک (mulberry32) + hash رشته‌ای: seed = وضعیت فیلتر فعلی
+// (دسته + زیردسته + سورت). همان فیلتر ⇒ همان جایگاه‌ها (بدون فلیک روی
+// ری‌رندرها)؛ فیلتر/سورت متفاوت ⇒ جایگاه‌های تازه («جای دقیق تصادفی»).
+
+/** FNV-1a — رشته‌ی seed را به عدد ۳۲بیتی بدون علامت می‌برد */
+function hashSeed(str: string): number {
+  let h = 2166136261
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+/** mulberry32 — PRNG قطعی و سبک (همان seed ⇒ همان دنباله) */
+function mulberry32(seed: number): () => number {
+  let a = seed
+  return () => {
+    a |= 0
+    a = (a + 0x6D2B79F5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Fischer-Yates با PRNG داده‌شده (کپی آرایه — ورودی دست‌نخورده) */
+function shuffleWithRng<T>(arr: readonly T[], rng: () => number): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+/**
+ * ادغام سنجاش‌ها: k=pinned.length جایگاه متمایزِ تصادفی در [0,3] انتخاب
+ * می‌شود؛ سنجاش‌ها (به ترتیب shuffle) در آن جایگاه‌ها می‌نشینند و همه‌ی
+ * خانه‌های دیگر (۰..۳ و پس از آن) به‌ترتیب با normal پر می‌شوند.
+ */
+function mergePinnedIntoSlots<T>(normal: readonly T[], pinned: readonly T[], rng: () => number): T[] {
+  if (pinned.length === 0) return [...normal]
+  const slots: number[] = []
+  while (slots.length < pinned.length) {
+    const s = Math.floor(rng() * 4)
+    if (!slots.includes(s)) slots.push(s)
+  }
+  const merged: T[] = []
+  let ni = 0
+  const total = pinned.length + normal.length
+  for (let i = 0; i < total; i++) {
+    const slotIdx = slots.indexOf(i)
+    merged.push(slotIdx !== -1 ? pinned[slotIdx] : normal[ni++])
+  }
+  return merged
+}
+
 // --- هوک ---
 export function useArticlesPage() {
   const [state, dispatch] = useReducer(articlesReducer, initialState)
@@ -65,6 +124,10 @@ export function useArticlesPage() {
   // --- دیتا: گزینه‌های مرکزی — loader روت با کوئری پرشون کرده ---
   const { data: categories } = useQuery(articleCategoriesOptions)
   const { data: articles, isLoading } = useQuery(articlesOptions(category, subCategory))
+  // stage-60 — لیست کامل (بدون فیلتر): مقاله‌های ویژه «فارغ از» دسته/
+  // زیردسته‌ی فعال باید در ۴ آیتم اول دیده شوند؛ وقتی خود کاربر روی all
+  // است، همان کلید قبلی است و فچ اضافه‌ای نمی‌شود (staleTime یکسان ۶۰s)
+  const { data: allArticles } = useQuery(articlesOptions('all', 'all'))
 
   // --- مشتق‌شده‌ها ---
   const currentCategory = useMemo(
@@ -77,10 +140,20 @@ export function useArticlesPage() {
   )
   const hasSubCategories = subCategories.length > 0
 
+  // stage-60 — سنجاش ویژه: فلگ‌دارها از «کل» لیست مقالات (فارغ از فیلتر
+  // دسته/زیردسته) تا ۴ مورد در جایگاه‌های تصادفی ۰..۳؛ بقیه‌ی فلگ‌دارها
+  // (بیش از ۴) مثل آیتم‌های عادی در جریان فیلتر + سورت می‌مانند.
   const sortedArticles = useMemo(() => {
-    if (appliedSortBy !== 'most-viewed') return articles ?? []
-    return [...(articles ?? [])].sort((a, b) => b.views - a.views)
-  }, [articles, appliedSortBy])
+    const rng = mulberry32(hashSeed(`${category}|${subCategory}|${appliedSortBy}`))
+    const flagged = (allArticles ?? []).filter(a => a.isFeatured === true)
+    const pinned = shuffleWithRng(flagged, rng).slice(0, 4)
+    const pinnedIds = new Set(pinned.map(a => a.id))
+    const normal = (articles ?? []).filter(a => !pinnedIds.has(a.id))
+    if (appliedSortBy === 'most-viewed') {
+      normal.sort((a, b) => b.views - a.views)
+    }
+    return mergePinnedIntoSlots(normal, pinned, rng)
+  }, [articles, allArticles, category, subCategory, appliedSortBy])
 
   const visibleArticles = useMemo(
     () => sortedArticles.slice(0, state.visibleCount),

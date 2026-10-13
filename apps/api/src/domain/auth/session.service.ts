@@ -9,6 +9,16 @@ import { randomToken, sha256 } from '#/domain/shared/crypto'
 import { asDeviceId, asSessionId, asUserId } from '#/domain/shared/brand'
 import { TokenService } from './token.service'
 
+/**
+ * stage-60 — پنجره‌ی بخشش چرخش: توکنِ «قبلی» (previousRefreshHash) تا ۱۰
+ * ثانیه بعد از چرخش، «رقابتِ هم‌زمانِ کانتکست‌ها» تلقی می‌شود نه سرقت —
+ * PWA و تبِ مرورگرِ هم‌کوکی پشت‌سرهم refresh می‌زنند و نباید هر دو بیفتند.
+ */
+const ROTATION_GRACE_MS = 10_000
+
+/** پیامِ 401 نرمِ «رقابتِ چرخش» — کلاینت (auth-session.ts) همین رشته را match می‌کند */
+const RACE_RETRY_MESSAGE = 'نشست هم‌زمان چرخیده است؛ دوباره تلاش کنید.'
+
 export interface AuthContext {
   userId: string
   deviceId: string
@@ -109,9 +119,9 @@ export class SessionService {
         const recentRace =
           fresh?.previousRefreshHash === hash &&
           fresh?.rotatedAt !== null &&
-          Date.now() - (fresh?.rotatedAt?.getTime() ?? 0) < 10_000
+          Date.now() - (fresh?.rotatedAt?.getTime() ?? 0) < ROTATION_GRACE_MS
         if (recentRace) {
-          throw Err.unauthorized('نشست هم‌زمان چرخیده است؛ دوباره تلاش کنید.')
+          throw Err.unauthorized(RACE_RETRY_MESSAGE)
         }
         await db
           .update(sessions)
@@ -134,6 +144,16 @@ export class SessionService {
       where: eq(sessions.previousRefreshHash, hash),
     })
     if (stale) {
+      // stage-60 — باگ تولیدی «کیک‌اوتِ <۲۴ ساعته»: کانتکست دومِ هم‌کوکی
+      // (PWA + تب) با توکنِ تازه‌چرخیده‌شده می‌رسد؛ اگر چرخش «همین حالا»
+      // بوده → همان 401 نرمِ مسیرِ رقابت (کلاینت دوباره refresh می‌زند و
+      // کوکیِ تازه را می‌گیرد). فقط خارج از پنجره revoke سخت (سرقتِ واقعی).
+      if (
+        stale.rotatedAt !== null &&
+        Date.now() - stale.rotatedAt.getTime() < ROTATION_GRACE_MS
+      ) {
+        throw Err.unauthorized(RACE_RETRY_MESSAGE)
+      }
       await db
         .update(sessions)
         .set({ revokedAt: new Date(), revokedReason: 'reuse-detected' })
