@@ -114,17 +114,25 @@ function shuffleWithRng<T>(arr: readonly T[], rng: () => number): T[] {
  * ادغام سنجاش‌ها: k=pinned.length جایگاه متمایزِ تصادفی در [0,3] انتخاب
  * می‌شود؛ سنجاش‌ها (به ترتیب shuffle) در آن جایگاه‌ها می‌نشینند و همه‌ی
  * خانه‌های دیگر (۰..۳ و پس از آن) به‌ترتیب با normal پر می‌شوند.
+ *
+ * stage-62 — رفع باگ لیست‌های کوتاه: قبلاً جایگاه‌ها همیشه از [0,3]
+ * انتخاب می‌شدند؛ وقتی total (pinned+normal) کمتر از ۴ بود (مثلاً فیلتر
+ * دسته‌ای که فقط ۲-۳ محصول دارد و سنجاش‌ها از بیرونِ فیلتر می‌آیند)،
+ * جایگاهِ ≥ total هرگز در حلقه نمی‌افتاد ⇒ آن سنجاش حذف و خانه‌های
+ * میانی از normalِ تمام‌شده «undefined» push می‌کردند (کرش رندر).
+ * اکنون دامنه‌ی جایگاه‌ها = min(4, total) است.
  */
 function mergePinnedIntoSlots<T>(normal: readonly T[], pinned: readonly T[], rng: () => number): T[] {
   if (pinned.length === 0) return [...normal]
+  const total = pinned.length + normal.length
+  const slotRange = Math.min(4, total)
   const slots: number[] = []
   while (slots.length < pinned.length) {
-    const s = Math.floor(rng() * 4)
+    const s = Math.floor(rng() * slotRange)
     if (!slots.includes(s)) slots.push(s)
   }
   const merged: T[] = []
   let ni = 0
-  const total = pinned.length + normal.length
   for (let i = 0; i < total; i++) {
     const slotIdx = slots.indexOf(i)
     merged.push(slotIdx !== -1 ? pinned[slotIdx] : normal[ni++])

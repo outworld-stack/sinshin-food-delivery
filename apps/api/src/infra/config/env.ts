@@ -98,7 +98,10 @@ export interface DeviceConfig {
   autoblockScore: number
   referralBlockAfter: number
   similarityWindowDays: number
-  /** stage-60 — سقف شماره‌های متمایزِ مجاز برای هر دستگاه؛ ۰ = خاموش (پیش‌فرض ۲) */
+  /** stage-60 — سقف شماره‌های متمایزِ مجاز برای هر دستگاه؛ ۰ = خاموش.
+   *  stage-62 — پیش‌فرض ۱: هر دستگاه (ویندوز/اندروید/اپل) فقط یک ثبت‌نام؛
+   *  ورود با شماره‌های «از قبل ثبت‌نام‌شده» همیشه آزاد است (گارد فقط در
+   *  مسیر کاربرِ جدید فعال می‌شود). */
   maxPhonesPerDevice: number
 }
 
@@ -296,7 +299,9 @@ export class AppConfig {
     }
 
     // stage-60 — سقف شماره‌های هر دستگاه؛ الگوی Number(x) || default عددِ صفر
-    // را می‌بلعد، پس جداگانه parse می‌شود: خالی/NaN/منفی → پیش‌فرض ۲، صفر → خاموش
+    // را می‌بلعد، پس جداگانه parse می‌شود. stage-62 — پیش‌فرض ۱:
+    // هر دستگاه فقط یک ثبت‌نام (لاگین شماره‌های موجود همیشه آزاد)؛
+    // خالی/NaN/منفی → پیش‌فرض ۱، صفر → خاموش
     const maxPhonesRaw = source['DEVICE_MAX_PHONES_PER_DEVICE']?.trim()
     const maxPhones = maxPhonesRaw ? Number(maxPhonesRaw) : NaN
     this.device = {
@@ -304,7 +309,7 @@ export class AppConfig {
       autoblockScore: Number(source['DEVICE_AUTOBLOCK_SCORE']) || 80,
       referralBlockAfter: Number(source['DEVICE_REFERRAL_BLOCK_AFTER']) || 3,
       similarityWindowDays: Number(source['DEVICE_SIMILARITY_WINDOW_DAYS']) || 7,
-      maxPhonesPerDevice: Number.isFinite(maxPhones) && maxPhones >= 0 ? maxPhones : 2,
+      maxPhonesPerDevice: Number.isFinite(maxPhones) && maxPhones >= 0 ? maxPhones : 1,
     }
 
     // round-19 — بدون HEALTH_ALERT_PHONES، ادمین‌های اصلی گیرنده‌اند
