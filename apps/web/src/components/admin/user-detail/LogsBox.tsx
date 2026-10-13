@@ -51,7 +51,7 @@ export const LogsBox = memo(function LogsBox({ logs }: LogsBoxProps) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end mb-6">
         <div className="sm:col-span-1">
           <label className="block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium">نوع تغییرات</label>
-          <select value={temp.type} onChange={handleType} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
+          <select value={temp.type} onChange={handleType} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium">
             <option value="all">همه تغییرات</option>
             <option value="NAME">تغییر نام</option>
             <option value="EMAIL">تغییر ایمیل</option>
@@ -61,7 +61,7 @@ export const LogsBox = memo(function LogsBox({ logs }: LogsBoxProps) {
         </div>
         <div className="sm:col-span-1">
           <label className="block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium">مرتب‌سازی</label>
-          <select value={temp.sortBy} onChange={handleSort} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
+          <select value={temp.sortBy} onChange={handleSort} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium">
             <option value="newest">جدیدترین</option>
             <option value="oldest">قدیمی‌ترین</option>
           </select>

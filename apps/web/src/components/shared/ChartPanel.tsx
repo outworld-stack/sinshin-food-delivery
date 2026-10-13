@@ -27,7 +27,7 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
   }
 }
 
-const selectCls = 'px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer'
+const selectCls = 'px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer font-DanaMedium'
 
 // پنل نمودار واحد — عنوان + انتخابگر بازه/نوع + نمودار (به‌جای ۴ کپی)
 export const ChartPanel = memo(function ChartPanel({

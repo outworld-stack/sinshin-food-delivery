@@ -35,7 +35,12 @@ export interface MenuRoutesDeps {
 
 /** stage-55 — ETag/304 + Cache-Control برای GETهای عمومی منو.
  * max-age=30 هم‌ارز TTL کشِ ردیس منو است؛ stale-while-revalidate=60.
- * سرور خودش با bustCache نسخه را عوض می‌کند — کش مشتری همیشه تازه می‌ماند. */
+ * سرور خودش با bustCache نسخه را عوض می‌کند — کش مشتری همیشه تازه می‌ماند.
+ *
+ * stage-59 — Vary: x-sinshin-lang: محتوای این پاسخ‌ها به هدر زبان بستگی
+ * دارد (COALESCE(ar,fa) قبل از ETag/سریالایز). بدون Vary، هر کشِ اشتراکی
+ * می‌تواند بدنه‌ی فارسی را به درخواست عربی بدهد. کلاینت علاوه بر این زبان
+ * را در URL هم می‌فرستد (withLangQuery) — دو لایه‌ی مستقل. */
 const withMenuCache = async <T>(
   ctx: {
     headers: Record<string, string | null | undefined>
@@ -47,6 +52,7 @@ const withMenuCache = async <T>(
   const etag = `"m-${sha256(JSON.stringify(data)).slice(0, 40)}"`
   ctx.set.headers.etag = etag
   ctx.set.headers['cache-control'] = 'public, max-age=30, stale-while-revalidate=60'
+  ctx.set.headers.vary = 'x-sinshin-lang'
   if (ctx.headers['if-none-match'] === etag) {
     // 304 — بدنه ندارد؛ ETag تازه در هدر می‌رود تا کش کلاینت معتبر بماند
     ctx.set.status = 304

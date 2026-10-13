@@ -202,92 +202,83 @@ export function PwaRegister() {
     <>
       {/* بنر آپدیت — مینیمال + «بعداً» (pwa-۳) */}
       {showUpdate && (
-        <div style={bannerStyle}>
-          <span style={{ fontSize: 13 }}>نسخه‌ی جدید آماده است</span>
-          <button onClick={applyUpdate} style={btnStyle}>به‌روزرسانی</button>
-          <button type="button" onClick={() => setShowUpdate(false)} style={laterBtnStyle}>
-            بعداً
-          </button>
-        </div>
-      )}
-
-      {/* install-prompt اندروید */}
-      {showInstall && !showIosGuide && (
-        <div style={bannerStyle}>
-          <span style={{ fontSize: 13 }}>سین‌شین را روی گوشی خود نصب کنید</span>
-          <button onClick={doInstall} style={btnStyle}>نصب</button>
-          <button
-            onClick={() => {
-              setShowInstall(false)
-              markDismissed(DISMISS_KEY)
-            }}
-            style={laterBtnStyle}
-          >
-            بعداً
-          </button>
-        </div>
-      )}
-
-      {/* راهنمای iOS — بستنش ۳۰ روز پایدار است (pwa-۲) */}
-      {showIosGuide && !showUpdate && (
-        <div style={bannerStyle}>
-          <span style={{ fontSize: 12 }}>
-            برای نصب: Share ⬆️ سپس «Add to Home Screen»
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+          <span className="text-[13px] text-gray-700 dark:text-gray-200 text-center font-DanaMedium">
+            نسخه‌ی جدید آماده است
           </span>
-          <button
-            onClick={() => {
-              setShowIosGuide(false)
-              markDismissed(IOS_DISMISS_KEY)
-            }}
-            style={laterBtnStyle}
-          >
-            بستن
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={applyUpdate}
+              className="px-4 py-1.5 rounded-xl bg-primary text-white text-[13px] font-DanaDemiBold hover:opacity-90 active:scale-95 transition cursor-pointer whitespace-nowrap"
+            >
+              به‌روزرسانی
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowUpdate(false)}
+              className="px-3.5 py-1.5 rounded-xl bg-transparent text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#3a151c] text-[13px] font-DanaMedium hover:bg-gray-50 dark:hover:bg-[#1a0a0e] transition cursor-pointer whitespace-nowrap"
+            >
+              بعداً
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* install-prompt اندروید — stage-59: موبایل دو ردیف (متن بالا، دکمه‌ها کنار هم پایین) */}
+      {showInstall && !showIosGuide && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+          <span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold text-center">
+            سین شین را روی دستگاه خود نصب کنید
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={doInstall}
+              className="px-5 py-1.5 rounded-xl bg-primary text-white text-[13px] font-DanaDemiBold hover:opacity-90 active:scale-95 transition cursor-pointer whitespace-nowrap"
+            >
+              نصب
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowInstall(false)
+                markDismissed(DISMISS_KEY)
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-transparent text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#3a151c] text-[13px] font-DanaMedium hover:bg-gray-50 dark:hover:bg-[#1a0a0e] transition cursor-pointer whitespace-nowrap"
+            >
+              بعداً
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* راهنمای iOS — بستنش ۳۰ روز پایدار است (pwa-۲)
+          stage-59: همان متن گرادیانی نصب + راهنمای Share در خط دوم */}
+      {showIosGuide && !showUpdate && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+          <div className="text-center">
+            <span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold">
+              سین شین را روی دستگاه خود نصب کنید
+            </span>
+            <span className="block text-[11px] text-gray-500 dark:text-gray-400 font-DanaMedium mt-0.5">
+              Share ⬆️ سپس «Add to Home Screen»
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowIosGuide(false)
+                markDismissed(IOS_DISMISS_KEY)
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-transparent text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#3a151c] text-[13px] font-DanaMedium hover:bg-gray-50 dark:hover:bg-[#1a0a0e] transition cursor-pointer whitespace-nowrap"
+            >
+              بستن
+            </button>
+          </div>
         </div>
       )}
     </>
   )
-}
-
-// استایل درون‌خطی — بدون وابستگی به CSS پروژه؛ ساده و بی‌مزاحمت
-const bannerStyle: React.CSSProperties = {
-  position: 'fixed',
-  bottom: 16,
-  left: '50%',
-  transform: 'translateX(-50%)',
-  zIndex: 9999,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  background: 'white',
-  borderRadius: 14,
-  padding: '10px 16px',
-  boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-  border: '1px solid #fde7f2',
-  direction: 'rtl',
-  fontFamily: 'Vazirmatn, Tahoma, sans-serif',
-}
-
-const btnStyle: React.CSSProperties = {
-  background: '#f6339a',
-  color: 'white',
-  border: 0,
-  borderRadius: 10,
-  padding: '6px 16px',
-  fontSize: 13,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  whiteSpace: 'nowrap',
-}
-
-const laterBtnStyle: React.CSSProperties = {
-  background: 'transparent',
-  color: '#999',
-  border: '1px solid #ddd',
-  borderRadius: 10,
-  padding: '6px 14px',
-  fontSize: 13,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  whiteSpace: 'nowrap',
 }

@@ -43,7 +43,7 @@ export const TransactionsList = memo(function TransactionsList({
         <select
           value={currentSort}
           onChange={handleSortChange}
-          className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer"
+          className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium"
         >
           {SORT_KEYS.map((key) => (
             <option key={key} value={key}>{SORT_LABELS[key]}</option>

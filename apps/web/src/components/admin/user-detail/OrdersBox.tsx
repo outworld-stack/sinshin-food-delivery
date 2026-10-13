@@ -77,7 +77,7 @@ export const OrdersBox = memo(function OrdersBox({ orders, addresses }: OrdersBo
         </div>
         <div className="sm:col-span-1 lg:col-span-1 xl:col-span-1">
           <label className="block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium">فیلتر آدرس</label>
-          <select value={temp.filterAddr} onChange={handleAddr} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
+          <select value={temp.filterAddr} onChange={handleAddr} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium">
             <option value="all">همه آدرس‌ها</option>
             <option value="null">تحویل حضوری</option>
             {addresses.map(a => <option key={a.id} value={a.id}>{a.address}</option>)}
@@ -85,14 +85,14 @@ export const OrdersBox = memo(function OrdersBox({ orders, addresses }: OrdersBo
         </div>
         <div className="sm:col-span-1 lg:col-span-1 xl:col-span-1">
           <label className="block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium">مرتب‌سازی تاریخ</label>
-          <select value={temp.sortDate} onChange={handleSortDate} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
+          <select value={temp.sortDate} onChange={handleSortDate} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium">
             <option value="newest">جدیدترین</option>
             <option value="oldest">قدیمی‌ترین</option>
           </select>
         </div>
         <div className="sm:col-span-2 lg:col-span-1 xl:col-span-1">
           <label className="block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium">مرتب‌سازی مبلغ</label>
-          <select value={temp.sortAmount} onChange={handleSortAmount} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
+          <select value={temp.sortAmount} onChange={handleSortAmount} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium">
             <option value="none">بدون مرتب‌سازی</option>
             <option value="highest">بیشترین مبلغ</option>
             <option value="lowest">کمترین مبلغ</option>

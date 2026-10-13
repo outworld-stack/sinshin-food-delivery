@@ -492,7 +492,7 @@ export const ReportsBox = memo(function ReportsBox() {
 								onChange={(e) =>
 									dispatch({ type: 'SET_STATUS', payload: e.target.value })
 								}
-								className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer"
+								className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer font-DanaMedium"
 							>
 								{ORDER_STATUSES.map((s) => (
 									<option key={s.key} value={s.key}>
@@ -514,7 +514,7 @@ export const ReportsBox = memo(function ReportsBox() {
 								onChange={(e) =>
 									dispatch({ type: 'SET_DELIVERY', payload: e.target.value })
 								}
-								className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer"
+								className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer font-DanaMedium"
 							>
 								{DELIVERY_TYPES.map((d) => (
 									<option key={d.key} value={d.key}>
@@ -541,7 +541,7 @@ export const ReportsBox = memo(function ReportsBox() {
 							onChange={(e) =>
 								dispatch({ type: 'SET_ADMIN', payload: e.target.value })
 							}
-							className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer"
+							className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer font-DanaMedium"
 						>
 							<option value="all">همه‌ی ادمین‌ها</option>
 							{(subAdmins ?? []).map((a) => (
@@ -569,7 +569,7 @@ export const ReportsBox = memo(function ReportsBox() {
 							onChange={(e) =>
 								dispatch({ type: 'SET_COURIER', payload: e.target.value })
 							}
-							className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer"
+							className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none cursor-pointer font-DanaMedium"
 						>
 							<option value="all">همه‌ی پیک‌ها</option>
 							{(couriersList ?? []).map((c) => (

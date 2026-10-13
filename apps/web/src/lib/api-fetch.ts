@@ -11,18 +11,37 @@
 
 import { apiBase, ssrFetchSignal } from '#/lib/api'
 import { getAccessToken, onUnauthorized, tryRefresh } from '#/lib/auth-session'
-import { langHeaders } from '#/lib/lang-header'
+import { langHeaders, resolveRequestLang } from '#/lib/lang-header'
 
 export interface FetchOpts {
   /** هدرهای اضافی — با هدرهای پایه ادغام می‌شوند (مثل idempotency-key) */
   headers?: Record<string, string>
 }
 
+/**
+ * stage-59 — ریشه‌یابی باگ «تعویض بلادرنگ fa↔ar»:
+ * سرور محتوای زبان را در هدرِ درخواست می‌فرستد (x-sinshin-lang)، ولی کشِ
+ * HTTPِ مرورگر فقط با (method + URL) کلید می‌خورد. رِفچِ فوریِ بعد از
+ * تعویض زبان (invalidateQueries + router.invalidate — که همه درست کار
+ * می‌کنند) به همان URL می‌رخت و مرورگر تا ۳۰ ثانیه (max-age + SWR تا ۹۰)
+ * بدنه‌ی کش‌شده‌ی «زبان قبلی» را از کش HTTP برمی‌گرداند — اسم غذاها و
+ * توضیحات عربی نمی‌شد. حل قطعی و مستقل از پشتیبانی Vary در مرورگرها:
+ * زبان به‌عنوان پارامتر URL به همه‌ی GETها چسبانده می‌شود → هر زبان ورودیِ
+ * کش HTTP اختصاصی خودش را دارد؛ تعویض زبان همان لحظه داده‌ی تازه می‌گیرد.
+ * (ا آزمایش شد: Elysia پارامترهای اضافه‌ی query را نادیده می‌گیرد — 200.)
+ */
+function withLangQuery(path: string, lang: 'fa' | 'ar'): string {
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}lang=${lang}`
+}
+
 export async function getJson<T>(path: string): Promise<T> {
   // round-34 — x-sinshin-lang از کوکی (SSR: درخواست ورودی؛ مرورگر: document)
-  const res = await fetch(apiBase() + path, {
+  // stage-59 — زبان در URL (کش HTTP per-lang) + هدر متقارن fa/ar
+  const lang = await resolveRequestLang()
+  const res = await fetch(apiBase() + withLangQuery(path, lang), {
     credentials: 'include',
-    headers: await langHeaders(),
+    headers: { 'x-sinshin-lang': lang },
     signal: ssrFetchSignal(), // کار-۳: سقف ۱۰s فقط SSR
   })
   return handleResponse<T>(res)
@@ -50,14 +69,17 @@ export async function authJson<T>(
   // ⬅ phase-3: هدرهای سفارشی «قبل از» توکن — authorization همیشه
   // توسط خودِ هلپر ست می‌شود؛ فراخواننده نمی‌تواند آن را بازنویسی کند
   // round-34 — هدر زبان هم قبل از توکن ادغام می‌شود (منبع: کوکی)
+  // stage-59 — GETهای احراز-دار هم زبان را در URL می‌برند (کش per-lang)
+  const lang = await resolveRequestLang()
+  const fetchPath = method === 'GET' ? withLangQuery(path, lang) : path
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    ...(await langHeaders()),
+    'x-sinshin-lang': lang,
     ...(opts?.headers ?? {}),
   }
   if (token) headers['authorization'] = `Bearer ${token}`
 
-  let res = await fetch(apiBase() + path, {
+  let res = await fetch(apiBase() + fetchPath, {
     method,
     headers,
     credentials: 'include',
@@ -71,7 +93,7 @@ export async function authJson<T>(
       const newToken = getAccessToken()
       if (newToken) headers['authorization'] = `Bearer ${newToken}`
       // همان headers (شامل idempotency-key) — تلاش مجدد امن
-      res = await fetch(apiBase() + path, {
+      res = await fetch(apiBase() + fetchPath, {
         method,
         headers,
         credentials: 'include',

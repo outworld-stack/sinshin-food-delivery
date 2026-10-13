@@ -74,14 +74,14 @@ export const ReferralsBox = memo(function ReferralsBox({ referrals }: ReferralsB
         </div>
         <div className="sm:col-span-1 lg:col-span-1 xl:col-span-1">
           <label className="block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium">مرتب‌سازی تاریخ</label>
-          <select value={temp.sortDate} onChange={handleSortDate} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
+          <select value={temp.sortDate} onChange={handleSortDate} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium">
             <option value="newest">جدیدترین</option>
             <option value="oldest">قدیمی‌ترین</option>
           </select>
         </div>
         <div className="sm:col-span-1 lg:col-span-1 xl:col-span-1">
           <label className="block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium">مرتب‌سازی سفارش</label>
-          <select value={temp.sortOrders} onChange={handleSortOrders} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
+          <select value={temp.sortOrders} onChange={handleSortOrders} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium">
             <option value="none">بدون مرتب‌سازی</option>
             <option value="most">بیشترین سفارش</option>
             <option value="least">کمترین سفارش</option>

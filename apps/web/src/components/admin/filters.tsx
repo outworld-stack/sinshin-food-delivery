@@ -8,9 +8,10 @@ import { SliderHorizontal } from 'reicon-react'
 
 import { ORDER_STATUS_CONFIG } from '#/components/shared/StatusBadge'
 
-/** کلاس فیلد ورودی فیلترها — یکسان در همه‌ی جعبه‌ها */
+/** کلاس فیلد ورودی فیلترها — یکسان در همه‌ی جعبه‌ها
+ *  stage-59 — فونت فارسی Dana (متوسط) روی همه‌ی باکس‌های فیلتر ادمین */
 export const FILTER_INPUT_CLS =
-  'w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none focus:border-primary'
+  'w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none focus:border-primary font-DanaMedium'
 
 /** کلاس برچسب فیلد */
 export const FILTER_LABEL_CLS =

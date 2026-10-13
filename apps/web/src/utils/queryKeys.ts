@@ -222,11 +222,12 @@ export const langSensitiveKeys = [
   qk.activeMainCategories, // تب‌های منو (دسته‌های اصلی)
   qk.productsByMainPrefix, // لیست منو: محصولات + دسته‌های هر تب
   qk.productByIdAll, // صفحه‌ی جزئیات محصول (نام/توضیح/محتویات/سایزها)
+  qk.categories, // stage-59 — /menu/categories هم lang-aware است (فرم‌های ادمین)
   qk.articleCategories, // دسته‌های مقاله
   qk.articlesAll, // لیست مقاله‌ها
   qk.aboutContent, // درباره‌ی ما
   qk.galleryImages, // گالری (متن‌های alt)
-  qk.termsContent, // قوانین (مودال ثبت‌نام)
+  qk.termsContent, // قوانین (مودال ثبت‌نام + باکس داشبورد)
   qk.restaurantStatus, // علت بسته‌شدن موقت (چک‌اوت/هدر)
   qk.cartDetailsAll, // نام محصول/سایز در سبد
   qk.checkoutPreviewPrefix, // نام آیتم‌ها در پیش‌نمایش چک‌اوت

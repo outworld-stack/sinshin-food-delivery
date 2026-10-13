@@ -12,6 +12,7 @@ import { Bicycle, Pin } from 'reicon-react'
 import { useI18n } from '#/i18n'
 import { apiBase } from '#/lib/api'
 import { getAccessToken } from '#/lib/auth-session'
+import { MapBrowserNote } from '#/components/shared/MapBrowserNote'
 
 interface CourierTrackingMapProps {
   status: string
@@ -311,13 +312,17 @@ export const CourierTrackingMap = memo(function CourierTrackingMap({
   }
 
   return (
-    <div className="relative w-full h-80 rounded-xl overflow-hidden border border-gray-300 dark:border-white/10">
-      <div ref={containerRef} className="absolute inset-0" />
-      {courierLocation && (
-        <div className="absolute top-2 right-2 bg-white/90 dark:bg-black/70 rounded-lg px-3 py-1.5 text-[10px] font-DanaMedium text-gray-600 dark:text-gray-300 z-10" dir="ltr">
-          {courierLocation.lat.toFixed(4)}, {courierLocation.lng.toFixed(4)}
-        </div>
-      )}
+    <div>
+      <div className="relative w-full h-80 rounded-xl overflow-hidden border border-gray-300 dark:border-white/10">
+        <div ref={containerRef} className="absolute inset-0" />
+        {courierLocation && (
+          <div className="absolute top-2 right-2 bg-white/90 dark:bg-black/70 rounded-lg px-3 py-1.5 text-[10px] font-DanaMedium text-gray-600 dark:text-gray-300 z-10" dir="ltr">
+            {courierLocation.lat.toFixed(4)}, {courierLocation.lng.toFixed(4)}
+          </div>
+        )}
+      </div>
+      {/* stage-59 — حداقل نسخه‌ی مرورگر برای تایل‌های نقشه (DecompressionStream) */}
+      <MapBrowserNote />
     </div>
   )
 })

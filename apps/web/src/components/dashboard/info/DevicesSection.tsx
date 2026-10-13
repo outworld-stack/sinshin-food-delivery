@@ -29,7 +29,14 @@ export const DevicesSection = memo(function DevicesSection({ devices }: DevicesS
         {devices.map((device) => (
           <div key={device.id} className="flex items-center justify-between p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-[#2a1015] flex items-center justify-center text-gray-500 dark:text-gray-400">
+              {/* stage-59 — دستگاه فعال (فعلی): آیکنِ سمت راست سبز می‌شود (به‌جای بج/دکمه‌ی «دستگاه فعلی») */}
+              <div
+                className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
+                  device.isCurrent
+                    ? 'bg-green-100 dark:bg-green-500/10 text-green-500'
+                    : 'bg-gray-200 dark:bg-[#2a1015] text-gray-500 dark:text-gray-400'
+                }`}
+              >
                 <Monitor size={20} />
               </div>
               <div>
@@ -37,9 +44,6 @@ export const DevicesSection = memo(function DevicesSection({ devices }: DevicesS
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{t['dash.info.lastActive']} {fmt.date(device.lastActive)}</p>
               </div>
             </div>
-            {device.isCurrent && (
-              <span className="text-xs text-green-500 font-DanaDemiBold px-3 py-1 rounded-full bg-green-100 dark:bg-green-500/10">{t['dash.info.currentDevice']}</span>
-            )}
           </div>
         ))}
       </div>

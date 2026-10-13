@@ -34,29 +34,34 @@
 
 /** کوکی sinshin-lang را از رشته‌ی کوکی بیرون می‌کشد */
 function parseLangCookie(cookie: string): 'fa' | 'ar' {
-	return /(?:^|;\s*)sinshin-lang=ar(?:;|$)/.test(cookie) ? 'ar' : 'fa'
+        return /(?:^|;\s*)sinshin-lang=ar(?:;|$)/.test(cookie) ? 'ar' : 'fa'
 }
 
 /** زبان فعالِ این درخواست — مرورگر یا SSR (اول ?lang=، بعد کوکی) */
 export async function resolveRequestLang(): Promise<'fa' | 'ar'> {
-	if (!import.meta.env.SSR) {
-		return parseLangCookie(document.cookie)
-	}
-	// SSR — الگوی geoGate: ماژول سرور فقط داخل این گارد پویا درون‌ریزی می‌شود؛
-	// در بیلد کلاینت import.meta.env.SSR=false → کل شاخه (با درون‌ریزی) حذف.
-	try {
-		const { ssrRequestLang } = await import('#/server/ssr-request')
-		return ssrRequestLang()
-	} catch {
-		return 'fa'
-	}
+        if (!import.meta.env.SSR) {
+                return parseLangCookie(document.cookie)
+        }
+        // SSR — الگوی geoGate: ماژول سرور فقط داخل این گارد پویا درون‌ریزی می‌شود؛
+        // در بیلد کلاینت import.meta.env.SSR=false → کل شاخه (با درون‌ریزی) حذف.
+        try {
+                const { ssrRequestLang } = await import('#/server/ssr-request')
+                return ssrRequestLang()
+        } catch {
+                return 'fa'
+        }
 }
 
 /**
- * هدرهای زبان برای ادغام با هدرهای موجود — {} در حالت فارسی
- * (هیچ تماسی تغییر شکل نمی‌دهد؛ فقط ar هدر اضافه می‌کند).
+ * هدرهای زبان برای ادغام با هدرهای موجود.
+ *
+ * stage-59 — تغییر مهم: حالا «همه‌ی» زبان‌ها هدر می‌فرستند (fa و ar).
+ * قبلاً fa هدر نمی‌فرستاد تا ترافیک قدیمی بی‌تغییر بماند؛ اما کشِ HTTPِ
+ * مرورگر با هدر Vary فقط وقتی درست کلید می‌خورد که مقدار هدر در دو
+ * درخواستِ fa/ar همیشه حاضر و متقارن باشد (غایب ≠ «fa»). سرور مقدار
+ * غیر-ar را همان fa تفسیر می‌کند — رفتار قدیمی دقیقاً حفظ می‌شود.
  */
 export async function langHeaders(): Promise<Record<string, string>> {
-	const lang = await resolveRequestLang()
-	return lang === 'ar' ? { 'x-sinshin-lang': 'ar' } : {}
+        const lang = await resolveRequestLang()
+        return { 'x-sinshin-lang': lang }
 }

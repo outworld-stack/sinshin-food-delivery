@@ -7,6 +7,8 @@
 
 // src/components/shared/BottomSheet.tsx
 import { memo, useCallback, useEffect, type ReactNode } from 'react'
+import { X } from 'reicon-react'
+import { useI18nSafe } from '#/i18n'
 
 interface BottomSheetProps {
   isOpen: boolean
@@ -19,9 +21,11 @@ interface BottomSheetProps {
 
 // شیت پایینِ موبایل — واحد (به‌جای ۵ کپی)
 // + کلید Escape می‌بندد + اسکرول بدنه موقع باز بودن قفل می‌شود (رفع F-23)
+// stage-59 — دکمه‌ی ضرب‌در در گوشه‌ی چپ (همه‌ی مودال‌های فیلتر موبایل)
 export const BottomSheet = memo(function BottomSheet({
   isOpen, onClose, title, children, hideOnDesktop = 'md:hidden',
 }: BottomSheetProps) {
+  const { t } = useI18nSafe()
   const handleBackdrop = useCallback(() => onClose(), [onClose])
 
   // Escape + قفل اسکرول
@@ -46,8 +50,19 @@ export const BottomSheet = memo(function BottomSheet({
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleBackdrop}></div>
       {/* stage-55 — ورود نرم شیت از پایین (CSS-only) + پدینگ امن iOS */}
       <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a0a0e] p-6 pt-2 pb-safe-lg rounded-t-3xl border-t border-gray-200 dark:border-[#3a151c] max-h-[85vh] overflow-y-auto animate-sheet-up">
-        <div className="w-10 h-1 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mb-6"></div>
-        <h2 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-6">{title}</h2>
+        <div className="w-10 h-1 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mb-4"></div>
+        {/* stage-59 — ردیف عنوان + دکمه‌ی ضرب‌در در گوشه‌ی چپ (RTL) */}
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t['common.close']}
+            className="shrink-0 p-2 -my-2 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
+          >
+            <X size={22} />
+          </button>
+        </div>
         {children}
       </div>
     </div>

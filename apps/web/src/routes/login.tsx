@@ -58,10 +58,11 @@ function LoginPage() {
 
 	// ⬅ حذف شد: loading و serverError → از state خود میوتیشن‌ها مشتق می‌شن
 	// ثبت‌نام: کاربر جدید؟ / قوانین؟ / کد معرف ذخیره‌شده؟
+	// stage-59 — termsRead حذف شد: اسکرول تا انتهای قوانین دیگر اجباری نیست؛
+	// تیکِ چک‌باکس به‌تنهایی کافی است (مشاهده‌ی قوانین = لینک داخل برچسب).
 	const [isNewUser, setIsNewUser] = useState(false)
 	const [needsTerms, setNeedsTerms] = useState(false)
 	const [termsAccepted, setTermsAccepted] = useState(false)
-	const [termsRead, setTermsRead] = useState(false)
 	const [termsModalOpen, setTermsModalOpen] = useState(false)
 	const [refCode, setRefCode] = useState<string | null>(null)
 	const [resendIn, setResendIn] = useState(0)
@@ -324,9 +325,9 @@ function LoginPage() {
 												</span>
 											</div>
 										)}
-										<div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] space-y-3">
+										<div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
 											<label
-												className={`flex items-start gap-2.5 ${termsRead ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+												className="flex items-start gap-2.5 cursor-pointer"
 											>
 												<input
 													type="checkbox"
@@ -335,30 +336,27 @@ function LoginPage() {
 														setTermsAccepted(e.target.checked)
 														if (e.target.checked) setNeedsTerms(false)
 													}}
-													disabled={!termsRead}
-													className="w-4 h-4 mt-0.5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0 disabled:cursor-not-allowed"
+													className="w-4 h-4 mt-0.5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0"
 												/>
 												<span className="text-xs text-gray-600 dark:text-gray-300 font-DanaMedium leading-relaxed">
 													<span className="font-DanaDemiBold">
 														{t['login.termsLabel']}
 													</span>{' '}
 													{t['login.termsRest']}
+													{' '}
+													{/* stage-59 — لینک مشاهده‌ی قوانین داخل برچسب؛ کلیک = باز شدن مودال (بدون اجبار اسکرول) */}
+													<button
+														type="button"
+														onClick={(e) => {
+															e.preventDefault()
+															setTermsModalOpen(true)
+														}}
+														className="text-primary dark:text-dark-primary font-DanaDemiBold underline decoration-primary/40 dark:decoration-dark-primary/40 underline-offset-4 hover:decoration-primary dark:hover:decoration-dark-primary transition cursor-pointer"
+													>
+														({t['login.viewTerms']})
+													</button>
 												</span>
 											</label>
-
-											{!termsRead ? (
-												<button
-													type="button"
-													onClick={() => setTermsModalOpen(true)}
-													className="w-full py-2.5 rounded-xl bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary text-xs font-DanaDemiBold hover:bg-primary/20 dark:hover:bg-dark-primary/20 transition cursor-pointer"
-												>
-													{t['login.viewTerms']}
-												</button>
-											) : (
-												<p className="text-[10px] text-green-500 font-DanaMedium">
-													{t['login.termsReadOk']}
-												</p>
-											)}
 										</div>
 									</div>
 								)}
@@ -496,11 +494,10 @@ function LoginPage() {
 				</div>
 			</div>
 
-			{/* مدال قوانین — اسکرول تا انتها اجباری */}
+			{/* مدال قوانین — stage-59: فقط برای مشاهده؛ اجبارِ اسکرول حذف شد */}
 			<TermsModal
 				isOpen={termsModalOpen}
 				onClose={() => setTermsModalOpen(false)}
-				onReadComplete={() => setTermsRead(true)}
 			/>
 		</div>
 	)

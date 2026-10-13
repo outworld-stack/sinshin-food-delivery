@@ -115,8 +115,8 @@ const OrdersPage = memo(function OrdersPage() {
         {/* ستون اصلی: لیست سفارشات */}
         <div className="lg:col-span-2 space-y-6">
 
-          {/* باکس‌های آماری */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* باکس‌های آماری — stage-59: موبایل دو ردیف (قبلاً grid-cols-2 ثابت در هم می‌ریخت) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-white dark:bg-[#2a1015] p-5 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium mb-1">{t['dash.orders.count']}</p>
@@ -144,7 +144,7 @@ const OrdersPage = memo(function OrdersPage() {
               <select
                 value={search.sort}
                 onChange={(e) => handleSortChange(e.target.value as DashboardOrdersSort)}
-                className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer"
+                className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none cursor-pointer font-DanaMedium"
               >
                 <option value="newest">{t['dash.orders.sort.newest']}</option>
                 <option value="oldest">{t['dash.orders.sort.oldest']}</option>

@@ -14,6 +14,7 @@ import { memo, useRef, useEffect, useState } from 'react'
 import { useI18nSafe } from '#/i18n'
 import { apiBase } from '#/lib/api'
 import { getAccessToken } from '#/lib/auth-session'
+import { MapBrowserNote } from '#/components/shared/MapBrowserNote'
 
 interface MapPickerProps {
   /** مختصات انتخاب‌شده (تهی = هنوز انتخاب نشده) */
@@ -302,6 +303,8 @@ export const MapPicker = memo(function MapPicker({ value, onChange }: MapPickerP
         ref={containerRef}
         className="relative w-full h-48 rounded-xl overflow-hidden border border-gray-300 dark:border-white/10 z-0"
       />
+      {/* stage-59 — حداقل نسخه‌ی مرورگر برای تایل‌های نقشه (DecompressionStream) */}
+      <MapBrowserNote />
       {value && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium" dir="ltr">
           {value.lat.toFixed(6)}, {value.lng.toFixed(6)}
