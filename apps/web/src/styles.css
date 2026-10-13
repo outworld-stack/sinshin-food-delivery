@@ -331,14 +331,14 @@
    (bg-white / bg-gray-50 و نسخه‌های dark) مقدم می‌شوند. */
 .aurora-card {
   /* زمینه‌ی تیره‌ی پایه — همیشه (هم‌رنگ خانواده‌ی کارت‌های تیره‌ی سایت) */
-  background-color: #1d0c12;
+  background-color: #000000;
   /* لکه‌های رنگیِ برند: primary / dark-primary / زرد / بنفش —
      هر لکه تا ۵۰٪ شعاع محو می‌شود (الگوی radial-gradient نمونه) */
   background-image:
-    radial-gradient(at 62% 9%, rgba(237, 7, 65, 0.5) 0px, transparent 50%),
-    radial-gradient(at 69% 60%, rgba(47, 212, 209, 0.35) 0px, transparent 50%),
-    radial-gradient(at 24% 89%, rgba(245, 166, 35, 0.32) 0px, transparent 50%),
-    radial-gradient(at 51% 77%, rgba(139, 92, 246, 0.4) 0px, transparent 50%);
+    radial-gradient(at 62% 9%, rgba(0, 194, 255, 0.5) 0px, transparent 50%),
+    radial-gradient(at 69% 60%, rgba(51, 241, 255, 0.45) 0px, transparent 50%),
+    radial-gradient(at 24% 89%, rgba(255, 198, 64, 0.45) 0px, transparent 50%),
+    radial-gradient(at 51% 77%, rgba(229, 76, 255, 0.6) 0px, transparent 50%);
   /* اندازه‌ی بزرگ‌تر از کارت ⇒ جابه‌جاییِ موقعیت، لکه‌ها را به‌نرمی
      در گوشه‌ها جارو می‌کند (همان --aura-size: 200% نمونه) */
   background-size: 200% 200%;
