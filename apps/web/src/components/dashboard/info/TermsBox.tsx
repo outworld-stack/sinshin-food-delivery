@@ -25,7 +25,7 @@ export const TermsBox = memo(function TermsBox() {
     <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm xl:sticky xl:top-6">
       <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-4">{t['terms.title']}</h2>
       {/* ارتفاع ثابت + اسکرول عمودی (خواسته‌ی صریح) */}
-      <div className="h-[420px] xl:h-[560px] overflow-y-auto pl-1 space-y-5">
+      <div className="h-105 xl:h-140 overflow-y-auto pl-1 space-y-5">
         {isLoading ? (
           <div className="space-y-4 py-2">
             {Array.from({ length: 6 }).map((_, i) => (
