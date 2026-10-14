@@ -12,65 +12,6 @@
 // کامیت پیشنهادی: stage forty-three
 // ═══════════════════════════════════════════════════════════════
 
-// src/utils/queryOptions.ts
-// فکتوری‌های queryOptions — الگوی رسمی TanStack Query v5
-// مزیت: loader سرور و useQuery کلاینت از همین تعریف استفاده می‌کنن؛
-// staleTime/کلید/queryFn هیچ‌وقت از هم دیگه جدا نمی‌شن
-import { queryOptions, keepPreviousData } from '@tanstack/react-query'
-import { qk } from './queryKeys'
-import {
-  getActiveMainCategories,
-  getProductById,
-  getProductsByMain,
-  getCategoriesByMain,
-  getCategories,
-  getAdminMainCategories,
-  getAdminProductDetails,
-  getAdminProducts,
-  getCartDetails,
-  type Category,
-  type Product,
-} from '#/server/products'
-import { getArticleCategories, getArticles, getAdminArticles, getAdminArticleDetails } from '#/server/articles'
-import {
-  getUserProfile, getApprovedProductReviews, getOrderDetails, getLiveTracking,
-  getOrderReviewedProducts, getAdminReviews, getMyOrders,
-} from '#/server/user'
-import { getGalleryImages, getAdminGalleryImages } from '#/server/gallery'
-import { getAboutContent } from '#/server/about'
-import { getCheckoutPreview, getRestaurantStatus } from '#/server/checkout'
-import { getSystemMetrics } from '#/server/system'
-import {
-  getAdminStats,
-  getAdmin2Options,
-  getCourierOptions,
-  getSubAdminSession,
-  getLiveTrackingEnabled,
-  getRestaurantOpen,
-  // ⬅ NEW: لیست‌های ادمین حالا فکتوری دارند (پیش‌نیاز loader + query)
-  getAdminUsers,
-  getAdminOrders,
-  getSubAdminOrders,
-  getAdminCouriers,
-  getAdminUserDetails,
-  getAdmin2Stats,
-  getLiveOrders,
-  getSubAdmins,
-  // ⬅ NEW (بچ ۵): جزئیات نقش‌محور + گزینه‌های پنل زنده
-  getSubAdminDetails,
-  getOrderDetailsByRole,
-  getAdminCourierDetailsForRole,
-  getCouriersForAssignment,
-  getIranOnlyAccess,
-  getRestaurantStatusFull,
-  // رارد ۳۷ — قفل جغرافیایی عراق
-  getOutsideScope,
-  getGeoStatus,
-} from '#/server/admin'
-import { getTerms } from '#/server/terms'
-import { getAdminCoupons, getAdminCoupon } from '#/server/coupons'
-import { getDeliveryZones } from '#/server/deliveryZones'
-import type { DeliveryType } from '#/types/site/checkout'
 import type {
   AdminOrdersData,
   AdminUserSort,
@@ -80,6 +21,65 @@ import type {
   MainData,
   ProductId,
 } from '@sinshin/shared'
+// src/utils/queryOptions.ts
+// فکتوری‌های queryOptions — الگوی رسمی TanStack Query v5
+// مزیت: loader سرور و useQuery کلاینت از همین تعریف استفاده می‌کنن؛
+// staleTime/کلید/queryFn هیچ‌وقت از هم دیگه جدا نمی‌شن
+import { keepPreviousData, queryOptions } from '@tanstack/react-query'
+import { getAboutContent } from '#/server/about'
+import {
+  getAdmin2Options,
+  getAdmin2Stats,
+  getAdminCourierDetailsForRole,
+  getAdminCouriers,
+  getAdminOrders,
+  getAdminStats,
+  getAdminUserDetails,
+  // ⬅ NEW: لیست‌های ادمین حالا فکتوری دارند (پیش‌نیاز loader + query)
+  getAdminUsers,
+  getCourierOptions,
+  getCouriersForAssignment,
+  getGeoStatus,
+  getIranOnlyAccess,
+  getLiveOrders,
+  getLiveTrackingEnabled,
+  getOrderDetailsByRole,
+  // رارد ۳۷ — قفل جغرافیایی عراق
+  getOutsideScope,
+  getRestaurantOpen,
+  getRestaurantStatusFull,
+  // ⬅ NEW (بچ ۵): جزئیات نقش‌محور + گزینه‌های پنل زنده
+  getSubAdminDetails,
+  getSubAdminOrders,
+  getSubAdminSession,
+  getSubAdmins,
+} from '#/server/admin'
+import { getAdminArticleDetails, getAdminArticles, getArticleCategories, getArticles } from '#/server/articles'
+import { getCheckoutPreview, getRestaurantStatus } from '#/server/checkout'
+import { getAdminCoupon, getAdminCoupons, getCouponConsumers } from '#/server/coupons'
+import { getDeliveryZones } from '#/server/deliveryZones'
+import { getAdminGalleryImages, getGalleryImages } from '#/server/gallery'
+import {
+  type Category,
+  getActiveMainCategories,
+  getAdminMainCategories,
+  getAdminProductDetails,
+  getAdminProducts,
+  getCartDetails,
+  getCategories,
+  getCategoriesByMain,
+  getProductById,
+  getProductsByMain,
+  type Product,
+} from '#/server/products'
+import { getSystemMetrics } from '#/server/system'
+import { getTerms } from '#/server/terms'
+import {getAdminReviews, getApprovedProductReviews, getLiveTracking,getMyOrders,getOrderDetails, 
+  getOrderReviewedProducts, 
+  getUserProfile, 
+} from '#/server/user'
+import type { DeliveryType } from '#/types/site/checkout'
+import { qk } from './queryKeys'
 
 // رارد ۴۶ — MainData/AdminOrdersData از قرارداد مشترک می‌آیند؛
 // کپی‌های محلی این فایل و OrderRowِ types/admin/orders حذف شدند (شکل‌ها بدون تغییر).
@@ -313,6 +313,16 @@ export const adminCouponDetailsOptions = (id: string) =>
     queryKey: qk.adminCouponDetails(id),
     queryFn: () => getAdminCoupon(id),
     staleTime: 30_000,
+  })
+
+// stage-65: مصرف‌کنندگان واقعی کوپن — صفحه‌بندی سروری؛ صفحه در کلید
+// (صفحه‌ی جدید = کش تازه)؛ placeholderData برای تعویض صفحه بدون پرش اسکلتون
+export const adminCouponConsumersOptions = (id: string, page: number) =>
+  queryOptions({
+    queryKey: qk.adminCouponConsumers(id, page),
+    queryFn: () => getCouponConsumers(id, page),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
   })
 
 // ⬅ NEW: ادمین‌های سطح ۲ — لیست مدیریت

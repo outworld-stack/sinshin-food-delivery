@@ -9,6 +9,12 @@
 //        رفتار خرید صفر از بین می‌رود.
 // ═══════════════════════════════════════════════════════════════
 
+import type {
+	CouponConditionType,
+	CouponRule,
+	CouponWithConditionsDto,
+} from '@sinshin/shared'
+import { useQuery } from '@tanstack/react-query'
 // src/components/admin/coupons/CouponForm.tsx
 // phase-9: فرم واحد ساخت/ویرایش کوپن — جایگزین CouponModal (حذف‌شده).
 // صفحات new.tsx و $couponId.tsx هر دو از همین استفاده می‌کنند.
@@ -20,27 +26,21 @@
 //     مرده می‌ساخت (نه عمومی، نه گرنت‌شده به کسی).
 //  ۳) هیدراته‌شدن از conditions واقعی سرور (type/params) با mapping معکوس —
 //     قبلاً rules تخت می‌خواند که هرگز وجود نداشت.
-import { useState, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import type {
-	CouponConditionType,
-	CouponRule,
-	CouponWithConditionsDto,
-} from '@sinshin/shared'
-import {
-	adminCategoriesOptions,
-	adminProductsOptions,
-} from '#/utils/queryOptions'
-import { useToastStore } from '#/stores/toastStore'
+import { useCallback, useState } from 'react'
+import { BellOff, Timer, X } from 'reicon-react'
 import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
 import { Toggle } from '#/components/shared/Toggle'
+import { useToastStore } from '#/stores/toastStore'
 import {
 	gregorianToJalali,
 	jalaliFromISO,
 	jalaliToGregorian,
 	jalaliToISO,
 } from '#/utils/persianDate'
-import { X, Timer } from 'reicon-react'
+import {
+	adminCategoriesOptions,
+	adminProductsOptions,
+} from '#/utils/queryOptions'
 
 /** چیزی که صفحه به سرور می‌فرستد (server/coupons.ts قرارداد را کامل می‌کند) */
 export interface CouponFormPayload {
@@ -52,6 +52,8 @@ export interface CouponFormPayload {
 	rules: CouponRule[]
 	/** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (اسکن شایستگی + یادآور) */
 	cronEnabled: boolean
+	/** stage-65 — ممنوعیت اعلان انتشار ساخت (کوپن بی‌صدا) */
+	announceSuppressed: boolean
 }
 
 // ─── تنظیمات قوانین — کلیدها = enum سرور (couponConditionTypeEnum) ───
@@ -183,6 +185,8 @@ interface CouponFormState {
 	isPublic: boolean
 	/** stage-48 — ورود به فرآیند کرون‌جاب (پیش‌فرض خاموش) */
 	cronEnabled: boolean
+	/** stage-65 — ممنوعیت اعلان انتشار ساخت (پیش‌فرض خاموش) */
+	announceSuppressed: boolean
 	rules: FormRule[]
 }
 
@@ -195,6 +199,7 @@ const EMPTY_FORM: CouponFormState = {
 	maxUses: 0,
 	isPublic: true,
 	cronEnabled: false,
+	announceSuppressed: false,
 	rules: [],
 }
 
@@ -214,6 +219,7 @@ function hydrate(data: CouponWithConditionsDto | undefined): CouponFormState {
 		maxUses: c.maxUses,
 		isPublic: c.isPublic,
 		cronEnabled: c.cronEnabled ?? false,
+		announceSuppressed: c.announceSuppressed ?? false,
 		rules: data.conditions.map((cond) => ({
 			key: cond.id as string,
 			type: cond.type,
@@ -366,6 +372,8 @@ export function CouponForm({
 			expiryDate: buildExpiryISO(),
 			// stage-48 — سوییچ کرون: روشن = کوپن وارد بررسی دوره‌ای می‌شود
 			cronEnabled: form.cronEnabled,
+			// stage-65 — سوییچ «کوپن بی‌صدا»: روشن = اعلان ساخت ارسال نمی‌شود
+			announceSuppressed: form.announceSuppressed,
 			// key فقط برای رندر است — به سرور نمی‌رود
 			// stage-47 — شرط‌های اختیاری: quantity=0 صریح ارسال می‌شود (خرید صفر)
 			rules: form.rules.map((r) => ({
@@ -510,6 +518,30 @@ export function CouponForm({
 						onToggle={() => set({ cronEnabled: !form.cronEnabled })}
 					/>
 				</div>
+
+				{/* stage-65 — سوییچ «کوپن بی‌صدا» — فقط برای کوپن عمومی معنا دارد (اعلان فقط لحظه‌ی ساخت ارسال می‌شود) — پیش‌فرض خاموش */}
+				{form.isPublic && (
+					<div className="mt-4 pt-4 border-t border-gray-100 dark:border-white/5 flex items-center justify-between gap-4">
+						<div className="min-w-0">
+							<span className="text-sm text-gray-700 dark:text-gray-300 font-DanaDemiBold flex items-center gap-1.5">
+								<BellOff
+									size={16}
+									className="text-primary dark:text-dark-primary shrink-0"
+								/>
+								ممنوع‌کردن اعلان انتشار
+							</span>
+							<p className="text-xs text-gray-400 mt-1 leading-relaxed">
+								{form.announceSuppressed
+									? 'کوپن «بی‌صدا» ساخته می‌شود: هیچ اعلان یا broadcast به کاربران ارسال نمی‌شود — کد فقط از مسیر خودتان (تبلیغات/اشتراک) لواستان می‌شود.'
+									: 'خاموش (پیش‌فرض): محضر ساخت کوپن عمومی؛ با یک اعلان broadcast (کد + درصد تخفیف) همه کاربران مطلع می‌شوند.'}
+							</p>
+						</div>
+						<Toggle
+							isOn={form.announceSuppressed}
+							onToggle={() => set({ announceSuppressed: !form.announceSuppressed })}
+						/>
+					</div>
+				)}
 			</section>
 
 			{/* ── قوانین هدف‌یابی (فقط کوپن خصوصی) ── */}

@@ -2,8 +2,14 @@
 // phase-9: شکل داده هم‌الگوی قرارداد واقعی سرور (CouponWithConditionsDto) —
 // قبلاً تایپ تختِ ساختگی (expiryDate/status/recipientsCount تخت) باعث
 // «Invalid Date»، «undefined نفر» و وضعیت همیشگی «منقضی» می‌شد.
+// stage-65 — سوییچ «کوپن بی‌صدا» + فچ مصرف‌کنندگان (صفحه‌بندی سروری).
+
+import type {
+	CouponConsumersPageDto,
+	CouponRule,
+	CouponWithConditionsDto,
+} from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
-import type { CouponWithConditionsDto, CouponRule } from '@sinshin/shared'
 
 export async function getAdminCoupons(): Promise<CouponWithConditionsDto[]> {
 	return authJson<CouponWithConditionsDto[]>('/admin/coupons', 'GET')
@@ -26,6 +32,8 @@ export async function createCoupon(input: {
 	rules: CouponRule[]
 	/** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (پیش‌فرض خاموش) */
 	cronEnabled?: boolean
+	/** stage-65 — ممنوعیت اعلان انتشار ساخت (پیش‌فرض خاموش = اعلان می‌رود) */
+	announceSuppressed?: boolean
 }): Promise<{ success: boolean; id?: string }> {
 	return authJson<{ success: boolean; id?: string }>('/admin/coupons', 'POST', {
 		code: input.code,
@@ -35,6 +43,7 @@ export async function createCoupon(input: {
 		isPublic: input.isPublic,
 		expiryDate: input.expiryDate,
 		cronEnabled: input.cronEnabled ?? false,
+		announceSuppressed: input.announceSuppressed ?? false,
 		rules: input.rules.map((r) => ({
 			type: r.type,
 			value: String(r.value),
@@ -54,6 +63,8 @@ export async function updateCoupon(input: {
 	rules: CouponRule[]
 	/** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (undefined = دست‌نخورده) */
 	cronEnabled?: boolean
+	/** stage-65 — ممنوعیت اعلان انتشار (undefined = دست‌نخورده) */
+	announceSuppressed?: boolean
 }): Promise<{ success: boolean }> {
 	return authJson<{ success: boolean }>(`/admin/coupons/${input.id}`, 'PATCH', {
 		code: input.code,
@@ -63,6 +74,7 @@ export async function updateCoupon(input: {
 		isPublic: input.isPublic,
 		expiryDate: input.expiryDate,
 		cronEnabled: input.cronEnabled,
+		announceSuppressed: input.announceSuppressed,
 		rules: input.rules.map((r) => ({
 			type: r.type,
 			value: String(r.value),
@@ -71,11 +83,27 @@ export async function updateCoupon(input: {
 	})
 }
 
-export async function deleteCoupon(id: string): Promise<{ success: boolean }> {
-	return authJson<{ success: boolean }>(`/admin/coupons/${id}`, 'DELETE')
+/** stage-65: حذف واقعی — ردیف + تاریخچهی مصرف (cascade)؛ غیرقابل برگشت */
+export async function deleteCoupon(id: string): Promise<{
+	success: boolean
+	message: string
+}> {
+	return authJson<{ success: boolean; message: string }>(`/admin/coupons/${id}`, 'DELETE')
 }
 
-/** stage-10: فعال/غیرفعال — رفع باگ «برگشتی نداشتن غیرفعال‌سازی» */
+/** stage-65 — مصرف‌کنندگان واقعی کوپن (تاریخچهی redemption) — صفحه‌بندی سروری */
+export async function getCouponConsumers(
+	id: string,
+	page: number,
+	limit = 20,
+): Promise<CouponConsumersPageDto> {
+	return authJson<CouponConsumersPageDto>(
+		`/admin/coupons/${id}/consumers?page=${page}&limit=${limit}`,
+		'GET',
+	)
+}
+
+/** stage-10: فعال/غیرفعال — برگشت‌پذیر (stage-65: حذف سخت از DELETE جداست) */
 export async function setCouponActive(
 	id: string,
 	active: boolean,

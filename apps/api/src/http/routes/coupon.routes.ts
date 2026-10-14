@@ -1,4 +1,17 @@
 // ═══════════════════════════════════════════════════════════
+// stage-65 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر:
+//   ① سوییچ «کوپن بی‌صدا» (announceSuppressed — پیش‌فرض خاموش):
+//     ادمین اصلی می‌تواند هنگام ساخت، اعلان broadcast همان کوپن را
+//     ممنوع کند. فقط ساختِ «عمومی» اعلان می‌گیرد (سیاست stage-64) و
+//     این سوییچ همان یک اعلان را خاموش می‌کند.
+//   ② GET /:id/consumers — مصرف‌کنندگان واقعی (redemptions) برای
+//     صفحه‌ی اختصاصی کوپن؛ صفحه‌بندی سروری.
+//   ③ DELETE = حذف واقعی (hard) + پاک شدن تاریخچه‌ی مصرف با cascade؛
+//     غیرفعال‌سازی نرم به PATCH /:id/status (body.active=false) رفت.
+//
 // stage-64 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -82,6 +95,8 @@ const couponBody = t.Object({
   rules: t.Array(ruleSchema, { maxItems: 10 }),
   /** stage-48 — ورود به فرآیند کرون‌جاب کوپن‌ها (پیش‌فرض خاموش) */
   cronEnabled: t.Optional(t.Boolean()),
+  /** stage-65 — ممنوعیت اعلان انتشار ساخت (پیش‌فرض خاموش = اعلان می‌رود) */
+  announceSuppressed: t.Optional(t.Boolean()),
 })
 
 export interface CouponRoutesDeps {
@@ -111,6 +126,25 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
       },
     )
 
+    // ── stage-65: مصرف‌کنندگان واقعی کوپن — تاریخچه‌ی redemption ──
+    .get(
+      '/:id/consumers',
+      ({ params, query }) =>
+        deps.coupons.consumers(params.id, query.page ?? 1, query.limit ?? 20),
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        query: t.Object({
+          page: t.Optional(t.Numeric({ minimum: 1, maximum: 10000 })),
+          limit: t.Optional(t.Numeric({ minimum: 5, maximum: 100 })),
+        }),
+        detail: {
+          summary: 'Coupon consumers — redemption history (paginated, newest first)',
+          description:
+            'Real redemptions (coupon_redemptions) joined with users + order displayId. Public and private coupons both included. 404 if coupon is deleted.',
+        },
+      },
+    )
+
     .post(
       '/',
       async ({ body, user }) => {
@@ -122,6 +156,8 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           isPublic: body.isPublic,
           expiryDate: body.expiryDate ?? null,
           cronEnabled: body.cronEnabled ?? false,
+          // stage-65 — سوییچ «کوپن بی‌صدا» (پیش‌فرض خاموش = اعلان ساخت می‌رود)
+          announceSuppressed: body.announceSuppressed ?? false,
           rules: body.rules.map((r) => ({
             type: r.type,
             params: ruleToParams(r.type, r.value, r.quantity),
@@ -139,7 +175,9 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
         // اعلان نمی‌گیرد؛ ویرایش/فعال‌سازی مجدد هم نه. فایر-اند-فورگت +
         // خودِ broadcast هرگز throw نمی‌کند — ساخت کوپن هرگز گیر اعلان
         // نمی‌کند؛ مقصد کلیک /products (کد در چک‌اوت زده می‌شود).
-        if (res.success && body.isPublic) {
+        // stage-65 — سوییچ «کوپن بی‌صدا»: announceSuppressed=true یعنی
+        // همین یک اعلان هم نمی‌رود (خواسته‌ی صریح کارفرما؛ پیش‌فرض خاموش).
+        if (res.success && body.isPublic && !(body.announceSuppressed ?? false)) {
           void deps.notifications
             .broadcast({
               type: 'coupon',
@@ -152,7 +190,7 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
         }
         return res
       },
-      { body: couponBody, detail: { summary: 'Create coupon (contract: value/quantity; public ⇒ broadcast announcement)' } },
+      { body: couponBody, detail: { summary: 'Create coupon (contract: value/quantity; public + not suppressed ⇒ broadcast announcement)' } },
     )
 
     // ── phase-5: PATCH — فرانت updateCoupon می‌فرستید ولی روت نبود! ──
@@ -167,6 +205,8 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           isPublic: body.isPublic,
           expiryDate: body.expiryDate ?? null,
           cronEnabled: body.cronEnabled,
+          // stage-65 — سوییچ «کوپن بی‌صدا» (نیامد = دست‌نخورده)
+          announceSuppressed: body.announceSuppressed,
           rules: body.rules.map((r) => ({
             type: r.type,
             params: ruleToParams(r.type, r.value, r.quantity),
@@ -188,13 +228,15 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
       },
     )
 
+    // ── stage-65: حذف واقعی — ردیف + تاریخچه‌ی مصرف (cascade) ──
+    // غیرفعال‌سازی نرم (برگشت‌پذیر) = PATCH /:id/status با active=false.
     .delete(
       '/:id',
       async ({ params, user }) => {
         const res = await deps.coupons.remove(params.id)
         await deps.audit.log({
           actorId: user.id,
-          action: 'COUPON_DEACTIVATE',
+          action: 'COUPON_DELETE',
           entity: 'coupon',
           entityId: params.id,
         })
@@ -202,7 +244,11 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
       },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        detail: { summary: 'Delete coupon' },
+        detail: {
+          summary: 'Hard-delete coupon + purge consumer history',
+          description:
+            'Irreversible. Deletes the coupon row; conditions, grants, redemptions and nudges cascade away (consumer history purged from DB). Orders keep their money rows/breakdown — their coupon link is nulled in the same transaction. In-flight PENDING_PAYMENT orders settle safely (settle skips redemption when coupon is gone). For a reversible off, use PATCH /:id/status with active=false instead.',
+        },
       },
     )
 

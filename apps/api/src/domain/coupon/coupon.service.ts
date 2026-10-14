@@ -19,7 +19,10 @@ import type { Db, DbOrTx } from '#/infra/db/client'
 import {
   couponConditions,
   couponGrants,
+  couponRedemptions,
   coupons,
+  orders,
+  users,
 } from '#/infra/db/schema'
 import { asCampaignId, type CampaignId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
@@ -331,6 +334,8 @@ export class CouponService {
     rules: Array<{ type: string; params: Record<string, unknown> }>
     /** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (پیش‌فرض خاموش) */
     cronEnabled?: boolean
+    /** stage-65 — ممنوعیت اعلان انتشار ساخت (پیش‌فرض خاموش = اعلان می‌رود) */
+    announceSuppressed?: boolean
   }): Promise<{ success: boolean; id?: string }> {
     // phase-9: حروف فارسی هم مجاز شد (پلتفرم کاملاً فارسی است؛ چک‌اوت toUpperCase
     // روی فارسی بی‌اثر و بی‌ضرر است) + خطاها به‌جای success:false با 200،
@@ -364,6 +369,8 @@ export class CouponService {
             isActive: true,
             // stage-48 — ورود به فرآیند بررسی کرون (سوییچ فرم؛ پیش‌فرض خاموش)
             cronEnabled: input.cronEnabled ?? false,
+            // stage-65 — سوییچ «کوپن بی‌صدا» (پیش‌فرض خاموش = اعلان ساخت می‌رود)
+            announceSuppressed: input.announceSuppressed ?? false,
             ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : {}),
           })
           .onConflictDoNothing({ target: coupons.code })
@@ -402,6 +409,8 @@ export class CouponService {
       rules: Array<{ type: string; params: Record<string, unknown> }>
       /** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (undefined = دست‌نخورده) */
       cronEnabled?: boolean
+      /** stage-65 — ممنوعیت اعلان انتشار (undefined = دست‌نخورده؛ فقط لحظه‌ی ساخت معنا دارد) */
+      announceSuppressed?: boolean
     },
   ): Promise<{ success: boolean }> {
     const { db } = this.deps
@@ -437,6 +446,8 @@ export class CouponService {
             isPublic: input.isPublic,
             // stage-48 — سوییچ کرون (نیامد = دست‌نخورده)
             ...(input.cronEnabled !== undefined ? { cronEnabled: input.cronEnabled } : {}),
+            // stage-65 — سوییچ «کوپن بی‌صدا» (نیامد = دست‌نخورده)
+            ...(input.announceSuppressed !== undefined ? { announceSuppressed: input.announceSuppressed } : {}),
             ...(input.expiryDate ? { endsAt: new Date(input.expiryDate) } : { endsAt: null }),
           })
           .where(eq(coupons.id, cid))
@@ -463,25 +474,97 @@ export class CouponService {
   }
 
   /**
-   * phase-fix — حذفِ سخت ممنوع: سفارش‌های در پرواز (PENDING_PAYMENT) به
-   * couponId اشاره می‌کنند و درج redemption در تسویه با FK می‌شکند و
-   * سفارشِ «پول‌گرفته‌شده» برای همیشه گیر می‌کند. حذف = غیرفعال‌سازی.
+   * stage-65 — حذف واقعی (hard delete) به خواسته‌ی صریح کارفرما:
+   * «هر کوپن باید توسط ادمین اصلی قابل حذم شدن باشد؛ بعد از حذف،
+   * تاریخچه‌ی مصرف‌کنندگان هم از UI هم دیتابیس پاک شود».
+   *
+   *  • conditions / grants / redemptions / nudges با FK cascade حذف
+   *    می‌شوند (= پاک شدن تاریخچه‌ی مصرف از دیتابیس).
+   *  • orders.coupon_id از فاز-۵ FK ندارد — برای پاک‌سازی کامل مرجع،
+   *    در همان tx روی سفارش‌ها null می‌شود؛ ردیف سفارش و breakdown
+   *    (دفتر پول) دست‌نخورده می‌ماند.
+   *  • سفارش‌های PENDING_PAYMENTِ در جریان گیر نمی‌کنند: مسیرهای
+   *    settle/fail/refund همه «کوپن نبود» را دفاعی هندل می‌کنند —
+   *    settle فقط warn می‌زند و redemption نمی‌سازد (کد موجود)،
+   *    fail/refund روی کوپنِ حذف‌شده no-op اند.
+   *  • غیرفعال‌سازی نرم (عقب‌گرد‌پذیر) همچنان از PATCH /:id/status
+   *    موجود است — این دو مسیر عمداً جدا ماندند.
    */
-  async remove(id: string): Promise<{ success: boolean; message?: string }> {
+  async remove(id: string): Promise<{ success: boolean; message: string }> {
     if (!UUID_RE.test(id)) throw Err.validation('شناسه معتبر نیست')
     const couponId = asCampaignId(id)
-    const updated = await this.deps.db
-      .update(coupons)
-      .set({ isActive: false })
+    return this.deps.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: coupons.id })
+        .from(coupons)
+        .where(eq(coupons.id, couponId))
+      if (!existing) throw Err.notFound('کوپن پیدا نشد')
+
+      // ۱) قطع پیوند سفارش‌ها — پول و breakdown می‌مانند، مرجع آویزان نه
+      await tx.update(orders).set({ couponId: null }).where(eq(orders.couponId, couponId))
+      // ۲) حذف ردیف — بقیه‌ی تاریخچه با cascade می‌روند
+      await tx.delete(coupons).where(eq(coupons.id, couponId))
+      return { success: true, message: 'کوپن و تاریخچه‌ی مصرف آن حذف شد' }
+    })
+  }
+
+  /**
+   * stage-65 — مصرف‌کنندگان واقعی کوپن (ردیف‌های coupon_redemptions) برای
+   * صفحه‌ی اختصاصی ادمین. صفحه‌بندی سروری + شمارش کل؛ جدیدترین مصرف اول.
+   * عمومی و خصوصی هر دو (redemption برای هر دو ثبت می‌شود).
+   */
+  async consumers(
+    id: string,
+    page: number,
+    limit: number,
+  ): Promise<{
+    total: number
+    page: number
+    limit: number
+    rows: Array<{
+      userId: string
+      name: string | null
+      phone: string
+      orderDisplayId: string | null
+      usedAt: Date
+    }>
+  }> {
+    if (!UUID_RE.test(id)) throw Err.validation('شناسه‌ی کوپن معتبر نیست')
+    const couponId = asCampaignId(id)
+    const [row] = await this.deps.db
+      .select({ id: coupons.id })
+      .from(coupons)
       .where(eq(coupons.id, couponId))
-      .returning({ id: coupons.id })
-    if (updated.length === 0) throw Err.notFound('کوپن پیدا نشد')
-    return { success: true, message: 'کوپن غیرفعال شد' }
+    if (!row) throw Err.notFound('کوپن پیدا نشد')
+
+    const [agg] = await this.deps.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(couponRedemptions)
+      .where(eq(couponRedemptions.couponId, couponId))
+
+    const rows = await this.deps.db
+      .select({
+        userId: couponRedemptions.userId,
+        name: users.name,
+        phone: users.phone,
+        orderDisplayId: orders.displayId,
+        usedAt: couponRedemptions.usedAt,
+      })
+      .from(couponRedemptions)
+      .innerJoin(users, eq(users.id, couponRedemptions.userId))
+      .leftJoin(orders, eq(orders.id, couponRedemptions.orderId))
+      .where(eq(couponRedemptions.couponId, couponId))
+      .orderBy(desc(couponRedemptions.usedAt))
+      .limit(limit)
+      .offset((page - 1) * limit)
+
+    return { total: agg?.count ?? 0, page, limit, rows }
   }
 
   /**
    * stage-10: فعال‌سازی مجدد — رفع باگ «غیرفعال کردم دیگر برنمی‌گردد».
-   * remove فقط isActive=false می‌گذاشت و هیچ مسیری برای برگشت نبود.
+   * غیرفعال‌سازی نرم از PATCH /:id/status انجام می‌شود (stage-65: حذف
+   * سخت از DELETE جداست) و این مسیر همان برگرداندن آن است.
    * اگر تاریخ انقضا گذشته باشد خطا می‌دهیم — ادمین اول باید انقضا را ویرایش کند
    * (وگرنه کوپن «فعال» ولی عملاً غیرقابل‌استفاده می‌شد — گمراه‌کننده).
    */

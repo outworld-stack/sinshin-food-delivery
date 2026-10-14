@@ -1,0 +1,1 @@
+ALTER TABLE "coupons" ADD COLUMN "announce_suppressed" boolean DEFAULT false NOT NULL;

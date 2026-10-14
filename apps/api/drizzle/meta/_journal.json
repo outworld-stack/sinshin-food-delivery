@@ -15,6 +15,13 @@
       "when": 1791879126115,
       "tag": "0001_steady_mephisto",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792017063385,
+      "tag": "0002_medical_elektra",
+      "breakpoints": true
     }
   ]
 }

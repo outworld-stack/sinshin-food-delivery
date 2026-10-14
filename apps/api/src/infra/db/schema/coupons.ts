@@ -53,6 +53,13 @@ export const coupons = pgTable(
      * روشن = کوپن وارد بررسی دوره‌ای cron هم می‌شود.
      */
     cronEnabled: boolean('cron_enabled').notNull().default(false),
+    /**
+     * stage-65 — ممنوعیت اعلان انتشارِ ساخت (سوییچ فرم؛ پیش‌فرض خاموش).
+     * true = کوپن «بی‌صدا» ساخته می‌شود: broadcast ساخت برای کاربران
+     * ارسال نمی‌شود. فقط لحظه‌ی ساخت معنا دارد — ویرایش/فعال‌سازی مجدد
+     * طبق سیاست stage-64 به‌هرحال اعلان نمی‌گیرد.
+     */
+    announceSuppressed: boolean('announce_suppressed').notNull().default(false),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
     endsAt: timestamp('ends_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -724,6 +724,8 @@ export interface CouponWithConditionsDto {
     isActive: boolean
     /** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (اسکن/یادآور) */
     cronEnabled: boolean
+    /** stage-65 — ممنوعیت اعلان انتشار ساخت (true = کوپن بی‌صدا) */
+    announceSuppressed: boolean
     startsAt: string
     endsAt: string | null
     /** رارد ۴۷ — همیشه روی سیم است (ردیف خام دیتابیس)؛ قبلاً در قرارداد جا افتاده بود */
@@ -735,6 +737,24 @@ export interface CouponWithConditionsDto {
    * شمارش coupon_grants است (خروجی موتور کمپین / اعطای لحظه‌ای).
    */
   recipientsCount: number
+}
+
+/** stage-65 — یک مصرف‌کننده‌ی واقعی کوپن (ردیف coupon_redemptions) */
+export interface CouponConsumerRow {
+  userId: UserId
+  name: string | null
+  phone: string
+  /** شناسه‌ی نمایشی سفارشی که کوپن رویش مصرف شد (ردیف سفارش پاک شده باشد = null) */
+  orderDisplayId: string | null
+  usedAt: string
+}
+
+/** stage-65 — صفحه‌ی مصرف‌کنندگان کوپن — صفحه‌بندی سروری */
+export interface CouponConsumersPageDto {
+  total: number
+  page: number
+  limit: number
+  rows: Array<CouponConsumerRow>
 }
 
 // ═══════════ ادمین: کاربران (ادغام — نسخه‌ی غنی با firstName/lastName) ═══════════

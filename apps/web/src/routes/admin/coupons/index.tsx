@@ -5,35 +5,39 @@
 //     recipientsCount) — قبلاً فیلدهای تختِ ساختگی می‌خواند که «Invalid Date»،
 //     «undefined نفر»، مخاطب/وضعیت غلط می‌ساخت.
 //  ۳) کل کارت کلیک‌پذیر است و به صفحه‌ی کوپن می‌رود.
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+//  stage-65 — دو مسیر جدا شد: Ban = غیرفعال‌سازی نمم (مسیر /status)؛
+//  Trash2 = حذف کامل غیرقابل‌برگشت (تاریخچهی مصرف پاک می‌شود).
+
+import type { CouponWithConditionsDto } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
-import { useCouponDelete, useCouponActivate } from '#/hooks/admin/useCouponMutations'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { memo, useCallback, useState } from 'react'
+import { Ban, Check, Pen, Plus, Trash2 } from 'reicon-react'
+import { ConfirmModal } from '#/components/ConfirmModal'
 import { AdminCouponsPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
-import { ConfirmModal } from '#/components/ConfirmModal'
-import { adminCouponsOptions } from '#/utils/queryOptions'
+import { useCouponActivate, useCouponDeactivate, useCouponDelete } from '#/hooks/admin/useCouponMutations'
 import {
-  couponStatus,
-  couponStatusLabel,
-  couponStatusBadgeClass,
-  formatCouponExpiry,
   couponAudienceLabel,
+  couponStatus,
+  couponStatusBadgeClass,
+  couponStatusLabel,
+  formatCouponExpiry,
   formatCouponUsage,
 } from '#/utils/couponDisplay'
-import { Plus, Pen, Ban, Check } from 'reicon-react'
-import type { CouponWithConditionsDto } from '@sinshin/shared'
-import { memo, useState, useCallback } from 'react'
+import { adminCouponsOptions } from '#/utils/queryOptions'
 
 // --- کارت کوپن — سه چیدمان (موبایل/تبلت/دسکتاپ) ---
 // stage-10: آیکون وضعیت تغییر کرد — Ban برای غیرفعال‌سازی (با تایید)،
 // Check برای فعال‌سازی مجدد. کوپن منقضی فقط از صفحه‌ی خودش (ویرایش انقضا).
 const CouponCard = memo(function CouponCard({
-  coupon: row, onEdit, onToggle, onOpen,
+  coupon: row, onEdit, onToggle, onOpen, onDelete,
 }: {
   coupon: CouponWithConditionsDto
   onEdit: (id: string) => void
   onToggle: (row: CouponWithConditionsDto) => void
   onOpen: (id: string) => void
+  onDelete: (row: CouponWithConditionsDto) => void
 }) {
   const c = row.coupon
   const status = couponStatus(c)
@@ -56,11 +60,16 @@ const CouponCard = memo(function CouponCard({
     e.stopPropagation()
     onEdit(c.id as string)
   }, [onEdit, c.id])
-  // stage-10: تغییر وضعیت — مسیر را صفحه تعیین می‌کند (فعال → تایید حذف؛ غیرفعال → فعال‌سازی)
+  // stage-10/stage-65: تغییر وضعیت — فعال → مودال غیرفعال‌سازی نرم؛ غیرفعال → فعال‌سازی
   const handleToggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
     onToggle(row)
   }, [onToggle, row])
+  // stage-65: حذف کامل — مودال تایید قوی (غیرقابل برگشت)
+  const handleDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    onDelete(row)
+  }, [onDelete, row])
   const handleOpen = useCallback(() => onOpen(c.id as string), [onOpen, c.id])
   // کیبورد — Enter/Space روی کارت هم باز می‌کند (دکمه‌ی ویرایش همیشه هست)
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -117,6 +126,9 @@ const CouponCard = memo(function CouponCard({
                 <Check size={16} />
               </button>
             ) : null}
+            <button type="button" onClick={handleDelete} aria-label="حذف کامل" title="حذف کامل (غیرقابل برگشت)" className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
+              <Trash2 size={16} />
+            </button>
           </div>
         </div>
       </div>
@@ -161,6 +173,9 @@ const CouponCard = memo(function CouponCard({
                 <Check size={18} />
               </button>
             ) : null}
+            <button type="button" onClick={handleDelete} aria-label="حذف کامل" title="حذف کامل (غیرقابل برگشت)" className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
+              <Trash2 size={18} />
+            </button>
           </div>
         </div>
       </div>
@@ -189,6 +204,9 @@ const CouponCard = memo(function CouponCard({
               <Check size={18} />
             </button>
           ) : null}
+          <button type="button" onClick={handleDelete} aria-label="حذف کامل" title="حذف کامل (غیرقابل برگشت)" className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer">
+            <Trash2 size={18} />
+          </button>
         </div>
       </div>
     </div>
@@ -199,6 +217,9 @@ const CouponCard = memo(function CouponCard({
 const AdminCouponsPage = memo(function AdminCouponsPage() {
   const navigate = useNavigate()
 
+  // stage-65 — دو مودال جدا: غیرفعال‌سازی نرم / حذف کامل
+  const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false)
+  const [couponToDeactivate, setCouponToDeactivate] = useState<string | null>(null)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [couponToDelete, setCouponToDelete] = useState<string | null>(null)
 
@@ -212,6 +233,9 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
       setCouponToDelete(null)
     },
   })
+
+  // stage-65 — غیرفعال‌سازی نرم (برگشت‌پذیر)؛ خطا (مثل انقضای گذشته) پیام شناور می‌شود
+  const deactivateMut = useCouponDeactivate()
 
   // stage-10: فعال‌سازی مجدد — مستقیم (بدون مودال)؛ خطا (مثل انقضای گذشته) پیام شناور می‌شود
   const activateMut = useCouponActivate()
@@ -227,12 +251,25 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
   }, [navigate])
   const handleRequestToggle = useCallback((row: CouponWithConditionsDto) => {
     if (row.coupon.isActive) {
-      setCouponToDelete(row.coupon.id as string)
-      setIsDeleteModalOpen(true)
+      // stage-65 — نرم: مودال غیرفعال‌سازی (برگشت‌پذیر)
+      setCouponToDeactivate(row.coupon.id as string)
+      setIsDeactivateModalOpen(true)
     } else {
       activateMut.mutate(row.coupon.id as string)
     }
   }, [activateMut])
+
+  const handleRequestDelete = useCallback((row: CouponWithConditionsDto) => {
+    setCouponToDelete(row.coupon.id as string)
+    setIsDeleteModalOpen(true)
+  }, [])
+  const handleCloseDeactivate = useCallback(() => {
+    setCouponToDeactivate(null)
+    setIsDeactivateModalOpen(false)
+  }, [])
+  const handleConfirmDeactivate = useCallback(() => {
+    if (couponToDeactivate) deactivateMut.mutate(couponToDeactivate)
+  }, [couponToDeactivate, deactivateMut])
   const handleCloseDelete = useCallback(() => {
     setCouponToDelete(null)
     setIsDeleteModalOpen(false)
@@ -283,6 +320,7 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
               onEdit={handleEdit}
               onToggle={handleRequestToggle}
               onOpen={handleOpen}
+              onDelete={handleRequestDelete}
             />
           ))}
           {(coupons ?? []).length === 0 && (
@@ -291,11 +329,20 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
         </div>
       </div>
 
-      {/* کانفرم حذف/غیرفعال‌سازی */}
+      {/* stage-65 — مودال غیرفعال‌سازی نرم (برگشت‌پذیر) */}
+      <ConfirmModal
+        isOpen={isDeactivateModalOpen}
+        title="غیرفعال‌سازی کوپن تخفیف"
+        message="این کوپن موقتاً غیرفعال می‌شود و تا فعال‌سازی مجدد قابل استفاده نیست. مصرف‌کنندگان و تاریخچه‌ی کوپن حفظ می‌شوند و هر زمان می‌توانید دوباره فعالش کنید. ادامه می‌دهید؟"
+        onConfirm={handleConfirmDeactivate}
+        onCancel={handleCloseDeactivate}
+      />
+
+      {/* stage-65 — مودال حذف کامل (غیرقابل برگشت) */}
       <ConfirmModal
         isOpen={isDeleteModalOpen}
-        title="غیرفعال‌سازی کوپن تخفیف"
-        message="این کوپن غیرفعال می‌شود و دیگر قابل استفاده نخواهد بود. سفارش‌های در جریان که قبلاً از آن استفاده کرده‌اند سالم می‌مانند. ادامه می‌دهید؟"
+        title="حذف کامل کوپن"
+        message="این عملیات غیرقابل برگشت است: کوپن به‌همراه شرط‌ها، گرنت‌ها و کل تاریخچه‌ی مصرف‌کنندگانش از دیتابیس حذف می‌شود. سفارش‌ها و سوابق مالی سالم می‌مانند (فقط پیوندشان به این کوپن قطع می‌شود). اگر فقط می‌خواهید کوپن موقتاً خاموش شود، از «غیرفعال‌سازی» (آیکون ممنوع) استفاده کنید. مطمئن هستید؟"
         onConfirm={handleConfirmDelete}
         onCancel={handleCloseDelete}
       />

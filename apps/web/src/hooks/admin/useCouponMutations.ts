@@ -2,6 +2,10 @@
 // جهش‌های کوپن — منبع واحد رارد ۴۸ (اسکن B13).
 // حذف/فعال‌سازی قبلاً در صفحه‌ی لیست و صفحه‌ی جزئیات جدا نوشته می‌شدند؛
 // تفاوت‌های واقعی (حذف اپتیمیستیک در لیست، ناوبری/ماندن) به‌صورت گزینه می‌مانند.
+//
+// stage-65 — دو مسیر جدا:
+//   • DELETE = حذف واقعی (غیرقابل‌برگشت) + پاکشدن تاریخچهی مصرف با cascade
+//   • PATCH /status {active:false} = غیرفعال‌سازی نمم (برگشت‌پذیر)
 
 import type { CouponWithConditionsDto } from '@sinshin/shared'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -40,7 +44,29 @@ export function useCouponActivate(opts: CouponMutationOptions = {}) {
 	})
 }
 
-/** حذف = غیرفعال‌سازی (سفارش‌های در جریان سالم می‌مانند) */
+/** stage-65 — غیرفعال‌سازی نم (برگشت‌پذیر) — مسیر /status */
+export function useCouponDeactivate(opts: CouponMutationOptions = {}) {
+	const queryClient = useQueryClient()
+	const showToast = useToastStore((s) => s.showToast)
+	return useMutation({
+		mutationFn: (id?: string) =>
+			setCouponActive(id ?? opts.couponId ?? '', false),
+		onSuccess: (res) => {
+			if (opts.couponId) {
+				queryClient.invalidateQueries({
+					queryKey: qk.adminCouponDetails(opts.couponId),
+				})
+			}
+			showToast(res.message || 'کوپن غیرفعال شد')
+		},
+		onError: (err) => showToast(err.message || 'غیرفعال‌سازی ناموفق بود', 'error'),
+		onSettled: () => {
+			queryClient.invalidateQueries({ queryKey: qk.adminCoupons })
+		},
+	})
+}
+
+/** stage-65 — حذف واقعی (غیرقابل‌برگشت): ردیف + تاریخچهی مصرف با cascade پاک می‌شوند */
 export function useCouponDelete(opts: CouponMutationOptions = {}) {
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
@@ -71,13 +97,14 @@ export function useCouponDelete(opts: CouponMutationOptions = {}) {
 					},
 				}
 			: {}),
-		onSuccess: () => {
+		onSuccess: (res) => {
 			if (opts.couponId) {
 				queryClient.invalidateQueries({
 					queryKey: qk.adminCouponDetails(opts.couponId),
 				})
 			}
-			showToast('کوپن غیرفعال شد')
+			// stage-65 — پیام واقعی سرور: «کوپن و تاریخچهی مصرف آن حذف شد»
+			showToast(res.message || 'کوپن و تاریخچهی مصرف آن حذف شد')
 			opts.onDeleted?.()
 		},
 		onSettled: () => {
