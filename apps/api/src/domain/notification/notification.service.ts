@@ -1,4 +1,38 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-64 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-55)
+// تغییر (ممیزی عمیق سرویس نوتیفیکیشن — اسکن کارفرما + اسکن ما):
+//   ① گارد تسخیر اشتراک اتمیک شد (TOCTOU بسته شد): upsert با
+//      setWhere(user_id=درخواست‌دهنده) — رقابتِ دو درخواستِ هم‌زمان
+//      دیگر نمی‌تواند مالکیت را بی‌صدا عوض کند؛ قبلاً SELECT سپس
+//      INSERT بینِ دو کوئری قابل شکست بود.
+//   ② پوشِ «سفارش جدید صف زنده» به ادمینِ اصلی هم می‌رسد (قبلاً فقط
+//      admin2 — خواسته‌ی جدید کارفرما). notifyAdmin2sNewOrder →
+//      notifyAdminsNewOrder (admin + admin2، غیربن).
+//   ③ مخاطب پوشِ broadcast هم‌راستای صندوق شد: join با users و فیلتر
+//      role='user' + bannedAt IS NULL (قبلاً همه‌ی اشتراک‌های فعال —
+//      حتی ادمین/بن‌شده — پوش می‌گرفتند ولی ردیف صندوق نداشتند)؛ سقف
+//      هم با صندوق ۵۰k شد. فان‌اوت فایر-اند-فورگت (پاسخ HTTP منتظر
+//      ده‌ها هزار پوش نمی‌ماند — هم‌زمان با stage-52 الگوی سفارش).
+//   ④ برچسب (tag) پوش‌های broadcast/تخفیف یکتا شد (type-logId) — دو
+//      اطلاعیه‌ی متفاوت دیگر جای هم را نمی‌گیرند؛ coupon_nudge و
+//      new-order عمداً ثابت ماندند (جایگزینیِ یادآور/سفارش = طراحی).
+//   ⑤ معنای آمار: «تحویل» → «acceptedByPushService» (پذیرشِ ۲۰۱ از
+//      سرور پوش — نمایشِ واقعی روی دستگاه فقط از سمت مرورگر قابل
+//      اثبات است) + گزارش غنی‌تر: شناسه، تعداد هدف، پذیرش، مرده،
+//      خطاها، مدت‌زمان.
+//   ⑥ تشدیدِ خودکارِ شکست نرم شد: خطای «موقت» (شبکه/مهلت/429/5xx)
+//      دیگر شمارنده‌ی failures را بالا نمی‌برد — فقط خطای قطعیِ ۴xx
+//      (400/401/403/413…) شمرده می‌شود. قبلاً ۵ پخشِ ناموفق (مثلاً
+//      اختلال موقت مسیر خروجی ایران↔FCM) همه‌ی اشتراک‌ها را از کار
+//      می‌انداخت و بازیابی فقط با باز شدن دوباره‌ی سایت بود.
+//   ⑦ sendTestPush — اعتبارسنجیِ سرِتا‌سرِ خط پوش (پرامپت مبتنی بر
+//      کلیک + دکمه‌ی «پوش تستی» در پنل): پوش واقعی به اشتراک‌های
+//      خودِ کاربر، بدون ردیف صندوق/تاریخچه.
+//   ⑧ فراخوانِ مرده‌ی publishSse('broadcast') حذف شد (هیچ کلاینتی
+//      مشترک کانال broadcast نبود؛ صندوق با refetch تازه می‌شود).
+//
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -42,13 +76,13 @@ import { likePattern } from '#/domain/shared/pg'
  *  ۲) SSE زنده — کانال notify:{userId} (فقط مالک؛ گارد در realtime.routes)
  *  ۳) Web Push — به همه‌ی اشتراک‌های فعال کاربر (مرورگر بسته هم می‌رسد)
  *
- * stage-52 — کانال چهارم (اختصاصی): notifyAdmin2sNewOrder
- *  سفارش جدید صف زنده ⇒ پوشِ «فقط ادمین سطح ۲» (ادمین اصلی همان پنل
- *  زنده + SSE را دارد؛ طبق خواسته، پوش نمی‌گیرد). بدون ردیف صندوق و بدون
- *  تاریخچه — پنل زنده خودش منبع نمایش سفارش است؛ این کانال فقط «زنگ» است.
+ * stage-52 — کانال چهارم (اختصاصی): notifyAdminsNewOrder
+ *  سفارش جدید صف زنده ⇒ پوشِ «ادمین اصلی + سطح ۲» (stage-64: ادمین
+ *  اصلی هم می‌گیرد). بدون ردیف صندوق و بدون تاریخچه — پنل زنده خودش
+ *  منبع نمایش سفارش است؛ این کانال فقط «زنگ» است.
  *
  * ضد-کرش (قانون طلایی: نوتیفیکیشن هرگز مسیر اصلی را زمین نمی‌زند):
- *  • notifyUser/notifyUsers/broadcast/notifyAdmin2sNewOrder هرگز throw
+ *  • notifyUser/notifyUsers/broadcast/notifyAdminsNewOrder هرگز throw
  *    نمی‌کنند — خطا فقط لاگ.
  *  • پوش اشتراکی که 404/410 داد → غیرفعال (disabledAt) و بعداً پاک‌سازی.
  *  • ارسال پوش فان‌اوت با سقف هم‌زمانی؛ هر اشتراک مستقل try/catch.
@@ -102,14 +136,36 @@ export interface NotificationDto {
   readAt: Date | null
 }
 
-/** stage-52 — آمار پوش سفارش زنده (برای لاگ و فراخوان‌های آینده) */
+/**
+ * stage-52 — آمار پوش سفارش زنده (برای لاگ و فراخوان‌های آینده).
+ * stage-64 — معنای «delivered» به «acceptedByPushService» تغییر کرد: 201 از
+ * سرور پوش یعنی پیام «پذیرفته و تحویلِ سرور پوش» شده؛ نمایشِ روی دستگاه
+ * فقط از سمت مرورگر/SW قابل اثبات است (پوش تستی همین را می‌سنجد).
+ */
 export interface LiveOrderPushStats {
-  /** اشتراک‌های فعال ادمین‌های سطح ۲ که پوش برایشان ارسال شد */
+  /** اشتراک‌های فعال ادمین‌ها (اصلی + سطح ۲) که پوش برایشان ارسال شد */
   targeted: number
-  /** تحویل موفق (201 از سرور پوش) */
-  delivered: number
+  /** پذیرش موفق سرور پوش (201/200) — نه ضمانتِ نمایش */
+  acceptedByPushService: number
   /** اشتراک مرده (404/410) — همین‌جا غیرفعال شد */
   gone: number
+  /** مدت‌زمان کل فان‌اوت (میلی‌ثانیه) — برای گزارش/مانیتورینگ */
+  durationMs: number
+}
+
+/**
+ * stage-64 — نتیجه‌ی پوش تستی (POST /notifications/test-push):
+ * اعتبارسنجی سرِتا‌سرِ خط پوش برای اشتراک‌های خودِ کاربر.
+ */
+export interface TestPushStats {
+  /** اشتراک‌های فعال خودِ کاربر که پوش برایشان ارسال شد */
+  targeted: number
+  /** پذیرش سرور پوش (201/200) */
+  acceptedByPushService: number
+  /** اشتراک مرده (404/410) — غیرفعال شد */
+  gone: number
+  /** مدت‌زمان فان‌اوت */
+  durationMs: number
 }
 
 /** سقف هم‌زمانی ارسال پوش — فشار لحظه‌ای روی حلقه‌ی رویداد نمی‌سازد */
@@ -118,6 +174,12 @@ const PUSH_CONCURRENCY = 25
 const INSERT_CHUNK = 500
 /** stage-48 — شکستِ پیاپی پوش قبل از غیرفعال‌کردن اشتراک */
 const PUSH_MAX_FAILURES = 5
+/**
+ * stage-64 — سقف مشترکِ مخاطبِ broadcast — هم‌راستای سقف صندوق (۵۰k):
+ * قبلاً ۲۰k بود و بی‌صدا مازاد را می‌انداخت؛ همین ثابت در هر دو مسیر
+ * (درج صندوق + پوش) استفاده می‌شود تا مخاطب‌ها هرگز از هم جدا نشوند.
+ */
+const BROADCAST_MAX_AUDIENCE = 50_000
 
 // ── stage-52 — ثابت‌های کانال «سفارش زنده → پوش ادمین۲» ──
 
@@ -163,11 +225,13 @@ export class NotificationService {
 
   /**
    * نوتیفیکیشن به یک کاربر — insert + SSE + push.
-   * هرگز throw نمی‌کند؛ خروجی آمار تحویل است.
+   * هرگز throw نمی‌کند؛ خروجی آمار پوش است.
+   * stage-64 — «pushed» → «pushAccepted»: پذیرشِ سرور پوش (201/200)،
+   * نه ضمانتِ نمایش روی دستگاه (مصرف‌کننده‌ها فقط id را می‌خوانند).
    */
   async notifyUser(userId: string, input: NotifyInput): Promise<{
     id: string | null
-    pushed: number
+    pushAccepted: number
     pushGone: number
   }> {
     let id: string | null = null
@@ -186,7 +250,7 @@ export class NotificationService {
       id = row?.id ?? null
     } catch (err) {
       console.error(`[notify] insert برای ${userId} ناموفق:`, err)
-      return { id: null, pushed: 0, pushGone: 0 }
+      return { id: null, pushAccepted: 0, pushGone: 0 }
     }
 
     // SSE زنده — فقط اگر تبِ کاربر باز باشد
@@ -201,8 +265,8 @@ export class NotificationService {
     })
 
     // Web Push — مرورگر بسته هم می‌گیرد
-    const { delivered, gone } = await this.pushToUser(userId, id, input)
-    return { id, pushed: delivered, pushGone: gone }
+    const { accepted, gone } = await this.pushToUser(userId, id, input)
+    return { id, pushAccepted: accepted, pushGone: gone }
   }
 
   /** نوتیفیکیشن به چند کاربر — batch با هم‌زمانی سقف‌دار */
@@ -224,6 +288,11 @@ export class NotificationService {
    * همه ساخته می‌شود (صندوق درون‌بری)؛ پوش فقط به مشترکان می‌رود.
    * stage-48 — هر پخش یک ردیف در notification_log (تاریخچه‌ی پنل) می‌گیرد؛
    * sender برای گزارش «چه کسی فرستاد» است (ادمین/ادمین۲/سیستم).
+   * stage-64 — ① پوش هم‌زمان صندوق نیست: فایر-اند-فورگت (پاسخ HTTP
+   * منتظر فان‌اوت ده‌ها هزار پوش نمی‌ماند؛ خطا داخلی لاگ می‌شود).
+   * ② tag پوش یکتا = type-logId (اطلاعیه‌های متفاوت جای هم را نمی‌گیرند).
+   * ③ فراخوان مرده‌ی publishSse('broadcast') حذف شد — هیچ کلاینتی
+   * مشترک آن کانال نبود؛ صندوق با refetch تازه می‌شود.
    * خروجی: تعداد کاربران هدف.
    */
   async broadcast(input: NotifyInput, sender?: NotifySender): Promise<{ targeted: number }> {
@@ -235,7 +304,7 @@ export class NotificationService {
         .from(users)
         .where(and(eq(users.role, 'user'), isNull(users.bannedAt)))
         .orderBy(desc(users.createdAt))
-        .limit(50_000)
+        .limit(BROADCAST_MAX_AUDIENCE)
       ids = rows.map((r) => r.id)
     } catch (err) {
       console.error('[notify] broadcast: خواندن کاربران ناموفق:', err)
@@ -269,46 +338,46 @@ export class NotificationService {
     }
 
     // stage-48 — تاریخچه‌ی ارسال (fail-soft — پخش موفق نباید گیر لاگ بکند)
-    await this.logBroadcast(input, inserted, sender).catch(() => {})
+    // stage-64 — شناسه‌ی ردیف تاریخچه برگردانده می‌شود: tag یکتای پوش
+    const logId = await this.logBroadcast(input, inserted, sender).catch(() => null)
 
-    // SSE برای آنلاین‌ها + پوش به مشترکان — بدون ردیف‌یابی مجدد
-    this.publishSse('broadcast', {
-      type: input.type,
-      title: input.title,
-      body: input.body,
-      url: input.url ?? null,
-      data: input.data ?? {},
-      createdAt: new Date().toISOString(),
-    })
-    await this.pushToSubscribedUsers(input)
+    // stage-64 — پوش به مشترکانِ همان مخاطبانِ صندوق — فایر-اند-فورگت
+    // (خطاها داخل pushToSubscribedUsers لاگ می‌شوند؛ پاسخ مسیر نمی‌ماند)
+    void this.pushToSubscribedUsers(input, logId).catch(() => {})
     return { targeted: inserted }
   }
 
   /**
-   * stage-52 — سفارش جدید وارد «صف زنده» شد ⇒ Web Push فقط به ادمین‌های
-   * سطح ۲. فراخوان: چک‌اوت تمام-کیف‌پول (order.routes) و نهایی‌شدن موفق
-   * پرداخت درگاهی (payment.service.finalize) — همان دو جایی که رویداد
-   * SSE ‏order-created روی orders:new منتشر می‌شود؛ یعنی دقیقاً لحظه‌ای
-   * که سفارش در پنل زنده ظاهر می‌شود.
+   * stage-52 — کانال چهارم (اختصاصی): notifyAdminsNewOrder
+   * سفارش جدید صف زنده ⇒ Web Push به ادمین‌های اصلی و سطح ۲.
+   * stage-64 — ادمینِ اصلی هم دریافت می‌کند (خواسته‌ی صریح کارفرما؛
+   * قبلاً فقط admin2 بود). فراخوان: چک‌اوت تمام-کیف‌پول (order.routes)
+   * و نهایی‌شدن موفق پرداخت درگاهی (payment.service.finalize) — همان
+   * دو جایی که رویداد SSE ‏order-created روی orders:new منتشر می‌شود.
    *
-   *  • هدف: اشتراک‌های فعالِ کاربران role=admin2 (غیربن) — ادمین اصلی
-   *    عمداً خارج است (خواسته‌ی صریح؛ او همان پنل زنده + SSE را دارد).
-   *  • فقط «پوش» است: ردیف صندوق نه (unread بی‌پایان برای هر سفارش =
-   *    اسپم)، SSE نه (پنل زنده خودش مشترک orders:new است)، ردیف
-   *    notification_log نه (تاریخچه با هر سفارش پر می‌شد).
-   *  • کلیک ⇒ /admin/admin2/live-orders — notificationclick در SW با
-   *    data.url تب را فوکوس/ناو یا پنجره‌ی تازه باز می‌کند.
-   *  • urgency=high (RFC 8030) + TTL اختصاصی ۱۵ دقیقه — سفارشِ قدیمی
-   *    دیگر خبر فوری نیست.
-   *  • قانون طلایی: هرگز throw نمی‌کند؛ چک‌اوت/پرداخت هرگز زمین نمی‌خورد.
+   *   • هدف: اشتراک‌های فعالِ کاربران role=admin یا admin2 (غیربن).
+   *   • فقط «پوش» است: ردیف صندوق نه (unread بی‌پایان برای هر سفارش =
+   *     اسپم)، SSE نه (پنل زنده خودش مشترک orders:new است)، ردیف
+   *     notification_log نه (تاریخچه با هر سفارش پر می‌شد).
+   *   • کلیک ⇒ /admin/admin2/live-orders — notificationclick در SW با
+   *     data.url تب را فوکوس/ناو یا پنجره‌ی تازه باز می‌کند.
+   *   • urgency=high (RFC 8030) + TTL اختصاصی ۱۵ دقیقه — سفارشِ قدیمی
+   *     دیگر خبر فوری نیست.
+   *   • قانون طلایی: هرگز throw نمی‌کند؛ چک‌اوت/پرداخت هرگز زمین نمی‌خورد.
    */
-  async notifyAdmin2sNewOrder(input: { displayId: string }): Promise<LiveOrderPushStats> {
-    const stats: LiveOrderPushStats = { targeted: 0, delivered: 0, gone: 0 }
+  async notifyAdminsNewOrder(input: { displayId: string }): Promise<LiveOrderPushStats> {
+    const stats: LiveOrderPushStats = {
+      targeted: 0,
+      acceptedByPushService: 0,
+      gone: 0,
+      durationMs: 0,
+    }
+    const startedAt = Date.now()
     try {
       // ۱) خلاصه‌ی سبک سفارش (نوع ارسال/جمع اقلام/مبلغ) — شکست = بدنه‌ی ساده
       const summary = await this.liveOrderSummary(input.displayId)
 
-      // ۲) اشتراک‌های فعال ادمین‌های سطح ۲ (join با users برای نقش/بن)
+      // ۲) اشتراک‌های فعال ادمین‌ها — اصلی و سطح ۲ (join با users برای نقش/بن)
       const subs = await this.deps.db
         .select({
           id: pushSubscriptions.id,
@@ -320,7 +389,7 @@ export class NotificationService {
         .innerJoin(users, eq(users.id, pushSubscriptions.userId))
         .where(
           and(
-            eq(users.role, 'admin2'),
+            inArray(users.role, ['admin', 'admin2']),
             isNull(users.bannedAt),
             isNull(pushSubscriptions.disabledAt),
           ),
@@ -362,7 +431,7 @@ export class NotificationService {
       }
       for (const { sub, outcome } of outcomes) {
         stats.targeted++
-        if (outcome.kind === 'ok') stats.delivered++
+        if (outcome.kind === 'ok') stats.acceptedByPushService++
         if (outcome.kind === 'gone') {
           stats.gone++
           goneIds.push(sub.id)
@@ -370,9 +439,11 @@ export class NotificationService {
       }
       await this.recordPushOutcomesBatch(outcomes)
       await this.disableSubscriptionsBatch(goneIds)
+      stats.durationMs = Date.now() - startedAt
       console.log(
-        `[notify] سفارش زنده ${input.displayId}: پوش به ${stats.targeted} اشتراک ادمین۲ ` +
-          `(تحویل ${stats.delivered}${stats.gone > 0 ? `، مرده ${stats.gone}` : ''})`,
+        `[notify] سفارش زنده ${input.displayId}: پوش به ${stats.targeted} اشتراک ادمین‌ها ` +
+          `(پذیرش سرور پوش ${stats.acceptedByPushService}${stats.gone > 0 ? `، مرده ${stats.gone}` : ''}` +
+          `، ${stats.durationMs}ms)`,
       )
     } catch (err) {
       console.error(`[notify] پوش سفارش زنده ${input.displayId} ناموفق:`, err)
@@ -636,26 +707,35 @@ export class NotificationService {
     }
   }
 
-  /** پوش به همه‌ی اشتراک‌های فعال یک کاربر — هم‌زمانی سقف‌دار */
+  /** پوش به همه‌ی اشتراک‌های فعال یک کاربر — هم‌زمانی سقف‌دار
+   *  stage-64 — tag یکتا به‌ازای ردیف نوتیف (type-notificationId):
+   *  دو اطلاعیه‌ی شخصیِ متفاوت دیگر جای هم را نمی‌گیرند؛ فقط
+   *  coupon_nudge عمداً ثابت است (یادآورهای تکراری جای هم را بگیرند). */
   private async pushToUser(
     userId: string,
     notificationId: string | null,
     input: NotifyInput,
-  ): Promise<{ delivered: number; gone: number }> {
-    let delivered = 0
+  ): Promise<{ accepted: number; gone: number }> {
+    let accepted = 0
     let gone = 0
+    const startedAt = Date.now()
     try {
       const subs = await this.deps.db
         .select()
         .from(pushSubscriptions)
         .where(and(eq(pushSubscriptions.userId, userId), isNull(pushSubscriptions.disabledAt)))
-      if (subs.length === 0) return { delivered: 0, gone: 0 }
+      if (subs.length === 0) return { accepted: 0, gone: 0 }
 
       const pushPayload = {
         title: input.title.slice(0, 120),
         body: input.body.slice(0, 300),
         url: input.url,
-        tag: input.type === 'coupon_nudge' ? 'coupon-nudge' : input.type,
+        tag:
+          input.type === 'coupon_nudge'
+            ? 'coupon-nudge'
+            : notificationId
+              ? `${input.type}-${notificationId}`
+              : input.type,
         data: input.data,
       }
 
@@ -678,7 +758,7 @@ export class NotificationService {
       const goneIds: string[] = []
       for (const { sub, outcome } of outcomes) {
         attempted++
-        if (outcome.kind === 'ok') delivered++
+        if (outcome.kind === 'ok') accepted++
         if (outcome.kind === 'gone') {
           gone++
           goneIds.push(sub.id)
@@ -691,29 +771,64 @@ export class NotificationService {
       if (notificationId) {
         await this.deps.db
           .update(notifications)
-          .set({ pushAttempted: attempted, pushDelivered: delivered })
+          .set({ pushAttempted: attempted, pushDelivered: accepted })
           .where(eq(notifications.id, notificationId))
           .catch(() => { /* آماری است — شکست مهم نیست */ })
+      }
+
+      // stage-64 — گزارش غنی: شناسه/هدف/پذیرش/مرده/مدت + نمونه‌ی خطاها
+      if (outcomes.length > 0) {
+        const errors = summarizeOutcomeErrors(outcomes)
+        console.log(
+          `[notify] پوش شخصی (${input.type}/${notificationId ?? 'no-id'}): ` +
+            `هدف ${attempted}، پذیرش سرور پوش ${accepted}` +
+            `${gone > 0 ? `، مرده ${gone}` : ''}، ${Date.now() - startedAt}ms` +
+            `${errors ? `، خطاها: ${errors}` : ''}`,
+        )
       }
     } catch (err) {
       console.error(`[notify] pushToUser برای ${userId} ناموفق:`, err)
     }
-    return { delivered, gone }
+    return { accepted, gone }
   }
 
-  /** پوش به همه‌ی مشترکان فعال (broadcast) — بدون ساخت ردیف اضافه */
-  private async pushToSubscribedUsers(input: NotifyInput): Promise<void> {
+  /**
+   * پوش به مشترکانِ فعالِ مخاطبانِ broadcast — بدون ساخت ردیف اضافه.
+   * stage-64 — مخاطب دقیقاً هم‌راستای صندوق شد: join با users و فیلتر
+   * role='user' + bannedAt IS NULL (قبلاً همه‌ی اشتراک‌های فعال — حتی
+   * ادمین/کاربرِ بن‌شده — پوش می‌گرفتند در حالی که ردیف صندوق نداشتند؛
+   * پیامِ نمایش‌داده‌شده بدون ردیف صندوق ناهماهنگی داده می‌ساخت).
+   * tag یکتا = type-logId — اطلاعیه‌های متفاوت جای هم را نمی‌گیرند.
+   */
+  private async pushToSubscribedUsers(
+    input: NotifyInput,
+    logId?: string | null,
+  ): Promise<void> {
+    const startedAt = Date.now()
     try {
       const subs = await this.deps.db
-        .select()
+        .select({
+          id: pushSubscriptions.id,
+          endpoint: pushSubscriptions.endpoint,
+          p256dh: pushSubscriptions.p256dh,
+          auth: pushSubscriptions.auth,
+        })
         .from(pushSubscriptions)
-        .where(isNull(pushSubscriptions.disabledAt))
-        .limit(20_000)
+        .innerJoin(users, eq(users.id, pushSubscriptions.userId))
+        .where(
+          and(
+            isNull(pushSubscriptions.disabledAt),
+            eq(users.role, 'user'),
+            isNull(users.bannedAt),
+          ),
+        )
+        .limit(BROADCAST_MAX_AUDIENCE)
+      if (subs.length === 0) return
       const pushPayload = {
         title: input.title.slice(0, 120),
         body: input.body.slice(0, 300),
         url: input.url,
-        tag: input.type,
+        tag: logId ? `${input.type}-${logId}` : input.type,
         data: input.data,
       }
       const outcomes: PushOutcomeItem[] = []
@@ -728,13 +843,22 @@ export class NotificationService {
         )
         outcomes.push(...results)
       }
+      let accepted = 0
       for (const { sub, outcome } of outcomes) {
+        if (outcome.kind === 'ok') accepted++
         if (outcome.kind === 'gone') goneIds.push(sub.id)
       }
       // stage-48 — همان آمار خطای پیاپی (تلاش مجدد دوره‌ای بعدی تصمیم می‌گیرد)
       // stage-55 — آمار دسته‌ای + غیرفعال‌سازی مرده‌ها دسته‌ای (حداکثر ۳ کوئری)
       await this.recordPushOutcomesBatch(outcomes)
       await this.disableSubscriptionsBatch(goneIds)
+      // stage-64 — گزارش غنی: هدف/پذیرش/مرده/مدت + خطاها
+      const errors = summarizeOutcomeErrors(outcomes)
+      console.log(
+        `[notify] broadcast push (${input.type}/${logId ?? 'no-id'}): هدف ${outcomes.length}، ` +
+          `پذیرش سرور پوش ${accepted}${goneIds.length > 0 ? `، مرده ${goneIds.length}` : ''}، ` +
+          `${Date.now() - startedAt}ms${errors ? `، خطاها: ${errors}` : ''}`,
+      )
       if (goneIds.length > 0) {
         console.log(`[notify] broadcast: ${goneIds.length} اشتراک مرده غیرفعال شد`)
       }
@@ -747,8 +871,13 @@ export class NotificationService {
    * stage-55 — آمار پوشِ دسته‌ای: قبلاً به‌ازای هر اشتراک یک UPDATE
    * مستقل (۲۰k اشتراک = ۲۰k کوئری)؛ حالا حداکثر ۳ کوئری.
    *  • ok ⇒ failures=0 + lastPushAt (سلامت اشتراک تأیید شد)
-   *  • fail (شبکه/429/5xx — خطای موقت) ⇒ failures+1؛ با رسیدن به سقف،
-   *    اشتراک غیرفعال می‌شود تا فان‌آوت‌های بعدی مسدود نمانند.
+   *  • fail قطعی (۴xx غیر از 429 — 400/401/403/413…) ⇒ failures+1؛ با
+   *    رسیدن به سقف، اشتراک غیرفعال می‌شود تا فان‌آوت‌های بعدی مسدود نمانند.
+   *  • stage-64 — fail «موقت» (شبکه/مهلت/429/5xx) دیگر شمرده نمی‌شود:
+   *    اختلالِ مسیر خروجی (ایران↔FCM) چند ساعت طول می‌کشید و ۵ پخشِ
+   *    ناموفق همه‌ی اشتراک‌ها را از کار می‌انداخت؛ بازیابی فقط با
+   *    باز شدن دوباره‌ی سایت (reconcile) بود. اشتراکِ واقعاً خراب بالاخره
+   *    404/410 (gone) یا 4xx قطعی می‌دهد و همان مسیرها او را می‌گیرند.
    */
   private async recordPushOutcomesBatch(outcomes: PushOutcomeItem[]): Promise<void> {
     if (outcomes.length === 0) return
@@ -756,7 +885,7 @@ export class NotificationService {
     const failIds: string[] = []
     for (const { sub, outcome } of outcomes) {
       if (outcome.kind === 'ok') okIds.push(sub.id)
-      else if (outcome.kind === 'fail') failIds.push(sub.id)
+      else if (outcome.kind === 'fail' && isPermanentPushFailure(outcome)) failIds.push(sub.id)
     }
     try {
       if (okIds.length > 0) {
@@ -798,21 +927,112 @@ export class NotificationService {
     }
   }
 
-  /** stage-48 — درج ردیف تاریخچه‌ی ارسال (notification_log) */
+  /**
+   * stage-48 — درج ردیف تاریخچه‌ی ارسال (notification_log)
+   * stage-64 — شناسه‌ی ردیف برگردانده می‌شود: tag یکتای پوشِ broadcast
+   * (type-logId) — اطلاعیه‌های متفاوت جای هم را نمی‌گیرند.
+   */
   private async logBroadcast(
     input: NotifyInput,
     audience: number,
     sender?: NotifySender,
-  ): Promise<void> {
-    await this.deps.db.insert(notificationLog).values({
-      type: input.type,
-      title: input.title.slice(0, 120),
-      body: input.body.slice(0, 300),
-      url: input.url?.slice(0, 300) ?? null,
-      audience,
-      senderRole: sender?.role ?? 'system',
-      senderName: sender?.name?.slice(0, 120) ?? null,
-    })
+  ): Promise<string | null> {
+    const [row] = await this.deps.db
+      .insert(notificationLog)
+      .values({
+        type: input.type,
+        title: input.title.slice(0, 120),
+        body: input.body.slice(0, 300),
+        url: input.url?.slice(0, 300) ?? null,
+        audience,
+        senderRole: sender?.role ?? 'system',
+        senderName: sender?.name?.slice(0, 120) ?? null,
+      })
+      .returning({ id: notificationLog.id })
+    return row?.id ?? null
+  }
+
+  /**
+   * stage-64 — پوش تستی: اعتبارسنجیِ سرِتا‌سرِ خط پوش برای «خودِ کاربر».
+   *
+   * هدفِ ممیزی: بعد از فلوی مجوزِ مبتنی بر کلیک (بنر PushAutoPrompt)،
+   * ادمین/کاربر بتواند فوراً بفهمد «اشتراک ثبت شده؟ رمزنگاری درست؟ سرور
+   * پوش قبول می‌کند؟» — بدون ساخت ردیف صندوق/تاریخچه (این یک عیب‌یابی
+   * است، نه اطلاعیه).
+   *
+   *  • فقط اشتراک‌های فعالِ خودِ کاربر هدف‌اند (نرخ‌سقف IP هم روی روت).
+   *  • tag ثابت 'test-push': پوش‌های تستی جای هم را می‌گیرند (اسپم نمی‌سازند)
+   *    و renotify در SW باعث زنگ دوباره می‌شود.
+   *  • TTL کوتاه (۵ دقیقه): پیام تستیِ دیررس معنا ندارد.
+   *  • قانون طلایی: هرگز throw نمی‌کند؛ آمار برمی‌گردد تا UI راهنمایی کند.
+   */
+  async sendTestPush(userId: string): Promise<TestPushStats> {
+    const stats: TestPushStats = {
+      targeted: 0,
+      acceptedByPushService: 0,
+      gone: 0,
+      durationMs: 0,
+    }
+    const startedAt = Date.now()
+    try {
+      const subs = await this.deps.db
+        .select({
+          id: pushSubscriptions.id,
+          endpoint: pushSubscriptions.endpoint,
+          p256dh: pushSubscriptions.p256dh,
+          auth: pushSubscriptions.auth,
+        })
+        .from(pushSubscriptions)
+        .where(and(eq(pushSubscriptions.userId, userId), isNull(pushSubscriptions.disabledAt)))
+        .limit(20)
+      if (subs.length === 0) {
+        stats.durationMs = Date.now() - startedAt
+        return stats
+      }
+
+      const pushPayload: PushPayload = {
+        title: '🔔 پوش تستی سین‌شین',
+        body: 'اگر این پیام را روی دستگاه می‌بینید، خط پوش این دستگاه سالم است ✅',
+        url: '/products',
+        tag: 'test-push',
+        ttl: 300,
+        data: { kind: 'test-push', at: new Date().toISOString() },
+      }
+
+      const outcomes: PushOutcomeItem[] = []
+      const goneIds: string[] = []
+      for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
+        const batch = subs.slice(i, i + PUSH_CONCURRENCY)
+        const results = await Promise.all(
+          batch.map(async (sub) => ({
+            sub,
+            outcome: await sendWebPush(this.deps.config, sub, pushPayload),
+          })),
+        )
+        outcomes.push(...results)
+      }
+      for (const { sub, outcome } of outcomes) {
+        stats.targeted++
+        if (outcome.kind === 'ok') stats.acceptedByPushService++
+        if (outcome.kind === 'gone') {
+          stats.gone++
+          goneIds.push(sub.id)
+        }
+      }
+      await this.recordPushOutcomesBatch(outcomes)
+      await this.disableSubscriptionsBatch(goneIds)
+      stats.durationMs = Date.now() - startedAt
+      const errors = summarizeOutcomeErrors(outcomes)
+      console.log(
+        `[notify] پوش تستی برای ${userId}: هدف ${stats.targeted}، ` +
+          `پذیرش سرور پوش ${stats.acceptedByPushService}${stats.gone > 0 ? `، مرده ${stats.gone}` : ''}` +
+          `، ${stats.durationMs}ms${errors ? `، خطاها: ${errors}` : ''}`,
+      )
+    } catch (err) {
+      console.error(`[notify] پوش تستی برای ${userId} ناموفق:`, err)
+      stats.durationMs = Date.now() - startedAt
+    }
+    return stats
   }
 
   /** سقف اشتراک فعال — قدیمی‌ترین‌ها غیرفعال (نه حذف؛ تاریخچه بماند) */
@@ -840,6 +1060,33 @@ export class NotificationService {
 
 const UUID_OK = (s: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+
+/**
+ * stage-64 — شکستِ «قطعی» پوش؟ فقط ۴xxِ غیر از 429 (اشتراک/کلید خراب —
+ * 400/401/403/413…). خطای بی‌وضعیت (شبکه/مهلت)، 429 و 5xx «موقت»ند و
+ * شمارنده‌ی failures را بالا نمی‌برند (توضیح کامل در recordPushOutcomesBatch).
+ */
+function isPermanentPushFailure(outcome: { kind: 'fail'; status?: number; error?: string }): boolean {
+  if (outcome.status === undefined) return false // شبکه/مهلت — موقت
+  if (outcome.status === 429 || outcome.status >= 500) return false // شلوغی/سرور — موقت
+  return outcome.status >= 400 // ۴xx قطعی (به‌جز ۴۰۴/۴۱۰ که gone هستند)
+}
+
+/**
+ * stage-64 — نمونه‌ی خطاهای فان‌اوت برای گزارش غنی: «HTTP 401×2, timeout×1».
+ * فقط برای لاگ/مشخصه‌های روت test-push است — مسیر اصلی هرگز گیرش نمی‌کند.
+ */
+function summarizeOutcomeErrors(outcomes: PushOutcomeItem[]): string {
+  const counts = new Map<string, number>()
+  for (const { outcome } of outcomes) {
+    if (outcome.kind !== 'fail') continue
+    const label =
+      outcome.status !== undefined ? `HTTP ${outcome.status}` : outcome.error ?? 'network'
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  if (counts.size === 0) return ''
+  return [...counts.entries()].map(([label, n]) => `${label}×${n}`).join(', ')
+}
 
 /**
  * stage-52 — متن پوش سفارش زنده (بدنه‌ی نوتیف):

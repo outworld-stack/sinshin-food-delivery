@@ -249,12 +249,12 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
               /* هیچ‌کاری نمی‌کند */
             }
             // stage-52 — سفارش جدید صف زنده: پنل‌ها SSE را گرفتند؛ حالا
-            // ادمین‌های سطح ۲ علاوه بر آن Web Push هم می‌گیرند (مرورگر بسته/
-            // تب دیگری هم باشد می‌رسد؛ کلیک ⇒ پنل سفارشات زنده). فایر-اند-
-            // فورگت — سرویس هرگز throw نمی‌کند و پاسخ چک‌اوت برای پوش
-            // هرگز معطل نمی‌ماند.
+            // ادمین‌ها (اصلی + سطح ۲ — stage-64) علاوه بر آن Web Push هم
+            // می‌گیرند (مرورگر بسته/تب دیگری هم باشد می‌رسد؛ کلیک ⇒ پنل
+            // سفارشات زنده). فایر-اند-فورگت — سرویس هرگز throw نمی‌کند و
+            // پاسخ چک‌اوت برای پوش هرگز معطل نمی‌ماند.
             void deps.notifications
-              .notifyAdmin2sNewOrder({ displayId: r.displayId })
+              .notifyAdminsNewOrder({ displayId: r.displayId })
               .catch(() => { /* ضد-کرش دوبل — قانون طلایی */ })
           }
           response = !r.requiresPayment || !r.paymentId

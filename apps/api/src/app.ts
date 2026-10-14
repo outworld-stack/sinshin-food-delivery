@@ -265,6 +265,8 @@ export const buildApp = (deps: AppDeps) => {
         sessions: deps.sessions,
         coupons: deps.coupons,
         audit: deps.audit,
+        // stage-64 — اعلان broadcast برای کوپن عمومیِ تازه‌ساخت
+        notifications: deps.notifications,
       }),
     )
     .use(termsRoutes({ sessions: deps.sessions, termsService: deps.termsService }))

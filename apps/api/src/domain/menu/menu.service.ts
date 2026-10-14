@@ -1101,6 +1101,14 @@ export class MenuService {
     const before = await this.deps.db.query.products.findFirst({
       where: eq(products.id, pid),
     })
+    // stage-64 — عکسِ فوریِ «بهترین تخفیف فعالِ قبل» — قبل از هر تغییر در DB:
+    // تراکنش سایزها پایین‌تر اجرا می‌شود و بعداً bestActiveDiscountPct(before)
+    // دیگر سایزهای «قدیم» را نمی‌خواند (باگ ممیزی: ویرایش تخفیفِ سایز هرگز
+    // پخش نمی‌شد چون pctBefore از سایزهای جدید حساب می‌شد و با pctAfter
+    // برابر درمی‌آمد). این عکسِ فوری مرجع مقایسه است — ماتریس تست کارفرما:
+    //   • سایز تکی/یکی از چند سایز تخفیف گرفت ⇒ یک اطلاعیه‌ی صحیح (نه تکراری)
+    //   • ویرایش بی‌ربط (نام/توضیح) با تخفیف ثابت ⇒ بدون اطلاعیه‌ی جدید
+    const beforeBestPct = before ? await this.bestActiveDiscountPct(before) : undefined
     // round-34 — نرمال‌سازی: '' → NULL؛ مواد اولیه‌ی خالی → NULL
     const nameAr = nullIfEmpty(input.nameAr)
     const descriptionAr = nullIfEmpty(input.descriptionAr)
@@ -1295,7 +1303,8 @@ export class MenuService {
         await this.publishProductLive(after)
       }
       // ۲) تخفیف مادی/جدید فعال شد ⇒ پخش فوری نوتیفیکیشن به همه
-      await this.broadcastDiscountIfActive(after, before)
+      // stage-64 — عکسِ فوریِ قبل پاس می‌شود (توضیح بالا)
+      await this.broadcastDiscountIfActive(after, before, beforeBestPct)
     }
     // stage-56 — نتیجه‌ی پیام‌دار (clashِ slug بالاتر return می‌شود)
     return { success: true }
@@ -1585,7 +1594,11 @@ export class MenuService {
    *   • create: تخفیف فعال ⇒ پخش.
    *   • update: فقط وقتی تخفیف «مادی» تغییر کرده (درصد/پنجره/سایز‌ها) و نتیجه
    *     فعال است — ویرایش‌های بی‌ربط به تخفیف (مثلاً توضیحات) پخش نمی‌شوند.
-   * خروجی system در notification_log ثبت می‌شود. هرگز throw نمی‌شود.
+   * stage-64 — پارامتر beforeBestPct: عکسِ فوریِ «بهترین تخفیف فعال» از
+   * «قبل از تغییر» (برای سایزها — سایزها در تراکنش پایین‌تر جایگزین شده‌اند
+   * و بازخوانیِ دوباره عددِ جدید را می‌دهد، نه قدیم را). بدون آن، ویرایشِ
+   * تخفیفِ سایز هرگز پخش نمی‌شد. خروجی system در notification_log ثبت
+   * می‌شود. هرگز throw نمی‌شود.
    */
   private async broadcastDiscountIfActive(
     after: Pick<
@@ -1595,6 +1608,7 @@ export class MenuService {
       | 'isAvailable' | 'courierAllowed' | 'takeawayAllowed' | 'dineInAllowed'
     >,
     before?: typeof products.$inferSelect | null,
+    beforeBestPct?: number,
   ): Promise<void> {
     try {
       const svc = this.deps.notifications
@@ -1606,7 +1620,10 @@ export class MenuService {
 
       let materialChange = true
       if (before) {
-        const pctBefore = await this.bestActiveDiscountPct(before)
+        // stage-64 — اولویت با عکسِ فوری (قبل از تغییرِ سایزها)؛ نبودش =
+        // مسیر create یا فراخوان قدیمی — همان محاسبه‌ی زنده (رفتار قبلی)
+        const pctBefore =
+          beforeBestPct !== undefined ? beforeBestPct : await this.bestActiveDiscountPct(before)
         const windowChanged =
           before.discountStartsAt?.getTime() !== after.discountStartsAt?.getTime() ||
           before.discountEndsAt?.getTime() !== after.discountEndsAt?.getTime() ||

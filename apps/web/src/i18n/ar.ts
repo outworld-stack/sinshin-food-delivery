@@ -616,6 +616,9 @@ export const ar: Dict = {
         'notify.enable.deniedStep3': 'عُد إلى هذه النافذة واضغط «إعادة فحص الإذن».',
         'notify.enable.recheck': 'إعادة فحص الإذن',
 
+        // stage-64 — زر إغلاق بانر تفعيل الإشعارات (PushAutoPrompt)
+        'notify.banner.dismiss': 'لاحقًا',
+
         // stage-51 — رسالة «المرحلة الدقيقة» لفشل التفعيل (بدل رسالة عامة)
         // (الكونسول أيضًا يسجّل كل فشل مع حالة HTTP — بلا رموز)
         'notify.enable.errKey':

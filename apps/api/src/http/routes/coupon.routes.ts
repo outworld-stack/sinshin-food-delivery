@@ -1,4 +1,15 @@
 // ═══════════════════════════════════════════════════════════
+// stage-64 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: «اعلان کوپن» — ساخت کوپنِ عمومی (isPublic=true) حالا به‌علاوه‌ی
+//        درج DB، یک broadcast نوع coupon هم می‌فرستد (ماتریس تست کارفرما:
+//        «ساخت/انتشار کوپن ⇒ اطلاعیه طبق سیاست اعلان، نه فقط درج»).
+//        سیاست: فقط «عمومی» در «ساخت» اعلان می‌شود — کد عمومی از ابتدا
+//        برای اشتراک‌گذاری است. کوپن خصوصی اعلان عمومی نمی‌گیرد (کد فقط
+//        به هدف‌یابی‌شده‌ها می‌رسد — اعلام عمومی یعنی لو رفتن کد)؛ ویرایش/
+//        فعال‌سازی مجدد هم اعلان نمی‌گیرد (اسپم می‌شد). فرستنده = system.
+//
 // stage-48 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -12,6 +23,7 @@ import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { CouponService } from '#/domain/coupon/coupon.service'
 import type { AuditService } from '#/domain/audit/audit.service'
+import type { NotificationService } from '#/domain/notification/notification.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { UUID_PATTERN } from '#/domain/shared/ids'
 
@@ -77,6 +89,8 @@ export interface CouponRoutesDeps {
   coupons: CouponService
   /** stage-10: لاگ ممیزی — عملیات کوپن ادمین اصلی */
   audit: AuditService
+  /** stage-64 — اعلان broadcast برای کوپن عمومیِ تازه‌ساخت */
+  notifications: NotificationService
 }
 
 export const couponRoutes = (deps: CouponRoutesDeps) =>
@@ -120,9 +134,25 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           entityId: res.id ?? null,
           metadata: { code: body.code, discount: body.discountPercentage },
         })
+        // stage-64 — اعلانِ ساختِ کوپنِ «عمومی»: کد از ابتدا برای همه است،
+        // پس همه باید خبردار شوند (سیاست اعلان — سربرگ فایل). کوپن خصوصی
+        // اعلان نمی‌گیرد؛ ویرایش/فعال‌سازی مجدد هم نه. فایر-اند-فورگت +
+        // خودِ broadcast هرگز throw نمی‌کند — ساخت کوپن هرگز گیر اعلان
+        // نمی‌کند؛ مقصد کلیک /products (کد در چک‌اوت زده می‌شود).
+        if (res.success && body.isPublic) {
+          void deps.notifications
+            .broadcast({
+              type: 'coupon',
+              title: '🎁 کد تخفیف جدید!',
+              body: `کد «${body.code}» با ٪${body.discountPercentage} تخفیف فعال شد — در چک‌اوت واردش کنید.`,
+              url: '/products',
+              data: { code: body.code, discount: body.discountPercentage },
+            })
+            .catch(() => { /* ضد-کرش دوبل — قانون طلایی */ })
+        }
         return res
       },
-      { body: couponBody, detail: { summary: 'Create coupon (contract: value/quantity)' } },
+      { body: couponBody, detail: { summary: 'Create coupon (contract: value/quantity; public ⇒ broadcast announcement)' } },
     )
 
     // ── phase-5: PATCH — فرانت updateCoupon می‌فرستید ولی روت نبود! ──

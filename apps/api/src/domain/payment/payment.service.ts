@@ -552,14 +552,14 @@ export class PaymentService {
       /* هیچ‌کاری نمی‌کند — publish هرگز نباید مسیر پرداخت را بشکند */
     }
     // stage-52 — سفارشِ «واقعاً جدید» (پرداخت موفق، داخل صف زنده ظاهر شد):
-    // علاوه بر SSE، Web Push به ادمین‌های سطح ۲ — مرورگر بسته هم می‌گیرد و
-    // کلیک ⇒ پنل سفارشات زنده. فایر-اند-فورگت: redirect مشتری هرگز
-    // منتظر ارسال پوش نمی‌ماند و سرویس هرگز throw نمی‌کند.
+    // علاوه بر SSE، Web Push به ادمین‌ها (اصلی + سطح ۲ — stage-64) — مرورگر
+    // بسته هم می‌گیرد و کلیک ⇒ پنل سفارشات زنده. فایر-اند-فورگت: redirect
+    // مشتری هرگز منتظر ارسال پوش نمی‌ماند و سرویس هرگز throw نمی‌کند.
     // (تصرف اتمیک PENDING تضمین می‌کند callback و job تایم‌اوت فقط یکی
     // به اینجا می‌رسند ⇒ پوش تکراری وجود ندارد.)
     if (result.paymentStatus === 'SUCCESS') {
       void this.deps.notifications
-        .notifyAdmin2sNewOrder({ displayId: result.orderDisplayId })
+        .notifyAdminsNewOrder({ displayId: result.orderDisplayId })
         .catch(() => { /* ضد-کرش دوبل — قانون طلایی */ })
     }
     return result

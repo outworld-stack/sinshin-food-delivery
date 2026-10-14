@@ -60,6 +60,7 @@ export interface NotificationRoutesDeps {
  *  GET  /notifications/push-status    → اشتراک‌های فعال من
  *  POST /notifications/subscriptions  → ثبت اشتراک Web Push
  *  DELETE /notifications/subscriptions → حذف اشتراک
+ *  POST /notifications/test-push      → stage-64: پوش تستی به اشتراک‌های خودم
  *
  * پنل (ادمین اصلی همیشه؛ ادمین۲ با مجوز):
  *  POST /notifications/broadcast  → پخش عمومی (send: notificationsSend)
@@ -184,6 +185,35 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
       {
         body: t.Object({ endpoint: t.String({ maxLength: 2048 }) }),
         detail: { summary: 'Remove my Web Push subscription' },
+      },
+    )
+
+    // ── stage-64 — پوش تستی: اعتبارسنجی سرِتا‌سرِ خط پوشِ «خودِ کاربر» ──
+    // فلوی مجوز نوتیف حالا مبتنی بر کلیک است (بنر PushAutoPrompt)؛ این
+    // روت ابزار راستی‌آزمایی همان فلوی تازه است: اشتراک‌های خودِ من هدف‌اند،
+    // بدون ردیف صندوق/تاریخچه. نتیجه (هدف/پذیرش/مرده/مدت) به UI برمی‌گردد
+    // تا «مثلث عیب‌یابی» (اشتراک؟ رمزنگاری؟ سرور پوش؟) قابل قضاوت باشد.
+    .post(
+      '/test-push',
+      async ({ user }) => {
+        const stats = await deps.notifications.sendTestPush(user.id)
+        return { success: true, ...stats }
+      },
+      {
+        // سقف نرخ: عیب‌یابیِ دستی است، نه مسیر کاربردی — ۱۰ بار در دقیقه
+        beforeHandle: ipRateLimit({
+          redis: deps.redis,
+          scope: 'push-test',
+          limit: 10,
+          windowSeconds: 60,
+        }),
+        detail: {
+          summary: 'Send a test Web Push to my own subscriptions (pipe validation)',
+          description:
+            'stage-64: پوش واقعی (رمزنگاری RFC 8291 + VAPID) به اشتراک‌های فعالِ خودِ کاربر — ' +
+            'بدون ردیف صندوق/تاریخچه. خروجی: targeted / acceptedByPushService / gone / durationMs. ' +
+            'acceptedByPushService>0 ولی نوتیف نیامد ⇒ مشکل سمت مرورگر (مجوز نوتیف سیستم‌عامل/SW).',
+        },
       },
     )
 

@@ -1,4 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-64 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/routes/admin/notifications/index.tsx
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-49)
+// تغییر: ① کارت «آزمایش خط پوش این دستگاه» — وضعیت محلی مرورگر +
+//        اشتراک‌های سرور + دکمه‌ی فعال‌سازی (کلیک = مجوز) + «پوش تستی»
+//        واقعی به اشتراک‌های خودم با تفسیر نتیجه (مثلث عیب‌یابی) — ابزارِ
+//        راستی‌آزمایی سرِتا‌سرِ خط بعد از فلوی مجوزِ مبتنی بر کلیک.
+//        ② متن راهنمای «گیرندگان» هم‌راستای stage-64 شد: پوشِ broadcast
+//        حالا فقط به کاربران عادیِ غیربن می‌رود (هم‌راستای صندوق) —
+//        ادمین‌ها با «پوش تستی» خط خودشان را می‌سنجند.
 // stage-49 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/routes/admin/notifications/index.tsx
 // وضعیت: جایگزینی کامل فایل موجود
@@ -12,32 +22,33 @@
 // stage-48 — تاریخچه‌ی ارسال + فیلتر پیشرفته (بدون باکس تست) حفظ شد
 
 // src/routes/admin/notifications/index.tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { useCallback, useState } from 'react'
+import type {
+	NotificationHistoryData,
+	NotificationLogDto,
+} from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
+import { createFileRoute } from '@tanstack/react-router'
+import { useCallback, useEffect, useState } from 'react'
 import {
-	Send,
 	BellRing,
 	CalendarSearch,
 	Eraser,
 	Filter,
+	Send,
 } from 'reicon-react'
-import { useI18nSafe } from '#/i18n'
-import { authJson } from '#/lib/api-fetch'
-import { usePermissions } from '#/hooks/admin/usePermissions'
-import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
-import { BottomSheet } from '#/components/shared/BottomSheet'
-import { Pagination } from '#/components/Pagination'
-import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
 import {
 	FILTER_INPUT_CLS,
 	FILTER_LABEL_CLS,
 	MobileFilterTrigger,
 } from '#/components/admin/filters'
-import type {
-	NotificationLogDto,
-	NotificationHistoryData,
-} from '@sinshin/shared'
+import { Pagination } from '#/components/Pagination'
+import { BottomSheet } from '#/components/shared/BottomSheet'
+import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
+import { usePermissions } from '#/hooks/admin/usePermissions'
+import { useI18nSafe } from '#/i18n'
+import { authJson } from '#/lib/api-fetch'
+import { enablePush, getPushState, type PushState } from '#/lib/push-subscription'
+import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
 
 /**
  * stage-48 — آهنگساز نوتیفیکیشن ادمین (+ ادمین۲).
@@ -159,6 +170,68 @@ function AdminNotificationsPage() {
 		'idle',
 	)
 	const [targeted, setTargeted] = useState(0)
+
+	// ── stage-64 — آزمایش خط پوش این دستگاه ──
+	const [localPush, setLocalPush] = useState<PushState | null>(null)
+	const [serverSubs, setServerSubs] = useState<number | null>(null)
+	const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle')
+	const [testResult, setTestResult] = useState<{
+		targeted: number
+		acceptedByPushService: number
+		gone: number
+		durationMs: number
+	} | null>(null)
+
+	const refreshLocalPush = useCallback(async () => {
+		const s = await getPushState().catch(() => null)
+		setLocalPush(s)
+		if (s?.state === 'granted') {
+			// مجوز هست — وضعیت ثبت سرور را هم تازه کن (push-status سبک است)
+			void authJson<{ subscriptions: number }>('/notifications/push-status', 'GET')
+				.then((r) => setServerSubs(r.subscriptions))
+				.catch(() => setServerSubs(null))
+		}
+	}, [])
+
+	useEffect(() => {
+		void refreshLocalPush()
+	}, [refreshLocalPush])
+
+	const onEnablePush = async () => {
+		await enablePush().catch(() => null)
+		await refreshLocalPush()
+	}
+
+	const sendTestPush = async () => {
+		setTestStatus('sending')
+		setTestResult(null)
+		try {
+			const json = await authJson<{
+				targeted: number
+				acceptedByPushService: number
+				gone: number
+				durationMs: number
+			}>('/notifications/test-push', 'POST')
+			setTestResult(json)
+			setTestStatus('done')
+			void refreshLocalPush()
+		} catch {
+			setTestStatus('error')
+		}
+	}
+
+	/** برچسب وضعیت محلی — رنگ + متن فارسی */
+	const localPushBadge = localPush
+		? localPush.state === 'granted' && localPush.subscribed
+			? { cls: 'bg-green-100 text-green-600 dark:bg-green-500/10 dark:text-green-400', text: 'اشتراک این مرورگر: فعال' }
+			: localPush.state === 'granted'
+				? { cls: 'bg-amber-100 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400', text: 'مجوز هست، اشتراک ساخته نشده' }
+				: localPush.state === 'default'
+					? { cls: 'bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-gray-400', text: 'مجوز نوتیف داده نشده' }
+					: localPush.state === 'denied'
+						? { cls: 'bg-red-100 text-red-500 dark:bg-red-500/10 dark:text-red-400', text: 'مجوز از مرورگر رد شده' }
+						: { cls: 'bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-gray-400', text: 'این مرورگر پوش را پشتیبانی نمی‌کند' }
+		: null
 
 	// ── فیلترهای تاریخچه (draft → اعمال) ──
 	const [tempSearch, setTempSearch] = useState('')
@@ -397,6 +470,87 @@ function AdminNotificationsPage() {
 				</div>
 			</div>
 
+			{/* ── stage-64 — آزمایش خط پوش این دستگاه (خودم) ── */}
+			<div className="bg-white dark:bg-[#2a1015] rounded-2xl border border-gray-200 dark:border-white/10 p-4 sm:p-6 space-y-3">
+				<div className="flex items-center justify-between gap-3 flex-wrap">
+					<h2 className="font-DanaDemiBold text-base text-gray-800 dark:text-gray-100">
+						آزمایش خط پوش این دستگاه
+					</h2>
+					{localPushBadge && (
+						<span className={`text-[10px] font-DanaDemiBold px-2 py-0.5 rounded-full shrink-0 ${localPushBadge.cls}`}>
+							{localPushBadge.text}
+						</span>
+					)}
+				</div>
+
+				<p className="text-[11px] text-gray-500 dark:text-gray-400 font-DanaMedium leading-relaxed">
+					«پوش تستی» یک پیام واقعی (رمزنگاری + VAPID) به اشتراک‌های «حساب خودتان»
+					می‌فرستد — بدون صندوق و تاریخچه. اگر روی دستگاه نمایش داده شد، خط پوش
+					سرِتا‌سر سالم است.
+				</p>
+
+				{serverSubs !== null && (
+					<p className="text-[11px] text-gray-400 dark:text-gray-500 font-DanaMedium">
+						اشتراک‌های ثبت‌شده در سرور برای حساب شما: {serverSubs}
+					</p>
+				)}
+
+				<div className="flex flex-wrap items-center gap-2">
+					{(localPush?.state === 'default' || (localPush?.state === 'granted' && !localPush.subscribed)) && (
+						<button
+							type="button"
+							onClick={() => void onEnablePush()}
+							className="px-4 py-2 rounded-xl bg-primary dark:bg-dark-primary text-white text-[13px] font-DanaDemiBold hover:opacity-90 transition cursor-pointer"
+						>
+							{localPush?.state === 'default' ? 'فعال‌سازی نوتیفیکیشن' : 'ساخت اشتراک'}
+						</button>
+					)}
+					<button
+						type="button"
+						disabled={testStatus === 'sending' || (localPush !== null && localPush.state !== 'granted')}
+						onClick={() => void sendTestPush()}
+						title={localPush !== null && localPush.state !== 'granted' ? 'اول مجوز نوتیف را فعال کنید' : undefined}
+						className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-gray-700 dark:text-gray-200 text-[13px] font-DanaDemiBold hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+					>
+						<Send size={15} />
+						{testStatus === 'sending' ? 'در حال ارسال…' : 'ارسال پوش تستی'}
+					</button>
+				</div>
+
+				{testStatus === 'error' && (
+					<p className="text-xs text-red-500 font-DanaMedium">
+						ارسال پوش تستی ناموفق بود — دوباره تلاش کنید.
+					</p>
+				)}
+				{testStatus === 'done' && testResult && (
+					<div
+						className={`text-[11px] font-DanaMedium leading-relaxed rounded-xl px-3.5 py-2.5 border space-y-1 ${
+							testResult.targeted === 0
+								? 'bg-amber-50 dark:bg-amber-500/10 border-amber-100 dark:border-amber-500/20 text-amber-700 dark:text-amber-400'
+								: testResult.acceptedByPushService > 0
+									? 'bg-green-50 dark:bg-green-500/10 border-green-100 dark:border-green-500/20 text-green-700 dark:text-green-400'
+									: 'bg-red-50 dark:bg-red-500/10 border-red-100 dark:border-red-500/20 text-red-600 dark:text-red-400'
+							}`}
+					>
+						<p>
+							هدف: {testResult.targeted} · پذیرش سرور پوش: {testResult.acceptedByPushService}
+							{testResult.gone > 0 ? ` · اشتراک مرده: ${testResult.gone}` : ''} · {testResult.durationMs}ms
+						</p>
+						{testResult.targeted === 0 ? (
+							<p>هیچ اشتراکی برای حساب شما ثبت نشده — اول «فعال‌سازی نوتیفیکیشن» را بزنید.</p>
+						) : testResult.acceptedByPushService > 0 ? (
+							<p>
+								سرور پوش پیام را پذیرفت ✓ — اگر روی دستگاه چیزی ندیدید، مشکل سمت مرورگر
+								است: نوتیف سیستم‌عامل روشن باشد، مرورگر بسته‌ی کامل (نه minimize) و در iOS
+								فقط PWA نصب‌شده پوش می‌گیرد.
+							</p>
+						) : (
+							<p>سرور پوش پیام را نپذیرفت — اشتراک مرده/خطا؛ لاگ سرور ([notify] پوش تستی) را ببینید.</p>
+						)}
+					</div>
+				)}
+			</div>
+
 			{/* ── فرم ارسال (ادمین اصلی یا notificationsSend) ── */}
 			{canSend && (
 				<div className="bg-white dark:bg-[#2a1015] rounded-2xl border border-gray-200 dark:border-white/10 p-6 space-y-4">
@@ -511,15 +665,14 @@ function AdminNotificationsPage() {
 						)}
 					</div>
 
-					{/* stage-49 — معنای «گیرندگان» (بازخورد ۶): شمارش
-						صندوقِ درون‌بری کاربران عادی؛ پوش به همه‌ی مشترکان
-						فعال می‌رود (حتی ادمین) ولی در این عدد شمرده نمی‌شود. */}
+					{/* stage-64 — معنای «گیرندگان»: پوشِ broadcast هم‌راستای صندوق شد —
+						فقط کاربران عادیِ غیربن. ادمین‌ها برای آزمونِ خط خودشان از
+						«پوش تستی» بالای همین صفحه استفاده می‌کنند. */}
 					<p className="text-[11px] text-gray-400 dark:text-gray-500 font-DanaMedium leading-relaxed bg-gray-50 dark:bg-[#1a0a0e] rounded-xl px-3.5 py-2.5 border border-gray-100 dark:border-[#3a151c]">
-						«گیرندگان» = تعداد کاربران عادی (مشتری‌ها) که پیام
-						در صندوق‌شان ثبت شد؛ نوتیف پوش به همه‌ی دستگاه‌های
-						مشترک‌شده می‌رسد — حتی حساب ادمین. اگر دیتابیس
-						توسعه فقط ادمین دارد، این عدد ۰ می‌ماند ولی پوش
-						همچنان روی دستگاهِ مشترک ظاهر می‌شود.
+						«گیرندگان» = تعداد کاربران عادی (غیربن) که پیام در صندوق‌شان ثبت
+						شد؛ پوشِ Web Push هم به همین مخاطبان می‌رود (مشترک‌هایشان).
+						ادمین‌ها/ادمین۲ها و کاربران بن‌شده هدف نیستند — برای آزمونِ خط
+						پوشِ خودتان از کارت «آزمایش خط پوش این دستگاه» استفاده کنید.
 					</p>
 
 					{/* فیلتر دسکتاپ */}

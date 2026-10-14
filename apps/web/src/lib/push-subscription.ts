@@ -1,4 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-64 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/lib/push-subscription.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-58)
+// تغییر: حذف autoPushFlow — درخواستِ Notification.requestPermission بدون
+//        کلیک در مرورگرها (به‌ویژه Safari/iOS) رد/ساکت می‌شود و اپل
+//        ردِ دائم را ثبت می‌کند. پرامپت حالا بنرِ PushAutoPrompt است که
+//        کاربر خودش دکمه‌اش را می‌زند (کلیک = مجوزِ پرسیدن). enablePush و
+//        بقیه‌ی ابزارها دست‌نخورده‌اند؛ کلیدهای throttle صادر شدند و معنایشان
+//        «مهلتِ دیده‌شدنِ بنر» است.
 // stage-58 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/lib/push-subscription.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -70,8 +79,8 @@ const SW_PUSH_URL = '/sw-push.js'
 
 /** stage-58 — throttle پرامپت خودکار: دوباره‌پرسیدن حداکثر هر ۳ روز
  *  (کروم بعد از ~۳ رد خودش پرامپت را quiet می‌کند؛ ما هم اذیت نمی‌کنیم) */
-const AUTO_PROMPT_KEY = 'sinshin-push-prompt-last'
-const AUTO_PROMPT_RETRY_DAYS = 3
+export const AUTO_PROMPT_KEY =  'sinshin-push-prompt-last'
+export const AUTO_PROMPT_RETRY_DAYS =  3
 
 /** مهلت‌های انتظار — هیچ await معلق نمی‌ماند */
 const READY_TIMEOUT_MS = 8_000
@@ -466,46 +475,6 @@ export async function reconcileSubscription(): Promise<PushState> {
 	}
 }
 
-/**
- * stage-58 — فلوی خودکارِ «باز شدن صفحه» (دکمه‌ی بنفش هدر حذف شد):
- *  • permission === 'default' + پشتیبانی + iOS-نصب‌شده + throttle ۳روزه
- *    ⇒ enablePush (پرامپتِ خودِ مرورگر پرسیده می‌شود)
- *  • permission === 'granted' ⇒ reconcileSubscription (درست‌سازی ثبت)
- *  • denied/unsupported ⇒ هیچ (مزاحم نیست)
- */
-export async function autoPushFlow(): Promise<PushState | null> {
-	if (typeof window === 'undefined' || !('Notification' in window)) return null
-	if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null
-
-	// iOS مرورگر (غیرنصب‌شده) — پرامپت بی‌معنا و خطادار؛ رد
-	const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
-	const isStandalone =
-		window.matchMedia('(display-mode: standalone)').matches ||
-		(window.navigator as unknown as { standalone?: boolean }).standalone ===
-			true
-	if (isIos && !isStandalone) return null
-
-	const permission = Notification.permission
-	if (permission === 'denied') return null
-
-	if (permission === 'default') {
-		// throttle — هر ۳ روز یک‌بار بیشتر نمی‌پرسیم
-		try {
-			const last = Number(localStorage.getItem(AUTO_PROMPT_KEY) ?? '0')
-			if (
-				Number.isFinite(last) &&
-				Date.now() - last < AUTO_PROMPT_RETRY_DAYS * 86400000
-			) {
-				return null
-			}
-			localStorage.setItem(AUTO_PROMPT_KEY, String(Date.now()))
-		} catch {
-			/* حافظه‌ی پر/معمولی — پرامپت می‌پرسیم */
-		}
-		return enablePush()
-	}
-	return reconcileSubscription()
-}
 
 /** لغو اشتراک — هم مرورگر هم بک‌اند */
 export async function disablePush(): Promise<PushState> {
