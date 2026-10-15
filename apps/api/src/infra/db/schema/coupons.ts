@@ -60,6 +60,16 @@ export const coupons = pgTable(
      * طبق سیاست stage-64 به‌هرحال اعلان نمی‌گیرد.
      */
     announceSuppressed: boolean('announce_suppressed').notNull().default(false),
+    /**
+     * stage-66 — سقف مصرف به‌ازای هر کاربر برای کوپن «عمومی» (سیاست
+     * کارفرما: هنگام ساخت توسط ادمین اصلی قابل‌تنظیم).
+     * ۰ = نامحدود (رفتار قبلی — کوپن‌های موجود دست‌نخورده می‌مانند).
+     * شمارش = redemptionهای فعال + سفارش‌های PENDING_PAYMENT با همین
+     * کوپن (رزروِ در جریان). برای کوپن خصوصی بی‌معناست — گرنت یکتا
+     * (grants_coupon_user_key) ذاتاً یک مصرف به‌ازای کاربر است؛ ستون
+     * ذخیره می‌شود ولی فقط مسیر عمومی آن را می‌خواند.
+     */
+    maxPerUser: integer('max_per_user').notNull().default(0),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
     endsAt: timestamp('ends_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -150,7 +160,16 @@ export const couponNudges = pgTable(
       .notNull()
       .$type<ConditionId>()
       .references(() => couponConditions.id, { onDelete: 'cascade' }),
+    /** تعداد «شرط‌های» ناقص — با مخاطب همه-به-جز-یکی همیشه ۱ است */
     missingCount: integer('missing_count'),
+    /**
+     * stage-66 — فاصله‌ی واقعی تا شرطِ ناقص در واحد خودِ آن شرط
+     * (مثلا «۳ سفارش دیگر» / «۵۰۰ هزار تومان دیگر») — سیاست کارفرما:
+     * پیام یادآور باید پیشرفت واقعی را بگوید نه «یک قدم».
+     * در اسکنِ شبانه = سقف شرط منهای مقدار فعلی کاربر (بالا گرد شده).
+     * null = ردیف‌های قدیمی پیش از مهاجرت → متن جایگزین «یک قدم».
+     */
+    remainingCount: integer('remaining_count'),
     scanDate: date('scan_date').notNull(),
     smsSentAt: timestamp('sms_sent_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

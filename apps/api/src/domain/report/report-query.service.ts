@@ -336,11 +336,16 @@ export class ReportQueryService {
         // rows.length/filter/reduce روی حداکثر ۱۰۰۰ کوپن → با کوپن‌های بیشتر
         // از سقف، آمار ناقص می‌شد). ردیف‌ها فقط برای جدول می‌مانند. رارد C1 —
         // ::bigint + Number().
-        const [rows, aggRows] = await Promise.all([
+        // stage-66 (N7) — تفکیک آماری: «مجموع مصرف» = رزرو لحظه‌ای (usedCount:
+        // شامل سفارش‌های در جریان)؛ «مصرف واقعی» = redemptionهای تسویه‌شده
+        // (بازپرداخت → redemption حذف → از این عدد بیرون می‌آید). قبلاً این
+        // دو در یک عدد مخلوط بودند و سقف در بازپرداخت «ناقص» جلوه می‌کرد.
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined
+        const [rows, aggRows, realAggRows] = await Promise.all([
             this.deps.db
                 .select()
                 .from(coupons)
-                .where(conditions.length > 0 ? and(...conditions) : undefined)
+                .where(whereClause)
                 .orderBy(desc(coupons.createdAt))
                 .limit(1000),
             this.deps.db
@@ -350,9 +355,15 @@ export class ReportQueryService {
                     used: sql<number>`coalesce(sum(${coupons.usedCount}), 0)::bigint`,
                 })
                 .from(coupons)
-                .where(conditions.length > 0 ? and(...conditions) : undefined),
+                .where(whereClause),
+            this.deps.db
+                .select({ real: sql<number>`count(*)::int` })
+                .from(couponRedemptions)
+                .innerJoin(coupons, eq(coupons.id, couponRedemptions.couponId))
+                .where(whereClause),
         ])
         const agg = aggRows[0]
+        const realAgg = realAggRows[0]
 
         const ids = rows.map((r) => r.id)
         const [grants, redemptions] = await Promise.all([
@@ -382,6 +393,7 @@ export class ReportQueryService {
                 { label: 'تعداد کوپن', value: faNum(Number(agg?.count ?? 0)) },
                 { label: 'کوپن‌های فعال', value: faNum(Number(agg?.active ?? 0)) },
                 { label: 'مجموع مصرف', value: faNum(Number(agg?.used ?? 0)) },
+                { label: 'مصرف واقعی (تسویه‌شده)', value: faNum(Number(realAgg?.real ?? 0)) },
             ],
             tables: [
                 {

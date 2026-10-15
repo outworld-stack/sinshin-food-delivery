@@ -1,5 +1,21 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-66 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/coupon-scan.job.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر (راند ترمیم کوپن):
+//   ④ isNull(endsAt) → «بدون انقضا یا آینده» — قبلاً کوپن‌های تاریخ‌دارِ
+//     آینده از کرون حذف می‌شدند (یادآور و اعطای کرونی برایشان هیچ‌وقت
+//     اجرا نمی‌شد)
+//   ③ ظرفیت: کوپنِ پرشده (maxUses رسیده) اسکن نمی‌شود — یادآورِ کوپنی
+//     که دیگر اعطا نمی‌شود، مزاحم است
+//   نامزدها حالا «شرط ناقص واقعی» + «فاصله‌ی واقعی» دارند (سرویس
+//   findNudgeCandidates بازنویسی شد — N4/سیاست ۲) و ذخیره‌ی remainingCount
+//   در ردیف nudge برای پیام «۳ سفارش تا کوپن» در جابِ ارسال.
+//   سقف ۲ یادآور به‌ازای کاربر-کوپن (سیاست ۳) داخل کوئری نامزدهاست.
+// ═══════════════════════════════════════════════════════════════
+
 //src/workers/jobs/coupon-scan.job.ts
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
@@ -30,6 +46,9 @@ export class CouponScanJob implements DailyJob {
     // stage-48 — فقط کوپن‌هایی که با سوییچِ فرم وارد فرآیند کرون شده‌اند
     // (cronEnabled=false ⇒ اسکن/یادآور برایش اجرا نمی‌شود — اعطای لحظه‌ی
     // تسویه جدا از این فرآیند است و دست‌نخورده می‌ماند).
+    // stage-66 (④/③) — «فعال» یعنی: روشن + شروع‌شده + منقضی‌نشده + ظرفیتِ
+    // باقی‌مانده. قبلاً isNull(endsAt) کوپن‌های تاریخ‌دارِ آینده را کامل حذف
+    // می‌کرد و ظرفیت هم چک نمی‌شد.
     const active = await db
       .select()
       .from(coupons)
@@ -38,7 +57,8 @@ export class CouponScanJob implements DailyJob {
           eq(coupons.isActive, true),
           eq(coupons.isPublic, false),
           eq(coupons.cronEnabled, true),
-          isNull(coupons.endsAt),
+          sql`(${coupons.endsAt} is null or ${coupons.endsAt} > now())`,
+          sql`(${coupons.maxUses} = 0 or ${coupons.usedCount} < ${coupons.maxUses})`,
         ),
       )
 
@@ -61,23 +81,21 @@ export class CouponScanJob implements DailyJob {
         .where(eq(couponConditions.couponId, coupon.id))
       if (conditions.length === 0) continue
 
+      // stage-66 — نامزد با «اولین شرطِ ناقصِ واقعی» (قطعی — نه ایندکس
+      // دلبخواهی) + فاصله‌ی واقعی تا سقف همان شرط (remainingCount).
       const candidates = await this.deps.coupons.findNudgeCandidates(coupon.id)
 
       // رارد ۴۸ (اسکن C8) — درج دسته‌ای (۵۰۰تایی) به‌جای یک INSERT به‌ازای
       // هر کاندید؛ سقف کاندیدها ۵۰۰۰ است و شبانه تا هزاران رفت‌وبرگشت می‌شد.
       // یکتایی (userId,couponId,scanDate) با onConflictDoNothing همان قبل حفظ می‌شود.
-      const values = candidates.map((c) => {
-        // شرطِ ناقص برای گزارش — ایندکس ایمن (کران‌گذاری شده تا از محدوده بیرون نزند)
-        const idx = Math.max(0, Math.min(c.missingCount - 1, conditions.length - 1))
-        const missingCondition = conditions[idx]
-        return {
-          userId: c.userId,
-          couponId: coupon.id,
-          missingConditionId: asConditionId(missingCondition?.id ?? conditions[0]!.id),
-          missingCount: c.missingCount,
-          scanDate,
-        }
-      })
+      const values = candidates.map((c) => ({
+        userId: c.userId,
+        couponId: coupon.id,
+        missingConditionId: asConditionId(c.missingConditionId),
+        missingCount: c.missingCount,
+        remainingCount: c.remainingCount,
+        scanDate,
+      }))
       for (let i = 0; i < values.length; i += 500) {
         await db
           .insert(couponNudges)

@@ -1,4 +1,15 @@
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// stage-66 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر: ① maxPerUser در body ساخت/ویرایش (سقف مصرف به‌ازای کاربر —
+//        سیاست ۱؛ این روت‌ها فقط با گارد requireAdmin = ادمین اصلی)
+//        ② کد broadcast حالا مثل DB نرمال می‌شود (قبلاً «sin66» خام در
+//        اعلان می‌رفت ولی «SIN66» ذخیره می‌شد)
+//        ③ قرارداد عمومی⇔بدون‌شرط/خصوصی⇔حداقل‌یک‌شرط در سرویس گارد
+//        می‌شود؛ OpenAPI همان را مستند می‌کند.
+// ═══════════════════════════════════════════════════════════════
+
 // stage-65 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/coupon.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -90,6 +101,8 @@ const couponBody = t.Object({
   title: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
   discountPercentage: t.Number({ minimum: 1, maximum: 99 }),
   maxUses: t.Number({ minimum: 0, maximum: 1000000 }),
+  /** stage-66 (سیاست ۱) — سقف مصرف به‌ازای هر کاربر برای کوپن عمومی؛ ۰ = نامحدود (پیش‌فرض) */
+  maxPerUser: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
   isPublic: t.Boolean(),
   expiryDate: t.Optional(t.Nullable(t.String({ maxLength: 30 }))),
   rules: t.Array(ruleSchema, { maxItems: 10 }),
@@ -148,11 +161,17 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
     .post(
       '/',
       async ({ body, user }) => {
+        // stage-66 — کد یک‌جا نرمال (همان قاعده‌ی سرویس) تا audit و broadcast
+        // دقیقاً همان کدی را بگویند که در DB می‌نشیند (قبلاً broadcast کد خام
+        // را می‌گفت: «sin66» در اعلان، «SIN66» در دیتابیس).
+        const code = body.code.trim().toUpperCase().slice(0, 16)
         const res = await deps.coupons.create({
-          code: body.code,
+          code,
           title: body.title ?? null,
           discountPercentage: body.discountPercentage,
           maxUses: body.maxUses,
+          // stage-66 (سیاست ۱) — سقف per-user (نیامد = ۰ = نامحدود)
+          maxPerUser: body.maxPerUser ?? 0,
           isPublic: body.isPublic,
           expiryDate: body.expiryDate ?? null,
           cronEnabled: body.cronEnabled ?? false,
@@ -168,7 +187,7 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           action: 'COUPON_CREATE',
           entity: 'coupon',
           entityId: res.id ?? null,
-          metadata: { code: body.code, discount: body.discountPercentage },
+          metadata: { code, discount: body.discountPercentage },
         })
         // stage-64 — اعلانِ ساختِ کوپنِ «عمومی»: کد از ابتدا برای همه است،
         // پس همه باید خبردار شوند (سیاست اعلان — سربرگ فایل). کوپن خصوصی
@@ -182,15 +201,23 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
             .broadcast({
               type: 'coupon',
               title: '🎁 کد تخفیف جدید!',
-              body: `کد «${body.code}» با ٪${body.discountPercentage} تخفیف فعال شد — در چک‌اوت واردش کنید.`,
+              body: `کد «${code}» با ٪${body.discountPercentage} تخفیف فعال شد — در چک‌اوت واردش کنید.`,
               url: '/products',
-              data: { code: body.code, discount: body.discountPercentage },
+              data: { code, discount: body.discountPercentage },
             })
             .catch(() => { /* ضد-کرش دوبل — قانون طلایی */ })
         }
         return res
       },
-      { body: couponBody, detail: { summary: 'Create coupon (contract: value/quantity; public + not suppressed ⇒ broadcast announcement)' } },
+      {
+        body: couponBody,
+        detail: {
+          summary:
+            'Create coupon (contract: value/quantity; public + not suppressed ⇒ broadcast announcement)',
+          description:
+            'stage-66: public coupons carry no rules and private coupons need at least one (422 otherwise, enforced in service). maxPerUser caps redemptions per user on public coupons (0 = unlimited default). The broadcast body uses the normalized code (uppercased/trimmed) exactly as stored.',
+        },
+      },
     )
 
     // ── phase-5: PATCH — فرانت updateCoupon می‌فرستید ولی روت نبود! ──
@@ -202,6 +229,8 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           title: body.title ?? null,
           discountPercentage: body.discountPercentage,
           maxUses: body.maxUses,
+          // stage-66 (سیاست ۱) — سقف per-user (نیامد = دست‌نخورده)
+          maxPerUser: body.maxPerUser,
           isPublic: body.isPublic,
           expiryDate: body.expiryDate ?? null,
           cronEnabled: body.cronEnabled,

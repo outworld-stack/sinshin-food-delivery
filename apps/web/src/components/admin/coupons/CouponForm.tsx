@@ -47,6 +47,8 @@ export interface CouponFormPayload {
 	code: string
 	discountPercentage: number
 	maxUses: number
+	/** stage-66 — سقف مصرف به‌ازای هر کاربر (کوپن عمومی)؛ ۰ = نامحدود */
+	maxPerUser: number
 	isPublic: boolean
 	expiryDate: string | null
 	rules: CouponRule[]
@@ -182,6 +184,8 @@ interface CouponFormState {
 	expiryJalali: string | null // «1404-06-13»
 	expiryTime: string // «23:59»
 	maxUses: number
+	/** stage-66 — سقف مصرف به‌ازای کاربر (فقط کوپن عمومی؛ ۰ = نامحدود) */
+	maxPerUser: number
 	isPublic: boolean
 	/** stage-48 — ورود به فرآیند کرون‌جاب (پیش‌فرض خاموش) */
 	cronEnabled: boolean
@@ -197,6 +201,7 @@ const EMPTY_FORM: CouponFormState = {
 	expiryJalali: null,
 	expiryTime: '23:59',
 	maxUses: 0,
+	maxPerUser: 1,
 	isPublic: true,
 	cronEnabled: false,
 	announceSuppressed: false,
@@ -217,6 +222,7 @@ function hydrate(data: CouponWithConditionsDto | undefined): CouponFormState {
 		expiryJalali: d ? jalaliToISO(gregorianToJalali(d)) : null,
 		expiryTime: d ? `${p(d.getHours())}:${p(d.getMinutes())}` : '23:59',
 		maxUses: c.maxUses,
+		maxPerUser: c.maxPerUser ?? 0,
 		isPublic: c.isPublic,
 		cronEnabled: c.cronEnabled ?? false,
 		announceSuppressed: c.announceSuppressed ?? false,
@@ -337,6 +343,11 @@ export function CouponForm({
 			showToast('حداکثر استفاده نمی‌تواند منفی باشد', 'error')
 			return
 		}
+		// stage-66 — سقف مصرف به‌ازای کاربر (فقط عمومی؛ عدد صحیح ≥ ۰)
+		if (form.isPublic && (!Number.isFinite(form.maxPerUser) || form.maxPerUser < 0)) {
+			showToast('حداکثر مصرف به‌ازای هر کاربر نمی‌تواند منفی باشد', 'error')
+			return
+		}
 		if (!form.isPublic && form.rules.length === 0) {
 			showToast(
 				'کوپن خصوصی بدون شرط به هیچ کاربری تعلق نمی‌گیرد — آن را عمومی کنید یا حداقل یک شرط اضافه کنید',
@@ -368,6 +379,8 @@ export function CouponForm({
 			code,
 			discountPercentage: form.discount,
 			maxUses: form.maxUses,
+			// stage-66 — سقف per-user؛ خصوصی گرنت یکتا دارد (ذاتی ۱) → ۰
+			maxPerUser: form.isPublic ? Math.max(0, Math.floor(form.maxPerUser)) : 0,
 			isPublic: form.isPublic,
 			expiryDate: buildExpiryISO(),
 			// stage-48 — سوییچ کرون: روشن = کوپن وارد بررسی دوره‌ای می‌شود
@@ -376,13 +389,17 @@ export function CouponForm({
 			announceSuppressed: form.announceSuppressed,
 			// key فقط برای رندر است — به سرور نمی‌رود
 			// stage-47 — شرط‌های اختیاری: quantity=0 صریح ارسال می‌شود (خرید صفر)
-			rules: form.rules.map((r) => ({
-				type: r.type,
-				value: r.value,
-				quantity: ruleConfig[r.type].optionalQuantity
-					? (r.quantity ?? 0)
-					: r.quantity,
-			})),
+			// stage-66 (یافته-②) — عمومی = بدون شرط: rules ارسال نمی‌شود تا
+			// کوپن عمومیِ همراه‌شرط (که سرور نادیده می‌گرفت) اصلاً شکل نگیرد
+			rules: form.isPublic
+				? []
+				: form.rules.map((r) => ({
+						type: r.type,
+						value: r.value,
+						quantity: ruleConfig[r.type].optionalQuantity
+							? (r.quantity ?? 0)
+							: r.quantity,
+					})),
 		})
 	}, [form, buildExpiryISO, onSubmit, showToast])
 
@@ -476,6 +493,32 @@ export function CouponForm({
 							className={inputClass}
 						/>
 					</div>
+					{/* stage-66 — سقف مصرف به‌ازای کاربر؛ فقط کوپن عمومی (خصوصی: گرنت یکتا) */}
+					{form.isPublic && (
+						<div>
+							<label
+								htmlFor="coupon-max-per-user"
+								className="block text-xs text-gray-400 mb-1"
+							>
+								حداکثر مصرف به‌ازای هر کاربر (۰ = نامحدود)
+							</label>
+							<input
+								id="coupon-max-per-user"
+								type="number"
+								min={0}
+								value={form.maxPerUser}
+								onChange={(e) =>
+									set({ maxPerUser: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+								}
+								className={inputClass}
+							/>
+							<p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+								هر مشتری حداکثر این‌قدر بار می‌تواند از این کد استفاده کند — ۰ یعنی
+								بدون سقف (رفتار قبلی). پس از رسیدن سهم، کد برای همان مشتری پیام
+								«سهم شما تمام شد» می‌گیرد.
+							</p>
+						</div>
+					)}
 				</div>
 			</section>
 
@@ -488,7 +531,8 @@ export function CouponForm({
 						</span>
 						<p className="text-xs text-gray-400 mt-1 leading-relaxed">
 							اگر خاموش باشد، فقط کاربرانی که شرایط زیر را دارند و به آن‌ها
-							«اعطا» شده، می‌توانند استفاده کنند.
+							«اعطا» شده، می‌توانند استفاده کنند. کوپن عمومی شرط ندارد —
+							قوانین هدف‌گیری فقط برای کوپن خصوصی ذخیره می‌شوند.
 						</p>
 					</div>
 					<Toggle

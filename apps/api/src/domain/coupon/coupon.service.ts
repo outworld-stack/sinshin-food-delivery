@@ -1,4 +1,21 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-66 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
+// وضعیت: جایگزینی کامل فایل موجود
+// تغییر (راند ترمیم کوپن — تلفیق اسکن کارفرما + اسکن ما):
+//   ① قرارداد ساخت/ویرایش: عمومی ⇔ بدون شرط / خصوصی ⇔ حداقل یک شرط
+//     (قبلاً کوپن خصوصی بی‌شرط و کوپن عمومیِ همراه‌شرط از روت عبور می‌کرد)
+//   ② findUsableCoupon: عمومی دیگر «کور» برنمی‌گردد + سقف مصرف
+//     به‌ازای کاربر (maxPerUser — سیاست ۱ کارفرما) + خروجی دلیل‌دار
+//   ③ grantIfEligible: ظرفیت (maxUses) چک می‌شود — اعطای کوپنِ پُرشده
+//     دیگر رخ نمی‌دهد
+//   ④ findNudgeCandidates: شرطِ ناقصِ «واقعی» و قطعی (اولین ناراضی) +
+//     فاصله‌ی واقعی (remaining) + سقف ۲ یادآور به‌ازای کاربر-کوپن
+//     (سیاست‌های ۲ و ۳) + ORDER BY قطعی
+//   ⑤ releaseNudgeClaim: شکست ارسال یادآور → claim آزاد برای retry
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -13,12 +30,13 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/coupon/coupon.service.ts
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import {
   couponConditions,
   couponGrants,
+  couponNudges,
   couponRedemptions,
   coupons,
   orders,
@@ -27,8 +45,29 @@ import {
 import { asCampaignId, type CampaignId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
 import { isUniqueViolation } from '#/domain/shared/pg'
-import { buildUserCondition, type ConditionType } from './coupon-evaluators'
+import {
+  buildUserCondition,
+  conditionThreshold,
+  evaluateCondition,
+  type ConditionType,
+} from './coupon-evaluators'
 import { UUID_RE } from '#/domain/shared/ids'
+
+/**
+ * stage-66 (سیاست ۳ کارفرما) — حداکثر تعداد یادآور برای هر (کوپن، کاربر).
+ * سقف با شمارش ردیف‌های «ارسال‌شده» (smsSentAt != null) اعمال می‌شود؛
+ * ردیف‌های اسکن‌شده ولی هرگز ارسال‌نشده به سهم کاربر حساب نمی‌شوند.
+ */
+export const MAX_NUDGES_PER_USER = 2
+
+/**
+ * stage-66 — خروجی دلیل‌دارِ findUsableCoupon: تمایذ پیام «نامعتبر برای
+ * شما» و «سهم شما از این کد تمام شد» برای چک‌اوت/پیش‌نمایش (قبلاً null
+ * خالی همه‌جا یکسان بود).
+ */
+export type UsableCouponOutcome =
+  | { ok: true; coupon: typeof coupons.$inferSelect }
+  | { ok: false; reason: 'invalid' | 'inactive' | 'not_granted' | 'per_user_exhausted' }
 
 
 // رارد ۴۷ — شکل سیم این خروجی = CouponWithConditionsDto در قرارداد مشترک؛
@@ -60,6 +99,9 @@ export class CouponService {
           eq(coupons.isPublic, false),
           sql`(${coupons.startsAt} <= now())`,
           sql`(${coupons.endsAt} is null or ${coupons.endsAt} > now())`,
+          // stage-66 (③) — کوپنِ ظرفیت‌پُر دیگر اعطا نمی‌شود: قبلاً گرنت برای
+          // کوپنی می‌شد که هرگز قابل استفاده نبود (UX گمراه‌کننده).
+          sql`(${coupons.maxUses} = 0 or ${coupons.usedCount} < ${coupons.maxUses})`,
         ),
       )
 
@@ -160,21 +202,67 @@ export class CouponService {
 
   // ══ اعتبار در چک‌اوت ══
 
+  /**
+   * stage-66 — شمارش مصرف فعالِ کاربر از یک کوپن عمومی:
+   * redemptionهای تسویه‌شده (بازپرداخت → redemption حذف → سهم آزاد)
+   * + سفارش‌های PENDING_PAYMENT با همین کوپن (رزروِ در جریان — دقیقاً
+   * همان چیزی که usedCount رزرو می‌کند). دو کوئری ایندکس‌دار.
+   */
+  private async perUserUsage(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<number> {
+    const [settled, pending] = await Promise.all([
+      tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(couponRedemptions)
+        .where(and(eq(couponRedemptions.couponId, couponId), eq(couponRedemptions.userId, userId))),
+      tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.couponId, couponId),
+            eq(orders.userId, userId),
+            eq(orders.status, 'PENDING_PAYMENT'),
+          ),
+        ),
+    ])
+    return (settled[0]?.count ?? 0) + (pending[0]?.count ?? 0)
+  }
+
   async findUsableCoupon(
     tx: DbOrTx,
     userId: string,
     code: string,
-  ): Promise<typeof coupons.$inferSelect | null> {
+  ): Promise<UsableCouponOutcome> {
     const clean = code.trim().toUpperCase().slice(0, 32)
     const coupon = (await tx.select().from(coupons).where(eq(coupons.code, clean)))[0]
-    if (!coupon) return null
+    if (!coupon) return { ok: false, reason: 'invalid' }
 
     const now = Date.now()
-    if (!coupon.isActive) return null
-    if (coupon.startsAt.getTime() > now) return null
-    if (coupon.endsAt !== null && coupon.endsAt.getTime() <= now) return null
+    if (!coupon.isActive) return { ok: false, reason: 'inactive' }
+    if (coupon.startsAt.getTime() > now) return { ok: false, reason: 'inactive' }
+    if (coupon.endsAt !== null && coupon.endsAt.getTime() <= now) return { ok: false, reason: 'inactive' }
 
-    if (coupon.isPublic) return coupon
+    if (coupon.isPublic) {
+      // stage-66 (② عمق دفاعی) — قرارداد: کوپن عمومی شرط ندارد. اگر داده‌ی
+      // قدیمی/معیوب شرط داشته باشد، «برای همه» رفتار نمی‌کنیم (قبلاً شرط‌ها
+      // بی‌صدا نادیده گرفته می‌شدند) — مثل غیرفعال رد؛ ادمین ویرایش/حذف می‌کند.
+      const [condCount] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(couponConditions)
+        .where(eq(couponConditions.couponId, coupon.id))
+      if ((condCount?.count ?? 0) > 0) return { ok: false, reason: 'inactive' }
+
+      // stage-66 (سیاست ۱) — سقف مصرف به‌ازای کاربر؛ ۰ = نامحدود (رفتار
+      // قبلی). شمارش = تسویه‌شده‌ها + رزروهای در جریان (perUserUsage).
+      // پنجره‌ی رقابت دو چک‌اوت هم‌زمانِ یک کاربر می‌ماند — محدودیت بازاریابی
+      // است نه قید پولی؛ ظرفیت کلی همچنان اتمیک است (UPDATE رزرو چک‌اوت).
+      if (coupon.maxPerUser > 0) {
+        const usage = await this.perUserUsage(tx, coupon.id, userId)
+        if (usage >= coupon.maxPerUser) return { ok: false, reason: 'per_user_exhausted' }
+      }
+
+      return { ok: true, coupon }
+    }
 
     const grant = await tx
       .select()
@@ -187,7 +275,7 @@ export class CouponService {
         ),
       )
       .then((rows) => rows[0])
-    return grant ? coupon : null
+    return grant ? { ok: true, coupon } : { ok: false, reason: 'not_granted' }
   }
 
   /**
@@ -241,8 +329,29 @@ export class CouponService {
 
   // ══ اسکن شبانه ══
 
+  /**
+   * stage-66 — نامزدهای یادآور با «شرط ناقص واقعی» و «فاصله‌ی واقعی».
+   *
+   * مخاطب: هم‌چنان همه-به‌جز-یکی (برای تک‌شرطی‌ها یعنی همه‌ی واجدنشانده) —
+   * اسپم‌بودنش با دو سیاست کارفرما مهار می‌شود: پیامِ فاصله‌ی واقعی
+   * (سیاست ۲) + سقف ۲ یادآور به‌ازای کاربر-کوپن (سیاست ۳).
+   *
+   * برای هر نامزد، «اولین شرطِ ناراضی» به‌ترتیبِ ثبتِ شرط‌ها قطعی انتخاب
+   * می‌شود (قبلاً ایندکس دلبخواهی از missingCount بود — N4) و
+   * remainingCount = سقف شرط − مقدار فعلی کاربر (بالا‌گرد) محاسبه و
+   * در ردیف nudge ذخیره می‌شود تا جابِ ارسال بدون محاسبه‌ی مجدد، پیام
+   * «۳ سفارش تا کوپن» بسازد.
+   *
+   * ORDER BY قطعی (N5): نزدیک‌ترین‌ها به شرایط اول؛ سقف ۵۰۰۰ نامزد.
+   */
   async findNudgeCandidates(couponId: CampaignId): Promise<
-    Array<{ userId: string; phone: string; missingCount: number }>
+    Array<{
+      userId: string
+      phone: string
+      missingConditionId: string
+      missingCount: number
+      remainingCount: number
+    }>
   > {
     const conds = await this.deps.db
       .select()
@@ -251,31 +360,101 @@ export class CouponService {
     if (conds.length === 0) return []
 
     const ctx = { db: this.deps.db, userId: '', now: new Date() }
-    const built = buildUserCondition(
-      ctx,
-      conds.map((c) => ({
-        type: c.type as ConditionType,
-        params: (c.params ?? {}) as Record<string, unknown>,
-      })),
-    )
+    const toInput = (c: (typeof conds)[number]) => ({
+      type: c.type as ConditionType,
+      params: (c.params ?? {}) as Record<string, unknown>,
+    })
+    const built = buildUserCondition(ctx, conds.map(toInput))
+    const evaluators = conds.map((c) => {
+      const input = toInput(c)
+      return evaluateCondition(ctx, input.type, input.params)
+    })
 
-    return this.deps.db
-      .select({
-        userId: sql<string>`u.id`,
-        phone: sql<string>`u.phone`,
-        missingCount: sql<number>`(${built.totalConditions} - ${built.satisfiedCount})`,
-      })
+    // ستون‌های پویا: sat_i/cur_i به‌ازای هر شرط — مقادیر فقط برای ردیف‌های
+    // عبورکرده از WHERE محاسبه می‌شوند (ساب‌کوئری‌های WHERE همان‌قدر
+    // سنگین‌اند که نسخه‌ی قبلی — بدون رگرسیون، فقط ستون‌های بیشتر).
+    const shape: Record<string, SQL> = {
+      userId: sql<string>`u.id`,
+      phone: sql<string>`u.phone`,
+      satisfiedCount: sql<number>`(${built.satisfiedCount})::int`,
+    }
+    for (const [i, ev] of evaluators.entries()) {
+      shape[`sat_${i}`] = sql<boolean>`${ev.satisfied}`
+      shape[`cur_${i}`] = sql<number>`${ev.current}`
+    }
+
+    const rows = (await this.deps.db
+      .select(shape)
       .from(sql`users u`)
       .where(
         sql`${built.allButOne}
-             and not ${built.allSatisfied}
-             and u.banned_at is null
-             and not exists (
-               select 1 from coupon_grants g
-               where g.coupon_id = ${couponId}::uuid and g.user_id = u.id
-             )`,
+           and not ${built.allSatisfied}
+           and u.banned_at is null
+           and not exists (
+             select 1 from coupon_grants g
+             where g.coupon_id = ${couponId}::uuid and g.user_id = u.id
+           )
+           and (
+             select count(*) from coupon_nudges n
+             where n.coupon_id = ${couponId}::uuid
+               and n.user_id = u.id
+               and n.sms_sent_at is not null
+           ) < ${MAX_NUDGES_PER_USER}`,
       )
-      .limit(5000)
+      // N5 — قطعی و معنادار: نزدیک‌ترین‌ها به شرایط اول. با «عبارت» مرتب
+      // می‌کنیم نه alias (خروجی sql خام در select نام‌گذاری نمی‌شود —
+      // ORDER BY "satisfiedCount" در PG خطای «ستون وجود ندارد» می‌دهد).
+      .orderBy(desc(sql`(${built.satisfiedCount})::int`), sql`u.id asc`)
+      .limit(5000)) as Array<Record<string, unknown>>
+
+    const candidates: Array<{
+      userId: string
+      phone: string
+      missingConditionId: string
+      missingCount: number
+      remainingCount: number
+    }> = []
+    for (const row of rows) {
+      const total = conds.length
+      const satisfiedCount = Number(row.satisfiedCount ?? 0)
+      // اولین شرطِ ناراضی به‌ترتیب ثبت — قطعی و قابل‌تکرار (N4)
+      let missingIdx = -1
+      for (let i = 0; i < total; i++) {
+        if (row[`sat_${i}`] !== true) {
+          missingIdx = i
+          break
+        }
+      }
+      // دفاعی: مخاطب شرطاً «همه به‌جز یکی» دارد؛ نباید بدون ناقص بیاید
+      if (missingIdx < 0) continue
+      const cond = conds[missingIdx]
+      if (!cond) continue
+      const threshold = conditionThreshold(cond.type as ConditionType, (cond.params ?? {}) as Record<string, unknown>)
+      // bigint از pg به‌صورت رشته می‌آید — Number() هر دو را می‌پوشاند
+      const current = Number(row[`cur_${missingIdx}`] ?? 0)
+      candidates.push({
+        userId: String(row.userId),
+        phone: String(row.phone),
+        missingConditionId: cond.id as string,
+        missingCount: Math.max(1, total - satisfiedCount),
+        remainingCount: Math.max(1, Math.ceil(threshold - current)),
+      })
+    }
+    return candidates
+  }
+
+  /**
+   * stage-66 (⑤) — آزادسازی claim یادآور: جابِ ارسال، ردیف را قبل از
+   * notifyUser تصرف می‌کند؛ اگر notifyUser شکست بخورد (id=null — درج
+   * صندوق/پوش هرگز throw نمی‌کند)، claim آزاد می‌شود تا اجرای مجدد/دستی
+   * همان روز دوباره تلاش کند. ردیف‌های آزادشده سهمِ سقف ۲ را نمی‌سوزانند.
+   */
+  async releaseNudgeClaim(nudgeId: string): Promise<void> {
+    if (!UUID_RE.test(nudgeId)) return
+    await this.deps.db
+      .update(couponNudges)
+      .set({ smsSentAt: null })
+      .where(eq(couponNudges.id, nudgeId))
   }
 
   // ══ CRUD ادمین ══
@@ -329,6 +508,8 @@ export class CouponService {
     title?: string | null
     discountPercentage: number
     maxUses: number
+    /** stage-66 (سیاست ۱) — سقف مصرف به‌ازای کاربر برای کوپن عمومی؛ ۰ = نامحدود (پیش‌فرض) */
+    maxPerUser?: number
     isPublic: boolean
     expiryDate: string | null
     rules: Array<{ type: string; params: Record<string, unknown> }>
@@ -337,6 +518,20 @@ export class CouponService {
     /** stage-65 — ممنوعیت اعلان انتشار ساخت (پیش‌فرض خاموش = اعلان می‌رود) */
     announceSuppressed?: boolean
   }): Promise<{ success: boolean; id?: string }> {
+    // stage-66 (①/②) — قرارداد ساخت، در سرویس (نه فقط روت — هر فراخوان‌کننده‌ای):
+    // عمومی ⇔ بدون شرط / خصوصی ⇔ حداقل یک شرط. قبلاً کوپن خصوصیِ بی‌شرط
+    // (هیچ موتوری اعطایش نمی‌کرد — کوپن مرده) و کوپن عمومیِ همراه‌شرط
+    // (findUsable شرط‌ها را بی‌صدا نادیده می‌گرفت) از همین‌جا عبور می‌کردند.
+    if (input.isPublic && input.rules.length > 0) {
+      throw Err.validation(
+        'کوپن عمومی شرط ندارد — قوانین فقط برای کوپن خصوصی (هدف‌یابی) معنا دارند؛ کوپن را خصوصی کنید یا شرط‌ها را حذف کنید',
+      )
+    }
+    if (!input.isPublic && input.rules.length === 0) {
+      throw Err.validation(
+        'کوپن خصوصی بدون شرط به هیچ کاربری اعطا نمی‌شود — حداقل یک شرط اضافه کنید یا کوپن را عمومی کنید',
+      )
+    }
     // phase-9: حروف فارسی هم مجاز شد (پلتفرم کاملاً فارسی است؛ چک‌اوت toUpperCase
     // روی فارسی بی‌اثر و بی‌ضرر است) + خطاها به‌جای success:false با 200،
     // Err.validation می‌شوند تا فرانت پیام واقعی را ببیند (باگ «اضافه شد
@@ -365,8 +560,9 @@ export class CouponService {
             title: input.title ?? null,
             discountPercentage: input.discountPercentage,
             maxUses: input.maxUses,
+            // stage-66 (سیاست ۱) — سقف per-user (۰ = نامحدود؛ فقط مسیر عمومی می‌خواندش)
+            maxPerUser: input.maxPerUser ?? 0,
             isPublic: input.isPublic,
-            isActive: true,
             // stage-48 — ورود به فرآیند بررسی کرون (سوییچ فرم؛ پیش‌فرض خاموش)
             cronEnabled: input.cronEnabled ?? false,
             // stage-65 — سوییچ «کوپن بی‌صدا» (پیش‌فرض خاموش = اعلان ساخت می‌رود)
@@ -404,6 +600,8 @@ export class CouponService {
       title?: string | null
       discountPercentage: number
       maxUses: number
+      /** stage-66 (سیاست ۱) — سقف per-user (undefined = دست‌نخورده در ویرایش) */
+      maxPerUser?: number
       isPublic: boolean
       expiryDate: string | null
       rules: Array<{ type: string; params: Record<string, unknown> }>
@@ -413,6 +611,19 @@ export class CouponService {
       announceSuppressed?: boolean
     },
   ): Promise<{ success: boolean }> {
+    // stage-66 (①/②) — همان قرارداد create؛ ویرایش هم نمی‌تواند کوپن معیوب بسازد.
+    // «عمومی‌کردنِ کوپنِ شرط‌دار» باید با rules خالی بیاید (فرم همین کار را
+    // می‌کند) — وگرنه ۴۲۲ روشن می‌گیرد، نه رفتارِ کورِ قبلی.
+    if (input.isPublic && input.rules.length > 0) {
+      throw Err.validation(
+        'کوپن عمومی شرط ندارد — شرط‌ها را حذف کنید یا کوپن را خصوصی نگه دارید',
+      )
+    }
+    if (!input.isPublic && input.rules.length === 0) {
+      throw Err.validation(
+        'کوپن خصوصی بدون شرط به هیچ کاربری اعطا نمی‌شود — حداقل یک شرط اضافه کنید یا کوپن را عمومی کنید',
+      )
+    }
     const { db } = this.deps
     // phase-9: هم‌الگوی create — کد فارسی مجاز + خطاها Err (۴۲۲/۴۰۹) نه success:false با 200
     const code = input.code.trim().toUpperCase().slice(0, 16)
@@ -443,6 +654,8 @@ export class CouponService {
             title: input.title ?? null,
             discountPercentage: input.discountPercentage,
             maxUses: input.maxUses,
+            // stage-66 (سیاست ۱) — سقف per-user (نیامد = دست‌نخورده)
+            ...(input.maxPerUser !== undefined ? { maxPerUser: input.maxPerUser } : {}),
             isPublic: input.isPublic,
             // stage-48 — سوییچ کرون (نیامد = دست‌نخورده)
             ...(input.cronEnabled !== undefined ? { cronEnabled: input.cronEnabled } : {}),

@@ -206,12 +206,22 @@ function CouponDetailPage() {
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-1">مخاطب</p>
             <p className="text-xs text-gray-600 dark:text-gray-300">{couponAudienceLabel(c.isPublic)}</p>
           </div>
-          <div>
-            <p className="text-[10px] text-gray-400 font-DanaMedium mb-1">دریافت‌کنندگان</p>
-            <p className="text-xs text-gray-600 dark:text-gray-300">
-              {c.isPublic ? '—' : `${data.recipientsCount} نفر`}
-            </p>
-          </div>
+          {/* stage-66 — عمومی: سقف مصرف هر کاربر (به‌جای دریافت‌کنندگان که برای عمومی «—» است)؛ خصوصی: گرنت یکتا = ۱ */}
+          {c.isPublic ? (
+            <div>
+              <p className="text-[10px] text-gray-400 font-DanaMedium mb-1">سقف هر کاربر</p>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                {c.maxPerUser === 0 ? 'نامحدود' : `${c.maxPerUser} بار`}
+              </p>
+            </div>
+          ) : (
+            <div>
+              <p className="text-[10px] text-gray-400 font-DanaMedium mb-1">دریافت‌کنندگان</p>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                {`${data.recipientsCount} نفر`}
+              </p>
+            </div>
+          )}
           <div>
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-1">مصرف</p>
             <p className="text-xs text-gray-600 dark:text-gray-300" dir="ltr">
@@ -300,7 +310,7 @@ function CouponDetailPage() {
                   type="button"
                   onClick={() => setConsumersPage((p) => Math.max(1, p - 1))}
                   disabled={consumersPage <= 1}
-                  className="px-4 py-2 min-h-[44px] rounded-xl bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 text-xs font-DanaMedium hover:bg-gray-200 dark:hover:bg-white/10 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="px-4 py-2 min-h-11 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 text-xs font-DanaMedium hover:bg-gray-200 dark:hover:bg-white/10 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   صفحه قبلی
                 </button>
@@ -311,7 +321,7 @@ function CouponDetailPage() {
                   type="button"
                   onClick={() => setConsumersPage((p) => Math.min(totalPages, p + 1))}
                   disabled={consumersPage >= totalPages}
-                  className="px-4 py-2 min-h-[44px] rounded-xl bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 text-xs font-DanaMedium hover:bg-gray-200 dark:hover:bg-white/10 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="px-4 py-2 min-h-11 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 text-xs font-DanaMedium hover:bg-gray-200 dark:hover:bg-white/10 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   صفحه بعدی
                 </button>

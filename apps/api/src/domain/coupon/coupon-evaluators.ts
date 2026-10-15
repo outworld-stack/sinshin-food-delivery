@@ -1,4 +1,10 @@
 //src/domain/coupon/coupon-evaluators.ts
+// stage-66 — دو اصلاح اسکن عمیق:
+//   • N1: MIN_CATEGORY_ORDERS حالا از جدول M2M «product_categories»
+//     می‌خواند (پیامد stage-60: چند-دسته‌ای‌شدن محصولات) — دیگر فقط
+//     دسته‌ی «اصلی» p.category_id شمرده نمی‌شود.
+//   • N11: جمع‌های ریالی (::bigint) — sum روی bigint با ::int در آستانه‌ی
+//     ۲٫۱ میلیارد تومان سرریز می‌کرد و شرط را «برقرار» جلوه می‌داد.
 import { sql, type SQL } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
@@ -78,8 +84,11 @@ export function evaluateCondition(
 
     case 'MIN_TOTAL_SPEND': {
       const amount = num(params.amount, 1)
+      // stage-66 (N11) — ::bigint: sum(total_amount) روی حساب‌های ریالی
+      // با ::int در ~۲٫۱ میلیارد سرریز می‌کرد (مقایسه wrong-way → grant
+      // نادرست). مقایسه با پارامتر عددی JS مشکلی ندارد.
       const spent = sql`(
-        select coalesce(sum(o.total_amount), 0)::int from orders o
+        select coalesce(sum(o.total_amount), 0)::bigint from orders o
         where o.user_id = u.id
           and o.payment_status = 'SUCCESS'
           and o.status <> 'CANCELED'
@@ -112,15 +121,18 @@ export function evaluateCondition(
       if (!categoryId) {
         return { satisfied: sql`false`, current: sql`0` }
       }
+      // stage-66 (N1) — M2M: محصول ممکن است در چند دسته باشد (stage-60).
+      // شمارش از product_categories؛ دسته‌ی اصلی p.category_id دیگر مرجع
+      // نیست (محصولِ فقط-در-دسته‌ی ثانویه شمرده نمی‌شد — شرط کور می‌ماند).
       const bought = sql`(
         select coalesce(sum(oi.quantity), 0)::int
         from order_items oi
         join orders o on o.id = oi.order_id
-        join products p on p.id = oi.product_id
+        join product_categories pc on pc.product_id = oi.product_id
         where o.user_id = u.id
           and o.payment_status = 'SUCCESS'
           and o.status <> 'CANCELED'
-          and p.category_id = ${categoryId}::uuid
+          and pc.category_id = ${categoryId}::uuid
       )`
       return { satisfied: sql`${bought} >= ${count}`, current: bought }
     }
@@ -156,8 +168,9 @@ export function evaluateCondition(
 
     case 'MIN_REFERRAL_SPEND': {
       const amount = num(params.amount, 1)
+      // stage-66 (N11) — ::bigint، همان دلیل MIN_TOTAL_SPEND
       const refSpend = sql`(
-        select coalesce(sum(o.total_amount), 0)::int
+        select coalesce(sum(o.total_amount), 0)::bigint
         from orders o
         join users b on b.id = o.user_id
         where b.referred_by = u.id
@@ -216,5 +229,26 @@ export function buildUserCondition(
     allButOne: sql`(${counts}) >= ${total - 1}`,
     satisfiedCount: sql`(${counts})`,
     totalConditions: total,
+  }
+}
+
+/**
+ * stage-66 — سقف عددیِ یک شرط در «واحد خودش» (سفارش/تومان/روز/معرفی) —
+ * برای محاسبه‌ی فاصله‌ی واقعی (remaining = سقف − فعلی) در موتور یادآور.
+ * همه‌ی ۹ نوع شرط یک سقف عددی دارند؛ مقدار خراب → ۱ (هم‌الگوی num).
+ */
+export function conditionThreshold(type: ConditionType, params: ConditionParams): number {
+  switch (type) {
+    case 'MIN_TOTAL_SPEND':
+    case 'MIN_REFERRAL_SPEND':
+      return num(params.amount, 1)
+    case 'REGISTERED_DAYS_AGO':
+      return num(params.days, 1)
+    case 'ORDERS_IN_LAST_DAYS':
+      return num(params.count, 1)
+    default:
+      // MIN_ORDERS_COUNT / MIN_PRODUCT_ORDERS / MIN_CATEGORY_ORDERS /
+      // MIN_REFERRALS / MIN_REFERRAL_ORDERS — همه { count }
+      return num(params.count, 1)
   }
 }

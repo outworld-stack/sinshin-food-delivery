@@ -27,6 +27,8 @@ export async function createCoupon(input: {
 	title?: string | null
 	discountPercentage: number
 	maxUses: number
+	/** stage-66 — سقف مصرف به‌ازای کاربر (کوپن عمومی)؛ ۰ = نامحدود (پیش‌فرض) */
+	maxPerUser?: number
 	isPublic: boolean
 	expiryDate: string | null
 	rules: CouponRule[]
@@ -40,6 +42,8 @@ export async function createCoupon(input: {
 		title: input.title ?? null,
 		discountPercentage: input.discountPercentage,
 		maxUses: input.maxUses,
+		// stage-66 — سقف per-user (۰ = نامحدود)
+		maxPerUser: input.maxPerUser ?? 0,
 		isPublic: input.isPublic,
 		expiryDate: input.expiryDate,
 		cronEnabled: input.cronEnabled ?? false,
@@ -58,6 +62,8 @@ export async function updateCoupon(input: {
 	title?: string | null
 	discountPercentage: number
 	maxUses: number
+	/** stage-66 — سقف per-user (undefined = دست‌نخورده در ویرایش) */
+	maxPerUser?: number
 	isPublic: boolean
 	expiryDate: string | null
 	rules: CouponRule[]
@@ -71,6 +77,8 @@ export async function updateCoupon(input: {
 		title: input.title ?? null,
 		discountPercentage: input.discountPercentage,
 		maxUses: input.maxUses,
+		// stage-66 — سقف per-user (نیامد = دست‌نخورده)
+		maxPerUser: input.maxPerUser,
 		isPublic: input.isPublic,
 		expiryDate: input.expiryDate,
 		cronEnabled: input.cronEnabled,

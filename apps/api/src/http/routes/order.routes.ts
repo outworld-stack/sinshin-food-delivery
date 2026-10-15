@@ -330,6 +330,29 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       async ({ user, body }) => {
         // phase-fix: سقف هر کاربر — ۴۵ در دقیقه (ضد brute-force کد تخفیف)
         await perUserLimit(user.id, 'checkout-preview', 45, 60)
+        // stage-66 (N9) — شمارش‌پذیری کد کوتاه عمومی: سقفِ «کدهای متمایز» در
+        // دقیقه، نه درخواست‌ها. پیش‌نمایش زنده‌ی چک‌اوت کدِ تثبیت‌شده را با هر
+        // تغییر سبد دوباره می‌فرستد (رفتار عادی کاربر)؛ مهاجم کدهای متفاوت
+        // می‌آزماید — دقیقاً چیزی که SADD می‌شمارد (هم‌الگوی ضد SMS-bombing
+        // رارد H4). ردیس پایین ⇒ این سقفِ نرم fail-open؛ سقف ۴۵/min با
+        // پشتیبان در-حافظه (L7) همچنان بسته است.
+        if (body.couponCode && body.couponCode.trim() !== '') {
+          const probeKey = `rl:coupon-probe:user:${user.id}`
+          const added = await deps.redis.sAdd(
+            probeKey,
+            body.couponCode.trim().toUpperCase().slice(0, 32),
+            60,
+          )
+          if (added !== null) {
+            const distinct = await deps.redis.sCard(probeKey)
+            if (distinct !== null && distinct > 10) {
+              throw Err.rateLimited(
+                'تلاش برای کدهای تخفیف زیاد است؛ کمی بعد دوباره امتحان کنید.',
+                60,
+              )
+            }
+          }
+        }
         return deps.orders.preview(user.id, body)
       },
       {

@@ -720,6 +720,8 @@ export interface CouponWithConditionsDto {
     discountPercentage: number
     maxUses: number
     usedCount: number
+    /** stage-66 — سقف مصرف به‌ازای هر کاربر (کوپن عمومی)؛ ۰ = نامحدود */
+    maxPerUser: number
     isPublic: boolean
     isActive: boolean
     /** stage-48 — عضویت در فرآیند کرون‌جاب کوپن‌ها (اسکن/یادآور) */

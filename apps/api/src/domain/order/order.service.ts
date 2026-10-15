@@ -300,16 +300,20 @@ export class OrderService {
                         let discount = 0;
                         let couponId: CampaignId | null = null;
                         if (input.couponCode) {
-                                const coupon = await this.deps.coupons.findUsableCoupon(
+                                // stage-66 — خروجی دلیل‌دار: سهم per-user تمام‌شده پیام خودش را دارد
+                                const outcome = await this.deps.coupons.findUsableCoupon(
                                         tx,
                                         userId,
                                         input.couponCode,
                                 );
-                                if (!coupon) {
+                                if (!outcome.ok) {
                                         throw Err.conflict(
-                                                "این کد تخفیف دیگر قابل استفاده نیست — سبد خرید را به‌روز کنید.",
+                                                outcome.reason === "per_user_exhausted"
+                                                        ? "سهم شما از این کد تخفیف به پایان رسیده است — این کد برای هر کاربر سقف مصرف دارد."
+                                                        : "این کد تخفیف دیگر قابل استفاده نیست — سبد خرید را به‌روز کنید.",
                                         );
                                 }
+                                const coupon = outcome.coupon;
                                 const [reserved] = await tx
                                         .update(coupons)
                                         .set({ usedCount: sql`${coupons.usedCount} + 1` })
@@ -669,27 +673,32 @@ export class OrderService {
                         message?: string;
                 } | null = null;
                 if (input.couponCode) {
+                        // stage-66 — خروجی دلیل‌دار findUsableCoupon: سهم per-user
+                        // تمام‌شده پیام مخصوص خودش را می‌گیرد (نه «نامعتبر» کلی)
                         const found = await this.deps.coupons.findUsableCoupon(
                                 db,
                                 userId,
                                 input.couponCode,
                         );
-                        if (found && found.maxUses > 0 && found.usedCount >= found.maxUses) {
+                        if (found.ok && found.coupon.maxUses > 0 && found.coupon.usedCount >= found.coupon.maxUses) {
                                 coupon = {
-                                        code: found.code,
+                                        code: found.coupon.code,
                                         valid: false,
                                         discount: 0,
                                         message: "ظرفیت این کد تخفیف تکمیل شده است.",
                                 };
-                        } else if (found) {
-                                discount = Math.round((foodTotal * found.discountPercentage) / 100);
-                                coupon = { code: found.code, valid: true, discount };
+                        } else if (found.ok) {
+                                discount = Math.round((foodTotal * found.coupon.discountPercentage) / 100);
+                                coupon = { code: found.coupon.code, valid: true, discount };
                         } else {
                                 coupon = {
                                         code: input.couponCode.trim().toUpperCase().slice(0, 32),
                                         valid: false,
                                         discount: 0,
-                                        message: "کد تخفیف نامعتبر است یا برای شما فعال نیست.",
+                                        message:
+                                                found.reason === "per_user_exhausted"
+                                                        ? "سهم شما از این کد تخفیف به پایان رسیده است — این کد برای هر کاربر سقف مصرف دارد."
+                                                        : "کد تخفیف نامعتبر است یا برای شما فعال نیست.",
                                 };
                         }
                 }
@@ -955,18 +964,24 @@ export class OrderService {
                                         .update(coupons)
                                         .set({ usedCount: sql`greatest(${coupons.usedCount} - 1, 0)` })
                                         .where(eq(coupons.id, row.couponId));
-                                await tx
+                                // stage-66 (N6) — گرنت فقط وقتی آزاد می‌شود که redemptionِ «همین
+                                // سفارش» واقعاً حذف شده باشد (مدرکِ مصرفِ کوپن توسط همین سفارش).
+                                // قبلاً بی‌قید آزاد می‌شد — اگر گرنتِ (کوپن، کاربر) آن‌وقت در
+                                // اختیار رزروِ زنده‌ی سفارش دیگری بود (داده‌ی قدیمی/کرنر-کیس)،
+                                // آزادسازیِ کور آن را می‌دزدید. تکرارناپذیری مسیر دست‌نخورده ماند.
+                                const deletedRedemptions = await tx
                                         .delete(couponRedemptions)
                                         .where(
                                                 and(
                                                         eq(couponRedemptions.couponId, row.couponId),
                                                         eq(couponRedemptions.orderId, row.id),
                                                 ),
-                                        );
+                                        )
+                                        .returning({ id: couponRedemptions.id });
                                 const coupon = (
                                         await tx.select().from(coupons).where(eq(coupons.id, row.couponId))
                                 )[0];
-                                if (coupon && !coupon.isPublic) {
+                                if (coupon && !coupon.isPublic && deletedRedemptions.length > 0) {
                                         await tx
                                                 .update(couponGrants)
                                                 .set({ consumedAt: null })
