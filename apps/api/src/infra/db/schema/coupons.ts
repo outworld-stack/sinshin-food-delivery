@@ -144,7 +144,14 @@ export const couponGrants = pgTable(
   ],
 )
 
-/** کرون شبانه — نامزدهای nudge (کوپن‌های خصوصی فعال) */
+/** کرون شبانه — نامزدهای nudge (کوپن‌های خصوصی فعال)
+ *  stage-67 — FK شرطِ ناقص از cascade به set-null تغییر کرد: ویرایشِ
+ *  کوپن شرط‌ها را حذف+بازسازی می‌کند؛ قبلاً همین cascade همه‌ی nudgeهای
+ *  آن کوپن را پاک می‌کرد و «سقف ۲ یادآور به‌ازای کاربر» با هر ویرایش
+ *  صفر می‌شد (کاربر دوباره ۲ یادآورِ تازه می‌گرفت). حالا ردیف‌ها با
+ *  missingConditionId=null زنده می‌مانند — شمارشِ سقف در
+ *  findNudgeCandidates مستقل از join شرط است و سرجایش می‌ماند؛ ردیف‌های
+ *  set-null دیگر قابل ارسال هم نیستند (innerJoin در جاب ارسال). */
 export const couponNudges = pgTable(
   'coupon_nudges',
   {
@@ -156,10 +163,14 @@ export const couponNudges = pgTable(
       .notNull()
       .$type<CampaignId>()
       .references(() => coupons.id, { onDelete: 'cascade' }),
+    /**
+     * stage-67 — nullable + ON DELETE SET NULL: ویرایش شرط‌ها ردیف را
+     * نمی‌کشد (حفظ سقف ۲)؛ null = «شرطِ مرجع در ویرایش جایگزین شده» —
+     * قابل ارسال نیست ولی در شمارش سقف می‌ماند.
+     */
     missingConditionId: uuid('missing_condition_id')
-      .notNull()
       .$type<ConditionId>()
-      .references(() => couponConditions.id, { onDelete: 'cascade' }),
+      .references(() => couponConditions.id, { onDelete: 'set null' }),
     /** تعداد «شرط‌های» ناقص — با مخاطب همه-به-جز-یکی همیشه ۱ است */
     missingCount: integer('missing_count'),
     /**

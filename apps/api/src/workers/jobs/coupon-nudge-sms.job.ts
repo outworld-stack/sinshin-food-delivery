@@ -1,4 +1,21 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-67 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-sms.job.ts
+// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-66)
+// تغییر (ترمیم اسکن کوپن×نوتیفیکیشن):
+//   ⑤-باقی‌مانده پنجره‌ی crash: ترتیب عوض شد — «اول ارسال، بعد claim».
+//     قبلاً claim (smsSentAt) قبل از notifyUser ست می‌شد؛ کرشِ پروسه بین
+//     آن دو یعنی سهمِ سقف-۲ سوخته بدون هیچ اعلانی. حالا claim فقط بعد
+//     از موفقیتِ notifyUser ست می‌شود؛ شکست/کرش = ردیف pending می‌ماند
+//     (retry ممکن، سهم نمی‌سوزد). هزینه‌ی پنجره‌ی جدیدِ کرش (بین ارسال
+//     و claim) حداکثر یک تکرار است — tag پوش 'coupon-nudge' به‌عمد
+//     جایگزین‌شونده است، پس بی‌ضرر.
+//   M3-اسکن re-check کامل در لحظه‌ی ارسال (علاوه بر فعال/انقضا/ظرفیتِ
+//     stage-66): ① کاربر بن شده حذف (users.bannedAt) ② cronEnabled در
+//     لحظه‌ی ارسال ③ گرنتِ بین اسکن و ارسال (کاربر از راه دیگری کوپن
+//     گرفته — یادآورِ «فاصله تا کوپن» دیگر دروغ است).
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-66 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-sms.job.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -13,14 +30,14 @@
 //   بدون remainingCount → متن جایگزین «یک قدم» همان قبل.
 // ═══════════════════════════════════════════════════════════════
 
-//src/workers/jobs/coupon-nudge-sms.job.ts (بازنویسی فاز-۲ + stage-66)
-import { and, eq, isNull, sql } from 'drizzle-orm'
+//src/workers/jobs/coupon-nudge-sms.job.ts (بازنویسی فاز-۲ + stage-66/67)
+import { and, eq, isNull, notExists, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import type { NotificationService } from '#/domain/notification/notification.service'
 import type { CouponService } from '#/domain/coupon/coupon.service'
-import { couponConditions, couponNudges, users, coupons } from '#/infra/db/schema'
+import { couponConditions, couponGrants, couponNudges, users, coupons } from '#/infra/db/schema'
 import type { DailyJob } from '#/workers/scheduler'
 
 const DEADLINE_HOUR = 13 // تهران — بعد از ناهار یادآور بی‌معنی است
@@ -54,11 +71,13 @@ function gapLabel(type: string, remaining: number): string {
  * فاز-۲ — یادآور کوپن «پیش از ناهار» (۱۱:۰۰ تهران) — با پوش
  * نوتیفیکیشن به‌جای پیامک (سیستم کاستوم Web Push + صندوق درون‌بری).
  *
- *  • منطق ضد-تکرار: فقط scan_date = امروز و smsSentAt IS NULL؛
- *    اول تصرف بعد ارسال → امن در برابر کرش.
- *  • stage-66 (⑤): اگر notifyUser شکست بخورد (id=null) claim آزاد
- *    می‌شود (releaseNudgeClaim) — retry در اجرای بعدی همان روز ممکن است.
- *  • کاربر بدون اشتراک پوش: فقط ردیف صندوق درون‌بری (SSE + لیست).
+ *  • منطق ضد-تکرار: فقط scan_date = امروز و smsSentAt IS NULL.
+ *  • stage-67 — «اول ارسال، بعد claim»: claim بعد از notifyUser موفق
+ *    ست می‌شود (کامنت سربرگ)؛ ردیفِ شکست‌خورده pending می‌ماند و سهمِ
+ *    سقف ۲ را نمی‌سوزاند. releaseNudgeClaim در سرویس به‌عنوان ابزار
+ *    عملیاتی (بازنشانی دستی) باقی است.
+ *  • کاربر بدون اشتراک پوش: ردیف صندوق (stage-67: صفحه‌ی «صندوق
+ *    اعلان‌ها» در پروفایل — مصرف‌کننده‌ی واقعیِ همین ردیف‌ها).
  *  • تکرارناپذیر: یکتایی (user, coupon, scan_date) — بدون تکرار بین رپلیکاها.
  *  • بعد از ۱۳:۰۰ توقف.
  */
@@ -100,10 +119,16 @@ export class CouponNudgeJob implements DailyJob {
       year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(new Date())
 
-    // stage-66 (④/③) — re-check در لحظه‌ی ارسال: کوپن بین اسکن (۰۲:۰۰)
-    // و ارسال (۱۱:۰۰) غیرفعال/منقضی/پُرشده باشد → یادآورش بی‌معنی و مزاحم
-    // است. innerJoin روی missingConditionId امن است (FK cascade — شرط حذف
-    // شود، ردیف nudge هم هست).
+    // stage-66 (④/③) + stage-67 (M3) — re-check کامل در لحظه‌ی ارسال.
+    // بین اسکن (۰۲:۰۰) و ارسال (۱۱:۰۰) هرکدام از این‌ها رخ داده باشد،
+    // یادآور بی‌معنی/مزاحم است و ارسال نمی‌شود:
+    //   • کوپن غیرفعال/منقضی/ظرفیت‌پُر شده (stage-66)
+    //   • کوپن از فرآیند کرون خارج شده (cronEnabled — stage-67)
+    //   • کاربر بن شده (stage-67)
+    //   • کاربر از راه دیگری گرنت گرفته — مثلاً تسویه‌ی سفارشِ صبح
+    //     (stage-67؛ پیامِ «۳ سفارش تا کوپن» دیگر دروغ است)
+    // innerJoin روی missingConditionId: ردیف‌های set-null (ویرایش شرط‌های
+    // stage-67) از اینجا به بعد قابل ارسال نیستند — به‌عمد.
     const pending = await db
       .select({
         nudgeId: couponNudges.id,
@@ -124,27 +149,29 @@ export class CouponNudgeJob implements DailyJob {
           sql`${couponNudges.scanDate} = ${scanDateStr}::date`,
           isNull(couponNudges.smsSentAt),
           eq(coupons.isActive, true),
+          eq(coupons.cronEnabled, true),
           sql`(${coupons.endsAt} is null or ${coupons.endsAt} > now())`,
           sql`(${coupons.maxUses} = 0 or ${coupons.usedCount} < ${coupons.maxUses})`,
+          // stage-67 (M3) — کاربر بن‌شده: یادآورِ بن‌شده نخرید
+          isNull(users.bannedAt),
+          // stage-67 (M3) — گرنتِ تازه: کاربر دیگر کوپن را دارد
+          notExists(
+            db
+              .select({ one: sql`1` })
+              .from(couponGrants)
+              .where(
+                and(
+                  eq(couponGrants.couponId, couponNudges.couponId),
+                  eq(couponGrants.userId, couponNudges.userId),
+                ),
+              ),
+          ),
         ),
       )
 
     let sent = 0
-    let released = 0
+    let skipped = 0
     for (const row of pending) {
-      // تصرف «فقط همین ردیف» (فاز-۱/phase-5 — باگ لیست) — اول claim بعد ارسال
-      const claimed = await db
-        .update(couponNudges)
-        .set({ smsSentAt: new Date() })
-        .where(
-          and(
-            eq(couponNudges.id, row.nudgeId),
-            isNull(couponNudges.smsSentAt),
-          ),
-        )
-        .returning({ id: couponNudges.id })
-      if (claimed.length === 0) continue
-
       // سیاست ۲ — فاصله‌ی واقعی؛ ردیف قدیمی بدون remaining → «یک قدم»
       const gap =
         row.remainingCount !== null && row.remainingCount !== undefined && row.remainingCount > 0
@@ -152,6 +179,10 @@ export class CouponNudgeJob implements DailyJob {
           : 'یک قدم'
       const title = row.couponTitle ?? row.couponCode
 
+      // stage-67 (⑤) — «اول ارسال، بعد claim»: notifyUser هرگز throw
+      // نمی‌کند؛ id=null یعنی درج صندوق/پوش نشد. ردیف همان‌طور pending
+      // می‌ماند (smsSentAt=null) — سهمِ سقف ۲ نمی‌سوزد و اجرای مجددِ
+      // همان روز (دستی/اصلاح‌شده) دوباره تلاش می‌کند.
       const res = await this.deps.notifications.notifyUser(row.userId, {
         type: 'coupon_nudge',
         title: `🎁 ${gap} تا کوپن تخفیف!`,
@@ -165,25 +196,38 @@ export class CouponNudgeJob implements DailyJob {
           remainingCount: row.remainingCount,
         },
       })
-      if (res.id !== null) {
-        sent++
-      } else {
-        // stage-66 (⑤) — notifyUser هرگز throw نمی‌کند؛ شکستِ درج صندوق/پوش
-        // را فقط id=null لو می‌دهد. claim آزاد تا retry بعدی (همان ردیف
-        // امروز دوباره pending می‌شود؛ سهمِ سقف ۲ هم نمی‌سوزد).
-        released++
+      if (res.id === null) {
+        skipped++
         console.warn(
-          `[cron:coupon-nudge] nudge ${row.nudgeId} failed to notify — claim released for retry`,
+          `[cron:coupon-nudge] nudge ${row.nudgeId} failed to notify — left pending for retry (claim not set)`,
         )
-        await this.deps.coupons.releaseNudgeClaim(row.nudgeId).catch(() => {
-          /* آزادسازی بهترین‌تلاش است — خطایش ردیف را همان‌ claim نگه می‌دارد */
-        })
+        continue
       }
+
+      // تصرف «فقط همین ردیف» و فقط اگر هنوز کسی نگرفته — پس از ارسالِ
+      // موفق. گارد isNull(smsSentAt) در برابر اجرای موازی دومی است.
+      const claimed = await db
+        .update(couponNudges)
+        .set({ smsSentAt: new Date() })
+        .where(
+          and(
+            eq(couponNudges.id, row.nudgeId),
+            isNull(couponNudges.smsSentAt),
+          ),
+        )
+        .returning({ id: couponNudges.id })
+      if (claimed.length === 0) {
+        // قبلاً (بین ارسال و claim) کسی دیگر claim کرد — ارسالِ ما
+        // تکرارِ بی‌خطرِ همان پیام بود (tag پوش جایگزین‌شونده است)
+        skipped++
+        continue
+      }
+      sent++
     }
 
     console.log(
-      `[cron:coupon-nudge] sent ${sent}/${pending.length} nudge notification(s), ` +
-        `${released} claim(s) released for retry ` +
+      `[cron:coupon-nudge] sent ${sent}/${pending.length} nudge notification(s)` +
+        `${skipped > 0 ? `, ${skipped} skipped/pending` : ''} ` +
         '(in-app + web push; کاربر بدون اشتراک پوش فقط صندوق درون‌بری)',
     )
   }

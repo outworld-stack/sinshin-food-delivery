@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-67 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/server/user.ts
+// ویرایش نقطه‌ای: دو تابع صندوق اعلان‌ها (تصمیم کارفرما «الف») —
+// getMyNotifications (۳۰ اعلانِ ۷ روز اخیر + بج) و markNotificationsRead
+// (تک/همه) — هر دو روی مسیرهای requireAuth سرویس نوتیفیکیشن.
+// ═══════════════════════════════════════════════════════════════
 // stage-56 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/server/user.ts
 // تغییر: getMyOrders — «سفارشات من» با صفحه‌بندی سروری (page/limit/
@@ -11,6 +17,7 @@
 import type {
 	AddressDto,
 	AdminReviewDto,
+	NotificationInboxData,
 	ProductId,
 	ProductReviewDto,
 	UserOrder,
@@ -54,6 +61,28 @@ export async function getMyOrders(
 	if (opts.sort) params.set('sort', opts.sort)
 	const q = params.toString()
 	return authJson<UserOrdersData>(`/orders${q ? `?${q}` : ''}`, 'GET')
+}
+
+// ── stage-67 — صندوق اعلان‌ها (پروفایل کاربر) ──
+
+/**
+ * اعلان‌های من — ۳۰ اعلانِ آخرِ «۷ روز اخیر» + شمار خوانده‌نشده.
+ * سرور TTL را اعمال می‌کند (از createdAt هر ردیف)؛ این لایه فقط قرارداد.
+ */
+export async function getMyNotifications(): Promise<NotificationInboxData> {
+	return authJson<NotificationInboxData>('/notifications', 'GET')
+}
+
+/** علامت‌گذاری خوانده‌شده — تک (id) یا همه (all) */
+export async function markNotificationsRead(input: {
+	id?: string
+	all?: boolean
+}): Promise<{ success: boolean; marked?: number }> {
+	return authJson<{ success: boolean; marked?: number }>(
+		'/notifications/read',
+		'POST',
+		input,
+	)
 }
 
 // round-12 — bind معرف پس از ثبت‌نام (اسکن QR / ورود دستی کد در داشبورد کاربر)

@@ -1,4 +1,23 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-67 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
+// وضعیت: ویرایش فایل موجود (تصمیم کارفرما «الف» + ترمیم اسکن کوپن×نوتیف):
+//   ① صندوق اعلان‌ها TTL هفت‌روزه شد (تصمیم کارفرما): هر ردیف از لحظه‌ی
+//      «به‌وجودآمدن» (createdAt) ۷ روز در صندوق می‌ماند — چه خوانده‌شده چه
+//      خوانده‌نشده؛ بعدش از list/unreadCount حذف و توسط prune پاک می‌شود.
+//      این همان بستنِ «رشد بی‌سقف جدول notifications» است (M1 اسکن):
+//      قبلاً فقط خوانده‌شده‌ی ۹۰ روز پاک می‌شد و هیچ کلاینتی read نمی‌زد.
+//   ② notifyUsers (مرده از stage-49) حذف شد — صفر فراخوان در کل ریپو.
+//   ③ گارد تسخیر اشتراک اتمیک شد (سرانجام همان ① stage-64 که فقط کامنت
+//      بود): upsert با setWhere(user_id=درخواست‌دهنده) + returning —
+//      رقابتِ دو درخواستِ هم‌زمان دیگر نمی‌تواند مالکیت را عوض کند؛
+//      SELECT-then-reject قبلی بین دو کوئری قابل شکست بود (TOCTOU).
+//   ④ مخاطب پوشِ broadcast دقیقاً هم‌راستای صندوق: همان مرتب‌سازی
+//      desc(users.createdAt) + برشِ همان ۵۰k کاربر اول (cutoff از
+//      broadcast پاس می‌شود) — قبلاً پوش بی‌order بود و زیرمجموعه‌ی
+//      متفاوتی می‌گرفت (یافته‌ی کم‌اهمیت اسکن).
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-64 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/notification/notification.service.ts
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-55)
@@ -73,6 +92,8 @@ import { likePattern } from '#/domain/shared/pg'
  *
  * سه کانال تحویل، یک منبع حقیقت (جدول notifications):
  *  ۱) DB — صندوق درون‌بری: لیست، خوانده‌نشده، علامت‌گذاری خوانده‌شده
+ *     (stage-67 — مصرف‌کننده: صفحه‌ی «صندوق اعلان‌ها» در پروفایل کاربر؛
+ *     TTL هفت‌روزه از createdAt — تصمیم کارفرما)
  *  ۲) SSE زنده — کانال notify:{userId} (فقط مالک؛ گارد در realtime.routes)
  *  ۳) Web Push — به همه‌ی اشتراک‌های فعال کاربر (مرورگر بسته هم می‌رسد)
  *
@@ -82,7 +103,7 @@ import { likePattern } from '#/domain/shared/pg'
  *  منبع نمایش سفارش است؛ این کانال فقط «زنگ» است.
  *
  * ضد-کرش (قانون طلایی: نوتیفیکیشن هرگز مسیر اصلی را زمین نمی‌زند):
- *  • notifyUser/notifyUsers/broadcast/notifyAdminsNewOrder هرگز throw
+ *  • notifyUser/broadcast/notifyAdminsNewOrder هرگز throw
  *    نمی‌کنند — خطا فقط لاگ.
  *  • پوش اشتراکی که 404/410 داد → غیرفعال (disabledAt) و بعداً پاک‌سازی.
  *  • ارسال پوش فان‌اوت با سقف هم‌زمانی؛ هر اشتراک مستقل try/catch.
@@ -174,6 +195,14 @@ const PUSH_CONCURRENCY = 25
 const INSERT_CHUNK = 500
 /** stage-48 — شکستِ پیاپی پوش قبل از غیرفعال‌کردن اشتراک */
 const PUSH_MAX_FAILURES = 5
+/**
+ * stage-67 — عمر صندوق اعلان‌ها (تصمیم کارفرما «الف»): هر اعلان ۷ روز
+ * از لحظه‌ی ایجاد در صندوق کاربر می‌ماند؛ تایمرِ حذف مستقل از
+ * خوانده‌شدن است و از createdAt هر ردیف محاسبه می‌شود. ۷ روز بعد:
+ *  • list/unreadCount دیگر برنمی‌گردانندش (حتی قبل از اجرای prune)
+ *  • prune (اجرای روزانه‌ی RetentionJob) ردیف را فیزیکی پاک می‌کند
+ */
+export const NOTIFICATION_TTL_DAYS = 7
 /**
  * stage-64 — سقف مشترکِ مخاطبِ broadcast — هم‌راستای سقف صندوق (۵۰k):
  * قبلاً ۲۰k بود و بی‌صدا مازاد را می‌انداخت؛ همین ثابت در هر دو مسیر
@@ -269,20 +298,6 @@ export class NotificationService {
     return { id, pushAccepted: accepted, pushGone: gone }
   }
 
-  /** نوتیفیکیشن به چند کاربر — batch با هم‌زمانی سقف‌دار */
-  async notifyUsers(userIds: string[], input: NotifyInput): Promise<{ notified: number }> {
-    const unique = [...new Set(userIds)].filter((u) => UUID_OK(u))
-    let notified = 0
-    for (let i = 0; i < unique.length; i += 50) {
-      const batch = unique.slice(i, i + 50)
-      const results = await Promise.all(
-        batch.map((u) => this.notifyUser(u, input).then((r) => r.id !== null)),
-      )
-      notified += results.filter(Boolean).length
-    }
-    return { notified }
-  }
-
   /**
    * پخش عمومی — به همه‌ی کاربران (نه ادمین‌ها). ردیف نوتیفیکیشن برای
    * همه ساخته می‌شود (صندوق درون‌بری)؛ پوش فقط به مشترکان می‌رود.
@@ -297,15 +312,26 @@ export class NotificationService {
    */
   async broadcast(input: NotifyInput, sender?: NotifySender): Promise<{ targeted: number }> {
     let ids: string[] = []
+    // stage-67 — cutoff برشِ مخاطب صندوق (کامنت پایین‌تر — داخل try پر می‌شود)
+    let audienceCutoff: Date | null = null
     try {
       // فقط کاربر عادی — ادمین‌ها از پنل خودشان همه‌چیز را می‌بینند
+      // stage-67 — createdAt هم انتخاب می‌شود (برشِ cutoff مخاطب پوش)
       const rows = await this.deps.db
-        .select({ id: users.id })
+        .select({ id: users.id, createdAt: users.createdAt })
         .from(users)
         .where(and(eq(users.role, 'user'), isNull(users.bannedAt)))
         .orderBy(desc(users.createdAt))
         .limit(BROADCAST_MAX_AUDIENCE)
       ids = rows.map((r) => r.id)
+      // stage-67 — cutoff مخاطب صندوق: createdAt آخرین ردیفِ سقف‌خورده
+      // (جدیدترین‌ها به‌ترتیب desc(users.createdAt)). فقط وقتی به سقف رسیده‌ایم
+      // معنا دارد؛ به پوش پاس می‌شود تا «مخاطبِ پوش» دقیقاً زیرمجموعه‌ی همین
+      // ۵۰k بماند — قبلاً پوش بی‌order بود و کاربران بیرون از برشِ صندوق هم
+      // پوش می‌گرفتند بدون ردیف صندوق (ناهماهنگی زیرمجموعه‌ی ۵۰k).
+      if (rows.length >= BROADCAST_MAX_AUDIENCE) {
+        audienceCutoff = rows[rows.length - 1]?.createdAt ?? null
+      }
     } catch (err) {
       console.error('[notify] broadcast: خواندن کاربران ناموفق:', err)
       return { targeted: 0 }
@@ -315,6 +341,10 @@ export class NotificationService {
       await this.logBroadcast(input, 0, sender).catch(() => {})
       return { targeted: 0 }
     }
+
+    // stage-67 — cutoff مخاطب صندوق (محاسبه در try بالا) — برش ۵۰k مشترک
+    // بین صندوق و پوش
+    const cutoff = audienceCutoff
 
     // درج chunked — بدون تراکنش غول‌پیکر
     let inserted = 0
@@ -343,7 +373,8 @@ export class NotificationService {
 
     // stage-64 — پوش به مشترکانِ همان مخاطبانِ صندوق — فایر-اند-فورگت
     // (خطاها داخل pushToSubscribedUsers لاگ می‌شوند؛ پاسخ مسیر نمی‌ماند)
-    void this.pushToSubscribedUsers(input, logId).catch(() => {})
+    // stage-67 — cutoff برشِ مخاطب پاس می‌شود (کامنت بالا)
+    void this.pushToSubscribedUsers(input, logId, cutoff).catch(() => {})
     return { targeted: inserted }
   }
 
@@ -495,11 +526,20 @@ export class NotificationService {
 
   // ═══ صندوق درون‌بری ═══
 
+  /**
+   * stage-67 — برشِ TTL: فقط ردیف‌های «۷ روز اخیر» دیده می‌شوند.
+   * تایمرِ حذف از createdAt هر ردیف است (تصمیم کارفرما) — مستقل از
+   * خوانده‌شدن؛ پس prune قبل از اجرا هم، ردیفِ منقضی هرگز لیست نمی‌شود.
+   */
+  private inboxCutoff(): Date {
+    return new Date(Date.now() - NOTIFICATION_TTL_DAYS * 86_400_000)
+  }
+
   async list(userId: string, limit: number): Promise<NotificationDto[]> {
     const rows = await this.deps.db
       .select()
       .from(notifications)
-      .where(eq(notifications.userId, userId))
+      .where(and(eq(notifications.userId, userId), gte(notifications.createdAt, this.inboxCutoff())))
       .orderBy(desc(notifications.createdAt))
       .limit(Math.min(Math.max(1, limit), 50))
     return rows.map(toDto)
@@ -509,7 +549,14 @@ export class NotificationService {
     const r = await this.deps.db
       .select({ count: sql<number>`count(*)::int` })
       .from(notifications)
-      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          isNull(notifications.readAt),
+          // stage-67 — هم‌راستا با list: بج شمرده‌نشده فقط ردیف‌های ۷ روز اخیر
+          gte(notifications.createdAt, this.inboxCutoff()),
+        ),
+      )
     return r[0]?.count ?? 0
   }
 
@@ -539,6 +586,12 @@ export class NotificationService {
    * رد می‌شود (reason=owned-by-other): بدون مدرک مالکیت، انتقال اشتراک
    * ممنوع است (قبلاً upsert بی‌صدا مالک را عوض می‌کرد و قربانی دیگر
    * نمی‌توانست اشتراکش را حذف کند).
+   * stage-67 — گارد «اتمیک» شد (سرانجامِ ① stage-64 که فقط کامنت بود):
+   * قبلاً SELECT سپس INSERT دو کوئری بود و در رقابتِ هم‌زمانِ دو درخواست
+   * (هر دو SELECTِ خالی می‌دیدند) onConflictDoUpdateِ دومی بی‌صدا مالکیت
+   * را می‌دزدید (TOCTOU). حالا یک کوئری: INSERT ... ON CONFLICT DO UPDATE
+   * با setWhere(user_id=درخواست‌دهنده) — اگر ردیف موجود مالِ دیگری باشد،
+   * WHERE رد می‌شود، هیچ ردیفی آپدیت/برنمی‌گردد ⇒ 409 همان قبلی.
    * سقف اشتراک فعال هر کاربر — قدیمی‌ترین غیرفعال می‌شود.
    */
   async registerSubscription(
@@ -552,18 +605,10 @@ export class NotificationService {
       return { ok: false, reason: 'keys-invalid' }
     }
     try {
-      // stage-55 — جلوگیری از «تسخیر اشتراک پوش»: اگر endpoint از قبل به
-      // کاربر دیگری تعلق دارد، بدون مدرکِ مالکیت (proof-of-possession)
-      // انتقال ممنوع است. قبلاً onConflictDoUpdate بی‌صدا مالک را عوض
-      // می‌کرد و قربانی دیگر نمی‌توانست اشتراکش را حذف کند.
-      // (داخل try: شکست DB همان reason='db' قبلی را می‌دهد، نه 500)
-      const [existing] = await this.deps.db
-        .select({ userId: pushSubscriptions.userId })
-        .from(pushSubscriptions)
-        .where(eq(pushSubscriptions.endpoint, sub.endpoint))
-        .limit(1)
-      if (existing && existing.userId !== userId) return { ok: false, reason: 'owned-by-other' }
-      await this.deps.db
+      // stage-67 — اتمیک:Returning خالی یعنی conflictِ مالِ دیگری بود
+      // (شرطِ setWhere رد شد). مسیر خوش‌بینانه (ردیف تازه یا مال خودم)
+      // دقیقاً یک ردیف برمی‌گرداند.
+      const rows = await this.deps.db
         .insert(pushSubscriptions)
         .values({
           userId,
@@ -584,7 +629,12 @@ export class NotificationService {
             // بازگشت کاربر (مثلاً پس از پاک‌شدن دستی) — دوباره فعال
             disabledAt: null,
           },
+          // stage-67 — قلبِ گارد اتمیک: آپدیتِ تسخیری فقط وقتی مجاز که
+          // ردیفِ موجود از قبل مالِ «همین درخواست‌دهنده» باشد
+          setWhere: eq(pushSubscriptions.userId, userId),
         })
+        .returning({ userId: pushSubscriptions.userId })
+      if (rows.length === 0) return { ok: false, reason: 'owned-by-other' }
       await this.capUserSubscriptions(userId)
       return { ok: true }
     } catch (err) {
@@ -625,22 +675,30 @@ export class NotificationService {
 
   // ═══ نگهداشت (RetentionJob صدا می‌زند) ═══
 
-  /** پاک‌سازی دوره‌ای: نوتیفیکیشن خوانده‌شده‌ی ۹۰ روز + اشتراک مرده‌ی ۳۰ روز */
+  /**
+   * پاک‌سازی دوره‌ای — stage-67 (تصمیم کارفرما «الف» + M1 اسکن):
+   * هر ردیفِ notifications که ۷ روز از «ایجادش» گذشته حذف می‌شود —
+   * خوانده‌شده یا نه (تایمر حذف از createdAt است، نه readAt). قبلاً فقط
+   * «خوانده‌شده‌ی ۹۰ روز» پاک می‌شد و چون هیچ کلاینتی read نمی‌زد، جدول
+   * بی‌سقف رشد می‌کرد. اشتراک مرده‌ی ۳۰ روز هم مثل قبل پاک می‌شود.
+   * شمارش با SELECT جدا (بدون returningِ عظیم — بدون ریسک حافظه) و حذف
+   * تک‌کوئری؛ RetentionJob روزانه صدا می‌زند.
+   */
   async prune(): Promise<{ notifications: number; subscriptions: number }> {
     let n = 0
     let s = 0
     try {
-      const cut90 = new Date(Date.now() - 90 * 86400_000)
-      const rows1 = await this.deps.db
-        .delete(notifications)
-        .where(
-          and(
-            sql`${notifications.readAt} is not null`,
-            lt(notifications.readAt, cut90),
-          ),
-        )
-        .returning({ id: notifications.id })
-      n = rows1.length
+      const cut = this.inboxCutoff()
+      const [row] = await this.deps.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(notifications)
+        .where(lt(notifications.createdAt, cut))
+      n = row?.count ?? 0
+      if (n > 0) {
+        await this.deps.db
+          .delete(notifications)
+          .where(lt(notifications.createdAt, cut))
+      }
     } catch (err) {
       console.error('[notify] prune notifications ناموفق:', err)
     }
@@ -799,10 +857,15 @@ export class NotificationService {
    * ادمین/کاربرِ بن‌شده — پوش می‌گرفتند در حالی که ردیف صندوق نداشتند؛
    * پیامِ نمایش‌داده‌شده بدون ردیف صندوق ناهماهنگی داده می‌ساخت).
    * tag یکتا = type-logId — اطلاعیه‌های متفاوت جای هم را نمی‌گیرند.
+   * stage-67 — هم‌راستاییِ کامل با برشِ صندوق: همان مرتب‌سازی
+   * desc(users.createdAt) + (در صورت سقفِ ۵۰k) فیلترِ cutoff که خودِ
+   * broadcast از آخرین ردیفِ مخاطب حساب کرد — قبلاً پوش بی‌order بود و
+   * زیرمجموعه‌ی کاربرانِ متفاوتی از صندوق می‌گرفت.
    */
   private async pushToSubscribedUsers(
     input: NotifyInput,
     logId?: string | null,
+    audienceCutoff?: Date | null,
   ): Promise<void> {
     const startedAt = Date.now()
     try {
@@ -820,8 +883,12 @@ export class NotificationService {
             isNull(pushSubscriptions.disabledAt),
             eq(users.role, 'user'),
             isNull(users.bannedAt),
+            // stage-67 — برشِ همان ۵۰k کاربرِ صندوق (فقط وقتی به سقف رسیدیم)
+            ...(audienceCutoff ? [gte(users.createdAt, audienceCutoff)] : []),
           ),
         )
+        // stage-67 — هم‌ترتیب با صندوق: desc(users.createdAt)
+        .orderBy(desc(users.createdAt))
         .limit(BROADCAST_MAX_AUDIENCE)
       if (subs.length === 0) return
       const pushPayload = {
@@ -1057,9 +1124,6 @@ export class NotificationService {
 }
 
 // ── helpers ──
-
-const UUID_OK = (s: string): boolean =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
 /**
  * stage-64 — شکستِ «قطعی» پوش؟ فقط ۴xxِ غیر از 429 (اشتراک/کلید خراب —

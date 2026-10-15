@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-67 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
+// ویرایش نقطه‌ای: مستندسازی OpenAPI مسیر صندوق (TTL هفت‌روزه از لحظه‌ی
+// ایجاد هر اعلان — تصمیم کارفرما «الف»). منطق مسیرها دست‌نخورده.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-55 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -97,7 +103,15 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
         ])
         return { items, unread }
       },
-      { detail: { summary: 'My notifications (latest 30 + unread count)' } },
+      {
+        detail: {
+          summary: 'My notifications (latest 30 + unread count)',
+          description:
+            'stage-67 — صندوق اعلان‌های کاربر: فقط ردیف‌های ۷ روز اخیر (TTL از ' +
+            'لحظه‌ی ایجاد هر اعلان — تصمیم کارفرما) + شمارش خوانده‌نشده‌ی همان بازه. ' +
+            'بعد از ۷ روز اعلان به‌طور خودکار حذف می‌شود (نگهداشت روزانه).',
+        },
+      },
     )
 
     .get(

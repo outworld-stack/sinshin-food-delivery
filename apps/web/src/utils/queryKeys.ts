@@ -38,6 +38,10 @@ export const qk = {
   // پریفکس — بعد از ثبت سفارش/تحویل‌تأییدشده، همه‌ی صفحات یکجا رفرش می‌شن
   myOrdersPrefix: ['my-orders'] as const,
 
+  // stage-67 — صندوق اعلان‌های من (پروفایل): ۳۰ اعلانِ ۷ روز اخیر + بج.
+  // کلید ثابت (بدون پارامتر) — نامعتبرسازی از SSE/بعد از markRead
+  myNotifications: ['my-notifications'] as const,
+
   // --- منو / محصولات ---
   activeMainCategories: ['active-main-categories'] as const,
   productsByMain: (mainSlug: string | null) => ['products-by-main', mainSlug] as const,

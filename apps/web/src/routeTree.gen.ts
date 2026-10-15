@@ -54,6 +54,7 @@ import { Route as AdminUsersIndexRouteImport } from './routes/admin/users/index'
 import { Route as CourierScanOrderIdRouteImport } from './routes/courier/scan/$orderId'
 import { Route as DashboardAddressesIndexRouteImport } from './routes/dashboard/addresses/index'
 import { Route as DashboardInfoIndexRouteImport } from './routes/dashboard/info/index'
+import { Route as DashboardNotificationsIndexRouteImport } from './routes/dashboard/notifications/index'
 import { Route as DashboardOrdersIndexRouteImport } from './routes/dashboard/orders/index'
 import { Route as DashboardOrdersOrderIdRouteImport } from './routes/dashboard/orders/$orderId'
 import { Route as DashboardWalletIndexRouteImport } from './routes/dashboard/wallet/index'
@@ -290,6 +291,12 @@ const DashboardInfoIndexRoute = DashboardInfoIndexRouteImport.update({
   path: '/info/',
   getParentRoute: () => DashboardRouteRoute,
 } as any)
+const DashboardNotificationsIndexRoute =
+  DashboardNotificationsIndexRouteImport.update({
+    id: '/notifications/',
+    path: '/notifications/',
+    getParentRoute: () => DashboardRouteRoute,
+  } as any)
 const DashboardOrdersIndexRoute = DashboardOrdersIndexRouteImport.update({
   id: '/orders/',
   path: '/orders/',
@@ -392,6 +399,7 @@ export interface FileRoutesByFullPath {
   '/admin/users/': typeof AdminUsersIndexRoute
   '/dashboard/addresses/': typeof DashboardAddressesIndexRoute
   '/dashboard/info/': typeof DashboardInfoIndexRoute
+  '/dashboard/notifications/': typeof DashboardNotificationsIndexRoute
   '/dashboard/orders/': typeof DashboardOrdersIndexRoute
   '/dashboard/wallet/': typeof DashboardWalletIndexRoute
   '/admin/articles/$articleId/edit': typeof AdminArticlesArticleIdEditRoute
@@ -440,6 +448,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersIndexRoute
   '/dashboard/addresses': typeof DashboardAddressesIndexRoute
   '/dashboard/info': typeof DashboardInfoIndexRoute
+  '/dashboard/notifications': typeof DashboardNotificationsIndexRoute
   '/dashboard/orders': typeof DashboardOrdersIndexRoute
   '/dashboard/wallet': typeof DashboardWalletIndexRoute
   '/admin/articles/$articleId/edit': typeof AdminArticlesArticleIdEditRoute
@@ -498,6 +507,7 @@ export interface FileRoutesById {
   '/admin/users/': typeof AdminUsersIndexRoute
   '/dashboard/addresses/': typeof DashboardAddressesIndexRoute
   '/dashboard/info/': typeof DashboardInfoIndexRoute
+  '/dashboard/notifications/': typeof DashboardNotificationsIndexRoute
   '/dashboard/orders/': typeof DashboardOrdersIndexRoute
   '/dashboard/wallet/': typeof DashboardWalletIndexRoute
   '/admin/articles/$articleId/edit': typeof AdminArticlesArticleIdEditRoute
@@ -557,6 +567,7 @@ export interface FileRouteTypes {
     | '/admin/users/'
     | '/dashboard/addresses/'
     | '/dashboard/info/'
+    | '/dashboard/notifications/'
     | '/dashboard/orders/'
     | '/dashboard/wallet/'
     | '/admin/articles/$articleId/edit'
@@ -605,6 +616,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/dashboard/addresses'
     | '/dashboard/info'
+    | '/dashboard/notifications'
     | '/dashboard/orders'
     | '/dashboard/wallet'
     | '/admin/articles/$articleId/edit'
@@ -662,6 +674,7 @@ export interface FileRouteTypes {
     | '/admin/users/'
     | '/dashboard/addresses/'
     | '/dashboard/info/'
+    | '/dashboard/notifications/'
     | '/dashboard/orders/'
     | '/dashboard/wallet/'
     | '/admin/articles/$articleId/edit'
@@ -1007,6 +1020,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardInfoIndexRouteImport
       parentRoute: typeof DashboardRouteRoute
     }
+    '/dashboard/notifications/': {
+      id: '/dashboard/notifications/'
+      path: '/notifications'
+      fullPath: '/dashboard/notifications/'
+      preLoaderRoute: typeof DashboardNotificationsIndexRouteImport
+      parentRoute: typeof DashboardRouteRoute
+    }
     '/dashboard/orders/': {
       id: '/dashboard/orders/'
       path: '/orders'
@@ -1209,6 +1229,7 @@ interface DashboardRouteRouteChildren {
   DashboardOrdersOrderIdRoute: typeof DashboardOrdersOrderIdRoute
   DashboardAddressesIndexRoute: typeof DashboardAddressesIndexRoute
   DashboardInfoIndexRoute: typeof DashboardInfoIndexRoute
+  DashboardNotificationsIndexRoute: typeof DashboardNotificationsIndexRoute
   DashboardOrdersIndexRoute: typeof DashboardOrdersIndexRoute
   DashboardWalletIndexRoute: typeof DashboardWalletIndexRoute
 }
@@ -1218,6 +1239,7 @@ const DashboardRouteRouteChildren: DashboardRouteRouteChildren = {
   DashboardOrdersOrderIdRoute: DashboardOrdersOrderIdRoute,
   DashboardAddressesIndexRoute: DashboardAddressesIndexRoute,
   DashboardInfoIndexRoute: DashboardInfoIndexRoute,
+  DashboardNotificationsIndexRoute: DashboardNotificationsIndexRoute,
   DashboardOrdersIndexRoute: DashboardOrdersIndexRoute,
   DashboardWalletIndexRoute: DashboardWalletIndexRoute,
 }

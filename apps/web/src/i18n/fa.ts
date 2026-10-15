@@ -328,6 +328,7 @@ export const fa = {
         'dash.nav.wallet': 'کیف پول',
         'dash.nav.addresses': 'آدرس‌های من',
         'dash.nav.info': 'اطلاعات کاربری',
+        'dash.nav.notifications': 'صندوق اعلان‌ها',
         'dash.logout': 'خروج از حساب',
 
         // ── ستون‌های مشترک جدول‌ها (رارد ۳۳) ──
@@ -549,6 +550,20 @@ export const fa = {
         'notify.pushEnabled': 'پوش این دستگاه فعال است',
         'notify.empty': 'فعلاً اطلاعیه‌ای ندارید',
         'notify.live': 'زنده',
+
+        // ── stage-67 — صندوق اعلان‌ها (پروفایل کاربر — تصمیم کارفرما «الف») ──
+        'notify.inbox.title': 'صندوق اعلان‌ها',
+        'notify.inbox.subtitle': 'آخرین اخبار تخفیفی و اطلاعیه‌های سایت، ۷ روز در دسترس شما',
+        'notify.inbox.intro':
+                'با فعال کردن نوتیفیکیشن‌ها، می‌توانید از آخرین اخبار تخفیفی سایت با خبر شوید؛ این اخبار در همین صفحه ذخیره می‌شوند و به مدت ۷ روز در دسترس شما می‌مانند.',
+        'notify.inbox.ttlNote':
+                'هر اعلان ۷ روز پس از ایجاد شدن، به‌طور خودکار از این صفحه حذف می‌شود (شمارش از لحظه‌ی ساخته‌شدن همان اعلان).',
+        'notify.inbox.daysLeft': '{n} روز مانده',
+        'notify.inbox.lessThanDay': 'کمتر از یک روز مانده',
+        'notify.type.coupon': 'کوپن تخفیف',
+        'notify.type.discount': 'تخفیف محصول',
+        'notify.type.broadcast': 'اطلاعیه عمومی',
+        'notify.type.system': 'پیام سیستم',
 
         // ── پنل ادمین: نوتیفیکیشن (فاز-۲) ──
         'admin.notify.title': 'ارسال نوتیفیکیشن',

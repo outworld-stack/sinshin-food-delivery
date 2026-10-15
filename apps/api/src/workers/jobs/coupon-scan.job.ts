@@ -1,4 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-67 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/coupon-scan.job.ts
+// ویرایش نقطه‌ای: گارد «پنجره‌ی ارسال گذشته» — این جاب catchUp=true است؛
+// بوتِ دیرهنگام (مثلاً ۱۵:۰۰ بعد از قطعِ شبانه) اسکن را جبران می‌کرد و
+// ردیف‌های امروز را می‌ساخت در حالی که جابِ ارسال (۱۱:۰۰، catchUp=false،
+// ددلاین ۱۳) دیگر هرگز امروز اجرا نمی‌شود ⇒ ردیف‌های مرده (تا ۹۰ روز
+// در جدول می‌ماندند). حالا اگر ساعتِ تهران از COUPON_NUDGE_TIME گذشته
+// باشد، اسکن امروز را رد می‌کند — اسکنِ فردا با همان نامزدها پر می‌شود.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-66 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/workers/jobs/coupon-scan.job.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -42,6 +52,24 @@ export class CouponScanJob implements DailyJob {
 
   async run(): Promise<void> {
     const { db } = this.deps
+
+    // stage-67 — گارد پنجره‌ی ارسال (کامنت سربرگ): اگر الان در تهران
+    // گذشته‌تر از ساعتِ ارسالِ یادآور (COUPON_NUDGE_TIME) است، ردیف‌های
+    // امروز دیگر فرستاده نمی‌شوند — اسکنِ «همین حالا» فقط ردیف مرده
+    // می‌سازد. مقایسه‌ی رشته‌ای HH:MM صفر-پَدشده ترتیب زمانی درست می‌دهد.
+    const nowHm = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tehran',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date())
+    if (nowHm >= this.deps.config.couponNudgeTime) {
+      console.log(
+        `[cron:coupon-scan] ${nowHm} Tehran is past nudge time (${this.deps.config.couponNudgeTime}) — ` +
+          'skipping today (rows would never be sent; tomorrow\'s scan covers them)',
+      )
+      return
+    }
 
     // stage-48 — فقط کوپن‌هایی که با سوییچِ فرم وارد فرآیند کرون شده‌اند
     // (cronEnabled=false ⇒ اسکن/یادآور برایش اجرا نمی‌شود — اعطای لحظه‌ی

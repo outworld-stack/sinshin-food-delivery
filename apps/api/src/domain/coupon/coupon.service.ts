@@ -1,4 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-67 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
+// ویرایش نقطه‌ای (ترمیم اسکن کوپن×نوتیف — بدون دست‌زدن به مسیر پول):
+//   • سقف ۲ یادآور در برابر ویرایش شرط‌ها مقاوم شد: FK جدول
+//     coupon_nudges (missing_condition_id) در اسکیما به SET NULL تغییر
+//     کرد (مایگریشن 0004) — قبلاً replaceConditions در update() با
+//     cascade همه‌ی nudgeها را می‌کشت و سقف ۲ صفر می‌شد. شمارشِ سقف
+//     در findNudgeCandidates مستقل از join است — ردیف‌های set-null
+//     در شمارش می‌مانند و قابل ارسال نیستند.
+//   • releaseNudgeClaim فقط ابزار عملیاتی ماند (جاب ارسال حالا
+//     «اول ارسال، بعد claim» است — کامنت جاب).
+//
 // stage-66 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
@@ -444,10 +456,11 @@ export class CouponService {
   }
 
   /**
-   * stage-66 (⑤) — آزادسازی claim یادآور: جابِ ارسال، ردیف را قبل از
-   * notifyUser تصرف می‌کند؛ اگر notifyUser شکست بخورد (id=null — درج
-   * صندوق/پوش هرگز throw نمی‌کند)، claim آزاد می‌شود تا اجرای مجدد/دستی
-   * همان روز دوباره تلاش کند. ردیف‌های آزادشده سهمِ سقف ۲ را نمی‌سوزانند.
+   * stage-66 (⑤) / stage-67 — آزادسازی claim یادآور (ابزار عملیاتی):
+   * جابِ ارسال حالا «اول ارسال، بعد claim» است (ترتیب در stage-67 عوض
+   * شد تا کرش بین claim و notify سهم نسوزاند)؛ شکستِ ارسال ردیف را
+   * pending نگه می‌دارد و نیازی به آزادسازی ندارد. این متد برای
+   * بازنشانی دستی/عملیاتی (مثلاً ردیفِ اشتباهاً claim شده) باقی است.
    */
   async releaseNudgeClaim(nudgeId: string): Promise<void> {
     if (!UUID_RE.test(nudgeId)) return
@@ -592,7 +605,10 @@ export class CouponService {
     }
   }
 
-  /** phase-5: ویرایش — کوپن + جایگزینی شرط‌ها (حذف+اینسرت؛ nudges با cascade می‌روند) */
+  /** phase-5: ویرایش — کوپن + جایگزینی شرط‌ها (حذف+اینسرت)
+   *  stage-67 — نudgeها دیگر با cascade کشته نمی‌شوند: FK به SET NULL
+   *  تغییر کرد (مایگریشن 0004) — سقف ۲ یادآورِ کاربران در برابر ویرایش
+   *  حفظ می‌شود؛ ردیف‌ها با missingConditionId=null زنده می‌مانند. */
   async update(
     id: string,
     input: {

@@ -323,6 +323,7 @@ export const ar: Dict = {
         'dash.nav.wallet': 'المحفظة',
         'dash.nav.addresses': 'عناويني',
         'dash.nav.info': 'معلومات الحساب',
+        'dash.nav.notifications': 'صندوق الإشعارات',
         'dash.logout': 'تسجيل الخروج',
 
         // ── أعمدة الجداول المشتركة (الجولة ٣٣) ──
@@ -540,6 +541,20 @@ export const ar: Dict = {
         'notify.pushEnabled': 'الإشعارات مفعّلة على هذا الجهاز',
         'notify.empty': 'لا إشعارات حاليًا',
         'notify.live': 'مباشر',
+
+        // ── stage-67 — صندوق الإشعارات (ملفّي المستخدم — قرار صاحب العمل «أ») ──
+        'notify.inbox.title': 'صندوق الإشعارات',
+        'notify.inbox.subtitle': 'آخر أخبار الخصومات وإشعارات الموقع، متاحة لمدة ٧ أيام',
+        'notify.inbox.intro':
+                'بتفعيل الإشعارات يمكنك معرفة آخر أخبار الخصومات في الموقع؛ تُحفظ هذه الأخبار في هذه الصفحة وتبقى في متناولك لمدة ٧ أيام.',
+        'notify.inbox.ttlNote':
+                'يُحذف كل إشعار تلقائيًا من هذه الصفحة بعد ٧ أيام من إنشائه (يبدأ العدّ لحظة إنشاء ذلك الإشعار).',
+        'notify.inbox.daysLeft': 'باقي {n} يوم',
+        'notify.inbox.lessThanDay': 'أقل من يوم متبقٍ',
+        'notify.type.coupon': 'قسيمة خصم',
+        'notify.type.discount': 'خصم منتج',
+        'notify.type.broadcast': 'إشعار عام',
+        'notify.type.system': 'رسالة النظام',
 
         // ── لوحة الإدارة: الإشعارات (فاز-۲) ──
         'admin.notify.title': 'إرسال إشعار',

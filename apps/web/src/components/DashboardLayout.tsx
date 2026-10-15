@@ -31,7 +31,7 @@ import type { NavItem } from '#/types/shared/navigation'
 import { useHydrated } from '#/hooks/useHydrated'
 import { useRealLogout } from '#/hooks/shared/useRealLogout'
 import { DashboardLayoutSkeleton } from '#/components/LoadingSkeletons'
-import { User, Cart, Wallet, Pin, Discover2, Logout4, Menu, Package, X } from 'reicon-react'
+import { User, Cart, Wallet, Pin, Discover2, Logout4, Menu, Package, X, Bell } from 'reicon-react'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
 // stage-49 — NotificationBell حذف شد (بازخورد ۳)
 import { useI18n } from '#/i18n'
@@ -72,6 +72,8 @@ export function DashboardLayout() {
     { to: '/dashboard/wallet', label: t['dash.nav.wallet'], icon: <Wallet size={20} /> },
     { to: '/dashboard/addresses', label: t['dash.nav.addresses'], icon: <Pin size={20} /> },
     { to: '/dashboard/info', label: t['dash.nav.info'], icon: <Discover2 size={20} /> },
+    // stage-67 — صندوق اعلان‌ها (TTL هفت‌روزه — تصمیم کارفرما «الف»)
+    { to: '/dashboard/notifications', label: t['dash.nav.notifications'], icon: <Bell size={20} /> },
   ]
 
   return (

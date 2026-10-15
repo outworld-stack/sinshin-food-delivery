@@ -4,6 +4,13 @@
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱)
 // ═══════════════════════════════════════════════════════════════
 
+// ═══ stage-67 — ویرایش نقطه‌ای: نرمال‌سازی زمان‌های کرون کوپن ═══
+// قبلاً مقدار خراب (مثل COUPON_NUDGE_TIME=14:00 یا «99» خام) بی‌صدا
+// می‌گذشت و جاب یادآور «هرگز» ارسال نمی‌کرد (ددلاین ۱۳:۰۰ تهران در
+// خود جاب است). حالا: قالب HH:MM چک می‌شود؛ یادآورِ ≥ ۱۳:۰۰ با
+// هشدارِ پرصدای بوت به ۱۱:۰۰ برمی‌گردد؛ اسکنِ دیرتر از یادآور با
+// هشدار به ۰۲:۰۰ برمی‌گردد (ساعتِ ارسالِ امروز گذشته — ردیف مرده نساز).
+
 // src/infra/config/env.ts
 import { normalizePhone } from '#/domain/shared/phone'
 
@@ -345,8 +352,38 @@ export class AppConfig {
       dockerSocket: str('DOCKER_SOCKET', '/var/run/docker.sock'),
     }
 
-    this.couponScanTime = str('COUPON_SCAN_TIME', '02:00')
-    this.couponNudgeTime = str('COUPON_NUDGE_TIME', '11:00')
+    // stage-67 — نرمال‌سازی زمان‌های کرون کوپن (کامنت سربرگ):
+    //  • قالب HH:MM نبود → پیش‌فرض + هشدار
+    //  • یادآور ≥ ۱۳:۰۰ → ۱۱:۰۰ + هشدار (ددلاین ۱۳ در جاب یادآور است؛
+    //    مقدار بزرگ‌تر یعنی «هرگز ارسال نشو» — قبلاً بی‌صدا بود)
+    //  • اسکن ≥ یادآور → ۰۲:۰۰ + هشدار (نامزدهای امروز دیرتر از ارسال
+    //    ساخته می‌شدند و هیچ‌وقت فرستاده نمی‌شدند — ردیف مرده)
+    this.couponScanTime = normalizeDailyTime(
+      str('COUPON_SCAN_TIME', '02:00'),
+      '02:00',
+      'COUPON_SCAN_TIME',
+    )
+    let nudgeTime = normalizeDailyTime(
+      str('COUPON_NUDGE_TIME', '11:00'),
+      '11:00',
+      'COUPON_NUDGE_TIME',
+    )
+    const nudgeHour = Number.parseInt(nudgeTime.slice(0, 2), 10)
+    if (nudgeHour >= 13) {
+      console.warn(
+        `[env] COUPON_NUDGE_TIME="${nudgeTime}" بعد از ددلاین ۱۳:۰۰ تهران است — ` +
+          `یادآور هرگز ارسال نمی‌شد؛ به "11:00" برگشت (stage-67).`,
+      )
+      nudgeTime = '11:00'
+    }
+    if (this.couponScanTime >= nudgeTime) {
+      console.warn(
+        `[env] COUPON_SCAN_TIME="${this.couponScanTime}" بعد از COUPON_NUDGE_TIME="${nudgeTime}" است — ` +
+          `نامزدهای امروز بعد از ارسال ساخته می‌شدند و فرستاده نمی‌شدند؛ اسکن به "02:00" برگشت (stage-67).`,
+      )
+      this.couponScanTime = '02:00'
+    }
+    this.couponNudgeTime = nudgeTime
 
     this.geoBypassIps = str('GEO_BYPASS_IPS')
       .split(',')
@@ -480,4 +517,18 @@ export class AppConfig {
   isSuperAdmin(phone: string): boolean {
     return this.superAdminPhones.includes(phone)
   }
+}
+// ── stage-67 — هلپر نرمال‌سازی «HH:MM» برای زمان‌های کرون روزانه ──
+// قالب درست → همان مقدار؛ خراب/خالی → پیش‌فرض با هشدار پرصدا (بوت).
+// مقایسه‌ی رشته‌ای HH:MM صفر-پَد شده ترتیب زمانی درست می‌دهد.
+const DAILY_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/
+
+function normalizeDailyTime(raw: string, fallback: string, envKey: string): string {
+  const v = raw.trim()
+  if (DAILY_TIME_RE.test(v)) return v
+  console.warn(
+    `[env] ${envKey}="${raw}" قالب HH:MM ندارد (مثال درست: "11:00") — ` +
+      `پیش‌فرض "${fallback}" استفاده می‌شود (stage-67).`,
+  )
+  return fallback
 }

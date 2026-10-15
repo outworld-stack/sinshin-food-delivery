@@ -74,7 +74,8 @@ import {
 } from '#/server/products'
 import { getSystemMetrics } from '#/server/system'
 import { getTerms } from '#/server/terms'
-import {getAdminReviews, getApprovedProductReviews, getLiveTracking,getMyOrders,getOrderDetails, 
+import {getAdminReviews, getApprovedProductReviews, getLiveTracking,getMyNotifications,
+  getMyOrders,getOrderDetails, 
   getOrderReviewedProducts, 
   getUserProfile, 
 } from '#/server/user'
@@ -148,6 +149,15 @@ export const myOrdersOptions = (page: number, limit: number, sort: string) =>
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   })
+
+// stage-67 — صندوق اعلان‌های من (صفحه‌ی پروفایل): staleTime کوتاه —
+// اعلان‌ها «زنده»اند (SSE notify:{userId} در هوک صفحه invalidate می‌کند)؛
+// این staleTime فقط برای بازگشت‌های بدون رویداد است.
+export const myNotificationsOptions = queryOptions({
+  queryKey: qk.myNotifications,
+  queryFn: () => getMyNotifications(),
+  staleTime: 30_000,
+})
 
 // کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).
 // همان DTO ولی بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها.

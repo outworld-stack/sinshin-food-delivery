@@ -158,12 +158,14 @@ export class RetentionJob implements DailyJob {
       }
     }
 
-    // فاز-۲ — صندوق نوتیفیکیشن: خوانده‌شده‌های ۹۰ روز + اشتراک پوش مرده‌ی ۳۰ روز.
-    // fail-soft — خطا را خودش لاگ می‌کند و بقیه‌ی پاک‌سازی را نمی‌اندازد.
+    // فاز-۲ — صندوق نوتیفیکیشن: stage-67 — TTL هفت‌روزه از createdAt هر
+    // ردیف (تصمیم کارفرما «الف»؛ خوانده‌شده/نشده فرقی ندارد) + اشتراک پوش
+    // مرده‌ی ۳۰ روز. fail-soft — خطا را خودش لاگ می‌کند و بقیه‌ی پاک‌سازی
+    // را نمی‌اندازد.
     const pruned = await this.deps.notifications.prune()
     if (pruned.notifications > 0 || pruned.subscriptions > 0) {
       console.log(
-        `[retention] notifications: ${pruned.notifications} read-old deleted, ` +
+        `[retention] notifications: ${pruned.notifications} expired (7d) deleted, ` +
         `${pruned.subscriptions} dead push subscriptions deleted`,
       )
     }

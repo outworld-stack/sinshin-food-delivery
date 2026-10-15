@@ -29,6 +29,13 @@
       "when": 1792023655473,
       "tag": "0003_faulty_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792061298269,
+      "tag": "0004_perpetual_shaman",
+      "breakpoints": true
     }
   ]
 }

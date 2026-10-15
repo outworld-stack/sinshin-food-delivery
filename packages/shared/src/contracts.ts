@@ -896,6 +896,33 @@ export interface NotificationHistoryData {
   total: number
 }
 
+// ═══════════ stage-67 — صندوق اعلان‌های کاربر (پروفایل) ═══════════
+
+/**
+ * یک اعلانِ صندوق درون‌بری کاربر — GET /notifications.
+ * stage-67: TTL هفت‌روزه — هر اعلان ۷ روز از لحظه‌ی ایجاد (createdAt)
+ * در «صندوق اعلان‌ها» باقی می‌ماند و بعدش خودکار حذف می‌شود
+ * (تصمیم کارفرما «الف»)؛ سرور فقط ردیف‌های همان بازه را برمی‌گرداند.
+ */
+export interface NotificationInboxItemDto {
+  id: string
+  /** coupon | coupon_nudge | broadcast | system | product_discount */
+  type: string
+  title: string
+  body: string
+  /** مقصد کلیک — مسیر داخلی سایت (مثلاً /products) */
+  url: string | null
+  data: Record<string, unknown>
+  createdAt: Date
+  readAt: Date | null
+}
+
+/** پاسخ GET /notifications — ۳۰ اعلانِ آخرِ ۷ روز اخیر + بج خوانده‌نشده */
+export interface NotificationInboxData {
+  items: NotificationInboxItemDto[]
+  unread: number
+}
+
 export interface CourierOptionDto {
   id: CourierId
   name: string
