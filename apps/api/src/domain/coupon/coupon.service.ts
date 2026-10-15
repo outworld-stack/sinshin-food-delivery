@@ -1,4 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-69 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
+// ویرایش نقطه‌ای (اسکن post-s67 — F3): findNudgeCandidates فقط
+// role='user' — یادآور کوپن ابزار جذب مشتری است؛ ادمین/ادمین₂
+// نباید «N سفارش تا کوپن» بگیرند (هم‌راستا با broadcast که از اول
+// eq(users.role,'user') داشت). اعطای لحظه‌ی تسویه (grantIfEligible)
+// و بقیه‌ی سرویس عیناً دست‌نخورده.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-67 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
 // ویرایش نقطه‌ای (ترمیم اسکن کوپن×نوتیف — بدون دست‌زدن به مسیر پول):
@@ -402,6 +411,7 @@ export class CouponService {
         sql`${built.allButOne}
            and not ${built.allSatisfied}
            and u.banned_at is null
+           and u.role = 'user'
            and not exists (
              select 1 from coupon_grants g
              where g.coupon_id = ${couponId}::uuid and g.user_id = u.id

@@ -1,3 +1,11 @@
+// ═══════════════════════════════════════════════════════════════
+// stage-69 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/utils/format.ts
+// ویرایش نقطه‌ای: افزودن faYear (رقم فارسی بدون جداکننده‌ی هزارگان)
+// — رفع باگ فوتر «© ۲٬۰۲۶»: faNum برای سال جداکننده می‌گذاشت.
+// بقیه‌ی فایل (faNum/قیمت/تاریخ/زمان نسبی/مدت) عیناً دست‌نخورده.
+// ═══════════════════════════════════════════════════════════════
+
 export const formatPrice = (price: number) => {
   return price.toLocaleString('fa-IR');
 };
@@ -43,6 +51,12 @@ export const formatReferralId = (date: Date | string, phone: string) => {
 };
 
 export const faNum = (n: number): string => n.toLocaleString('fa-IR')
+
+// stage-69 — سال/اعدادِ «بدون جداکننده‌ی هزارگان»: faNum برای مبالغ
+// جداکننده می‌گذارد (۵۰٬۰۰۰) که برای سال غلط است — فوتر «© ۲٬۰۲۶»
+// می‌شد (باگ گزارش‌شده‌ی کارفرما). سال ارقام فارسی بدون جداکننده می‌خواهد.
+export const faYear = (n: number): string =>
+  n.toLocaleString('fa-IR', { useGrouping: false })
 
 // ── round-18 — مانیتورینگ سیستم (داشبورد ادمین) ──
 

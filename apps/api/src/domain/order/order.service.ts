@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-69 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/order/order.service.ts
+// ویرایش نقطه‌ای (اسکن post-s67 — F4): ارقام متن اعلانِ «کوپن گرفتی»
+// فارسی شد — «٪۱۵» و «۲ کوپن» به‌جای ارقام لاتین (هم‌راستا با
+// یادآور کوپن و قرارداد faNum). منطق settle/grant و مسیر پول
+// عیناً دست‌نخورده.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-56 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/order/order.service.ts
 // تغییر: myOrdersPage — صفحه‌بندی سروریِ «سفارشات من» (page/limit/sort +
@@ -28,6 +36,9 @@
 
 //src/domain/order/order.service.ts
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+
+// stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
+import { faNum } from "#/domain/report/format";
 
 import type { Db, DbOrTx } from "#/infra/db/client";
 import {
@@ -543,10 +554,10 @@ export class OrderService {
                         const best = granted[0];
                         const title =
                                 granted.length > 1
-                                        ? `🎁 ${granted.length} کوپن تخفیف جدید گرفتی!`
+                                        ? `🎁 ${faNum(granted.length)} کوپن تخفیف جدید گرفتی!`
                                         : '🎁 یک کوپن تخفیف جدید گرفتی!';
                         const body = best
-                                ? `«${best.title ?? best.code}» با ٪${best.discountPercentage} تخفیف به حساب تو اضافه شد — سفارش بعدی‌ات ارزان‌تر می‌شود.`
+                                ? `«${best.title ?? best.code}» با ٪${faNum(best.discountPercentage)} تخفیف به حساب تو اضافه شد — سفارش بعدی‌ات ارزان‌تر می‌شود.`
                                 : `کوپن تخفیف جدید به حساب شما اضافه شد.`;
                         await this.deps.notifications.notifyUser(userId, {
                                 type: 'coupon',

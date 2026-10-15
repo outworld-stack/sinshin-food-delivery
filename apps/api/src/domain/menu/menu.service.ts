@@ -1,4 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-69 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
+// ویرایش نقطه‌ای (اسکن post-s67 — F4): رقم درصدِ پخش تخفیف محصول
+// در متن اعلان فارسی شد — «٪۱۵» به‌جای «15» (هم‌راستا با یادآور
+// کوپن/گرنت و قرارداد faNum). شرطِ material-change و بقیه‌ی منطق
+// عیناً دست‌نخورده.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-56 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/menu/menu.service.ts
 // تغییر:
@@ -66,6 +74,8 @@ import {
 import { nullIfEmpty, pickAr, pickArArr, type Lang } from '#/domain/shared/lang'
 import { isUniqueViolation, likePattern } from '#/domain/shared/pg'
 import { UUID_RE } from '#/domain/shared/ids'
+// stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
+import { faNum } from '#/domain/report/format'
 import type { Product } from '@sinshin/shared'
 
 const CACHE_TTL_SECONDS = 30
@@ -1635,7 +1645,7 @@ export class MenuService {
       await svc.broadcast({
         type: 'product_discount',
         title: '🎉 تخفیف ویژه در سین‌شین!',
-        body: `«${after.name}» الان با ${pctAfter}٪ تخفیف در دسترس است — همین حالا سفارش بده.`,
+        body: `«${after.name}» الان با ${faNum(pctAfter)}٪ تخفیف در دسترس است — همین حالا سفارش بده.`,
         url: `/products/${after.id}`,
         data: { productId: after.id, discount: pctAfter },
       })

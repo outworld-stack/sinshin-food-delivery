@@ -1,4 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-69 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-notification.job.ts
+// ویرایش نقطه‌ای (اسکن post-s67 — F3 + F4):
+//   F3 — re-check لحظه‌ی ارسال: فقط users.role = «user» (ادمین/ادمین₂
+//        یادآور نمی‌گیرند — همان قرارداد broadcast؛ ردیف‌های legacyِ
+//        ساخته‌شده پیش از فیلترِ اسکن هم همین‌جا متوقف می‌شوند)
+//   F4 — ارقام متن اعلان یکدست فارسی: «٪۱۵» به‌جای «٪15»
+//        (gapLabel از همان faNum قرارداد domain/report/format)
+// ترتیب «اول ارسال بعد claim»، ستون sms_sent_at، re-checkهای
+// stage-66/67 و بقیه‌ی منطق عیناً دست‌نخورده.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-68 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-notification.job.ts
 // وضعیت: فقط rename فایل (خواسته‌ی صریح کارفرما) —
@@ -50,13 +62,16 @@ import type { AppConfig } from '#/infra/config/env'
 import type { NotificationService } from '#/domain/notification/notification.service'
 import type { CouponService } from '#/domain/coupon/coupon.service'
 import { couponConditions, couponGrants, couponNudges, users, coupons } from '#/infra/db/schema'
+// stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
+import { faNum } from '#/domain/report/format'
 import type { DailyJob } from '#/workers/scheduler'
 
 const DEADLINE_HOUR = 13 // تهران — بعد از ناهار یادآور بی‌معنی است
 
 /** سیاست ۲ — فاصله‌ی واقعی به «واحد خودِ شرط» — اعداد فارسی */
 function gapLabel(type: string, remaining: number): string {
-  const n = Number(remaining).toLocaleString('fa-IR')
+  // stage-69 (F4) — همان خروجی قبلی، حالا از قرارداد واحد faNum
+  const n = faNum(remaining)
   switch (type) {
     case 'MIN_TOTAL_SPEND':
       return `${n} تومان خرید`
@@ -166,6 +181,10 @@ export class CouponNudgeJob implements DailyJob {
           sql`(${coupons.maxUses} = 0 or ${coupons.usedCount} < ${coupons.maxUses})`,
           // stage-67 (M3) — کاربر بن‌شده: یادآورِ بن‌شده نخرید
           isNull(users.bannedAt),
+          // stage-69 (F3) — فقط مشتری: ادمین/ادمین₂ یادآور جذب مشتری
+          // نمی‌گیرند (همان قرارداد broadcast؛ ردیف‌های legacyِ پیش از
+          // فیلترِ اسکن هم همین‌جا متوقف می‌شوند)
+          eq(users.role, 'user'),
           // stage-67 (M3) — گرنتِ تازه: کاربر دیگر کوپن را دارد
           notExists(
             db
@@ -200,7 +219,7 @@ export class CouponNudgeJob implements DailyJob {
         title: `🎁 ${gap} تا کوپن تخفیف!`,
         body:
           `تا کوپن «${title}» ` +
-          `(٪${row.discountPercentage} تخفیف) فاصله دارید — سفارش بعدی‌تان را ثبت کنید.`,
+          `(٪${faNum(row.discountPercentage)} تخفیف) فاصله دارید — سفارش بعدی‌تان را ثبت کنید.`,
         url: '/products',
         data: {
           couponCode: row.couponCode,

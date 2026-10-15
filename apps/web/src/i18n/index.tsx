@@ -8,6 +8,9 @@
 // src/i18n/index.tsx
 // رارد ۳۱ — زیرساخت دوزبانه fa/ar (تصمیم‌های ۱ تا ۵ کاربر).
 //
+// stage-69 — Fmt.year جدید (fa: faYear / ar: arYear — ارقام بدون جداکننده‌ی
+// هزارگان؛ رفع باگ فوتر «© ۲٬۰۲۶»). بقیه‌ی فرمترها عیناً همان قبل.
+//
 // معماری «کوکی‌محور» (بدون تغییر URL):
 //   • کوکی sinshin-lang منبع حقیقت است — سرور آن را در beforeLoad ریشه می‌خواند
 //     (SSR از همان بایت اول عربی رندر می‌کند؛ بدون فلش) و کلاینت هنگام
@@ -25,22 +28,23 @@ import type { Lang } from '@sinshin/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import {
-	createContext,
-	type ReactNode,
-	useCallback,
-	useContext,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
+        createContext,
+        type ReactNode,
+        useCallback,
+        useContext,
+        useEffect,
+        useMemo,
+        useRef,
+        useState,
 } from 'react'
 import {
-	faNum,
-	formatDate,
-	formatDuration,
-	formatPrice,
-	formatRelative,
-	formatTime,
+        faNum,
+        faYear,
+        formatDate,
+        formatDuration,
+        formatPrice,
+        formatRelative,
+        formatTime,
 } from '#/utils/format'
 import { langSensitiveKeys } from '#/utils/queryKeys'
 import { arApiErrorMessage } from './apiErrors'
@@ -57,7 +61,7 @@ export const DICTS: Record<Lang, Dict> = { fa, ar }
 
 /** جایگزینی {n} در الگوی دیکشنری — «ارسال مجدد کد تا {n} ثانیه دیگر» */
 export function tpl(template: string, vars: { n: string | number }): string {
-	return template.replace('{n}', String(vars.n))
+        return template.replace('{n}', String(vars.n))
 }
 
 // ── کوکی ──
@@ -67,128 +71,135 @@ export const LANG_COOKIE_RE = /(?:^|;\s*)sinshin-lang=(fa|ar)(?:;|$)/
 
 /** رارد ۳۸ — زبان از پارامتر ?lang= یک URL (fa|ar؛ هر چیز دیگر = null) */
 export function langFromUrl(url: string | null | undefined): Lang | null {
-	if (!url) return null
-	try {
-		const q = new URL(url).searchParams.get('lang')
-		return q === 'fa' || q === 'ar' ? q : null
-	} catch {
-		return null
-	}
+        if (!url) return null
+        try {
+                const q = new URL(url).searchParams.get('lang')
+                return q === 'fa' || q === 'ar' ? q : null
+        } catch {
+                return null
+        }
 }
 
 export function readLangCookie(): Lang | null {
-	if (typeof document === 'undefined') return null
-	const m = LANG_COOKIE_RE.exec(document.cookie)
-	return m ? (m[1] as Lang) : null
+        if (typeof document === 'undefined') return null
+        const m = LANG_COOKIE_RE.exec(document.cookie)
+        return m ? (m[1] as Lang) : null
 }
 
 /** رارد ۳۸ — عمومی شد: root beforeLoad (سمت سرورِ ?lang=) هم کوکی می‌نویسد */
 export function writeLangCookie(lang: Lang): void {
-	// biome-ignore lint/suspicious/noDocumentCookie: همان الگوی themeStore موجود — Cookie Store API هنوز در همه‌ی مرورگرهای هدف نیست
-	document.cookie = `${LANG_COOKIE}=${lang}; path=/; max-age=31536000; samesite=lax`
+        // biome-ignore lint/suspicious/noDocumentCookie: همان الگوی themeStore موجود — Cookie Store API هنوز در همه‌ی مرورگرهای هدف نیست
+        document.cookie = `${LANG_COOKIE}=${lang}; path=/; max-age=31536000; samesite=lax`
 }
 
 // ── خطای API چندزبانه (رارد ۳۳) ──
 
 /** متن خطا از هر شکلی که پرتاب می‌شود — Error، رشته، یا { message } */
 function errTextOf(err: unknown, fallback: string): string {
-	if (typeof err === 'string' && err) return err
-	const m = (err as { message?: unknown } | null | undefined)?.message
-	if (typeof m === 'string' && m) return m
-	return fallback
+        if (typeof err === 'string' && err) return err
+        const m = (err as { message?: unknown } | null | undefined)?.message
+        if (typeof m === 'string' && m) return m
+        return fallback
 }
 
 function errCodeOf(err: unknown): string | undefined {
-	const c = (err as { code?: unknown } | null | undefined)?.code
-	return typeof c === 'string' ? c : undefined
+        const c = (err as { code?: unknown } | null | undefined)?.code
+        return typeof c === 'string' ? c : undefined
 }
 
 // ── فرمترهای چندزبانه ──
 
 export interface Fmt {
-	price: (n: number) => string
-	num: (n: number) => string
-	date: (d: Date | string) => string
-	time: (d: Date | string) => string
-	duration: (ms: number) => string
-	relative: (d: Date | string) => string
+        price: (n: number) => string
+        num: (n: number) => string
+        /** stage-69 — سال: رقم بومی بدون جداکننده‌ی هزارگان (رفع باگ فوتر © ۲٬۰۲۶) */
+        year: (n: number) => string
+        date: (d: Date | string) => string
+        time: (d: Date | string) => string
+        duration: (ms: number) => string
+        relative: (d: Date | string) => string
 }
 
 const arNum = (n: number): string => n.toLocaleString('ar-EG')
 
+// stage-69 — سال عربی بدون جداکننده (arNum برای 2026 «٢٬٠٢٦» می‌داد)
+const arYear = (n: number): string => n.toLocaleString('ar-EG', { useGrouping: false })
+
 const arDate = (d: Date | string): string => {
-	const dd = d instanceof Date ? d : new Date(d)
-	return Number.isNaN(dd.getTime())
-		? '—'
-		: dd.toLocaleDateString('ar-EG', {
-				year: 'numeric',
-				month: 'long',
-				day: 'numeric',
-			})
+        const dd = d instanceof Date ? d : new Date(d)
+        return Number.isNaN(dd.getTime())
+                ? '—'
+                : dd.toLocaleDateString('ar-EG', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric',
+                        })
 }
 
 const arTime = (d: Date | string): string => {
-	const dd = d instanceof Date ? d : new Date(d)
-	return Number.isNaN(dd.getTime())
-		? '—'
-		: dd.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+        const dd = d instanceof Date ? d : new Date(d)
+        return Number.isNaN(dd.getTime())
+                ? '—'
+                : dd.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
 }
 
 const arDuration = (ms: number): string => {
-	if (ms < 1000) return `${arNum(Math.round(ms))} م.ث`
-	const seconds = ms / 1000
-	if (seconds < 10) return `${arNum(Math.round(seconds * 10) / 10)} ثانية`
-	if (seconds < 60) return `${arNum(Math.round(seconds))} ثانية`
-	const minutes = seconds / 60
-	if (minutes < 60) return `${arNum(Math.round(minutes))} دقيقة`
-	const hours = minutes / 60
-	if (hours < 48) return `${arNum(Math.round(hours))} ساعة`
-	return `${arNum(Math.round(hours / 24))} يوم`
+        if (ms < 1000) return `${arNum(Math.round(ms))} م.ث`
+        const seconds = ms / 1000
+        if (seconds < 10) return `${arNum(Math.round(seconds * 10) / 10)} ثانية`
+        if (seconds < 60) return `${arNum(Math.round(seconds))} ثانية`
+        const minutes = seconds / 60
+        if (minutes < 60) return `${arNum(Math.round(minutes))} دقيقة`
+        const hours = minutes / 60
+        if (hours < 48) return `${arNum(Math.round(hours))} ساعة`
+        return `${arNum(Math.round(hours / 24))} يوم`
 }
 
 const arRelative = (d: Date | string): string => {
-	const dd = d instanceof Date ? d : new Date(d)
-	if (Number.isNaN(dd.getTime())) return '—'
-	const seconds = Math.round((Date.now() - dd.getTime()) / 1000)
-	if (seconds < 45) return 'الآن'
-	if (seconds < 3600)
-		return `قبل ${arNum(Math.max(1, Math.round(seconds / 60)))} دقيقة`
-	if (seconds < 86400) return `قبل ${arNum(Math.round(seconds / 3600))} ساعة`
-	return `قبل ${arNum(Math.round(seconds / 86400))} يوم`
+        const dd = d instanceof Date ? d : new Date(d)
+        if (Number.isNaN(dd.getTime())) return '—'
+        const seconds = Math.round((Date.now() - dd.getTime()) / 1000)
+        if (seconds < 45) return 'الآن'
+        if (seconds < 3600)
+                return `قبل ${arNum(Math.max(1, Math.round(seconds / 60)))} دقيقة`
+        if (seconds < 86400) return `قبل ${arNum(Math.round(seconds / 3600))} ساعة`
+        return `قبل ${arNum(Math.round(seconds / 86400))} يوم`
 }
 
 const faFmt: Fmt = {
-	price: formatPrice,
-	num: faNum,
-	date: formatDate,
-	time: formatTime,
-	duration: formatDuration,
-	relative: formatRelative,
+        price: formatPrice,
+        num: faNum,
+        year: faYear,
+        date: formatDate,
+        time: formatTime,
+        duration: formatDuration,
+        relative: formatRelative,
 }
 
 const arFmt: Fmt = {
-	price: arNum,
-	num: arNum,
-	date: arDate,
-	time: arTime,
-	duration: arDuration,
-	relative: arRelative,
+        price: arNum,
+        num: arNum,
+        year: arYear,
+        date: arDate,
+        time: arTime,
+        duration: arDuration,
+        relative: arRelative,
 }
 
 function makeFmt(lang: Lang): Fmt {
-	return lang === 'ar' ? arFmt : faFmt
+        return lang === 'ar' ? arFmt : faFmt
 }
 
 // ── فراهم‌کننده ──
 
 interface I18nValue {
-	lang: Lang
-	t: Dict
-	fmt: Fmt
-	setLang: (next: Lang) => void
-	/** رارد ۳۳ — پیام خطای API به زبان کاربر: عربی از نقشه‌ی apiErrors،
-	 *  فارسی همان پیام سرور (رفتار صفر-تغییر). مقدار پشتیبان وقتی err متنی ندارد. */
-	apiError: (err: unknown, fallback?: string) => string
+        lang: Lang
+        t: Dict
+        fmt: Fmt
+        setLang: (next: Lang) => void
+        /** رارد ۳۳ — پیام خطای API به زبان کاربر: عربی از نقشه‌ی apiErrors،
+         *  فارسی همان پیام سرور (رفتار صفر-تغییر). مقدار پشتیبان وقتی err متنی ندارد. */
+        apiError: (err: unknown, fallback?: string) => string
 }
 
 const I18nContext = createContext<I18nValue | null>(null)
@@ -200,13 +211,13 @@ const I18nContext = createContext<I18nValue | null>(null)
  * همان رفتار قبل از دوزبانه شدن؛ هیچ خطایی نمی‌دهد و هیچ چیزی عربی نمی‌شود.
  */
 const I18N_FALLBACK: I18nValue = {
-	lang: 'fa',
-	t: DICTS.fa,
-	fmt: faFmt,
-	setLang: () => {
-		/* خارج از سایت، تغییر زبان معنا ندارد — بی‌اثر */
-	},
-	apiError: (err, fallback) => errTextOf(err, fallback ?? 'خطا'),
+        lang: 'fa',
+        t: DICTS.fa,
+        fmt: faFmt,
+        setLang: () => {
+                /* خارج از سایت، تغییر زبان معنا ندارد — بی‌اثر */
+        },
+        apiError: (err, fallback) => errTextOf(err, fallback ?? 'خطا'),
 }
 
 /**
@@ -216,135 +227,135 @@ const I18N_FALLBACK: I18nValue = {
  * ناوبری سمت کلاینت به لندینگ/ورود همیشه کوکی تازه را می‌خواند.
  */
 export function I18nProvider({
-	initialLang = 'fa',
-	children,
+        initialLang = 'fa',
+        children,
 }: {
-	initialLang?: Lang
-	children: ReactNode
+        initialLang?: Lang
+        children: ReactNode
 }) {
-	const [lang, setLangState] = useState<Lang>(
-		() => readLangCookie() ?? initialLang,
-	)
+        const [lang, setLangState] = useState<Lang>(
+                () => readLangCookie() ?? initialLang,
+        )
 
-	// رارد ۳۹ — ابزارهای فوری‌سازی تعویض زبانِ داده‌های محتوایی:
-	// کوئری‌کلاینت برای لغو/نامعتبرسازی کلیدهای حساس به زبان، و روتر
-	// برای اجرای دوباره‌ی لودرها (صفحات جزئیات که با loaderData رندر
-	// می‌شوند) + beforeLoad ریشه (context.lang → عنوان/متا/توکن‌های سند).
-	// Provider فقط داخل درخت روتر می‌نشیند، پس هر دو همیشه در دسترس‌اند.
-	const queryClient = useQueryClient()
-	const router = useRouter()
+        // رارد ۳۹ — ابزارهای فوری‌سازی تعویض زبانِ داده‌های محتوایی:
+        // کوئری‌کلاینت برای لغو/نامعتبرسازی کلیدهای حساس به زبان، و روتر
+        // برای اجرای دوباره‌ی لودرها (صفحات جزئیات که با loaderData رندر
+        // می‌شوند) + beforeLoad ریشه (context.lang → عنوان/متا/توکن‌های سند).
+        // Provider فقط داخل درخت روتر می‌نشیند، پس هر دو همیشه در دسترس‌اند.
+        const queryClient = useQueryClient()
+        const router = useRouter()
 
-	// stage-63 — تایمرِ رقصِ محو برای تعویض زبان (پاک‌سازی در جداشدن Provider)
-	const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-	useEffect(
-		() => () => {
-			if (fadeTimer.current) clearTimeout(fadeTimer.current)
-			document.documentElement.classList.remove('lang-switching')
-		},
-		[],
-	)
+        // stage-63 — تایمرِ رقصِ محو برای تعویض زبان (پاک‌سازی در جداشدن Provider)
+        const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+        useEffect(
+                () => () => {
+                        if (fadeTimer.current) clearTimeout(fadeTimer.current)
+                        document.documentElement.classList.remove('lang-switching')
+                },
+                [],
+        )
 
-	const setLang = useCallback(
-		(next: Lang) => {
-			// کلیک روی زبانِ فعال — بی‌اثر؛ قبلاً کوکی/وضعیت همان مقدار بازنویسی
-			// می‌شد که حالا با نامعتبرسازیِ پرهزینه هم بود.
-			if (next === lang) return
+        const setLang = useCallback(
+                (next: Lang) => {
+                        // کلیک روی زبانِ فعال — بی‌اثر؛ قبلاً کوکی/وضعیت همان مقدار بازنویسی
+                        // می‌شد که حالا با نامعتبرسازیِ پرهزینه هم بود.
+                        if (next === lang) return
 
-			// stage-63 — تعویضِ تمام‌صفحه (رشته‌های UI + داده‌های سروری + لودرها)
-			// از «فلشِ یک-فریمی» به محوِ سریع تبدیل شد (خواسته‌ی کارفرما):
-			//   ① کلاس lang-switching روی <html> ⇒ محوی ۱۳۰ms
-			//   ② «در تاریکی»: کوکی + state + کوئری‌ها + لودرها تعویض می‌شوند
-			//   ③ دو rAF بعد از کامیتِ ری‌اکت (حداقل یک فریم رندر با محتوای
-			//      تازه در تاریکی) ⇒ کلاس برداشته می‌شود و نور ۱۶۰ms برمی‌گردد
-			// کل چرخه ≈ ۳۰۰ms — سریع و بدون فلش. prefers-reduced-motion یا
-			// نبودِ DOM ⇒ همان تعویضِ آنیِ قبل.
-			const swap = () => {
-				writeLangCookie(next)
-				setLangState(next)
-				// اتریبیوت زبان سند — پنل ادمین/پیک هرگز Provider ندارد و همیشه fa می‌ماند
-				try {
-					document.documentElement.lang = next
-				} catch {
-					/* هیچ‌کاری نمی‌کند */
-				}
-				// رارد ۳۹ — ریشه‌ی باگ «تأخیر ترجمه» همین‌جا بسته شد: رشته‌های UI
-				// از دیکشنری کلاینت همان لحظه عوض می‌شدند، اما داده‌ی محتوایی
-				// (اسم غذاها، توضیحات، منوها، محتویات، مقاله‌ها، گالری، درباره،
-				// قوانین، سبد…) در کشِ React Query با کلیدِ بدونِ زبان می‌ماند و
-				// فقط بعد از staleTime + رفرش/رفکوس دوباره فچ می‌شد → «با تأخیر
-				// زیاد عربی/فارسی می‌شد». ترتیب مهم است — کوکی از قبل نوشته شده،
-				// پس فچ‌های زیر هدر x-sinshin-lang تازه می‌فرستند (langHeaders از
-				// همان کوکی می‌خواند):
-				//   ① لغو — فچِ در-پروازِ زبانِ قبل، نتیجه‌ی قدیمی ننویسد
-				//   ② نامعتبرسازی — کوئری‌های فعال همان لحظه ریفچ؛ غیرفعال‌ها کهنه
-				//      می‌شوند و در مونت/ناوبری بعدی تازه می‌آیند
-				//   ③ router.invalidate — لودرهای روت‌های فعال (جزئیات محصول/مقاله)
-				//      و beforeLoad ریشه دوباره اجرا می‌شوند (کوکی تازه را می‌خوانند)
-				try {
-					for (const key of langSensitiveKeys) {
-						queryClient.cancelQueries({ queryKey: key })
-					}
-					for (const key of langSensitiveKeys) {
-						queryClient.invalidateQueries({ queryKey: key })
-					}
-					router.invalidate()
-				} catch {
-					/* هیچ‌کاری نمی‌کند — تعویض زبان هرگز نباید خطا بدهد */
-				}
-			}
+                        // stage-63 — تعویضِ تمام‌صفحه (رشته‌های UI + داده‌های سروری + لودرها)
+                        // از «فلشِ یک-فریمی» به محوِ سریع تبدیل شد (خواسته‌ی کارفرما):
+                        //   ① کلاس lang-switching روی <html> ⇒ محوی ۱۳۰ms
+                        //   ② «در تاریکی»: کوکی + state + کوئری‌ها + لودرها تعویض می‌شوند
+                        //   ③ دو rAF بعد از کامیتِ ری‌اکت (حداقل یک فریم رندر با محتوای
+                        //      تازه در تاریکی) ⇒ کلاس برداشته می‌شود و نور ۱۶۰ms برمی‌گردد
+                        // کل چرخه ≈ ۳۰۰ms — سریع و بدون فلش. prefers-reduced-motion یا
+                        // نبودِ DOM ⇒ همان تعویضِ آنیِ قبل.
+                        const swap = () => {
+                                writeLangCookie(next)
+                                setLangState(next)
+                                // اتریبیوت زبان سند — پنل ادمین/پیک هرگز Provider ندارد و همیشه fa می‌ماند
+                                try {
+                                        document.documentElement.lang = next
+                                } catch {
+                                        /* هیچ‌کاری نمی‌کند */
+                                }
+                                // رارد ۳۹ — ریشه‌ی باگ «تأخیر ترجمه» همین‌جا بسته شد: رشته‌های UI
+                                // از دیکشنری کلاینت همان لحظه عوض می‌شدند، اما داده‌ی محتوایی
+                                // (اسم غذاها، توضیحات، منوها، محتویات، مقاله‌ها، گالری، درباره،
+                                // قوانین، سبد…) در کشِ React Query با کلیدِ بدونِ زبان می‌ماند و
+                                // فقط بعد از staleTime + رفرش/رفکوس دوباره فچ می‌شد → «با تأخیر
+                                // زیاد عربی/فارسی می‌شد». ترتیب مهم است — کوکی از قبل نوشته شده،
+                                // پس فچ‌های زیر هدر x-sinshin-lang تازه می‌فرستند (langHeaders از
+                                // همان کوکی می‌خواند):
+                                //   ① لغو — فچِ در-پروازِ زبانِ قبل، نتیجه‌ی قدیمی ننویسد
+                                //   ② نامعتبرسازی — کوئری‌های فعال همان لحظه ریفچ؛ غیرفعال‌ها کهنه
+                                //      می‌شوند و در مونت/ناوبری بعدی تازه می‌آیند
+                                //   ③ router.invalidate — لودرهای روت‌های فعال (جزئیات محصول/مقاله)
+                                //      و beforeLoad ریشه دوباره اجرا می‌شوند (کوکی تازه را می‌خوانند)
+                                try {
+                                        for (const key of langSensitiveKeys) {
+                                                queryClient.cancelQueries({ queryKey: key })
+                                        }
+                                        for (const key of langSensitiveKeys) {
+                                                queryClient.invalidateQueries({ queryKey: key })
+                                        }
+                                        router.invalidate()
+                                } catch {
+                                        /* هیچ‌کاری نمی‌کند — تعویض زبان هرگز نباید خطا بدهد */
+                                }
+                        }
 
-			const reducedMotion =
-				typeof window !== 'undefined' &&
-				typeof window.matchMedia === 'function' &&
-				window.matchMedia('(prefers-reduced-motion: reduce)').matches
-			if (reducedMotion || typeof document === 'undefined') {
-				swap()
-				return
-			}
+                        const reducedMotion =
+                                typeof window !== 'undefined' &&
+                                typeof window.matchMedia === 'function' &&
+                                window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                        if (reducedMotion || typeof document === 'undefined') {
+                                swap()
+                                return
+                        }
 
-			const root = document.documentElement
-			// رقصِ محوِ در-جریان را قطع و از نو شروع کن (کلیکِ سریعِ پشت‌سرهم)
-			if (fadeTimer.current) clearTimeout(fadeTimer.current)
-			root.classList.add('lang-switching')
-			fadeTimer.current = setTimeout(() => {
-				swap()
-				// دو rAF ⇒ حداقل یک فریم با محتوای تازه در تاریکی رندر شده؛ سپس
-				// نور برمی‌گردد — هیچ «فلشی» دیده نمی‌شود.
-				requestAnimationFrame(() =>
-					requestAnimationFrame(() => {
-						root.classList.remove('lang-switching')
-						fadeTimer.current = null
-					}),
-				)
-			}, 130)
-		},
-		[lang, queryClient, router],
-	)
+                        const root = document.documentElement
+                        // رقصِ محوِ در-جریان را قطع و از نو شروع کن (کلیکِ سریعِ پشت‌سرهم)
+                        if (fadeTimer.current) clearTimeout(fadeTimer.current)
+                        root.classList.add('lang-switching')
+                        fadeTimer.current = setTimeout(() => {
+                                swap()
+                                // دو rAF ⇒ حداقل یک فریم با محتوای تازه در تاریکی رندر شده؛ سپس
+                                // نور برمی‌گردد — هیچ «فلشی» دیده نمی‌شود.
+                                requestAnimationFrame(() =>
+                                        requestAnimationFrame(() => {
+                                                root.classList.remove('lang-switching')
+                                                fadeTimer.current = null
+                                        }),
+                                )
+                        }, 130)
+                },
+                [lang, queryClient, router],
+        )
 
-	const value = useMemo<I18nValue>(
-		() => ({
-			lang,
-			t: DICTS[lang],
-			fmt: makeFmt(lang),
-			setLang,
-			apiError: (err, fallback) => {
-				const msg = errTextOf(err, fallback ?? DICTS[lang]['common.error'])
-				return lang === 'ar' ? arApiErrorMessage(errCodeOf(err), msg) : msg
-			},
-		}),
-		[lang, setLang],
-	)
+        const value = useMemo<I18nValue>(
+                () => ({
+                        lang,
+                        t: DICTS[lang],
+                        fmt: makeFmt(lang),
+                        setLang,
+                        apiError: (err, fallback) => {
+                                const msg = errTextOf(err, fallback ?? DICTS[lang]['common.error'])
+                                return lang === 'ar' ? arApiErrorMessage(errCodeOf(err), msg) : msg
+                        },
+                }),
+                [lang, setLang],
+        )
 
-	return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
+        return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 
 export function useI18n(): I18nValue {
-	const v = useContext(I18nContext)
-	if (!v) throw new Error('useI18n باید داخل I18nProvider استفاده شود')
-	return v
+        const v = useContext(I18nContext)
+        if (!v) throw new Error('useI18n باید داخل I18nProvider استفاده شود')
+        return v
 }
 
 /** رارد ۳۲ — نسخه‌ی امن برای کامپوننت‌های مشترک سایت/ادمین؛ خارج از Provider = فارسی خالص */
 export function useI18nSafe(): I18nValue {
-	return useContext(I18nContext) ?? I18N_FALLBACK
+        return useContext(I18nContext) ?? I18N_FALLBACK
 }

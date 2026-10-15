@@ -1,4 +1,18 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-69 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/pwa/PushAutoPrompt.tsx
+// ویرایش نقطه‌ای (اسکن post-s67 — F1/F2):
+//   F1 — بنر شناور (fixed bottom-24) دکمه‌ی «دریافت کد تایید» لاگین را
+//        می‌پوشاند (کلیک intercepted در E2E) و در دسکتاپ روی آیتم‌های
+//        لیست صندوق هم‌پوشانی دارد.
+//   F2 — در صفحه‌ی صندوق، بنرِ جهانی + کارت InboxPushCard هم‌زمان
+//        «پرامپت دوتایی» می‌سازند.
+// راه‌حل: «صفحاتِ متمرکز» (login / dashboard/notifications) بنر را
+// باز/نمی‌گذارند — مسیر فعال از روتر خوانده می‌شود (واکنشی به ناوبری
+// SPA). فلوی خودِ بنر (throttle ۳روزه، reconcile، SW-message، iOS
+// guard) عیناً دست‌نخورده.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-64 — sinshin-food-delivery — فایل جدید (جایگزین کامل stage-58)
 // مسیر مقصد: apps/web/src/pwa/PushAutoPrompt.tsx
 // کامیت پیشنهادی: stage sixty-four
@@ -33,6 +47,7 @@
  * می‌دهد؛ مسیرهای /admin و /courier همیشه فارسی (پنل ترجمه نمی‌شود).
  */
 
+import { useRouterState } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BellRing, X } from 'reicon-react'
 import type { Lang } from '#/i18n'
@@ -59,7 +74,8 @@ function isIosBrowserWithoutInstall(): boolean {
 	const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
 	const isStandalone =
 		window.matchMedia('(display-mode: standalone)').matches ||
-		(window.navigator as unknown as { standalone?: boolean }).standalone === true
+		(window.navigator as unknown as { standalone?: boolean }).standalone ===
+			true
 	return isIos && !isStandalone
 }
 
@@ -82,15 +98,51 @@ function markDismissed(): void {
 	}
 }
 
+/*
+ * stage-69 (F1/F2) — صفحاتِ «تمرکز» که بنر شناور نباید رویشان بیاید:
+ *  • /login — کارتِ وسط‌چینِ تمام‌صفحه است و دکمه‌ی «دریافت کد تایید»
+ *    دقیقاً جای بنرِ fixed bottom-24 می‌نشست؛ کلیک روی CTA توسط بنر
+ *    بلعیده می‌شد (کلیک intercepted در E2E). ورود/OTP فلویِ تک‌کار است؛
+ *    پرامپتِ پوش جایش بعد از لاگین/در مرور عادی است، نه وسطِ فرم.
+ *  • /dashboard/notifications — کارت InboxPushCard با CTA و راهنمای
+ *    کامل همان‌جاست؛ بنرِ موازی یعنی «پرامپت دوتایی» (F2) و هم‌پوشانیِ
+ *    دسکتاپ روی آیتم‌های لیست (F1).
+ * باز/بسته شدن واکنشی است: ورود به این مسیرها بنرِ باز را فوراً
+ * می‌بندد و تایمرِ معلق را لغو می‌کند؛ خروج از آن‌ها تایمر را دوباره
+ * مسلح می‌کند (بنر در مرور عادی همان‌طور که بود کار می‌کند).
+ */
+const SUPPRESSED_PATHS = ['/login', '/dashboard/notifications']
+
+function isSuppressedPath(pathname: string): boolean {
+	return SUPPRESSED_PATHS.some(
+		(p) => pathname === p || pathname.startsWith(`${p}/`),
+	)
+}
+
 export function PushAutoPrompt() {
 	const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 	const [phase, setPhase] = useState<BannerPhase>('hidden')
-	const [failureReason, setFailureReason] = useState<PushFailureReason | null>(null)
+	const [failureReason, setFailureReason] = useState<PushFailureReason | null>(
+		null,
+	)
+	// stage-69 (F1/F2) — مسیر فعال از روتر (واکنشی به ناوبری SPA؛ نه
+	// فقط window.location لحظه‌ی مانت). روی صفحات متمرکز بنر باز/نمی‌شود.
+	const suppressed = isSuppressedPath(
+		useRouterState({ select: (s) => s.location.pathname }),
+	)
+	/** مقدار لحظه‌ای برای تایمرِ mount — رِف تا در fire-time تازه بخوانیم */
+	const suppressedRef = useRef(suppressed)
+	useEffect(() => {
+		suppressedRef.current = suppressed
+	}, [suppressed])
 	/** زبان بنر — یک‌بار در مانت (تعویض زبان وسطِ بنر، مورد نیست) */
 	const [lang] = useState<Lang>(() => {
 		if (typeof window === 'undefined') return 'fa'
 		// پنل ادمین/پیک همیشه فارسی است — کوکی ar برای آن‌ها بی‌معناست
-		if (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/courier')) {
+		if (
+			window.location.pathname.startsWith('/admin') ||
+			window.location.pathname.startsWith('/courier')
+		) {
 			return 'fa'
 		}
 		return readLangCookie() ?? 'fa'
@@ -104,11 +156,15 @@ export function PushAutoPrompt() {
 	}, [])
 
 	// ── باز شدن صفحه: ارزیابی وضعیت + reconcile خودکارِ مجوزدارها ──
+	// stage-69 — کلیدِ وابستگی «suppressed»: روی صفحه‌ی متمرکز تایمر
+	// مسلح نمی‌شود/لغو می‌شود؛ با خروج از آن دوباره مسلح می‌شود (۲.۵s
+	// بعد از ورود به صفحه‌ی عادی). سیاستِ throttle و بقیه‌ی منطق عیناً قبل.
 	useEffect(() => {
 		if (typeof window === 'undefined') return
+		if (suppressed) return
 		let cancelled = false
 		const timer = window.setTimeout(async () => {
-			if (cancelled) return
+			if (cancelled || suppressedRef.current) return
 			if (isIosBrowserWithoutInstall()) return
 			const state = await getPushState().catch(() => null)
 			if (cancelled || !state) return
@@ -117,7 +173,10 @@ export function PushAutoPrompt() {
 				void reconcileSubscription().catch(() => {})
 				return
 			}
-			if (state.state === 'default' && !dismissedWithin(AUTO_PROMPT_RETRY_DAYS)) {
+			if (
+				state.state === 'default' &&
+				!dismissedWithin(AUTO_PROMPT_RETRY_DAYS)
+			) {
 				setPhase('prompt')
 			}
 			// denied / unsupported ⇒ بی‌سروصدا
@@ -127,7 +186,17 @@ export function PushAutoPrompt() {
 			cancelled = true
 			window.clearTimeout(timer)
 		}
-	}, [])
+	}, [suppressed])
+
+	// ── stage-69 (F1/F2) — ورود به صفحه‌ی متمرکز با بنرِ باز ⇒ فوراً بسته ──
+	useEffect(() => {
+		if (!suppressed) return
+		setPhase('hidden')
+		if (hideTimer.current !== null) {
+			window.clearTimeout(hideTimer.current)
+			hideTimer.current = null
+		}
+	}, [suppressed])
 
 	// ── چرخش/انقضای اشتراک از سمت SW — فوراً آشتی کن ──
 	useEffect(() => {
@@ -139,7 +208,8 @@ export function PushAutoPrompt() {
 			}
 		}
 		navigator.serviceWorker.addEventListener('message', onSwMessage)
-		return () => navigator.serviceWorker.removeEventListener('message', onSwMessage)
+		return () =>
+			navigator.serviceWorker.removeEventListener('message', onSwMessage)
 	}, [])
 
 	// ── بعد از لاگین: اشتراکِ مهمانِ pending را در سرور ثبت کن ──
