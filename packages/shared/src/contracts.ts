@@ -1,4 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-68 — sinshin-food-delivery
+// مسیر مقصد: packages/shared/src/contracts.ts
+// تغییر (F8 اسکن post-s67): NotificationInboxData.ttlDays — عمر صندوق
+//        از سرور (NOTIFICATION_TTL_DAYS)؛ کلاینت بج «N روز مانده» را
+//        با قرارداد همین پاسخ می‌سازد، نه هاردکدِ موازی.
+//
 // stage-60 — sinshin-food-delivery
 // مسیر مقصد: packages/shared/src/contracts.ts
 // تغییر: Category.mainCategoryIds (اشتراک دسته بین چند والد) +
@@ -917,10 +923,16 @@ export interface NotificationInboxItemDto {
   readAt: Date | null
 }
 
-/** پاسخ GET /notifications — ۳۰ اعلانِ آخرِ ۷ روز اخیر + بج خوانده‌نشده */
+/**
+ * پاسخ GET /notifications — ۳۰ اعلانِ آخرِ ۷ روز اخیر + بج خوانده‌نشده.
+ * stage-68 (F8): ttlDays هم از سرور می‌آید (همان NOTIFICATION_TTL_DAYS
+ * سرویس) تا کلاینت بج «N روز مانده» را بدون هاردکدِ موازی رندر کند.
+ */
 export interface NotificationInboxData {
   items: NotificationInboxItemDto[]
   unread: number
+  /** عمر صندوق به روز — قرارداد TTL با سرویس (stage-68) */
+  ttlDays: number
 }
 
 export interface CourierOptionDto {

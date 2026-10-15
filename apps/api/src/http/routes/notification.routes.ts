@@ -1,4 +1,15 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-68 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
+// ویرایش نقطه‌ای (اسکن post-s67):
+//   F7 — گارد «مسیر داخلی» برای url پخش، سمت سرور: قبلاً فقط فرانت
+//        (urlClean در پنل) چک می‌کرد؛ API هر رشته‌ای ≤۳۰۰ می‌پذیرفت.
+//        url خارجی (https://…، //، فاصله‌دار) ⇒ SW در notificationclick
+//        پنجره‌ی خارجی باز می‌کرد و Link صندوق SPA را می‌شکست. حالا:
+//        باید با «/» شروع شود (بدون «//» پروتکل-نسبی و بدون فاصله).
+//   F8 — ttlDays در پاسخ صندوق (قرارداد TTL از سرور — حذف هاردکد ۷
+//        در InboxList؛ همان NOTIFICATION_TTL_DAYS سرویس).
+
 // stage-67 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/http/routes/notification.routes.ts
 // ویرایش نقطه‌ای: مستندسازی OpenAPI مسیر صندوق (TTL هفت‌روزه از لحظه‌ی
@@ -38,7 +49,7 @@ import { Elysia, t } from 'elysia'
 
 import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
-import type { NotificationService } from '#/domain/notification/notification.service'
+import { NOTIFICATION_TTL_DAYS, type NotificationService } from '#/domain/notification/notification.service'
 import type { RedisService } from '#/infra/redis/redis'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
@@ -52,6 +63,16 @@ export interface NotificationRoutesDeps {
   /** stage-55 — سقف نرخ IP برای ثبت اشتراک پوش */
   redis: RedisService
 }
+
+/**
+ * stage-68 (F7) — url پخش باید «مسیر داخلی سایت» باشد (قرارداد sw/صندوق):
+ *  • با «/» شروع شود (نه https://…، نه رشته‌ی خام)
+ *  • «//» پروتکل‌نسبی ممنوع (openWindow مرورگر آن را دامنه‌ی خارجی می‌گیرد)
+ *  • بدون هیچ فاصله‌ای (کاراکترهای کنترلی هم باز می‌افتند)
+ * همان قاعده‌ای که پنل ادمین سمت فرانت دارد (urlClean) — اینجا مرز امنیتی
+ * واقعی سرور است؛ فرانتِ آسیب‌پذیر/دستکاری‌شده نباید بتواند url خارجی تزریق کند.
+ */
+const INTERNAL_URL_RE = /^\/(?!\/)[^\s]*$/
 
 /**
  * فاز-۲ + stage-48/51 — مسیرهای نوتیفیکیشن.
@@ -101,7 +122,9 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           deps.notifications.list(user.id, 30),
           deps.notifications.unreadCount(user.id),
         ])
-        return { items, unread }
+        // stage-68 (F8) — ttlDays از سرور: کلاینت بج «N روز مانده» را با
+        // قراردادِ همین پاسخ می‌سازد (نه هاردکد)؛ مقدار = NOTIFICATION_TTL_DAYS
+        return { items, unread, ttlDays: NOTIFICATION_TTL_DAYS }
       },
       {
         detail: {
@@ -109,7 +132,9 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           description:
             'stage-67 — صندوق اعلان‌های کاربر: فقط ردیف‌های ۷ روز اخیر (TTL از ' +
             'لحظه‌ی ایجاد هر اعلان — تصمیم کارفرما) + شمارش خوانده‌نشده‌ی همان بازه. ' +
-            'بعد از ۷ روز اعلان به‌طور خودکار حذف می‌شود (نگهداشت روزانه).',
+            'بعد از ۷ روز اعلان به‌طور خودکار حذف می‌شود (نگهداشت روزانه). ' +
+            'stage-68: ttlDays (همان NOTIFICATION_TTL_DAYS سرویس) هم برگردانده ' +
+            'می‌شود تا کلاینت بج «N روز مانده» را بدون هاردکد رندر کند.',
         },
       },
     )
@@ -244,6 +269,21 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
     .post(
       '/broadcast',
       async ({ body, user }) => {
+        // stage-68 (F7) — مرز امنیتی سرور: url فقط مسیر داخلی. پنل خودش
+        // همین را چک می‌کند (urlClean) ولی API نباید به فرانت اعتماد کند —
+        // فراخوانی مستقیم/کلاینت دستکاری‌شده با url خارجی، SW را وادار به
+        // openWindow دامنه‌ی خارجی می‌کرد و Link صندوق را می‌شکست.
+        if (body.url && !INTERNAL_URL_RE.test(body.url)) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: 'آدرس مقصد نوتیفیکیشن باید مسیری داخلی سایت باشد (مثل /products).',
+              },
+            }),
+            { status: 422, headers: { 'content-type': 'application/json' } },
+          )
+        }
         // stage-48 — فرستنده در تاریخچه ثبت می‌شود (نقش + نام/شماره)
         const senderName = (user.name ?? '').trim() || user.phone
         const res = await deps.notifications.broadcast(
@@ -268,7 +308,8 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           summary: 'Broadcast notification to all users (main admin or admin2 with notificationsSend)',
           description:
             'به همه‌ی کاربران عادی: ردیف صندوق + پوش به مشترکان. ادمین‌ها هدف نیستند. ' +
-            'stage-48: هر ارسال در تاریخچه (notification_log) با نقش/نام فرستنده ثبت می‌شود.',
+            'stage-48: هر ارسال در تاریخچه (notification_log) با نقش/نام فرستنده ثبت می‌شود. ' +
+            'stage-68: url (اختیاری) باید مسیر داخلی باشد — با / شروع شود، بدون // و بدون فاصله (422).',
         },
       },
     )

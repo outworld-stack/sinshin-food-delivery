@@ -1,4 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-68 — sinshin-food-delivery
+// مسیر مقصد: apps/web/src/components/DashboardLayout.tsx
+// ویرایش نقطه‌ای (F6 اسکن post-s67): بج خوانده‌نشده روی آیتم «صندوق
+//        اعلان‌ها» در سایدبار دسکتاپ و منوی کشویی موبایل — همان کوئری
+//        کش‌شده‌ی صفحه‌ی صندوق (myNotifications)؛ بدون endpoint جدید.
+//        (زنگ جدا در هدر حذف‌مانده از بازخورد ۳ stage-49 — برقرار)
+
 // stage-56 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/DashboardLayout.tsx
 // تغییر: pt-safe روی هدر موبایلِ sticky (viewport-fit=cover — ناچ)
@@ -34,7 +41,10 @@ import { DashboardLayoutSkeleton } from '#/components/LoadingSkeletons'
 import { User, Cart, Wallet, Pin, Discover2, Logout4, Menu, Package, X, Bell } from 'reicon-react'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
 // stage-49 — NotificationBell حذف شد (بازخورد ۳)
-import { useI18n } from '#/i18n'
+// stage-68 (F6) — بج خوانده‌نشده‌ی صندوق (کوئری مشترک با صفحه‌ی صندوق)
+import { useI18n, tpl } from '#/i18n'
+import { faNum } from '#/utils/format'
+import { myNotificationsOptions } from '#/utils/queryOptions'
 
 export function DashboardLayout() {
   const hydrated = useHydrated()
@@ -50,6 +60,16 @@ export function DashboardLayout() {
     ...userProfileLightClientOptions,
     enabled: isAuthenticated,
   })
+
+  // stage-68 (F6) — بج خوانده‌نشده‌ی «صندوق اعلان‌ها»: همان کوئری/کشِ
+  // صفحه‌ی صندوق (myNotifications)؛ select فقط شمارش را برمی‌دارد. SSE صفحه‌ی
+  // صندوق همین کلید را invalidate می‌کند ⇒ بجِ لایوت هم خودکار تازه می‌شود.
+  const { data: inboxUnread } = useQuery({
+    ...myNotificationsOptions,
+    enabled: isAuthenticated,
+    select: (d) => d.unread,
+  })
+  const unreadBadge = inboxUnread ?? 0
 
   // phase-fix: لاگ‌اوت واقعی — سشن سرور باطل می‌شود، توکن و کش پاک (مرگ لاگ‌اوت دکوری)
   const handleLogout = useRealLogout('/')
@@ -105,6 +125,15 @@ export function DashboardLayout() {
                 >
                   {item.icon}
                   {item.label}
+                  {/* stage-68 (F6) — بج صندوق فقط روی آیتم خودش (سایدبار دسکتاپ) */}
+                  {item.to === '/dashboard/notifications' && unreadBadge > 0 && (
+                    <span
+                      title={tpl(t['notify.unreadCount'], { n: faNum(unreadBadge) })}
+                      className="mr-auto min-w-5 h-5 px-1.5 rounded-full bg-white dark:bg-[#2a1015] text-primary dark:text-dark-primary text-[11px] font-DanaDemiBold flex items-center justify-center border border-primary/30 dark:border-dark-primary/30 shrink-0"
+                    >
+                      {unreadBadge > 9 ? '۹+' : faNum(unreadBadge)}
+                    </span>
+                  )}
                 </Link>
               ))}
             </nav>
@@ -179,6 +208,15 @@ export function DashboardLayout() {
                   >
                     {item.icon}
                     {item.label}
+                    {/* stage-68 (F6) — همان بج در منوی کشویی موبایل */}
+                    {item.to === '/dashboard/notifications' && unreadBadge > 0 && (
+                      <span
+                        title={tpl(t['notify.unreadCount'], { n: faNum(unreadBadge) })}
+                        className="mr-auto min-w-5 h-5 px-1.5 rounded-full bg-white dark:bg-[#2a1015] text-primary dark:text-dark-primary text-[11px] font-DanaDemiBold flex items-center justify-center border border-primary/30 dark:border-dark-primary/30 shrink-0"
+                      >
+                        {unreadBadge > 9 ? '۹+' : faNum(unreadBadge)}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </nav>

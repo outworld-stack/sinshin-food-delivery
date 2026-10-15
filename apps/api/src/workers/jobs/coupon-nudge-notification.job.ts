@@ -1,6 +1,17 @@
 // ═══════════════════════════════════════════════════════════════
+// stage-68 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-notification.job.ts
+// وضعیت: فقط rename فایل (خواسته‌ی صریح کارفرما) —
+//   coupon-nudge-sms.job.ts → coupon-nudge-notification.job.ts
+//   این جاب از فاز-۲ هیچ پیامکی نمی‌فرستد (notifyUser = صندوق درون‌بری
+//   + SSE + Web Push)؛ نام قدیمی از دوره‌ی پیامک مانده بود. منطق،
+//   ترتیب claim، ستون sms_sent_at و رفتار جاب عیناً دست‌نخورده —
+//   فقط نام فایل و ارجاعات import اصلاح شد (نکته‌ی کارفرما + اسکن).
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // stage-67 — sinshin-food-delivery
-// مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-sms.job.ts
+// مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-notification.job.ts
+//   (stage-68: نام قدیمی coupon-nudge-sms.job.ts — پیش از rename)
 // وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی stage-66)
 // تغییر (ترمیم اسکن کوپن×نوتیفیکیشن):
 //   ⑤-باقی‌مانده پنجره‌ی crash: ترتیب عوض شد — «اول ارسال، بعد claim».
@@ -17,7 +28,8 @@
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
 // stage-66 — sinshin-food-delivery
-// مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-sms.job.ts
+// مسیر مقصد: apps/api/src/workers/jobs/coupon-nudge-notification.job.ts
+//   (stage-68: نام قدیمی coupon-nudge-sms.job.ts — پیش از rename)
 // وضعیت: جایگزینی کامل فایل موجود
 // تغییر (راند ترمیم کوپن + هماهنگی با سرویس نوتیفیکیشن):
 //   ⑤ شکستِ notifyUser (id=null — هرگز throw نمی‌کند) → آزادسازی claim
@@ -30,7 +42,7 @@
 //   بدون remainingCount → متن جایگزین «یک قدم» همان قبل.
 // ═══════════════════════════════════════════════════════════════
 
-//src/workers/jobs/coupon-nudge-sms.job.ts (بازنویسی فاز-۲ + stage-66/67)
+//src/workers/jobs/coupon-nudge-notification.job.ts (بازنویسی فاز-۲ + stage-66/67؛ stage-68 rename)
 import { and, eq, isNull, notExists, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'

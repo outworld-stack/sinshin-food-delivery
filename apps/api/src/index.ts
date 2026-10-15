@@ -65,8 +65,9 @@ import { TranslationService } from '#/domain/translation/translation.service'
 import { NeshanService } from '#/infra/maps/neshan.service'
 import { DockerLogsService } from '#/infra/logs/docker-logs.service'
 import { NotificationService } from '#/domain/notification/notification.service'
-// فاز-۲ — یادآور کوپن حالا پوش است؛ همان مسیر فایل قبلی (محتوای جدید)
-import { CouponNudgeJob } from '#/workers/jobs/coupon-nudge-sms.job'
+// فاز-۲ — یادآور کوپن از ابتدا پوش/نوتیفیکیشن بود؛ stage-68 نام فایل
+// هم به همین حقیقت آمد (rename از coupon-nudge-sms.job — فقط نام/ایمپورت)
+import { CouponNudgeJob } from '#/workers/jobs/coupon-nudge-notification.job'
 import { AutoTranslateJob } from '#/workers/jobs/auto-translate.job'
 import { buildApp } from '#/app'
 
