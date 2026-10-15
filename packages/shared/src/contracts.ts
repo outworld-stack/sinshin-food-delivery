@@ -445,6 +445,12 @@ export interface DeviceDto {
   lastActiveAt: Date
   createdAt: Date
   current: boolean
+  /** stage-70 — نوع دستگاه: mobile | tablet | desktop | null (دستگاه‌های قدیمی) */
+  deviceType?: 'mobile' | 'tablet' | 'desktop' | null
+  /** برند قاعده‌مند: apple | samsung | xiaomi | huawei | google | other — دسکتاپ: windows | macos | linux */
+  deviceBrand?: string | null
+  /** مدل/جزئیات: «A55»، «Redmi Note 10»، «16 Pro»، «iOS 17.5» — null = نامشخص */
+  deviceModel?: string | null
 }
 
 export interface UserProfileDto {
@@ -779,6 +785,7 @@ export interface AdminUserRow {
   firstName: string | null
   lastName: string | null
   phone: string
+  /** stage-70 — نام نمایشی دستگاه (برند/OS فارسی؛ «—» = بی‌دستگاه) */
   device: string
   status: string
   walletBalance: number
@@ -786,6 +793,10 @@ export interface AdminUserRow {
   registeredAt: Date
   /** رارد ۴۳ — همیشه ارسال می‌شود؛ 'admin' → آیکون مسدودسازی در فرانت disable */
   role: string
+  /** stage-70 — ساختار خام برای فیلتر/رندر غنی‌تر در کارت «نام دستگاه» */
+  deviceType?: 'mobile' | 'tablet' | 'desktop' | null
+  deviceBrand?: string | null
+  deviceModel?: string | null
 }
 
 export interface AdminUsersData {
@@ -824,7 +835,17 @@ export interface AdminUserDetailsDto {
   totalSpent: number
   referralsCount: number
   referrerId?: UserId | null
-  devices: { id: DeviceId; name: string; platform: string | null; lastActiveAt: Date; isCurrent: boolean }[]
+  devices: {
+    id: DeviceId
+    name: string
+    platform: string | null
+    lastActiveAt: Date
+    isCurrent: boolean
+    /** stage-70 — برند/مدل/نوع دستگاه برای ستون «نام دستگاه» */
+    deviceType?: 'mobile' | 'tablet' | 'desktop' | null
+    deviceBrand?: string | null
+    deviceModel?: string | null
+  }[]
   orders: { id: string; date: Date; amount: number; status: string; addressId: AddressId | null }[]
   referrals: { id: UserId; phone: string; registeredAt: Date; totalOrders: number; orderIds?: string[] }[]
   addresses: { id: AddressId; address: string; lat: number; lng: number; orderCount: number }[]

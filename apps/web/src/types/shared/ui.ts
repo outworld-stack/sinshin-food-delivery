@@ -166,8 +166,12 @@ export interface StatusConfig {
 export interface AdminUserFilterProps {
         tempSearch: string
         setTempSearch: (val: string) => void
-        tempDevice: string
-        setTempDevice: (val: string) => void
+        /** stage-70 — فیلتر واقعی نوع دستگاه: all | mobile | tablet | desktop */
+        tempDeviceType: string
+        setTempDeviceType: (val: string) => void
+        /** stage-70 — برند قاعده‌مند: all | apple | samsung | xiaomi | huawei | honor | google | other */
+        tempDeviceBrand: string
+        setTempDeviceBrand: (val: string) => void
         tempStatus: string
         setTempStatus: (val: string) => void
         tempSortDate: UserSortDir

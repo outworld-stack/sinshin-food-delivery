@@ -53,7 +53,10 @@ export async function getAdminUsers(filters: {
         page: number
         limit: number
         search?: string
-        device?: string
+        /** stage-70 — فیلتر واقعی نوع دستگاه: mobile | tablet | desktop */
+        deviceType?: string
+        /** stage-70 — برند قاعده‌مند: apple | samsung | xiaomi | huawei | google | other */
+        deviceBrand?: string
         status?: string
         sorts?: Array<{ field: string; dir: 'asc' | 'desc' }>
 }): Promise<AdminUsersData> {
@@ -61,8 +64,10 @@ export async function getAdminUsers(filters: {
         params.set('page', String(filters.page))
         params.set('limit', String(filters.limit))
         if (filters.search) params.set('search', filters.search)
-        if (filters.device && filters.device !== 'all')
-                params.set('device', filters.device)
+        if (filters.deviceType && filters.deviceType !== 'all')
+                params.set('deviceType', filters.deviceType)
+        if (filters.deviceBrand && filters.deviceBrand !== 'all')
+                params.set('deviceBrand', filters.deviceBrand)
         if (filters.status && filters.status !== 'all')
                 params.set('status', filters.status)
         if (filters.sorts && filters.sorts.length > 0) {

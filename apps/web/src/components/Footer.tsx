@@ -33,8 +33,7 @@ export const Footer = memo(function Footer() {
                                                 </p>
                                                 <a
                                                         referrerPolicy="origin"
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
+                                                        target="_blank"                                                        
                                                         href="https://trustseal.enamad.ir/?id=7986156&Code=LnoeWDPBQqa5OOpFGq1R5GsNkHQE0TIu"
                                                 >
                                                         <img

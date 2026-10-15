@@ -105,7 +105,9 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
             page: query.page,
             limit: query.limit,
             search: query.search || undefined,
-            device: query.device || undefined,
+            // stage-70 — فیلتر واقعی نوع/برند دستگاه (قبلاً device mock بود)
+            deviceType: query.deviceType || undefined,
+            deviceBrand: query.deviceBrand || undefined,
             status: query.status || undefined,
             sorts: parseSorts(query.sorts),
           },
@@ -117,11 +119,27 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
           page: t.Number({ minimum: 1, maximum: 500 }),
           limit: t.Number({ minimum: 5, maximum: 100 }),
           search: t.Optional(t.String({ maxLength: 40 })),
-          device: t.Optional(t.String()),
+          deviceType: t.Optional(t.Union([t.Literal('mobile'), t.Literal('tablet'), t.Literal('desktop'), t.Literal('all')])),
+          deviceBrand: t.Optional(
+            t.Union([
+              t.Literal('apple'),
+              t.Literal('samsung'),
+              t.Literal('xiaomi'),
+              t.Literal('huawei'),
+              t.Literal('honor'),
+              t.Literal('google'),
+              t.Literal('other'),
+              t.Literal('all'),
+            ]),
+          ),
           status: t.Optional(t.String()),
           sorts: t.Optional(t.String()),
         }),
-        detail: { summary: 'Admin users — paginated, filterable, sortable (usersRead)' },
+        detail: {
+          summary: 'Admin users — paginated, filterable, sortable (usersRead)',
+          description:
+            'stage-70: deviceType/deviceBrand filter on the user\'s latest-identity device (real device columns, not mock). Each row also returns device/deviceType/deviceBrand/deviceModel for the «نام دستگاه» column.',
+        },
       },
     )
     .get(

@@ -43,6 +43,13 @@ const deviceSchema = t.Object({
   touch: t.Optional(t.Nullable(t.Boolean())),
   networkType: t.Optional(t.Nullable(t.String({ maxLength: 20 }))),
   label: t.Optional(t.Nullable(t.String({ maxLength: 100 }))),
+  // stage-70 — نوع/برند/مدل دستگاه: فقط نمایشی (پنل ادمین/پروفایل)؛
+  // در fingerprint/سهمیه/ریسک هیچ دخلی ندارد و جعلش اثر عملکردی ندارد.
+  deviceType: t.Optional(
+    t.Nullable(t.Union([t.Literal('mobile'), t.Literal('tablet'), t.Literal('desktop')])),
+  ),
+  deviceBrand: t.Optional(t.Nullable(t.String({ maxLength: 30 }))),
+  deviceModel: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
 })
 
 export const authRoutes = (deps: AuthRoutesDeps) => {
@@ -191,7 +198,7 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
         detail: {
           summary: 'Verify OTP and login',
           description:
-            'Device fingerprint (layer 1 clientId + layer 2 signal hashes) is resolved server-side: exact hash match, similarity linking, risk scoring, referral-fraud block. Creates user on first login (termsAccepted required). Refresh token rotates in an HttpOnly cookie.',
+            'Device fingerprint (layer 1 clientId + layer 2 signal hashes) is peeked server-side read-only; permanent effects (device row, links, risk, owner-phone claim) happen only after a successful registration/login, atomically. Missing signals never count as similarity. deviceType/deviceBrand/deviceModel are display-only. Creates user on first login (termsAccepted required). Refresh token rotates in an HttpOnly cookie.',
         },
       },
     )

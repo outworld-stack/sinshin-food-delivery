@@ -53,6 +53,10 @@ const UserInfoPage = memo(function UserInfoPage() {
             deviceName: d.name,
             lastActive: d.lastActiveAt,
             isCurrent: d.current,
+            // stage-70 — نوع/برند/مدل برای خط دوم «نام دستگاه»
+            deviceType: d.deviceType ?? null,
+            deviceBrand: d.deviceBrand ?? null,
+            deviceModel: d.deviceModel ?? null,
           }))} />
         </div>
 

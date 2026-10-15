@@ -471,6 +471,20 @@ export const fa = {
                 'بر اساس قوانین امنیتی سین‌شین، هر دستگاه فقط می‌تواند با یک شماره موبایل ثبت‌نام کند و امکان ثبت‌نام با شماره جدید روی همین دستگاه وجود ندارد.',
         'dash.info.lastActive': 'آخرین فعالیت:',
         'dash.info.currentDevice': 'دستگاه فعلی',
+        // ── stage-70 — «نام دستگاه»: نوع/برند (خط دوم هر دستگاه) ──
+        'dash.info.deviceType.mobile': 'موبایل',
+        'dash.info.deviceType.tablet': 'تبلت',
+        'dash.info.deviceType.desktop': 'رایانه',
+        'dash.info.deviceBrand.apple': 'اپل',
+        'dash.info.deviceBrand.samsung': 'سامسونگ',
+        'dash.info.deviceBrand.xiaomi': 'شیائومی',
+        'dash.info.deviceBrand.huawei': 'هوآوی',
+        'dash.info.deviceBrand.honor': 'آنر',
+        'dash.info.deviceBrand.google': 'گوگل',
+        'dash.info.deviceBrand.other': 'سایر',
+        'dash.info.deviceBrand.windows': 'ویندوز',
+        'dash.info.deviceBrand.macos': 'مک',
+        'dash.info.deviceBrand.linux': 'لینوکس',
 
         // ── کیف پول (رارد ۳۳) ──
         'dash.wallet.title': 'کیف پول من',

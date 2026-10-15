@@ -37,7 +37,12 @@ export const adminUsersSearchSchema = z.object({
   page: z.number().int().min(1).catch(1).default(1),
   limit: z.number().int().min(5).max(100).catch(10).default(10),
   search: searchTextField,
-  device: z.string().catch('all').default('all'),
+  // stage-70 — فیلترهای واقعی دستگاه (enum + catch: زباله → پیش‌فرض)
+  deviceType: z.enum(['all', 'mobile', 'tablet', 'desktop']).catch('all').default('all'),
+  deviceBrand: z
+    .enum(['all', 'apple', 'samsung', 'xiaomi', 'huawei', 'honor', 'google', 'other'])
+    .catch('all')
+    .default('all'),
   status: z.string().catch('all').default('all'),
   // رارد ۴۷ — enum شدند (قبلاً رشته‌ی آزاد): مقدار زباله در URL حالا
   // به پیش‌فرض برمی‌گردد، نه اینکه بی‌صدا صعودی (asc) شود
@@ -51,7 +56,8 @@ export type AdminUsersSearch = z.infer<typeof adminUsersSearchSchema>
 interface AdminUsersUiState {
   // موقت (قبل از «اعمال فیلتر») — فقط داخل مودال/سایدبار زنده‌ست
   tempSearch: string
-  tempDevice: string
+  tempDeviceType: AdminUsersSearch['deviceType']
+  tempDeviceBrand: AdminUsersSearch['deviceBrand']
   tempStatus: string
   tempSortDate: UserSortDir
   tempSortWallet: AmountSortDir
@@ -64,24 +70,25 @@ interface AdminUsersUiState {
 
 type AdminUsersAction =
   | { type: 'SET_TEMP_SEARCH'; payload: string }
-  | { type: 'SET_TEMP_DEVICE'; payload: string }
+  | { type: 'SET_TEMP_DEVICE_TYPE'; payload: AdminUsersSearch['deviceType'] }
+  | { type: 'SET_TEMP_DEVICE_BRAND'; payload: AdminUsersSearch['deviceBrand'] }
   | { type: 'SET_TEMP_STATUS'; payload: string }
   | { type: 'SET_TEMP_SORT_DATE'; payload: UserSortDir }
   | { type: 'SET_TEMP_SORT_WALLET'; payload: AmountSortDir }
   | { type: 'SET_TEMP_SORT_SPENT'; payload: AmountSortDir }
   // باز کردن مودال: درَفت‌ها با فیلترهای فعلی URL سینک می‌شن
-  | { type: 'OPEN_FILTER'; payload: Pick<AdminUsersSearch, 'search' | 'device' | 'status' | 'sortDate' | 'sortWallet' | 'sortSpent'> }
+  | { type: 'OPEN_FILTER'; payload: Pick<AdminUsersSearch, 'search' | 'deviceType' | 'deviceBrand' | 'status' | 'sortDate' | 'sortWallet' | 'sortSpent'> }
   | { type: 'CLOSE_FILTER' }
   | { type: 'APPLY_FILTERS' }
   // ⬅ NEW: سینک درَفت‌ها با URL بدون باز کردن مودال —
   // برای سوار شدن اولیه (deep-link/رفرش) و back/forward؛
   // وگرنه باکس فیلتر دسکتاپ بعد از رفرش، پیش‌فرض‌ها را نشان می‌داد نه فیلترهای اعمال‌شده
-  | { type: 'SYNC_FILTERS'; payload: Pick<AdminUsersSearch, 'search' | 'device' | 'status' | 'sortDate' | 'sortWallet' | 'sortSpent'> }
+  | { type: 'SYNC_FILTERS'; payload: Pick<AdminUsersSearch, 'search' | 'deviceType' | 'deviceBrand' | 'status' | 'sortDate' | 'sortWallet' | 'sortSpent'> }
   | { type: 'REQUEST_TOGGLE'; payload: { id: string; status: string } }
   | { type: 'CLEAR_TOGGLE' }
 
 const initialUiState: AdminUsersUiState = {
-  tempSearch: '', tempDevice: 'all', tempStatus: 'all',
+  tempSearch: '', tempDeviceType: 'all', tempDeviceBrand: 'all', tempStatus: 'all',
   tempSortDate: 'newest', tempSortWallet: 'none', tempSortSpent: 'none',
   isFilterModalOpen: false,
   confirmToggle: null,
@@ -90,7 +97,8 @@ const initialUiState: AdminUsersUiState = {
 function adminUsersReducer(state: AdminUsersUiState, action: AdminUsersAction): AdminUsersUiState {
   switch (action.type) {
     case 'SET_TEMP_SEARCH': return { ...state, tempSearch: action.payload }
-    case 'SET_TEMP_DEVICE': return { ...state, tempDevice: action.payload }
+    case 'SET_TEMP_DEVICE_TYPE': return { ...state, tempDeviceType: action.payload }
+    case 'SET_TEMP_DEVICE_BRAND': return { ...state, tempDeviceBrand: action.payload }
     case 'SET_TEMP_STATUS': return { ...state, tempStatus: action.payload }
     case 'SET_TEMP_SORT_DATE': return { ...state, tempSortDate: action.payload }
     case 'SET_TEMP_SORT_WALLET': return { ...state, tempSortWallet: action.payload }
@@ -101,7 +109,8 @@ function adminUsersReducer(state: AdminUsersUiState, action: AdminUsersAction): 
         ...state,
         isFilterModalOpen: true,
         tempSearch: action.payload.search,
-        tempDevice: action.payload.device,
+        tempDeviceType: action.payload.deviceType,
+        tempDeviceBrand: action.payload.deviceBrand,
         tempStatus: action.payload.status,
         tempSortDate: action.payload.sortDate,
         tempSortWallet: action.payload.sortWallet,
@@ -115,7 +124,8 @@ function adminUsersReducer(state: AdminUsersUiState, action: AdminUsersAction): 
       return {
         ...state,
         tempSearch: action.payload.search,
-        tempDevice: action.payload.device,
+        tempDeviceType: action.payload.deviceType,
+        tempDeviceBrand: action.payload.deviceBrand,
         tempStatus: action.payload.status,
         tempSortDate: action.payload.sortDate,
         tempSortWallet: action.payload.sortWallet,
@@ -143,18 +153,20 @@ export function useAdminUsersPage() {
     dispatch({
       type: 'SYNC_FILTERS',
       payload: {
-        search: search.search, device: search.device, status: search.status,
+        search: search.search, deviceType: search.deviceType, deviceBrand: search.deviceBrand,
+        status: search.status,
         sortDate: search.sortDate, sortWallet: search.sortWallet, sortSpent: search.sortSpent,
       },
     })
-  }, [search.search, search.device, search.status,
+  }, [search.search, search.deviceType, search.deviceBrand, search.status,
     search.sortDate, search.sortWallet, search.sortSpent])
 
   // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
   // preload-on-intent (هاور روی «کاربران» در سایدبار) => ناوبری آنی
   const { data, isLoading } = useQuery(adminUsersOptions({
     page: search.page, limit: search.limit,
-    search: search.search, device: search.device, status: search.status,
+    search: search.search, deviceType: search.deviceType, deviceBrand: search.deviceBrand,
+    status: search.status,
     sortDate: search.sortDate, sortWallet: search.sortWallet, sortSpent: search.sortSpent,
   }))
 
@@ -208,7 +220,17 @@ export function useAdminUsersPage() {
 
   // --- هندلرها ---
   const handleTempSearch = useCallback((v: string) => dispatch({ type: 'SET_TEMP_SEARCH', payload: v }), [])
-  const handleTempDevice = useCallback((v: string) => dispatch({ type: 'SET_TEMP_DEVICE', payload: v }), [])
+  const handleTempDeviceType = useCallback((v: string) => {
+    const val: AdminUsersSearch['deviceType'] =
+      v === 'mobile' || v === 'tablet' || v === 'desktop' ? v : 'all'
+    dispatch({ type: 'SET_TEMP_DEVICE_TYPE', payload: val })
+  }, [])
+  const handleTempDeviceBrand = useCallback((v: string) => {
+    const known = ['apple', 'samsung', 'xiaomi', 'huawei', 'honor', 'google', 'other'] as const
+    const val: AdminUsersSearch['deviceBrand'] =
+      (known as readonly string[]).includes(v) ? (v as AdminUsersSearch['deviceBrand']) : 'all'
+    dispatch({ type: 'SET_TEMP_DEVICE_BRAND', payload: val })
+  }, [])
   const handleTempStatus = useCallback((v: string) => dispatch({ type: 'SET_TEMP_STATUS', payload: v }), [])
   const handleTempSortDate = useCallback((v: UserSortDir) => dispatch({ type: 'SET_TEMP_SORT_DATE', payload: v }), [])
   const handleTempSortWallet = useCallback((v: AmountSortDir) => dispatch({ type: 'SET_TEMP_SORT_WALLET', payload: v }), [])
@@ -219,7 +241,8 @@ export function useAdminUsersPage() {
     dispatch({
       type: 'OPEN_FILTER',
       payload: {
-        search: search.search, device: search.device, status: search.status,
+        search: search.search, deviceType: search.deviceType, deviceBrand: search.deviceBrand,
+        status: search.status,
         sortDate: search.sortDate, sortWallet: search.sortWallet, sortSpent: search.sortSpent,
       },
     })
@@ -233,7 +256,8 @@ export function useAdminUsersPage() {
       search: {
         ...search,
         search: state.tempSearch,
-        device: state.tempDevice,
+        deviceType: state.tempDeviceType,
+        deviceBrand: state.tempDeviceBrand,
         status: state.tempStatus,
         sortDate: state.tempSortDate,
         sortWallet: state.tempSortWallet,
@@ -242,7 +266,8 @@ export function useAdminUsersPage() {
       },
     })
     dispatch({ type: 'APPLY_FILTERS' })
-  }, [navigate, search, state.tempSearch, state.tempDevice, state.tempStatus,
+  }, [navigate, search, state.tempSearch, state.tempDeviceType, state.tempDeviceBrand,
+    state.tempStatus,
     state.tempSortDate, state.tempSortWallet, state.tempSortSpent])
 
   // صفحه‌بندی → URL (back مرورگر = صفحه قبلی، رفرش = همان صفحه)
@@ -270,7 +295,7 @@ export function useAdminUsersPage() {
     state: { ...state, page: search.page, limit: search.limit },
     data, isLoading, permissions, isChecking,
     toggleMutation,
-    handleTempSearch, handleTempDevice, handleTempStatus,
+    handleTempSearch, handleTempDeviceType, handleTempDeviceBrand, handleTempStatus,
     handleTempSortDate, handleTempSortWallet, handleTempSortSpent,
     handleApplyFilters, handlePage, handleLimit,
     handleOpenFilter, handleCloseFilter,

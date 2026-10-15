@@ -44,8 +44,10 @@ const AdminUsersPage = memo(function AdminUsersPage() {
         <UsersFilterBox
           tempSearch={page.state.tempSearch}
           setTempSearch={page.handleTempSearch}
-          tempDevice={page.state.tempDevice}
-          setTempDevice={page.handleTempDevice}
+          tempDeviceType={page.state.tempDeviceType}
+          setTempDeviceType={page.handleTempDeviceType}
+          tempDeviceBrand={page.state.tempDeviceBrand}
+          setTempDeviceBrand={page.handleTempDeviceBrand}
           tempStatus={page.state.tempStatus}
           setTempStatus={page.handleTempStatus}
           tempSortDate={page.state.tempSortDate}
@@ -65,7 +67,7 @@ const AdminUsersPage = memo(function AdminUsersPage() {
             {/* هدر دسکتاپ */}
             <div className="hidden lg:grid lg:grid-cols-6 gap-4 px-4 mb-2 text-xs text-gray-400 dark:text-gray-500 font-DanaMedium border-b border-gray-100 dark:border-white/5 pb-2 text-right">
               <div>نام و موبایل</div>
-              <div>دستگاه</div>
+              <div>نام دستگاه</div>
               <div>موجودی</div>
               <div>مجموع خرید</div>
               <div>تاریخ ثبت‌نام</div>
@@ -104,8 +106,10 @@ const AdminUsersPage = memo(function AdminUsersPage() {
         <UsersFilterBox
           tempSearch={page.state.tempSearch}
           setTempSearch={page.handleTempSearch}
-          tempDevice={page.state.tempDevice}
-          setTempDevice={page.handleTempDevice}
+          tempDeviceType={page.state.tempDeviceType}
+          setTempDeviceType={page.handleTempDeviceType}
+          tempDeviceBrand={page.state.tempDeviceBrand}
+          setTempDeviceBrand={page.handleTempDeviceBrand}
           tempStatus={page.state.tempStatus}
           setTempStatus={page.handleTempStatus}
           tempSortDate={page.state.tempSortDate}
@@ -140,7 +144,8 @@ export const Route = createFileRoute('/admin/users/')({
   // فقط فیلترهای اعمال‌شده deps محسوب می‌شن — تغییر آن‌ها = اجرای دوباره loader
   loaderDeps: ({ search }) => ({
     page: search.page, limit: search.limit,
-    search: search.search, device: search.device, status: search.status,
+    search: search.search, deviceType: search.deviceType, deviceBrand: search.deviceBrand,
+    status: search.status,
     sortDate: search.sortDate, sortWallet: search.sortWallet, sortSpent: search.sortSpent,
   }),
 

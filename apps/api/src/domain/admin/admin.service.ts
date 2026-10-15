@@ -13,7 +13,7 @@
 // ═════════════════════════════════════════════════════════════
 
 // src/domain/admin/admin.service.ts
-import { and, asc, desc, eq, gte, ilike, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, exists, gte, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import {
@@ -33,6 +33,7 @@ import { Err } from '#/domain/shared/errors'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
 import { likePattern, maskPhone } from '#/domain/shared/pg'
+import { deviceDisplayName } from '#/domain/device/device-label'
 import type { AdminOrdersData, AdminStatsDto, AdminUserSort, AdminUsersData } from '@sinshin/shared'
 
 // رارد ۴۷ — AdminUserSort به قرارداد مشترک رفت (کپی محلی حذف شد) —
@@ -122,7 +123,10 @@ export class AdminService {
             page: number
             limit: number
             search?: string
-            device?: string
+            /** stage-70 — mobile | tablet | desktop (فیلتر نوع دستگاه — واقعی) */
+            deviceType?: string
+            /** stage-70 — برند قاعده‌مند: apple|samsung|xiaomi|huawei|google|other */
+            deviceBrand?: string
             status?: string
             sorts?: AdminUserSort[]
         },
@@ -144,6 +148,36 @@ export class AdminService {
             } else if (filters.status === 'SUSPENDED') {
                 conditions.push(sql`${users.bannedAt} is not null`)
             }
+        }
+
+        // stage-70 — فیلتر واقعی نوع/برند دستگاه (قبلاً پارامتر device کاملاً
+        // mock بود و بک‌اند نادیده‌اش می‌گرفت). «دستگاهِ کاربر» = هویتِ تازه‌ترین
+        // ورودِ همان شماره → ردیف devices آن.
+        if (filters.deviceType && filters.deviceType !== 'all') {
+            const devExists = db
+                .select({ one: sql`1` })
+                .from(deviceIdentities)
+                .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
+                .where(
+                    and(
+                        eq(deviceIdentities.phone, users.phone),
+                        eq(devices.deviceType, filters.deviceType),
+                    ),
+                )
+            conditions.push(exists(devExists))
+        }
+        if (filters.deviceBrand && filters.deviceBrand !== 'all') {
+            const brandExists = db
+                .select({ one: sql`1` })
+                .from(deviceIdentities)
+                .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
+                .where(
+                    and(
+                        eq(deviceIdentities.phone, users.phone),
+                        eq(devices.deviceBrand, filters.deviceBrand),
+                    ),
+                )
+            conditions.push(exists(brandExists))
         }
 
         const where = conditions.length > 0 ? and(...conditions) : undefined
@@ -218,16 +252,63 @@ export class AdminService {
         // رارد M2 — موجودی و مجموع خرید از همان JOIN بالا می‌آیند؛ دو کوئریِ
         // batch اضافی حذف شد. Number() برای bigint (رارد C1).
 
+        // ── stage-70 — دستگاهِ واقعیِ هر کاربر: تازه‌ترین ورودِ همان شماره ──
+        // (قبلاً device='—' هاردکد بود و فیلترش در UI کاملاً mock.)
+        // یک کوئریِ batch برای کل صفحه؛ انتخاب = بیشترین lastLoginAt (nulls last
+        // → firstLoginAt) بین هویت‌های شماره.
+        const phones = rows.map((r) => r.phone)
+        const identityRows = phones.length
+            ? await db
+                  .select({
+                      phone: deviceIdentities.phone,
+                      deviceType: devices.deviceType,
+                      deviceBrand: devices.deviceBrand,
+                      deviceModel: devices.deviceModel,
+                      platform: devices.platform,
+                      userAgent: devices.userAgent,
+                      rank: sql<number>`row_number() over (
+                      partition by ${deviceIdentities.phone}
+                      order by ${deviceIdentities.lastLoginAt} desc nulls last,
+                               ${deviceIdentities.firstLoginAt} desc
+                  )::int`.as('rank'),
+                  })
+                  .from(deviceIdentities)
+                  .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
+                  .where(inArray(deviceIdentities.phone, phones))
+            : []
+        const latestDevice = new Map(
+            identityRows
+                .filter((r) => r.rank === 1)
+                .map((r) => [
+                    r.phone,
+                    {
+                        deviceType: r.deviceType,
+                        deviceBrand: r.deviceBrand,
+                        deviceModel: r.deviceModel,
+                        platform: r.platform,
+                        userAgent: r.userAgent,
+                    },
+                ]),
+        )
+
         return {
             users: rows.map((r) => {
-                // device از sessions
+                // stage-70 — «نام دستگاه»: موبایل → برند+مدل؛ رایانه → ویندوز/لینوکس/مک
+                const dev = latestDevice.get(r.phone)
+                const deviceType =
+                    dev?.deviceType === 'mobile' || dev?.deviceType === 'tablet' || dev?.deviceType === 'desktop'
+                        ? dev.deviceType
+                        : null
                 return {
                     id: asUserId(r.id),
                     firstName: r.name?.split(' ')[0] ?? null,
                     lastName: r.name?.split(' ').slice(1).join(' ') || null,
                     // stage-55 — شماره‌ی کامل فقط برای ادمین اصلی؛ ادمین۲ ماسک
                     phone: opts?.maskPhones ? maskPhone(r.phone) : r.phone,
-                    device: '—',
+                    device: dev ? deviceDisplayName(dev) : '—',
+                    deviceType,
+                    deviceBrand: dev?.deviceBrand ?? null,
+                    deviceModel: dev?.deviceModel ?? null,
                     status: r.bannedAt ? 'SUSPENDED' : 'ACTIVE',
                     walletBalance: Number(r.balance ?? 0),
                     totalSpent: Number(r.spentTotal ?? 0),
@@ -288,10 +369,15 @@ export class AdminService {
                     id: devices.id,
                     name: devices.label,
                     platform: devices.platform,
+                    deviceType: devices.deviceType,
+                    deviceBrand: devices.deviceBrand,
+                    deviceModel: devices.deviceModel,
+                    userAgent: devices.userAgent,
                     lastActiveAt: devices.lastSeenAt,
                 }).from(deviceIdentities)
                     .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
-                    .where(eq(deviceIdentities.phone, user.phone)),
+                    .where(eq(deviceIdentities.phone, user.phone))
+                    .orderBy(desc(devices.lastSeenAt)),
 
                 db.select({
                     id: orders.displayId,
@@ -352,7 +438,17 @@ export class AdminService {
             name: user.name,
             email: user.email,
             status: user.bannedAt ? 'SUSPENDED' : 'ACTIVE',
-            device: '—',
+            // stage-70 — نام دستگاهِ تازه‌ترین ورود (به‌جای '—' هاردکد)
+            device:
+                deviceRows.length > 0
+                    ? deviceDisplayName({
+                          deviceType: deviceRows[0]?.deviceType ?? null,
+                          deviceBrand: deviceRows[0]?.deviceBrand ?? null,
+                          deviceModel: deviceRows[0]?.deviceModel ?? null,
+                          platform: deviceRows[0]?.platform ?? null,
+                          userAgent: deviceRows[0]?.userAgent ?? null,
+                      })
+                    : '—',
             registeredAt: user.createdAt,
             walletBalance: walletRow,
             totalSpent: spentRow,
@@ -362,6 +458,12 @@ export class AdminService {
                 id: d.id,
                 name: d.name ?? 'دستگاه',
                 platform: d.platform,
+                deviceType:
+                    d.deviceType === 'mobile' || d.deviceType === 'tablet' || d.deviceType === 'desktop'
+                        ? d.deviceType
+                        : null,
+                deviceBrand: d.deviceBrand,
+                deviceModel: d.deviceModel,
                 lastActiveAt: d.lastActiveAt,
                 isCurrent: false,
             })),

@@ -1,14 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-55 — sinshin-food-delivery
+// stage-70 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/device/device.service.ts
 // وضعیت: جایگزینی کامل فایل موجود
-// تغییر: escape wildcard جستجو با likePattern (هر دو مسیر)
+// تغییر: تفکیک peek (فقط-خواندنی) از finalize (اثر دائمی، داخل تراکنش
+//        ثبت‌نام) + سقف سخت روی ردیفِ دقیقِ دستگاه + claim اتمیک مالکیت +
+//        یکتایی clientId + گارد سیگنال‌های missing در شباهت
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/device/device.service.ts
 import { and, desc, eq, gte, ilike, inArray, ne, or, sql, type SQL } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
+import type { Db, DbOrTx } from '#/infra/db/client'
 import {
   deviceEvents,
   deviceIdentities,
@@ -24,6 +26,9 @@ import { asDeviceId, asUserId, type DeviceId } from '#/domain/shared/brand'
 import {
   compositeFingerprintHash,
   computeRiskScore,
+  isMissingHash,
+  MIN_REAL_HASH_SIGNALS,
+  realSignalCount,
   signalSimilarity,
   type DeviceSignals,
 } from './device-signals'
@@ -31,52 +36,76 @@ import {
 const CLUSTER_CAP = 50
 const SIMILARITY_CANDIDATE_CAP = 500
 
-export interface DeviceResolution {
-  device: DeviceRow
-  created: boolean
-  linkedTo: { deviceId: string; similarity: number }[]
+/**
+ * stage-70 — گاردِ لینک شباهت: علاوه بر آستانه‌ی score، لینک فقط وقتی
+ * ساخته می‌شود که تعداد/وزنِ سیگنال‌های «واقعاً قابل مقایسه» کافی باشد.
+ * سیگنال missing هرگز امتیاز نمی‌دهد (P1-۱).
+ */
+const MIN_LINK_COMPARABLE_WEIGHT = 0.5
+const MIN_LINK_COMPARABLE_COUNT = 2
+
+/**
+ * نتیجه‌ی «پیش‌بینی» فقط-خواندنی دستگاه — بدون هیچ اثر دائمی:
+ * نه insert، نه لینک، نه امتیازِ ذخیره‌شده، نه مسدودسازی، نه ابطال سشن.
+ * سرویس احراز هویت با این نتیجه تصمیم می‌گیرد؛ فقط در صورت موفقیتِ
+ * ثبت‌نام/ورود، finalize() اثر دائمی را در همان تراکنش ثبت می‌کند.
+ */
+export interface DevicePeek {
+  /** ردیف موجود یا null اگر دستگاه تازه است */
+  device: DeviceRow | null
+  /** لایه‌ای که دستگاه را پیدا کرد */
+  matchedBy: 'client-id' | 'fingerprint' | 'none'
+  /** شماره‌های متمایزِ خوشه (بدون شماره‌ی فعلی) — فقط سیگنال ریسک/معرف */
   clusterPhoneCount: number
   isNewPhoneForDevice: boolean
   referralBlocked: boolean
+  /** امتیاز ریسکِ محاسبه‌شده (هنوز ذخیره نشده) */
   riskScore: number
   riskFlags: string[]
+  /** composite هش محاسبه‌شده — finalize دوباره محاسبه نمی‌کند */
+  fingerprintHash: string
+}
+
+export interface DeviceFinalizeInput {
+  signals: DeviceSignals
+  phone: string
+  ip?: string | null
+  peek: DevicePeek
+  /** REGISTER = ثبت‌نام موفق (claim مالکیت)؛ LOGIN = ورود کاربر موجود */
+  event: 'REGISTER' | 'LOGIN'
+}
+
+export interface DeviceFinalizeResult {
+  device: DeviceRow
+  linkedTo: { deviceId: string; similarity: number }[]
 }
 
 export class DeviceService {
   constructor(private readonly deps: { db: Db; config: AppConfig }) {}
 
   /**
-   * حل کردن دستگاه از سیگنال‌ها — ترتیب:
+   * stage-70 — پیش‌بینی فقط-خواندنی (جایگزین resolveِ قدیمی).
+   * ترتیب شناسایی:
    *  ۱) clientId (لایه ۱ — قوی‌ترین)
-   *  ۲) هش مرکبِ دقیق
-   *  ۳) شباهت با دستگاه‌های اخیر → ساخت + پیوند
-   * بعد: امتیاز ریسک، انسداد خودکار، تصمیم REFERRAL_BLOCK.
+   *  ۲) هش مرکبِ دقیق (لایه ۲ — با scope ویژه برای کیفیت پایین)
+   * سپس: خوشه (فقط خواندنی) + امتیاز ریسک (بدون ذخیره).
+   *
+   * تفاوت با resolve قدیمی (P1-۳/P2-۴): هیچ write ای انجام نمی‌شود —
+   * تلاشِ ردشده‌ی ثبت‌نام دیگر گراف دستگاه را آلوده نمی‌کند.
    */
-  async resolve(
-    signals: DeviceSignals,
-    phone: string,
-    ip?: string | null,
-  ): Promise<DeviceResolution> {
-    const { db, config } = this.deps
-    const composite = compositeFingerprintHash(signals, signals.userAgent ?? null)
+  async peek(signals: DeviceSignals, phone: string): Promise<DevicePeek> {
+    const { db } = this.deps
+    const composite = compositeFingerprintHash(signals, signals.userAgent ?? null, phone)
 
     let device: DeviceRow | undefined
-    let created = false
-    let canvasDrift = false
-    const linkedTo: { deviceId: string; similarity: number }[] = []
+    let matchedBy: DevicePeek['matchedBy'] = 'none'
 
     // ── ۱) لایه ۱ — clientId ──
     if (signals.clientId) {
       device = await db.query.devices.findFirst({
         where: eq(devices.clientId, signals.clientId),
       })
-      if (device) {
-        // دفاع ضد جعلِ canvas: canvas عوض شده ولی سیگنال‌های GPU ثابت
-        canvasDrift =
-          device.canvasHash !== signals.canvasHash &&
-          device.webglHash === signals.webglHash &&
-          device.audioHash === signals.audioHash
-      }
+      if (device) matchedBy = 'client-id'
     }
 
     // ── ۲) هش مرکبِ دقیق ──
@@ -84,14 +113,95 @@ export class DeviceService {
       device = await db.query.devices.findFirst({
         where: eq(devices.fingerprintHash, composite),
       })
+      if (device) matchedBy = 'fingerprint'
+    }
+
+    // امتیاز ریسک — فقط محاسبه (ذخیره در finalize)
+    const clusterIds = device ? await this.clusterDeviceIds(device.id) : []
+    const clusterPhones = device
+      ? await db
+          .selectDistinct({ phone: deviceIdentities.phone })
+          .from(deviceIdentities)
+          .where(
+            and(inArray(deviceIdentities.deviceId, clusterIds), ne(deviceIdentities.phone, phone)),
+          )
+      : []
+
+    const { score, flags } = device
+      ? computeRiskScore({
+          signals,
+          userAgent: signals.userAgent ?? null,
+          clusterPhoneCount: clusterPhones.length + 1,
+          canvasDrift: DeviceService.driftDetected(device, signals),
+        })
+      : { score: 0, flags: [] as string[] }
+
+    const isNewPhone = !device
+      ? true
+      : !(await db.query.deviceIdentities.findFirst({
+          where: and(eq(deviceIdentities.deviceId, device.id), eq(deviceIdentities.phone, phone)),
+        }))
+
+    return {
+      device: device ?? null,
+      matchedBy,
+      clusterPhoneCount: clusterPhones.length,
+      isNewPhoneForDevice: isNewPhone,
+      referralBlocked: isNewPhone && clusterPhones.length >= this.deps.config.device.referralBlockAfter,
+      riskScore: score,
+      riskFlags: flags,
+      fingerprintHash: composite,
+    }
+  }
+
+  /**
+   * stage-70 — نهایی‌سازیِ اثر دائمی دستگاه: فقط بعد از موفقیتِ ثبت‌نام
+   * یا ورود، و داخل تراکنشِ سرویس احراز هویت (یا هیچ).
+   *
+   * کارها (به‌ترتیب):
+   *  ۱) ردیف موجود را FOR UPDATE قفل و سیگنال‌ها/ریسک را به‌روز کن؛
+   *     ردیف تازه را race-safe درج کن (ON CONFLICT → پیدا-مجدد).
+   *  ۲) فقط برای ردیفِ تازه: جست‌وجوی شباهت (با گارد missing) + لینک‌ها.
+   *  ۳) REGISTER: claim اتمیک مالکیت — UPDATE ... WHERE owner IS NULL.
+   *  ۴) ثبت/به‌روزرسانی هویت + رویداد REGISTER/LOGIN.
+   *  ۵) REGISTER + deviceEnforcement + آستانه: مسدودسازی خودکار
+   *     (سیاست جدید: هرگز قبل از ثبت‌نام موفق — P1-۳).
+   */
+  async finalize(db: DbOrTx, input: DeviceFinalizeInput): Promise<DeviceFinalizeResult> {
+    const { config } = this.deps
+    const { signals, phone, ip, peek, event } = input
+    const composite = peek.fingerprintHash
+    const linkedTo: { deviceId: string; similarity: number }[] = []
+
+    // ── ۱) ردیف دستگاه: به‌روزرسانیِ قفل‌شده یا درجِ race-safe ──
+    let device: DeviceRow | undefined
+
+    if (peek.device) {
+      // قفل ردیف — رقابتِ هم‌زمان روی همین دستگاه اینجا سریال می‌شود
+      const rows = await db
+        .select()
+        .from(devices)
+        .where(eq(devices.id, peek.device.id))
+        .for('update')
+      device = rows[0]
     }
 
     if (device) {
-      // دستگاه شناخته‌شده — سیگنال‌های تازه را به‌روز کن (به‌روزرسانی مرورگر / تغییر تدریجی)
+      // drift دو-مرحله‌ای: prev = canvasِ ذخیره‌شده‌ی فعلی، سپس به‌روزرسانی
+      const drift = DeviceService.driftDetected(device, signals)
+      const { score, flags } = computeRiskScore({
+        signals,
+        userAgent: signals.userAgent ?? null,
+        clusterPhoneCount: peek.clusterPhoneCount + 1,
+        canvasDrift: drift,
+      })
+
       const [updated] = await db
         .update(devices)
         .set({
-          clientId: signals.clientId ?? device.clientId,
+          // clientId فقط وقتی خالی است پر می‌شود — بازنویسی ممنوع (D6)؛
+          // با ایندکس یکتا، بازنویسیِ هم‌زمان two-row خطای خام می‌داد.
+          clientId: device.clientId ?? signals.clientId ?? null,
           fingerprintHash: composite,
           canvasHash: signals.canvasHash,
           webglHash: signals.webglHash,
@@ -107,26 +217,28 @@ export class DeviceService {
           networkType: signals.networkType ?? device.networkType,
           userAgent: signals.userAgent ?? device.userAgent,
           label: signals.label ?? device.label,
+          deviceType: signals.deviceType ?? device.deviceType,
+          deviceBrand: signals.deviceBrand ?? device.deviceBrand,
+          deviceModel: signals.deviceModel ?? device.deviceModel,
+          prevCanvasHash: device.canvasHash,
+          riskScore: score,
+          riskFlags: flags,
           lastSeenAt: new Date(),
         })
         .where(eq(devices.id, device.id))
         .returning()
       device = updated ?? device
+
+      if (flags.length > 0 && (score !== peek.riskScore || flags.length !== peek.riskFlags.length)) {
+        await this.logEventOn(db, device.id, phone, 'RISK_FLAGGED', ip, signals.userAgent, {
+          score,
+          flags,
+        })
+      }
     } else {
-      // ── ۳) شباهت با پنجره‌ی اخیر → ساخت + پیوند ──
-      const since = new Date(Date.now() - config.device.similarityWindowDays * 86_400_000)
-      const candidates = await db
-        .select()
-        .from(devices)
-        .where(gte(devices.lastSeenAt, since))
-        .limit(SIMILARITY_CANDIDATE_CAP)
-
-      const scored = candidates
-        .map((c) => ({ c, sim: signalSimilarity(c, signals) }))
-        .filter((x) => x.sim >= config.device.linkThreshold)
-        .sort((a, b) => b.sim - a.sim)
-
-      const [inserted] = await db
+      // درج race-safe (D5/P2-۷): ON CONFLICT DO NOTHING → اگر رقابت برنده
+      // بود، ردیفِ موجود دوباره پیدا می‌شود — خطای خام دیتابیس به کاربر نمی‌رسد.
+      const inserted = await db
         .insert(devices)
         .values({
           clientId: signals.clientId ?? null,
@@ -145,105 +257,156 @@ export class DeviceService {
           networkType: signals.networkType ?? null,
           userAgent: signals.userAgent ?? null,
           label: signals.label ?? null,
+          deviceType: signals.deviceType ?? null,
+          deviceBrand: signals.deviceBrand ?? null,
+          deviceModel: signals.deviceModel ?? null,
         })
+        .onConflictDoNothing()
         .returning()
-      if (!inserted) throw Err.internal('ذخیره‌سازی دستگاه ناموفق بود.')
-      device = inserted
-      created = true
 
-      for (const { c, sim } of scored.slice(0, 5)) {
-        // جفت مرتب‌شده — بدون destructuring (noUncheckedIndexedAccess)
-        const a = device.id < c.id ? device.id : c.id
-        const b = device.id < c.id ? c.id : device.id
-        await db
-          .insert(deviceLinks)
-          .values({ deviceA: a, deviceB: b, similarity: sim })
-          .onConflictDoNothing()
-        linkedTo.push({ deviceId: c.id, similarity: sim })
-        await this.logEvent(device.id, phone, 'LINK_CREATED', ip, signals.userAgent, {
-          otherDeviceId: c.id,
-          similarity: sim,
-        })
+      device = inserted[0]
+      if (!device) {
+        device =
+          (await db.query.devices.findFirst({ where: eq(devices.fingerprintHash, composite) })) ??
+          (signals.clientId
+            ? await db.query.devices.findFirst({ where: eq(devices.clientId, signals.clientId) })
+            : undefined)
+      }
+      if (!device) throw Err.internal('ذخیره‌سازی دستگاه ناموفق بود.')
+
+      // ── ۲) شباهت + لینک — فقط کیفیت کافی (P1-۱) و مرتب‌سازی صریح (P2-۶) ──
+      // دقت: خودِ ردیفِ تازه از کاندیدها حذف می‌شود — درج + جست‌وجوی بعدی،
+      // خودش را با شباهت ۱.۰ «لینک به خود» می‌ساخت (کشف E2E استیج ۷۰).
+      if (realSignalCount(signals) >= MIN_REAL_HASH_SIGNALS) {
+        const since = new Date(Date.now() - config.device.similarityWindowDays * 86_400_000)
+        const candidates = await db
+          .select()
+          .from(devices)
+          .where(and(gte(devices.lastSeenAt, since), ne(devices.id, device.id)))
+          .orderBy(desc(devices.lastSeenAt))
+          .limit(SIMILARITY_CANDIDATE_CAP)
+
+        const scored = candidates
+          .map((c) => ({ c, sim: signalSimilarity(c, signals) }))
+          .filter(
+            (x) =>
+              x.sim.score >= config.device.linkThreshold &&
+              x.sim.comparableWeight >= MIN_LINK_COMPARABLE_WEIGHT &&
+              x.sim.comparableCount >= MIN_LINK_COMPARABLE_COUNT,
+          )
+          .sort((a, b) => b.sim.score - a.sim.score)
+
+        for (const { c, sim } of scored.slice(0, 5)) {
+          // جفت مرتب‌شده — بدون destructuring (noUncheckedIndexedAccess)
+          const a = device.id < c.id ? device.id : c.id
+          const b = device.id < c.id ? c.id : device.id
+          await db
+            .insert(deviceLinks)
+            .values({ deviceA: a, deviceB: b, similarity: sim.score })
+            .onConflictDoNothing()
+          linkedTo.push({ deviceId: c.id, similarity: sim.score })
+          await this.logEventOn(db, device.id, phone, 'LINK_CREATED', ip, signals.userAgent, {
+            otherDeviceId: c.id,
+            similarity: sim.score,
+          })
+        }
+      }
+
+      // امتیاز ریسک تازه‌وارد را هم ذخیره کن (برای پنل ادمین)
+      const { score, flags } = computeRiskScore({
+        signals,
+        userAgent: signals.userAgent ?? null,
+        clusterPhoneCount: peek.clusterPhoneCount + 1,
+        canvasDrift: false,
+      })
+      if (score > 0) {
+        const [withRisk] = await db
+          .update(devices)
+          .set({ riskScore: score, riskFlags: flags })
+          .where(eq(devices.id, device.id))
+          .returning()
+        device = withRisk ?? device
+        if (flags.length > 0) {
+          await this.logEventOn(db, device.id, phone, 'RISK_FLAGGED', ip, signals.userAgent, {
+            score,
+            flags,
+          })
+        }
       }
     }
 
-    // ── خوشه: BFS روی گراف لینک‌ها (مرورگر عوض‌شده را هم می‌گیرد) ──
-    const clusterIds = await this.clusterDeviceIds(device.id)
-    const clusterPhones = await db
-      .selectDistinct({ phone: deviceIdentities.phone })
-      .from(deviceIdentities)
-      .where(
-        and(inArray(deviceIdentities.deviceId, clusterIds), ne(deviceIdentities.phone, phone)),
-      )
-
-    // ── امتیاز ریسک ──
-    const { score, flags } = computeRiskScore({
-      signals,
-      userAgent: signals.userAgent ?? null,
-      clusterPhoneCount: clusterPhones.length + 1,
-      canvasDrift,
-    })
-    if (score !== device.riskScore || JSON.stringify(flags) !== JSON.stringify(device.riskFlags)) {
-      const [updated] = await db
+    // ── ۳) claim اتمیک مالکیت (فقط REGISTER) — P2-۵ ──
+    // سقف سختِ «هر دستگاه یک ثبت‌نام» روی همین ردیف اعمال می‌شود؛
+    // کل خوشه فقط سیگنال ریسک/معرف است (P1-۲).
+    if (event === 'REGISTER' && config.deviceEnforcement && config.device.maxPhonesPerDevice > 0) {
+      const [claimed] = await db
         .update(devices)
-        .set({ riskScore: score, riskFlags: flags })
-        .where(eq(devices.id, device.id))
+        .set({ registeredOwnerPhone: phone })
+        .where(
+          and(
+            eq(devices.id, device.id),
+            sql`(${devices.registeredOwnerPhone} is null or ${devices.registeredOwnerPhone} = ${phone})`,
+          ),
+        )
         .returning()
-      device = updated ?? device
-      if (flags.length > 0) {
-        await this.logEvent(device.id, phone, 'RISK_FLAGGED', ip, signals.userAgent, {
-          score,
-          flags,
+      if (claimed) {
+        device = claimed
+      } else {
+        // بین peek و تراکنش، دستگاهِ دیگری claimش کرده — رد تمیز دامنه‌ای
+        await this.logEventOn(db, device.id, phone, 'PHONE_LIMIT_BLOCKED', ip, signals.userAgent, {
+          phone,
+          limit: config.device.maxPhonesPerDevice,
+          race: true,
         })
+        throw Err.devicePhoneLimit(config.device.maxPhonesPerDevice)
       }
     }
 
-    // ── انسداد خودکار: امولاتور/فارم ──
-    if (score >= config.device.autoblockScore && !device.isBlocked) {
+    // ── ۴) هویت + رویداد REGISTER/LOGIN ──
+    await this.attachIdentityOn(db, device.id, phone, event, ip, signals.userAgent ?? null)
+
+    // ── ۵) مسدودسازی خودکار — فقط بعد از ثبت‌نام موفق + پشت flag (P1-۳) ──
+    if (
+      event === 'REGISTER' &&
+      config.deviceEnforcement &&
+      device.riskScore >= config.device.autoblockScore &&
+      !device.isBlocked
+    ) {
       const [blocked] = await db
         .update(devices)
         .set({
           isBlocked: true,
           blockedAt: new Date(),
-          blockedReason: `auto: ${flags.join(',')}`,
+          blockedReason: `auto: ${device.riskFlags.join(',')}`,
         })
         .where(eq(devices.id, device.id))
         .returning()
       device = blocked ?? device
-      await this.logEvent(device.id, phone, 'AUTO_BLOCK', ip, signals.userAgent, {
-        score,
-        flags,
+      await this.logEventOn(db, device.id, phone, 'AUTO_BLOCK', ip, signals.userAgent, {
+        score: device.riskScore,
+        flags: device.riskFlags,
       })
-      await this.revokeDeviceSessions(device.id, 'auto-block')
+      await this.revokeDeviceSessionsOn(db, device.id, 'auto-block')
     }
 
-    const isNewPhone = !(await db.query.deviceIdentities.findFirst({
-      where: and(eq(deviceIdentities.deviceId, device.id), eq(deviceIdentities.phone, phone)),
-    }))
-
-    return {
-      device,
-      created,
-      linkedTo,
-      clusterPhoneCount: clusterPhones.length,
-      isNewPhoneForDevice: isNewPhone,
-      referralBlocked: isNewPhone && clusterPhones.length >= config.device.referralBlockAfter,
-      riskScore: score,
-      riskFlags: flags,
-    }
+    return { device, linkedTo }
   }
 
   /** سهمیه: دستگاهِ جدید برای این شماره وقتی سقف پر است → خطا (ادمین معاف) */
-  async assertQuota(phone: string, role: string, currentDeviceId: string): Promise<void> {
+  async assertQuota(phone: string, role: string, currentDeviceId?: string | null): Promise<void> {
     const { db, config } = this.deps
     if (!config.deviceEnforcement) return
     if (role === 'admin') return
 
-    const current = asDeviceId(currentDeviceId)
+    const current = currentDeviceId ? asDeviceId(currentDeviceId) : null
     const others = await db
       .selectDistinct({ deviceId: deviceIdentities.deviceId })
       .from(deviceIdentities)
-      .where(and(eq(deviceIdentities.phone, phone), ne(deviceIdentities.deviceId, current)))
+      .where(
+        current
+          ? and(eq(deviceIdentities.phone, phone), ne(deviceIdentities.deviceId, current))
+          : eq(deviceIdentities.phone, phone),
+      )
 
     if (others.length >= config.maxDevicesPerUser) {
       throw Err.deviceLimit(config.maxDevicesPerUser)
@@ -258,35 +421,7 @@ export class DeviceService {
     ip?: string | null,
     userAgent?: string | null,
   ): Promise<void> {
-    const { db, config } = this.deps
-    const id = asDeviceId(deviceId)
-
-    const existing = await db.query.deviceIdentities.findFirst({
-      where: and(eq(deviceIdentities.deviceId, id), eq(deviceIdentities.phone, phone)),
-    })
-
-    if (!existing) {
-      const first = !(await db.query.deviceIdentities.findFirst({
-        where: eq(deviceIdentities.deviceId, id),
-      }))
-      const crowded =
-        (await this.countDevicePhones(id)) >= config.device.referralBlockAfter
-      await db
-        .insert(deviceIdentities)
-        .values({
-          deviceId: id,
-          phone,
-          relation: first ? 'OWNER' : crowded ? 'SUSPICIOUS' : 'SECONDARY',
-        })
-        .onConflictDoNothing()
-    } else {
-      await db
-        .update(deviceIdentities)
-        .set({ lastLoginAt: new Date() })
-        .where(eq(deviceIdentities.id, existing.id))
-    }
-
-    await this.logEvent(deviceId, phone, event, ip, userAgent, {})
+    await this.attachIdentityOn(this.deps.db, deviceId, phone, event, ip, userAgent)
   }
 
   /** حذف دستگاه کاربر — هویت + سشن‌های همان دستگاه */
@@ -308,7 +443,7 @@ export class DeviceService {
     return true
   }
 
-  /** رویداد عمومی — از AuthService برای REFERRAL_BLOCKED هم صدا زده می‌شود */
+  /** رویداد عمومی — از AuthService برای PHONE_LIMIT_BLOCKED هم صدا زده می‌شود */
   async logEvent(
     deviceId: string,
     phone: string | null,
@@ -317,14 +452,7 @@ export class DeviceService {
     userAgent?: string | null,
     metadata: Record<string, unknown> = {},
   ): Promise<void> {
-    await this.deps.db.insert(deviceEvents).values({
-      deviceId: asDeviceId(deviceId),
-      phone,
-      event,
-      ip: ip ?? null,
-      userAgent: userAgent ?? null,
-      metadata,
-    })
+    await this.logEventOn(this.deps.db, deviceId, phone, event, ip, userAgent, metadata)
   }
 
   // ── ادمین ──
@@ -501,6 +629,66 @@ export class DeviceService {
 
   // ── داخلی ──
 
+  /**
+   * drift دو-مرحله‌ای (D3): canvas باید «دو بار پشت‌سرهم» عوض شده باشد و
+   * سیگنال‌های GPU (webgl/audio) هر دو واقعی و ثابت بمانند. تغییرِ
+   * تک‌رویداد (آپدیت مرورگر/درایور) دیگر پرچم نمی‌زند.
+   */
+  private static driftDetected(device: DeviceRow, signals: DeviceSignals): boolean {
+    if (
+      isMissingHash(signals.canvasHash) ||
+      isMissingHash(signals.webglHash) ||
+      isMissingHash(signals.audioHash) ||
+      isMissingHash(device.canvasHash)
+    ) {
+      return false
+    }
+    const changedNow =
+      device.canvasHash !== signals.canvasHash &&
+      device.webglHash === signals.webglHash &&
+      device.audioHash === signals.audioHash
+    if (!changedNow) return false
+    return device.prevCanvasHash !== null && device.prevCanvasHash !== device.canvasHash
+  }
+
+  private async attachIdentityOn(
+    db: DbOrTx,
+    deviceId: string,
+    phone: string,
+    event: 'LOGIN' | 'REGISTER',
+    ip?: string | null,
+    userAgent?: string | null,
+  ): Promise<void> {
+    const { config } = this.deps
+    const id = asDeviceId(deviceId)
+
+    const existing = await db.query.deviceIdentities.findFirst({
+      where: and(eq(deviceIdentities.deviceId, id), eq(deviceIdentities.phone, phone)),
+    })
+
+    if (!existing) {
+      const first = !(await db.query.deviceIdentities.findFirst({
+        where: eq(deviceIdentities.deviceId, id),
+      }))
+      const crowded = (await this.countDevicePhonesOn(db, id)) >= config.device.referralBlockAfter
+      await db
+        .insert(deviceIdentities)
+        .values({
+          deviceId: id,
+          phone,
+          relation: first ? 'OWNER' : crowded ? 'SUSPICIOUS' : 'SECONDARY',
+        })
+        .onConflictDoNothing()
+    } else {
+      await db
+        .update(deviceIdentities)
+        .set({ lastLoginAt: new Date() })
+        .where(eq(deviceIdentities.id, existing.id))
+    }
+
+    await this.logEventOn(db, deviceId, phone, event, ip, userAgent, {})
+  }
+
   private async clusterDeviceIds(root: DeviceId): Promise<DeviceId[]> {
     // رارد M4 — قبلاً یک کوئری به‌ازای هر دستگاه (خوشه‌ی ۵۰تایی = تا ۵۰
     // کوئری متوالی). حالا هر «سطح» از BFS با یک inArray خوانده می‌شود —
@@ -531,18 +719,41 @@ export class DeviceService {
     return [...visited]
   }
 
-  private async countDevicePhones(deviceId: DeviceId): Promise<number> {
-    return this.deps.db
+  private async countDevicePhonesOn(db: DbOrTx, deviceId: DeviceId): Promise<number> {
+    return db
       .select({ count: sql<number>`count(*)::int` })
       .from(deviceIdentities)
       .where(eq(deviceIdentities.deviceId, deviceId))
       .then((rows) => rows[0]?.count ?? 0)
   }
 
-  private async revokeDeviceSessions(deviceId: string, reason: string): Promise<void> {
-    await this.deps.db
+  private async logEventOn(
+    db: DbOrTx,
+    deviceId: string,
+    phone: string | null,
+    event: string,
+    ip?: string | null,
+    userAgent?: string | null,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
+    await db.insert(deviceEvents).values({
+      deviceId: asDeviceId(deviceId),
+      phone,
+      event,
+      ip: ip ?? null,
+      userAgent: userAgent ?? null,
+      metadata,
+    })
+  }
+
+  private async revokeDeviceSessionsOn(db: DbOrTx, deviceId: string, reason: string): Promise<void> {
+    await db
       .update(sessions)
       .set({ revokedAt: new Date(), revokedReason: reason })
       .where(and(eq(sessions.deviceId, asDeviceId(deviceId)), sql`${sessions.revokedAt} is null`))
+  }
+
+  private async revokeDeviceSessions(deviceId: string, reason: string): Promise<void> {
+    await this.revokeDeviceSessionsOn(this.deps.db, deviceId, reason)
   }
 }

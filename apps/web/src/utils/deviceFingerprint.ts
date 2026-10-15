@@ -5,10 +5,21 @@
 // خروجی دقیقاً قرارداد device در POST /api/auth/otp/verify است.
 // رارد ۳۱ — label حالا نام و نسخه‌ی مرورگر را هم دارد (خواسته‌ی کاربر:
 // «هنگام سنجش دیوایس، مرورگرش را هم بسنجه») — فقط نمایشی، صفر تغییر API.
+//
+// stage-70 — دو تغییر:
+//   ۱) پروتکل سیگنال ناموجود: خطا/عدم پشتیبانی دیگر رشته‌ی 'unavailable'
+//      (و هش مشترکش) نمی‌فرستد — نشانگر «sinshin-missing-v1» می‌رود تا
+//      سمت سرور آن را «missing» بشناسد و هرگز امتیاز شباهت نگیرد (P1-۱:
+//      هشِ یکسانِ unavailable بین دستگاه‌های نامرتبط لینک کاذب می‌ساخت).
+//      مقادیر degenerate (فونت صفر/صدا صفر) هم missing می‌شوند (D2).
+//   ۲) تشخیص نوع/برند/مدل دستگاه (deviceIdentity.ts) — فقط نمایشی.
 
 import { browserLabel } from '#/lib/browserSupport'
+import { detectDeviceIdentity, readHighEntropy } from '#/utils/deviceIdentity'
 
 const DID_KEY = 'sinshin_did'
+/** نشانگر سیگنال ناموجود — سرور sha256 همین را «missing» می‌شناسد */
+const MISSING_SIGNAL = 'sinshin-missing-v1'
 
 function readCookie(name: string): string | null {
   const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
@@ -48,7 +59,7 @@ function canvasSignal(): string {
     c.width = 240
     c.height = 60
     const ctx = c.getContext('2d')
-    if (!ctx) return 'unavailable'
+    if (!ctx) return MISSING_SIGNAL
     ctx.textBaseline = 'top'
     ctx.font = '14px Arial'
     ctx.fillStyle = '#f60'
@@ -64,7 +75,7 @@ function canvasSignal(): string {
     ctx.beginPath(); ctx.arc(100, 50, 20, 0, Math.PI * 2); ctx.fill()
     return c.toDataURL()
   } catch {
-    return 'unavailable'
+    return MISSING_SIGNAL
   }
 }
 
@@ -72,13 +83,13 @@ function webglSignal(): string {
   try {
     const c = document.createElement('canvas')
     const gl = (c.getContext('webgl') ?? c.getContext('experimental-webgl')) as WebGLRenderingContext | null
-    if (!gl) return 'unavailable'
+    if (!gl) return MISSING_SIGNAL
     const ext = gl.getExtension('WEBGL_debug_renderer_info')
     const vendor = ext ? String(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)) : String(gl.getParameter(gl.VENDOR))
     const renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER))
     return `${vendor}~${renderer}~${gl.getParameter(gl.MAX_TEXTURE_SIZE)}~${gl.getParameter(gl.VERSION)}`
   } catch {
-    return 'unavailable'
+    return MISSING_SIGNAL
   }
 }
 
@@ -87,7 +98,7 @@ async function audioSignal(): Promise<string> {
     const Ctx =
       window.OfflineAudioContext ??
       (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext
-    if (!Ctx) return 'unavailable'
+    if (!Ctx) return MISSING_SIGNAL
     const ctx = new Ctx(1, 44100, 44100)
     const osc = ctx.createOscillator()
     osc.type = 'triangle'
@@ -105,9 +116,11 @@ async function audioSignal(): Promise<string> {
     const data = buffer.getChannelData(0)
     let sum = 0
     for (let i = 4500; i < 5000; i++) sum += Math.abs(data[i])
+    // D2 — جمع صفر = anti-fingerprinting (بی‌اطلاع)؛ نه سیگنال واقعی
+    if (!Number.isFinite(sum) || sum === 0) return MISSING_SIGNAL
     return sum.toString()
   } catch {
-    return 'unavailable'
+    return MISSING_SIGNAL
   }
 }
 
@@ -144,9 +157,11 @@ function fontSignal(): string {
       const m = measure(`"${f}",monospace`)
       if (m.w !== base.w || m.h !== base.h) found.push(f)
     }
+    // D2 — صفر فونت = همه‌ی اندازه‌ها مساوی (anti-fp) → بی‌اطلاع
+    if (found.length === 0) return MISSING_SIGNAL
     return found.join(',')
   } catch {
-    return 'unavailable'
+    return MISSING_SIGNAL
   }
 }
 
@@ -165,15 +180,20 @@ export interface DeviceSignalsPayload {
   touch: boolean
   networkType: string | null
   label: string
+  /** stage-70 — فقط نمایشی (پنل ادمین/پروفایل) */
+  deviceType: 'mobile' | 'tablet' | 'desktop'
+  deviceBrand: string | null
+  deviceModel: string | null
 }
 
 /** جمع‌آوری کامل — قبل از فراخوانیِ تایید */
 export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
-  const [canvasHash, webglHash, audioHash, fontsHash] = await Promise.all([
+  const [canvasHash, webglHash, audioHash, fontsHash, highEntropy] = await Promise.all([
     sha256Hex(canvasSignal()),
     sha256Hex(webglSignal()),
     audioSignal().then(sha256Hex),
     sha256Hex(fontSignal()),
+    readHighEntropy(),
   ])
 
   const nav = navigator as Navigator & {
@@ -185,6 +205,9 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
   // رارد ۳۱ — «Windows · 1920x1080 · Chrome 141» به‌جای «Windows · 1920x1080»؛
   // ادمین در فهرست دستگاه‌های کاربر می‌بیند کاربر با چه مرورگری آمده
   const browser = browserLabel(navigator.userAgent)
+
+  // stage-70 — برند/مدل/نوع دستگاه (فقط نمایشی)
+  const identity = detectDeviceIdentity(navigator.userAgent, highEntropy)
 
   return {
     clientId: getClientId(),
@@ -201,5 +224,8 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
     touch: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
     networkType: nav.connection?.effectiveType ?? null,
     label: browser ? `${platform} · ${screen.width}x${screen.height} · ${browser}` : `${platform} · ${screen.width}x${screen.height}`,
+    deviceType: identity.type,
+    deviceBrand: identity.brand,
+    deviceModel: identity.model,
   }
 }

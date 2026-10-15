@@ -462,6 +462,20 @@ export const ar: Dict = {
                 'وفقاً لقواعد الأمان في سين شين، يمكن لكل جهاز التسجيل برقم هاتف واحد فقط، ولا يمكن التسجيل برقم جديد على هذا الجهاز.',
         'dash.info.lastActive': 'آخر نشاط:',
         'dash.info.currentDevice': 'الجهاز الحالي',
+        // ── stage-70 — «نام الجهاز»: النوع/العلامة التجارية (السطر الثاني لكل جهاز) ──
+        'dash.info.deviceType.mobile': 'هاتف محمول',
+        'dash.info.deviceType.tablet': 'جهاز لوحي',
+        'dash.info.deviceType.desktop': 'حاسوب',
+        'dash.info.deviceBrand.apple': 'آبل',
+        'dash.info.deviceBrand.samsung': 'سامسونج',
+        'dash.info.deviceBrand.xiaomi': 'شاومي',
+        'dash.info.deviceBrand.huawei': 'هواوي',
+        'dash.info.deviceBrand.honor': 'أونر',
+        'dash.info.deviceBrand.google': 'جوجل',
+        'dash.info.deviceBrand.other': 'أخرى',
+        'dash.info.deviceBrand.windows': 'ويندوز',
+        'dash.info.deviceBrand.macos': 'ماك',
+        'dash.info.deviceBrand.linux': 'لينكس',
 
         // ── المحفظة (الجولة ٣٣) ──
         'dash.wallet.title': 'محفظتي',

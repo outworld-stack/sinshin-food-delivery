@@ -14,13 +14,14 @@ import { usePermissions } from '#/hooks/admin/usePermissions'
 import { adminUserDetailsOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { PermissionGate, Can } from '#/components/shared/PermissionGate'
+import { Mobile, Monitor } from 'reicon-react'
 import { ChartPanel } from '#/components/shared/ChartPanel'
 import { OrdersBox } from '#/components/admin/user-detail/OrdersBox'
 import { ReferralsBox } from '#/components/admin/user-detail/ReferralsBox'
 import { LogsBox } from '#/components/admin/user-detail/LogsBox'
 import { AddressesBox } from '#/components/admin/user-detail/AddressesBox'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
-import { ChevronRight, Pen, Monitor } from 'reicon-react'
+import { ChevronRight, Pen } from 'reicon-react'
 import { faNum } from '#/utils/format'
 
 export const Route = createFileRoute('/admin/users/$userId/')({
@@ -38,6 +39,26 @@ export const Route = createFileRoute('/admin/users/$userId/')({
   errorComponent: RouteError,
   notFoundComponent: RouteNotFound,
 })
+// ── stage-70 — خط «نام دستگاه»: نوع · برند · مدل (فارسی، سازگار با پنل ادمین) ──
+const ADMIN_BRAND_FA: Record<string, string> = {
+  apple: 'اپل', samsung: 'سامسونگ', xiaomi: 'شیائومی', huawei: 'هوآوی', honor: 'آنر',
+  google: 'گوگل', other: 'سایر', windows: 'ویندوز', macos: 'مک', linux: 'لینوکس',
+}
+const ADMIN_TYPE_FA: Record<string, string> = {
+  mobile: 'موبایل', tablet: 'تبلت', desktop: 'رایانه',
+}
+function deviceMetaLine(
+  deviceType: string | null | undefined,
+  deviceBrand: string | null | undefined,
+  deviceModel: string | null | undefined,
+): string {
+  const parts: string[] = []
+  if (deviceType && ADMIN_TYPE_FA[deviceType]) parts.push(ADMIN_TYPE_FA[deviceType])
+  if (deviceBrand) parts.push(ADMIN_BRAND_FA[deviceBrand] ?? deviceBrand)
+  if (deviceModel) parts.push(deviceModel)
+  return parts.length > 0 ? parts.join(' · ') : '—'
+}
+
 
 function AdminUserDetailPage() {
   const { userId } = Route.useParams()
@@ -130,10 +151,12 @@ function AdminUserDetailPage() {
             <div key={dev.id} className="flex items-center justify-between p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-[#2a1015] flex items-center justify-center text-gray-500">
-                  <Monitor size={20} />
+                  {dev.deviceType === 'mobile' || dev.deviceType === 'tablet' ? <Mobile size={20} aria-hidden /> : <Monitor size={20} aria-hidden />}
                 </div>
                 <div>
                   <p className="font-DanaMedium text-gray-800 dark:text-white text-sm">{dev.name}</p>
+                  {/* stage-70 — «نام دستگاه»: نوع · برند · مدل */}
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{deviceMetaLine(dev.deviceType, dev.deviceBrand, dev.deviceModel)}</p>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">آخرین فعالیت: {formatDate(dev.lastActiveAt)}</p>
                 </div>
               </div>

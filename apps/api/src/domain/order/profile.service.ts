@@ -151,6 +151,9 @@ export class ProfileService {
               name: string
               platform: string
               riskScore: number
+              deviceType: string | null
+              deviceBrand: string | null
+              deviceModel: string | null
               lastLoginAt: Date | null
               firstLoginAt: Date | null
             }[])
@@ -160,6 +163,9 @@ export class ProfileService {
                 name: sql<string>`coalesce(${devices.label}, ${devices.platform}, 'دستگاه')`,
                 platform: devices.platform,
                 riskScore: devices.riskScore,
+                deviceType: devices.deviceType,
+                deviceBrand: devices.deviceBrand,
+                deviceModel: devices.deviceModel,
                 lastLoginAt: deviceIdentities.lastLoginAt,
                 firstLoginAt: deviceIdentities.firstLoginAt,
               })
@@ -190,6 +196,13 @@ export class ProfileService {
         name: d.name,
         platform: d.platform,
         riskScore: d.riskScore,
+        // stage-70 — نوع/برند/مدل برای «دستگاه‌های فعال» پروفایل
+        deviceType:
+          d.deviceType === 'mobile' || d.deviceType === 'tablet' || d.deviceType === 'desktop'
+            ? d.deviceType
+            : null,
+        deviceBrand: d.deviceBrand,
+        deviceModel: d.deviceModel,
         lastActiveAt: d.lastLoginAt ?? d.firstLoginAt,
         createdAt: d.firstLoginAt,
         current: d.id === currentDeviceId,

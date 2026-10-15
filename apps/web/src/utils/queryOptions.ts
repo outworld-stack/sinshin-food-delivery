@@ -460,7 +460,10 @@ export interface AdminUsersFilters {
   page: number
   limit: number
   search: string
-  device: string
+  /** stage-70 — all | mobile | tablet | desktop */
+  deviceType: string
+  /** stage-70 — all | apple | samsung | xiaomi | huawei | google | other */
+  deviceBrand: string
   status: string
   sortDate: UserSortDir
   sortWallet: AmountSortDir
@@ -488,7 +491,8 @@ export const adminUsersOptions = (f: AdminUsersFilters) =>
       page: f.page,
       limit: f.limit,
       search: f.search,
-      device: f.device,
+      deviceType: f.deviceType,
+      deviceBrand: f.deviceBrand,
       status: f.status,
       sorts: usersSorts(f),
 

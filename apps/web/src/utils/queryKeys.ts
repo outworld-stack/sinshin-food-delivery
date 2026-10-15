@@ -167,9 +167,9 @@ export const qk = {
   // قانون: پوزیشن پارامترها با کلیدهای خام قبلی یکیه → hash یکسان، کش حفظ می‌شه
   adminUsers: (f: {
     page: number; limit: number;
-    search: string; device: string; status: string;
+    search: string; deviceType: string; deviceBrand: string; status: string;
     sortDate: string; sortWallet: string; sortSpent: string;
-  }) => ['admin-users', f.page, f.limit, f.search, f.device, f.status,
+  }) => ['admin-users', f.page, f.limit, f.search, f.deviceType, f.deviceBrand, f.status,
     f.sortDate, f.sortWallet, f.sortSpent] as const,
   // پریفکس — بعد از تغییر وضعیت/ویرایش، همه‌ی فیلترها رفرش می‌شن
   adminUsersAll: ['admin-users'] as const,

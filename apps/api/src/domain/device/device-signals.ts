@@ -21,6 +21,14 @@ export interface DeviceSignals {
   label?: string | null
   /** از هدر سرور می‌آید، نه کلاینت */
   userAgent?: string | null
+  /**
+   * stage-70 — نوع/برند/مدل دستگاه (تشخیص سمت کلاینت، فقط نمایشی).
+   * هرگز در fingerprint/امتیاز ریسک/سهمیه دخیل نیست — شبیه‌سازی/جعلش
+   * اثر عملکردی ندارد و صرفاً نام ستون «نام دستگاه» را پر می‌کند.
+   */
+  deviceType?: string | null
+  deviceBrand?: string | null
+  deviceModel?: string | null
 }
 
 /** فیلدهای مقایسه‌شونده — ردیف devices هم این شکل را دارد */
@@ -35,6 +43,57 @@ interface SignalLike {
   language?: string | null
 }
 
+// ═══ stage-70 — پروتکل سیگنال ناموجود ═══
+//
+// پیشینه (اسکن راند ۷۰ / P1-۱): سه سیگنال GPU-محور در صورت خطا/عدم
+// پشتیبانی مقدار یکسانِ 'unavailable' برمی‌گرداندند و SHA-256 همان رشته
+// ارسال می‌شد؛ برابری این هش‌ها در similarity امتیاز مثبت می‌گرفت —
+// 0.25+0.25+0.20 = 0.70 که «دقیقاً» آستانه‌ی پیش‌فرض لینک است. نتیجه:
+// دستگاه‌های فیزیکی نامرتبط با APIهای محدودشده (مرورگرهای حریم‌خصوصی،
+// WebViewها) به یکدیگر پیوند می‌خوردند و ثبت‌نام شماره‌ی جدید به‌اشتباه
+// رد می‌شد.
+//
+// رفع (P1-۱ + D1 + D2): «نبودن سیگنال» از «برابری سیگنال» تفکیک شد —
+// ۱) کلاینت جدید نشانگر sinshin-missing-v1 می‌فرستد؛ کلاینت قدیمیِ
+//    کش‌شده هنوز 'unavailable' — هر دو اینجا «missing» شناخته می‌شوند.
+// ۲) مقادیر degenerate (هش رشته‌ی خالی فونت / جمع صفر صدا) هم missing.
+// ۳) similarity فقط روی سیگنال‌های «قابل مقایسه» (هر دو طرف واقعی)
+//    امتیاز می‌دهد و برای ایجاد لینک، حداقل سیگنال قابل‌مقایسه لازم است.
+// ۴) هش مرکبِ کیفیت‌پایین scopeش به clientId/شماره است تا دو دستگاهِ
+//    ناشناس هرگز از طریق لایه‌ی ۲ یکی نشوند (ادغام کاذب D1).
+
+const MISSING_SENTINELS = new Set<string>([
+  sha256('sinshin-missing-v1'), // کلاینت stage-70+
+  sha256('unavailable'), // کلاینت‌های قدیمی (کش JS) — دوره‌ی گذار
+])
+const DEGENERATE_HASHES = new Set<string>([
+  sha256(''), // fonts: هیچ فونتی شناسایی نشد (anti-fingerprinting)
+  sha256('0'), // audio: جمع صفر (resistFingerprinting)
+])
+
+/** آیا این هش عملاً «بی‌اطلاع» است؟ (نبود/پوچی سیگنال) */
+export function isMissingHash(hash: string | null | undefined): boolean {
+  if (!hash) return true
+  return MISSING_SENTINELS.has(hash) || DEGENERATE_HASHES.has(hash)
+}
+
+/** شمار سیگنال‌های هشِ واقعاً موجود (missing نیستند) از ۴ سیگنال اصلی */
+export function realSignalCount(s: Pick<SignalLike, 'canvasHash' | 'webglHash' | 'audioHash' | 'fontsHash'>): number {
+  let n = 0
+  if (!isMissingHash(s.canvasHash)) n++
+  if (!isMissingHash(s.webglHash)) n++
+  if (!isMissingHash(s.audioHash)) n++
+  if (!isMissingHash(s.fontsHash)) n++
+  return n
+}
+
+/**
+ * حداقل سیگنال واقعی برای آنکه لایه‌ی ۲ (هش دقیق) و لایه‌ی ۳ (شباهت)
+ * اصلاً معتبر شمرده شوند. زیر این حد، دستگاه «غیرقابل شناسایی» است و
+ * فقط clientId می‌تواند آن را پیدا کند.
+ */
+export const MIN_REAL_HASH_SIGNALS = 2
+
 // ── شباهت وزن‌دار ──
 // سیگنال‌های GPU-محور وزن بیشتری دارند چون مرورگر/VPN عوض کنی هم ثابت می‌مانند.
 const W = {
@@ -47,18 +106,57 @@ const W = {
   tzlang: 0.05,
 } as const
 
-export function signalSimilarity(a: SignalLike, b: SignalLike): number {
-  let s = 0
-  if (a.canvasHash === b.canvasHash) s += W.canvas
-  if (a.webglHash === b.webglHash) s += W.webgl
-  if (a.audioHash === b.audioHash) s += W.audio
-  if (a.fontsHash === b.fontsHash) s += W.fonts
-  if (a.screen && a.screen === b.screen) s += W.screen
-  if (a.platform && a.platform === b.platform) s += W.platform
-  if (a.timezone && a.timezone === b.timezone && a.language && a.language === b.language) {
-    s += W.tzlang
+export interface SimilarityResult {
+  /** مجموع وزن سیگنال‌های برابر (هر دو طرف واقعی) */
+  score: number
+  /** مجموع وزن سیگنال‌هایی که در هر دو طرف قابل مقایسه‌اند */
+  comparableWeight: number
+  /** تعداد سیگنال‌های قابل مقایسه */
+  comparableCount: number
+}
+
+/**
+ * stage-70 — شباهت فقط روی سیگنال‌های «قابل مقایسه»:
+ *  - سیگنال missing (هر طرف) → نه امتیاز، نه شمرده شدن قابل‌مقایسه.
+ *  - خروجی علاوه بر score، کیفیت مقایسه را هم برمی‌گرداند تا گاردِ
+ *    حداقل سیگنال در لینک‌سازی اعمال شود.
+ */
+export function signalSimilarity(a: SignalLike, b: SignalLike): SimilarityResult {
+  let score = 0
+  let comparableWeight = 0
+  let comparableCount = 0
+
+  const hashPair = (x: string, y: string, w: number): void => {
+    if (isMissingHash(x) || isMissingHash(y)) return // missing ≠ برابر
+    comparableWeight += w
+    comparableCount++
+    if (x === y) score += w
   }
-  return s
+
+  hashPair(a.canvasHash, b.canvasHash, W.canvas)
+  hashPair(a.webglHash, b.webglHash, W.webgl)
+  hashPair(a.audioHash, b.audioHash, W.audio)
+  hashPair(a.fontsHash, b.fontsHash, W.fonts)
+  if (a.screen && b.screen && a.screen === b.screen) {
+    comparableWeight += W.screen
+    comparableCount++
+    score += W.screen
+  } else if (a.screen && b.screen) {
+    comparableWeight += W.screen
+    comparableCount++
+  }
+  if (a.platform && b.platform) {
+    comparableWeight += W.platform
+    comparableCount++
+    if (a.platform === b.platform) score += W.platform
+  }
+  if (a.timezone && b.timezone && a.language && b.language) {
+    comparableWeight += W.tzlang
+    comparableCount++
+    if (a.timezone === b.timezone && a.language === b.language) score += W.tzlang
+  }
+
+  return { score, comparableWeight, comparableCount }
 }
 
 // ── هش مرکب ──
@@ -76,10 +174,24 @@ export function uaFamily(ua: string | null | undefined): string {
 }
 
 /**
- * FP_HASH = sha256(ترکیب مرتب‌شده‌ی همه‌ی سیگنال‌ها + خانواده‌ی مرورگر).
+ * FP_HASH = sha256(ترتیب مرتب‌شده‌ی همه‌ی سیگنال‌ها + خانواده‌ی مرورگر).
  * نسخه‌ی مرورگر عمداً حذف است — آپدیت مرورگر نباید هویت دستگاه را عوض کند.
+ *
+ * stage-70 (D1) — کیفیت پایین: اگر کمتر از MIN_REAL_HASH_SIGNALS سیگنال
+ * واقعی باشد، هش مرکبِ عمومی «دو دستگاه ناشناسِ مشابه» را یکی می‌کرد
+ * (ادغام کاذب). چنین دستگاهی فقط با scope پایدار شناسایی می‌شود:
+ *  - با clientId → همان مرورگر؛
+ *  - بدون clientId → همان شماره (ادغام بین‌کاربر ممنوع).
  */
-export function compositeFingerprintHash(s: DeviceSignals, userAgent: string | null): string {
+export function compositeFingerprintHash(
+  s: DeviceSignals,
+  userAgent: string | null,
+  phone: string,
+): string {
+  if (realSignalCount(s) < MIN_REAL_HASH_SIGNALS) {
+    const scope = s.clientId ? `cid:${s.clientId}` : `phone:${phone}`
+    return sha256(`lowq|${scope}`)
+  }
   const canon = [
     s.canvasHash,
     s.webglHash,
@@ -116,9 +228,13 @@ function detectOs(source: string | null | undefined): string | null {
 export interface RiskInput {
   signals: DeviceSignals
   userAgent: string | null
-  /** شماره‌های متمایز خوشه (شامل فعلی) */
+  /** شماره‌های متمایز خوشه (شامل فعلی) — فقط سیگنال ریسک/معرف */
   clusterPhoneCount: number
-  /** clientId یکی ولی canvas عوض شده و webgl/audio ثابت — نشانه‌ی جعل */
+  /**
+   * clientId یکی ولی canvas دو بار پشت‌سرهم عوض شده و webgl/audio ثابت —
+   * نشانه‌ی جعلِ فعال (farbling پایدار). stage-70: یک تغییرِ تک‌رویداد
+   * (آپدیت مرورگر/درایور GPU) دیگر پرچم نمی‌زند (D3).
+   */
   canvasDrift: boolean
 }
 

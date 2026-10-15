@@ -1,8 +1,8 @@
 //src/domain/auth/auth.service.ts
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
-import { devices, deviceIdentities, users, type UserRow } from '#/infra/db/schema'
+import { devices, deviceIdentities, users, type UserRow, type DeviceRow } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
 import type { OtpService } from './otp.service'
@@ -15,6 +15,16 @@ import { asUserId } from '#/domain/shared/brand'
 
 // رارد ۴۷ — کاربر عمومی = قرارداد مشترک AuthUser (کپی محلی حذف شد)؛
 // برند id و union نقش در مرز ساختِ publicUser اعمال می‌شود.
+
+// ═══ stage-70 ═══
+// جریان ورود/ثبت‌نام بازطراحی شد (اسکن راند ۷۰ — P1-۲/P1-۳/P2-۴/P2-۵):
+//   ۱) peek فقط-خواندنی: هیچ اثر دائمی قبل از موفقیت (نه دستگاه، نه
+//      لینک، نه مسدودسازی، نه ابطال سشن).
+//   ۲) سقف سختِ «هر دستگاه یک ثبت‌نام» فقط روی «همان ردیفِ دستگاه» با
+//      claim اتمیک اعمال می‌شود؛ خوشه‌ی شباهت فقط سیگنال ریسک/معرف است.
+//   ۳) کاربر + دستگاه + claim + هویت، همه در «یک تراکنش» — یا هیچ.
+//   ۴) قفل advisory روی شماره + FOR UPDATE روی ردیف دستگاه: رقابت‌های
+//      هم‌زمان دقیقاً یک برنده دارند و بازنده خطای دامنه‌ای تمیز می‌گیرد.
 
 export interface LoginOptions {
   refCode?: string | null
@@ -79,12 +89,13 @@ export class AuthService {
   /**
    * ورود با OTP — یک مسیر واحد برای همه‌ی نقش‌ها:
    *  ۱) کد چک می‌شود
-   *  ۲) تفسیر دستگاه (clientId → هش مرکب → شباهت+پیوند) + ریسک + انسداد خودکار
-   *  ۳) دستگاه مسدود → رد
-   *  ۴) کاربر پیدا/ساخته می‌شود — admin2: قواعد لاگین (ساعتی بسته → رد)
-   *  ۵) سهمیه‌ی دستگاه + هویت + رویداد
+   *  ۲) پیش‌بینیِ فقط-خواندنیِ دستگاه (stage-70: بدون اثر دائمی)
+   *  ۳) دستگاه مسدود → رد (مسدودی = فقط تصمیم ادمین یا ریسکِ پس از ثبت‌نام)
+   *  ۴) کاربر جدید: قوانین + مالکِ ردیفِ دستگاه + معرف — سپس در «یک
+   *     تراکنش»: ساخت کاربر + نهایی‌سازی دستگاه (claim اتمیک مالکیت)
+   *  ۵) کاربر موجود: در همان الگو — به‌روزرسانی + نهایی‌سازی LOGIN
    *  ۶) نشست روی دستگاه فیزیکی
-   *  ۷) admin2: onLogin → سشن + رویداد + queueCountِ حوزه
+   *  ۷) admin2: قواعد لاگین / onLogin
    */
   async loginWithOtp(
     phone: string,
@@ -96,57 +107,58 @@ export class AuthService {
     const { db, config } = this.deps
     await this.deps.otp.verify(phone, code)
 
-    // ── هوشمندی دستگاه ──
-    const resolution = await this.deps.devices.resolve(signals, phone, ip)
-    if (resolution.device.isBlocked) {
+    // ── هوشمندی دستگاه — فقط پیش‌بینی، صفر اثر جانبی ──
+    const peek = await this.deps.devices.peek(signals, phone)
+    if (peek.device?.isBlocked) {
       throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
     }
 
     let user = await db.query.users.findFirst({ where: eq(users.phone, phone) })
-    let isNewUser = false
+    const isNewUser = !user
+    const maxPhones = config.device.maxPhonesPerDevice
+    let finalDevice: DeviceRow | undefined
 
     if (!user) {
-      isNewUser = true
       if (!opts.termsAccepted) {
         throw Err.validation('پذیرش قوانین برای ثبت‌نام الزامی است.')
       }
 
-      // ── stage-60 — سقف شماره‌های هر دستگاه: ثبت‌نام شماره‌ی جدیدِ فراتر از سقف رد ──
-      // فقط مسیر کاربر جدید؛ کاربران موجود (لاگین از همان دستگاه) هرگز بلاک نمی‌شوند.
-      const maxPhones = config.device.maxPhonesPerDevice
-      if (
-        config.deviceEnforcement &&
-        maxPhones > 0 &&
-        resolution.isNewPhoneForDevice &&
-        resolution.clusterPhoneCount >= maxPhones
-      ) {
-        await this.deps.devices.logEvent(
-          resolution.device.id,
-          phone,
-          'PHONE_LIMIT_BLOCKED',
-          ip,
-          signals.userAgent ?? null,
-          { phone, clusterPhoneCount: resolution.clusterPhoneCount, limit: maxPhones },
-        )
+      // ── سقف شماره‌های دستگاه (stage-60/62) — stage-70: فقط «همین ردیف» ──
+      // مالکِ ردیفِ دستگاهِ فعلی؛ کل خوشه دیگر معیار رد نیست (P1-۲).
+      // ورود با شماره‌های ثبت‌نام‌شده (کاربر موجود) همیشه آزاد است.
+      const owner = peek.device?.registeredOwnerPhone ?? null
+      if (config.deviceEnforcement && maxPhones > 0 && owner && owner !== phone) {
+        if (peek.device) {
+          await this.deps.devices.logEvent(
+            peek.device.id,
+            phone,
+            'PHONE_LIMIT_BLOCKED',
+            ip,
+            signals.userAgent ?? null,
+            { phone, limit: maxPhones, ownerPhone: owner },
+          )
+        }
         throw Err.devicePhoneLimit(maxPhones)
       }
 
       const willBeRole = config.isSuperAdmin(phone) ? 'admin' : 'user'
 
-      // ── معرف + REFERRAL_BLOCK ──
+      // ── معرف + REFERRAL_BLOCK (خوشه = سیگنال ضدفارم، نه رد قطعی) ──
       let referredBy: string | null = null
       if (opts.refCode) {
-        if (resolution.referralBlocked) {
-          await this.deps.devices.logEvent(
-            resolution.device.id,
-            phone,
-            'REFERRAL_BLOCKED',
-            ip,
-            signals.userAgent ?? null,
-            { refCode: opts.refCode, clusterPhones: resolution.clusterPhoneCount },
-          )
+        if (peek.referralBlocked) {
+          if (peek.device) {
+            await this.deps.devices.logEvent(
+              peek.device.id,
+              phone,
+              'REFERRAL_BLOCKED',
+              ip,
+              signals.userAgent ?? null,
+              { refCode: opts.refCode, clusterPhones: peek.clusterPhoneCount },
+            )
+          }
           console.log(
-            `[device] referral blocked for ${phone} — cluster already has ${resolution.clusterPhoneCount} phone(s)`,
+            `[device] referral blocked for ${phone} — cluster already has ${peek.clusterPhoneCount} phone(s)`,
           )
         } else {
           const refCode = opts.refCode.trim().toUpperCase().slice(0, 32)
@@ -157,63 +169,96 @@ export class AuthService {
         }
       }
 
-      await this.deps.devices.assertQuota(phone, willBeRole, resolution.device.id)
+      await this.deps.devices.assertQuota(phone, willBeRole, peek.device?.id ?? null)
 
-      const [createdUser] = await db
-        .insert(users)
-        .values({
+      // ── تراکنش اتمیک: کاربر + دستگاه + claim مالکیت — یا هیچ ──
+      const outcome = await db.transaction(async (tx) => {
+        // قفلِ شماره: ثبت‌نام/ورودِ هم‌زمانِ همین شماره سریال می‌شود
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+
+        // بازبینی مالکیت زیر قفل — رقیبی بین peek و تراکنش claim کرده باشد
+        if (peek.device) {
+          const rows = await tx
+            .select({ owner: devices.registeredOwnerPhone })
+            .from(devices)
+            .where(eq(devices.id, peek.device.id))
+            .for('update')
+          const currentOwner = rows[0]?.owner ?? null
+          if (config.deviceEnforcement && maxPhones > 0 && currentOwner && currentOwner !== phone) {
+            throw Err.devicePhoneLimit(maxPhones)
+          }
+        }
+
+        const [createdUser] = await tx
+          .insert(users)
+          .values({
+            phone,
+            role: willBeRole,
+            lastLoginAt: new Date(),
+            referralCode: await this.generateUniqueReferralCode(),
+            referredBy,
+            termsAcceptedAt: new Date(),
+            termsVersion: opts.termsVersion ?? null,
+          })
+          .returning()
+        if (!createdUser) throw Err.internal('ذخیره‌سازی کاربر ناموفق بود؛ دوباره تلاش کن.')
+
+        const { device } = await this.deps.devices.finalize(tx, {
+          signals,
           phone,
-          role: willBeRole,
-          lastLoginAt: new Date(),
-          referralCode: await this.generateUniqueReferralCode(),
-          referredBy,
-          termsAcceptedAt: new Date(),
-          termsVersion: opts.termsVersion ?? null,
+          ip,
+          peek,
+          event: 'REGISTER',
         })
-        .returning()
-      user = createdUser
-
-      await this.deps.devices.attachIdentity(
-        resolution.device.id,
-        phone,
-        'REGISTER',
-        ip,
-        signals.userAgent ?? null,
-      )
+        return { user: createdUser, device }
+      })
+      user = outcome.user
+      finalDevice = outcome.device
     } else {
       if (user.bannedAt) throw Err.banned()
 
-      const patch: Partial<typeof users.$inferInsert> = { lastLoginAt: new Date() }
-      if (config.isSuperAdmin(phone) && user.role !== 'admin') patch.role = 'admin'
-      if (opts.termsAccepted && !user.termsAcceptedAt) {
-        patch.termsAcceptedAt = new Date()
-        patch.termsVersion = opts.termsVersion ?? null
-      }
-      const [updated] = await db
-        .update(users)
-        .set(patch)
-        .where(eq(users.id, user.id))
-        .returning()
-      user = updated ?? user
+      await this.deps.devices.assertQuota(phone, user.role, peek.device?.id ?? null)
 
-      await this.deps.devices.assertQuota(phone, user.role, resolution.device.id)
-      await this.deps.devices.attachIdentity(
-        resolution.device.id,
-        phone,
-        'LOGIN',
-        ip,
-        signals.userAgent ?? null,
-      )
+      const existingUser = user
+      const outcome = await db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+
+        const patch: Partial<typeof users.$inferInsert> = { lastLoginAt: new Date() }
+        if (config.isSuperAdmin(phone) && existingUser.role !== 'admin') patch.role = 'admin'
+        if (opts.termsAccepted && !existingUser.termsAcceptedAt) {
+          patch.termsAcceptedAt = new Date()
+          patch.termsVersion = opts.termsVersion ?? null
+        }
+        const [updated] = await tx
+          .update(users)
+          .set(patch)
+          .where(eq(users.id, existingUser.id))
+          .returning()
+
+        const { device } = await this.deps.devices.finalize(tx, {
+          signals,
+          phone,
+          ip,
+          peek,
+          event: 'LOGIN',
+        })
+        return { user: updated ?? existingUser, device }
+      })
+      user = outcome.user
+      finalDevice = outcome.device
     }
 
     if (!user) throw Err.internal('ذخیره‌سازی کاربر ناموفق بود؛ دوباره تلاش کن.')
+    if (!finalDevice) throw Err.internal('تفسیر دستگاه ناموفق بود؛ دوباره تلاش کنید.')
+
+    const deviceRow = finalDevice
 
     // ── قلاب admin2 — قبل از سشن: قواعد لاگین (ساعتی بسته → رد) ──
     await this.deps.admin2.assertLoginAllowed(user)
 
     const issue = await this.deps.sessions.createSession(
       user,
-      resolution.device.id,
+      deviceRow.id,
       ip,
       signals.userAgent ?? null,
     )
@@ -228,8 +273,8 @@ export class AuthService {
     return {
       ...issue,
       device: {
-        id: resolution.device.id,
-        name: resolution.device.label ?? resolution.device.platform ?? 'دستگاه',
+        id: deviceRow.id,
+        name: deviceRow.label ?? deviceRow.platform ?? 'دستگاه',
       },
       isNewUser,
       ...(queueCount !== undefined ? { queueCount } : {}),
@@ -264,6 +309,10 @@ export class AuthService {
         lastActiveAt: r.lastLoginAt ?? r.firstLoginAt,
         createdAt: r.firstLoginAt,
         current: r.device.id === currentDeviceId,
+        // stage-70 — برند/مدل/نوع برای «دستگاه‌های فعال» پروفایل
+        deviceType: r.device.deviceType,
+        deviceBrand: r.device.deviceBrand,
+        deviceModel: r.device.deviceModel,
       })),
     }
   }

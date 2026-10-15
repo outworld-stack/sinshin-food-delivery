@@ -1,4 +1,5 @@
 //src/infra/db/schema/devices.ts
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   doublePrecision,
@@ -19,6 +20,17 @@ import type { DeviceId } from '#/domain/shared/brand'
  * لایه ۱: client_id (uuid کوکی کلاینت — قوی‌ترین شناسه)
  * لایه ۲: هش‌های جزئی (canvas/webgl/audio/fonts) + سیگنال‌های خام
  * fingerprint_hash = sha256(ترکیب مرتب‌شده) — سمت سرور ساخته می‌شود.
+ *
+ * stage-70 — ستون‌های جدید:
+ *  - registered_owner_phone: شماره‌ای که «از همین ردیفِ دستگاه» ثبت‌نام موفق
+ *    داشته؛ سقفِ سختِ «هر دستگاه یک ثبت‌نام» دقیقاً روی همین ستون، به‌صورت
+ *    اتمیک (UPDATE ... WHERE registered_owner_phone IS NULL) اعمال می‌شود.
+ *    (P1-۲: قبلاً سقف روی «کل خوشه‌ی شباهت» بود و لینک کاذب، دستگاه‌های
+ *    بی‌ربط را هم می‌بست.)
+ *  - prev_canvas_hash: canvas دور قبل — پرچم canvas-drift فقط با «دو تغییر
+ *    متوالی» می‌خورد (D3: آپدیت تک‌باره‌ی مرورگر دیگر ریسک نمی‌سازد).
+ *  - device_type/device_brand/device_model: فقط نمایشی (پنل ادمین/پروفایل) —
+ *    هرگز در سهمیه/ریسک/لینک دخیل نیستند.
  */
 export const devices = pgTable(
   'devices',
@@ -40,6 +52,16 @@ export const devices = pgTable(
     networkType: varchar('network_type', { length: 20 }),
     userAgent: text('user_agent'),
     label: varchar('label', { length: 100 }),
+    /** stage-70 — mobile | tablet | desktop (null = دستگاه قدیمی) */
+    deviceType: varchar('device_type', { length: 12 }),
+    /** stage-70 — apple|samsung|xiaomi|huawei|google|other — دسکتاپ: windows|macos|linux */
+    deviceBrand: varchar('device_brand', { length: 30 }),
+    /** stage-70 — مدل/جزئیات: «A55»، «Redmi Note 10»، «16 Pro»، «iOS 17.5» */
+    deviceModel: varchar('device_model', { length: 80 }),
+    /** stage-70 — claim اتمیکِ مالکیت پس از ثبت‌نام موفق (P2-۵) */
+    registeredOwnerPhone: varchar('registered_owner_phone', { length: 11 }),
+    /** stage-70 — canvas دورِ قبل (تشخیص drift دو مرحله‌ای) */
+    prevCanvasHash: varchar('prev_canvas_hash', { length: 64 }),
     riskScore: integer('risk_score').notNull().default(0),
     riskFlags: jsonb('risk_flags').$type<string[]>().notNull().default([]),
     isBlocked: boolean('is_blocked').notNull().default(false),
@@ -51,9 +73,17 @@ export const devices = pgTable(
   (t) => [
     uniqueIndex('devices_fingerprint_hash_key').on(t.fingerprintHash),
     index('devices_client_id_idx').on(t.clientId),
+    /** stage-70 (P2-۷) — یکتایی clientId غیر-null؛ هم‌زمانی دیگر دو ردیف
+     * با یک clientId نمی‌سازد (دروازه‌ی مهاجرت ۰۰۰۵ اول duplicates را پاک
+     * می‌کند). ایندکس قدیمیِ عادی برای سازگاری می‌ماند (کوئری‌های موجود). */
+    uniqueIndex('devices_client_id_uidx')
+      .on(t.clientId)
+      .where(sql`client_id is not null`),
     index('devices_last_seen_idx').on(t.lastSeenAt),
     index('devices_blocked_idx').on(t.isBlocked),
     index('devices_risk_idx').on(t.riskScore),
+    /** stage-70 — فیلتر نوع دستگاه در لیست کاربران ادمین */
+    index('devices_type_idx').on(t.deviceType),
   ],
 )
 

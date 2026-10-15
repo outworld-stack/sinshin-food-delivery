@@ -1,4 +1,7 @@
 // src/components/admin/users/UsersFilterBox.tsx
+// stage-70 — فیلترهای دستگاه «واقعی» شدند: نوع (موبایل/تبلت/رایانه) و برند
+// (اپل/سامسونگ/شیائومی/…) به‌جای سه گزینه‌ی mock — از ستون‌های device_type /
+// device_brand دیتابیس فیلتر می‌کنند و کارت‌ها «نام دستگاه» واقعی نشان می‌دهند.
 import { memo, useCallback } from 'react'
 import {
 	FILTER_LABEL_CLS,
@@ -12,12 +15,17 @@ interface UsersFilterBoxProps extends AdminUserFilterProps {
 	isMobileModal?: boolean
 }
 
+/** stage-70 — برندهای قراردادی فیلتر (هم‌راستا با zod-catch اسکیمای URL) */
+const KNOWN_BRANDS = ['apple', 'samsung', 'xiaomi', 'huawei', 'honor', 'google', 'other'] as const
+
 // محتوای فیلتر کاربران — مشترک دسکتاپ/مودال (DRY)
 export const UsersFilterBox = memo(function UsersFilterBox({
 	tempSearch,
 	setTempSearch,
-	tempDevice,
-	setTempDevice,
+	tempDeviceType,
+	setTempDeviceType,
+	tempDeviceBrand,
+	setTempDeviceBrand,
 	tempStatus,
 	setTempStatus,
 	tempSortDate,
@@ -33,9 +41,25 @@ export const UsersFilterBox = memo(function UsersFilterBox({
 		(e: React.ChangeEvent<HTMLInputElement>) => setTempSearch(e.target.value),
 		[setTempSearch],
 	)
-	const handleDevice = useCallback(
-		(e: React.ChangeEvent<HTMLSelectElement>) => setTempDevice(e.target.value),
-		[setTempDevice],
+	// stage-70 — selectهای دستگاه فقط مقادیر enum قراردادی را می‌پذیرند؛
+	// مقدار زباله از DOM به پیش‌فرض برمی‌گردد (هم‌راستا با zod-catch اسکیمای URL)
+	const handleDeviceType = useCallback(
+		(e: React.ChangeEvent<HTMLSelectElement>) => {
+			const v = e.target.value
+			setTempDeviceType(
+				v === 'mobile' || v === 'tablet' || v === 'desktop' ? v : 'all',
+			)
+		},
+		[setTempDeviceType],
+	)
+	const handleDeviceBrand = useCallback(
+		(e: React.ChangeEvent<HTMLSelectElement>) => {
+			const v = e.target.value
+			setTempDeviceBrand(
+				(KNOWN_BRANDS as readonly string[]).includes(v) ? v : 'all',
+			)
+		},
+		[setTempDeviceBrand],
 	)
 	const handleStatus = useCallback(
 		(e: React.ChangeEvent<HTMLSelectElement>) => setTempStatus(e.target.value),
@@ -65,7 +89,7 @@ export const UsersFilterBox = memo(function UsersFilterBox({
 			className={
 				isMobileModal
 					? 'grid grid-cols-2 gap-4 items-end'
-					: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4 items-end'
+					: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-9 gap-4 items-end'
 			}
 		>
 			<div
@@ -85,16 +109,35 @@ export const UsersFilterBox = memo(function UsersFilterBox({
 				/>
 			</div>
 			<div>
-				<label className={FILTER_LABEL_CLS}>دستگاه</label>
+				<label htmlFor="users-filter-device-type" className={FILTER_LABEL_CLS}>نوع دستگاه</label>
 				<select
-					value={tempDevice}
-					onChange={handleDevice}
+					id="users-filter-device-type"
+					value={tempDeviceType}
+					onChange={handleDeviceType}
 					className={selectCls}
 				>
-					<option value="all">همه دستگاه‌ها</option>
-					<option value="iPhone 16 Pro">iPhone 16 Pro</option>
-					<option value="Samsung S24 Ultra">Samsung S24 Ultra</option>
-					<option value="MacBook Pro">MacBook Pro</option>
+					<option value="all">همه</option>
+					<option value="mobile">موبایل</option>
+					<option value="tablet">تبلت</option>
+					<option value="desktop">رایانه</option>
+				</select>
+			</div>
+			<div>
+				<label htmlFor="users-filter-device-brand" className={FILTER_LABEL_CLS}>برند دستگاه</label>
+				<select
+					id="users-filter-device-brand"
+					value={tempDeviceBrand}
+					onChange={handleDeviceBrand}
+					className={selectCls}
+				>
+					<option value="all">همه برندها</option>
+					<option value="apple">اپل</option>
+					<option value="samsung">سامسونگ</option>
+					<option value="xiaomi">شیائومی</option>
+					<option value="huawei">هوآوی</option>
+					<option value="honor">آنر</option>
+					<option value="google">گوگل</option>
+					<option value="other">سایر</option>
 				</select>
 			</div>
 			<div>
