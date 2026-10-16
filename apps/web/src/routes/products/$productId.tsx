@@ -26,6 +26,7 @@ import { ProductMobileBar } from '#/components/site/product-detail/ProductMobile
 import { ProductPriceBox } from '#/components/site/product-detail/ProductPriceBox'
 import { ProductReviews } from '#/components/site/product-detail/ProductReviews'
 import { ProductSizeSelector } from '#/components/site/product-detail/ProductSizeSelector'
+import { ShaderBackground } from '#/components/site/product-detail/ShaderBackground'
 import { useProductPage } from '#/hooks/site/useProductPage'
 import { useBack } from '#/hooks/useBack'
 import { useI18n } from '#/i18n'
@@ -129,8 +130,17 @@ function ProductDetailPage() {
         // رارد ۳۸ — JSON-LD (Product + BreadcrumbList) به head منتقل شد:
         // دوزبانه (بومی‌سازی‌شده) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
 
+        // stage-78 — محصول ویژه (ویژه‌سازی ادمین اصلی): پس‌زمینه‌ی متحرکِ WebGL
+        // در پسِ محتوا (fixed z-0). محتوا «relative» می‌شود تا در ترتیبِ نقاشی
+        // بالای بوم بیفتد — بدون z-index (بدون ساخت stacking-context؛ z ایندکس‌های
+        // فرزندانِ ثابت مثل نوار موبایل z-50 در کانتکست ریشه می‌مانند و تغییری نمی‌کنند)
+        const isFeatured = product.isFeatured === true
+
         return (
-                <div className="py-10 px-4 max-w-6xl mx-auto pb-32 lg:pb-10">
+                <>
+                        {isFeatured ? <ShaderBackground /> : null}
+
+                        <div className="relative py-10 px-4 max-w-6xl mx-auto pb-32 lg:pb-10">
                         <button
                                 type="button"
                                 onClick={back}
@@ -193,6 +203,7 @@ function ProductDetailPage() {
                                 onDecrement={page.handleDecrement}
                                 onAddToCart={page.handleAddToCart}
                         />
-                </div>
+                        </div>
+                </>
         )
 }

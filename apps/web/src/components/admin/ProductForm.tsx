@@ -304,6 +304,7 @@ export function ProductForm({
         onSubmit,
         isSubmitting,
         canToggleAvailability = true,
+        canToggleFeatured = true,
 }: ProductFormProps) {
         // کتگوری‌ها از فکتوری مشترک (qk.categories) — همون کش فرم کوپن و فیلتر لیست‌ها
         const { data: categories } = useQuery(adminCategoriesOptions)
@@ -958,7 +959,9 @@ export function ProductForm({
                                                 </div>
                                         ) : null}
 
-                                        {/* stage-60 — محصول ویژه (سنجاق‌شده): ۴ آیتم اول + Aurora */}
+                                        {/* stage-60 — محصول ویژه (سنجاق‌شده): ۴ آیتم اول + Aurora
+                                        stage-78 — سوئیچ فقط برای ادمین اصلی (بک هم پرچم ادمین۲ را نادیده می‌گیرد) */}
+                                        {canToggleFeatured ? (
                                         <div
                                                         className={`flex items-center justify-between gap-3 p-3 rounded-lg border transition ${
                                                                                 formData.isFeatured
@@ -981,8 +984,8 @@ export function ProductForm({
                                                                                                         محصول ویژه (سنجاق‌شده)
                                                                                         </p>
                                                                                         <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
-                                                                                                        این محصول فارغ از فیلتر/مرتب‌سازی کاربر، همیشه در ۴ آیتم اول
-                                                                                                        لیست می‌نشیند و کارتش پس‌زمینه‌ی Aurora می‌گیرد.
+                                                                                                        همیشه در ۴ آیتم اول لیست + بج «ویژه» و پس‌زمینه‌ی Aurora روی کارت +
+                                                                                                        پس‌زمینه‌ی متحرک در صفحه‌ی اختصاصی. فقط ادمین اصلی.
                                                                                         </p>
                                                                         </div>
                                                         </div>
@@ -992,6 +995,7 @@ export function ProductForm({
                                                                         label="محصول ویژه (سنجاق‌شده)"
                                                         />
                                         </div>
+                                        ) : null}
 
                                         {[
                                                 {

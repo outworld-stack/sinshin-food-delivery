@@ -15,6 +15,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
   const year = dateObj.toLocaleDateString(locale, { year: 'numeric' });
 
   // stage-60 — کارت ویژه: پس‌زمینه‌ی Aurora + عنوان روشن
+  // stage-78 — در لایت، Aurora پاستلی است → عنوان تیره؛ در دارک سفید
   const aurora = article.isFeatured === true;
 
   return (
@@ -45,7 +46,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
         <Link
           to="/articles/$articleId"
           params={{ articleId: article.id }}
-          className={`font-DanaMedium text-sm/7 mt-2.5 ml-1.5 sm:ml-0 sm:mt-0 md:text-lg line-clamp-2 max-w-48 ${aurora ? 'text-white' : 'text-zinc-700 dark:text-white'} hover:text-primary dark:hover:text-dark-primary transition-colors`}
+          className={`font-DanaMedium text-sm/7 mt-2.5 ml-1.5 sm:ml-0 sm:mt-0 md:text-lg line-clamp-2 max-w-48 ${aurora ? 'text-zinc-800 dark:text-white' : 'text-zinc-700 dark:text-white'} hover:text-primary dark:hover:text-dark-primary transition-colors`}
         >
           {article.title}
         </Link>

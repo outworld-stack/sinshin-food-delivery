@@ -21,7 +21,13 @@ export const Footer = memo(function Footer() {
         const { t, fmt } = useI18n()
 
         return (
-                <footer className="bg-white dark:bg-[#1a0a0e] border-t border-gray-200 dark:border-white/10">
+                // stage-78 — relative (بدون z-index ⇒ بدون stacking-context): فوترِ
+                // ایستا در ترتیبِ نقاشی زیر عناصرِ position‌دار (مثل بومِ پس‌زمینه‌ی
+                // fixed z-0 صفحه‌ی محصول ویژه) می‌افتاد و زیرش دفن می‌شد؛ با
+                // position در همان مرحله ولی «بعد از main» در ترتیب DOM می‌نشیند
+                // ⇒ همیشه بالای بوم. هیچ اثر دیگری ندارد (توست z-200/مودال‌ها
+                // z-100 هنوز بالاترند؛ چیدمان تغییری نمی‌کند).
+                <footer className="relative bg-white dark:bg-[#1a0a0e] border-t border-gray-200 dark:border-white/10">
                         {/* نوار بالایی فوتر */}
                         <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-8">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-10">

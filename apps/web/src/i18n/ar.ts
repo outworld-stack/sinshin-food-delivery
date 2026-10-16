@@ -83,6 +83,8 @@ export const ar: Dict = {
         'common.retry': 'إعادة المحاولة',
         'common.scrollTop': 'العودة إلى الأعلى',
         'common.discountBadge': 'خصم {n}٪',
+        // stage-78 — شارة «مميز» في الزاوية اليسرى العليا لبطاقة المنتج المميز
+        'common.featuredBadge': 'مميز',
 
         // ── العدّ التنازلي للخصم المحدود بوقت (stage-47) ──
         'common.offerEndsIn': 'نهاية الخصم',

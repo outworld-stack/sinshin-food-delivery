@@ -106,4 +106,9 @@ export interface ProductFormProps {
    * productsAvailability). نیامد = اجازه (سازگاری).
    */
   canToggleAvailability?: boolean;
+  /**
+   * stage-78 — اجازه‌ی نمایش سوئیچ «محصول ویژه» — فقط ادمین اصلی
+   * (بک هم پرچم را از ادمین۲ حذف می‌کند). نیامد = اجازه (سازگاری).
+   */
+  canToggleFeatured?: boolean;
 }

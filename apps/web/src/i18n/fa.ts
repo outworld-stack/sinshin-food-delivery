@@ -83,6 +83,8 @@ export const fa = {
         'common.retry': 'تلاش مجدد',
         'common.scrollTop': 'بازگشت به بالا',
         'common.discountBadge': '{n}٪ تخفیف',
+        // stage-78 — بج «ویژه» گوشه‌ی چپِ بالای کارت محصول ویژه
+        'common.featuredBadge': 'ویژه',
 
         // ── شمارنده‌ی معکوس تخفیف زمان‌دار (stage-47) ──
         'common.offerEndsIn': 'پایان تخفیف',

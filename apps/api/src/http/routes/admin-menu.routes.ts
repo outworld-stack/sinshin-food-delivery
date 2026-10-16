@@ -258,6 +258,13 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .post(
       '/products',
       async ({ body, user }) => {
+        // stage-78 — «ویژه» فقط به دست ادمین اصلی: پرچم از بدنه‌ی درخواستِ
+        // ادمین۲ حذف می‌شود → create ⇒ پیش‌فرض خاموش؛ ویرایش ⇒ دست‌نخورده.
+        // ادمین۲ هم محصولِ ویژه‌ی ادمین اصلی را خراب نمی‌کند و هم نمی‌تواند
+        // خودش محصولی را ویژه کند (بج/Aura/صفحه‌ی متحرک = تصمیم برند).
+        if (user.role !== 'admin' && body.isFeatured !== undefined) {
+          delete body.isFeatured
+        }
         const res = await deps.menu.createProduct(body)
         // stage-10: ممیزی فقط برای ادمین اصلی — ادمین۲ activities خودش را دارد
         if (user.role === 'admin') {
@@ -315,6 +322,11 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .patch(
       '/products/:id',
       async ({ params, body, user }) => {
+        // stage-78 — همان گاردِ ویژه‌سازی POST: ادمین۲ پرچم را تغییر نمی‌دهد
+        // (undefined ⇒ دست‌نخورده — مقدار فعلی در دیتابیس می‌ماند)
+        if (user.role !== 'admin' && body.isFeatured !== undefined) {
+          delete body.isFeatured
+        }
         // stage-56 — نتیجه‌ی پیام‌دار (clashِ slug → پیام دوستانه در پاسخ)
         const res = await deps.menu.updateProduct({ id: params.id, ...body })
         if (res.success && user.role === 'admin') {

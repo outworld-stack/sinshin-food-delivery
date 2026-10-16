@@ -12,68 +12,70 @@ import { usePermissions } from '#/hooks/admin/usePermissions'
 import { PermissionGate } from '#/components/shared/PermissionGate'
 
 export const Route = createFileRoute('/admin/products/$productId/edit')({
-	component: EditProductPage,
+        component: EditProductPage,
 })
 
 function EditProductPage() {
-	const { productId } = Route.useParams()
-	const navigate = useNavigate()
-	const queryClient = useQueryClient()
-	const showToast = useToastStore((state) => state.showToast)
-	const { permissions } = usePermissions()
+        const { productId } = Route.useParams()
+        const navigate = useNavigate()
+        const queryClient = useQueryClient()
+        const showToast = useToastStore((state) => state.showToast)
+        const { permissions, isMainAdmin } = usePermissions()
 
-	const { data: product, isLoading } = useQuery(
-		adminProductDetailsOptions(productId),
-	)
+        const { data: product, isLoading } = useQuery(
+                adminProductDetailsOptions(productId),
+        )
 
-	// ورودی کاملاً تایپ‌دار (قبلاً data: any بود) —
-	// stage-60 — categoryIds حالا در PATCH هم می‌رود (دسته دیگر immutable نیست)
-	const mutation = useMutation({
-		mutationFn: (data: ProductFormData) =>
-			updateAdminProduct({ data: { id: productId, ...data } }),
-		onSuccess: (res) => {
-			// stage-56 — HTTP 200 با success=false (مثل slug تکراری): پیام سرور
-			// نمایش داده شود؛ بدون invalidate/ناوبری — کاربر روی فرم اصلاح می‌کند
-			if (!res.success) {
-				showToast(res.message ?? 'ویرایش محصول ناموفق بود.', 'error')
-				return
-			}
-			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
-			queryClient.invalidateQueries({
-				queryKey: qk.adminProductDetails(productId),
-			})
-			// stage-48 — منوی عمومی/سبد/چک‌اوت حالت‌ها و موجودی تازه را ببینند
-			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
-			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
-			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
-			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
-			showToast('محصول با موفقیت ویرایش شد')
-			navigate({ to: '/admin/products' })
-		},
-		// stage-56 — خطای شبکه/اعتبارسنجی (استثنا) هم پیام‌دار دیده شود
-		onError: (err) => showToast(err.message, 'error'),
-	})
+        // ورودی کاملاً تایپ‌دار (قبلاً data: any بود) —
+        // stage-60 — categoryIds حالا در PATCH هم می‌رود (دسته دیگر immutable نیست)
+        const mutation = useMutation({
+                mutationFn: (data: ProductFormData) =>
+                        updateAdminProduct({ data: { id: productId, ...data } }),
+                onSuccess: (res) => {
+                        // stage-56 — HTTP 200 با success=false (مثل slug تکراری): پیام سرور
+                        // نمایش داده شود؛ بدون invalidate/ناوبری — کاربر روی فرم اصلاح می‌کند
+                        if (!res.success) {
+                                showToast(res.message ?? 'ویرایش محصول ناموفق بود.', 'error')
+                                return
+                        }
+                        queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
+                        queryClient.invalidateQueries({
+                                queryKey: qk.adminProductDetails(productId),
+                        })
+                        // stage-48 — منوی عمومی/سبد/چک‌اوت حالت‌ها و موجودی تازه را ببینند
+                        queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
+                        queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+                        queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
+                        queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
+                        showToast('محصول با موفقیت ویرایش شد')
+                        navigate({ to: '/admin/products' })
+                },
+                // stage-56 — خطای شبکه/اعتبارسنجی (استثنا) هم پیام‌دار دیده شود
+                onError: (err) => showToast(err.message, 'error'),
+        })
 
-	// گارد — فقط productsWrite اجازه ویرایش دارد
-	if (!permissions.productsWrite) {
-		return <PermissionGate hasAccess={false} pageName="ویرایش محصول" />
-	}
+        // گارد — فقط productsWrite اجازه ویرایش دارد
+        if (!permissions.productsWrite) {
+                return <PermissionGate hasAccess={false} pageName="ویرایش محصول" />
+        }
 
-	if (isLoading || !product) {
-		return <AdminProductFormSkeleton />
-	}
+        if (isLoading || !product) {
+                return <AdminProductFormSkeleton />
+        }
 
-	return (
-		<div className="space-y-6">
-			<h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">
-				ویرایش محصول: {product.name}
-			</h1>
-			<ProductForm
-				initialData={product}
-				onSubmit={mutation.mutate}
-				isSubmitting={mutation.isPending}
-				canToggleAvailability={permissions.productsAvailability}
-			/>
-		</div>
-	)
+        return (
+                <div className="space-y-6">
+                        <h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">
+                                ویرایش محصول: {product.name}
+                        </h1>
+                        <ProductForm
+                                initialData={product}
+                                onSubmit={mutation.mutate}
+                                isSubmitting={mutation.isPending}
+                                canToggleAvailability={permissions.productsAvailability}
+                                // stage-78 — ویژه‌سازی فقط ادمین اصلی (بک هم گارد دارد)
+                                canToggleFeatured={isMainAdmin}
+                        />
+                </div>
+        )
 }
