@@ -240,6 +240,161 @@ async function main(): Promise<void> {
       'P4: شماره C بدون clientId اصلاً ردیفِ مالِ دیگران را نمی‌بیند (نرم)',
       peekC3.device === null,
     )
+
+    // ═════════════════════════════════════════════════════════════
+    // stage-80 — هوشِ جمعیتی + وراثتِ مسدودی + دروازه‌ی هم‌بستگی
+    // ═════════════════════════════════════════════════════════════
+
+    /** سیگنال‌های «یکتا» — الگوی دستگاهِ واقعیِ قابل‌ردگیری */
+    const uniqueSignals = (tag: string, clientId?: string | null) => ({
+      ...strongSignals(clientId),
+      canvasHash: `${tag}-c`.repeat(20).slice(0, 64),
+      webglHash: `${tag}-w`.repeat(20).slice(0, 64),
+      audioHash: `${tag}-a`.repeat(20).slice(0, 64),
+      fontsHash: `${tag}-f`.repeat(20).slice(0, 64),
+    })
+
+    const finalizeSignals = async (
+      peek: Awaited<ReturnType<typeof devices.peek>>,
+      phone: string,
+      signals: ReturnType<typeof strongSignals>,
+    ) =>
+      database.db.transaction(async (tx) =>
+        devices.finalize(tx, { signals, phone, peek, event: 'REGISTER' }),
+      )
+
+    // ── S1 — جمعیتِ هم‌مدل: لینکِ کاذب دیگر ساخته نمی‌شود (IDF) ──
+    // ۱۲ دستگاهِ هم‌مدلِ تازه (همان چهار هشِ strongSignals) + ردیف‌های A/B
+    for (let i = 0; i < 12; i++) {
+      await database.db.execute(
+        sql`insert into devices (fingerprint_hash, canvas_hash, webgl_hash, audio_hash, fonts_hash)
+            values (${'crowd-fp-' + i}, ${'a'.repeat(64)}, ${'b'.repeat(64)}, ${'c'.repeat(64)}, ${'d'.repeat(64)})`,
+      )
+    }
+    const PHONE_D = '09150000004'
+    const peekD = await devices.peek(strongSignals(), PHONE_D)
+    const finD = await finalizeSignals(peekD, PHONE_D, strongSignals())
+    const linksOfD = (await database.db.query.deviceLinks.findMany({})).filter(
+      (l) => l.deviceA === finD.device.id || l.deviceB === finD.device.id,
+    )
+    ok(
+      'S1: ثبت‌نامِ دستگاهِ هم‌مدل در جمعیتِ ۱۵تایی → هیچ لینکِ کاذبی (وزنِ جمعیتی)',
+      linksOfD.length === 0,
+      `links=${linksOfD.length}`,
+    )
+    ok('S1: ریسکِ crowded-cluster هم نگرفت (خوشه‌ی تنها)', finD.device.riskFlags.length === 0, JSON.stringify(finD.device.riskFlags))
+
+    // ── S2 — وراثتِ مسدودی: فرارِ «پاک‌کردنِ storage + شماره‌ی جدید» ──
+    const PHONE_E = '09150000005'
+    const PHONE_F = '09150000006'
+    const peekE = await devices.peek(uniqueSignals('e'), PHONE_E)
+    const finE = await finalizeSignals(peekE, PHONE_E, uniqueSignals('e'))
+    ok('S2: دستگاهِ E (سیگنال‌های یکتا) ثبت‌نام کرد و سالم است', !finE.device.isBlocked)
+    await devices.setBlocked(finE.device.id, true, 'admin-test', null)
+    // متخلف: storage پاک (clientId تازه/هیچ) + شماره‌ی جدید + همان سیگنال‌ها
+    const peekF = await devices.peek(uniqueSignals('e'), PHONE_F)
+    ok(
+      'S2: peek شماره F ردیفِ مسدودِ E را پیدا نمی‌کند (هشِ scope-شماره) — فرارِ خاموش',
+      peekF.device === null,
+    )
+    const finF = await finalizeSignals(peekF, PHONE_F, uniqueSignals('e'))
+    ok(
+      'S2: ثبت‌نام F کامل شد اما دستگاهش «مسدودِ وارثی» شد (cluster-block-inherit)',
+      finF.device.isBlocked === true && finF.device.blockedReason === 'cluster-block-inherit',
+      `blocked=${finF.device.isBlocked} reason=${finF.device.blockedReason}`,
+    )
+    const evadeEvents = await database.db.query.deviceEvents.findMany({
+      where: sql`device_id = ${finF.device.id} and event = 'EVADED_BLOCK_LINK'`,
+    })
+    ok('S2: رویدادِ ممیزی EVADED_BLOCK_LINK با جزئیات ثبت شد', evadeEvents.length === 1)
+    const inheritLink = (await database.db.query.deviceLinks.findMany({})).find(
+      (l) =>
+        (l.deviceA === finE.device.id && l.deviceB === finF.device.id) ||
+        (l.deviceA === finF.device.id && l.deviceB === finE.device.id),
+    )
+    ok('S2: رابطه‌ی E↔F در گرافِ دستگاه ثبت شد (پنل ادمین)', Boolean(inheritLink))
+
+    // ── S3 — دستگاهِ بی‌گناهِ هم‌مدل: مصون از وراثت (وزنِ جمعیتی) ──
+    // یکی از جمعیتِ هم‌مدل را مسدود می‌کنیم؛ شخصِ بعدیِ همان مدل نباید وارثِ مسدودی شود
+    const crowdRow = await database.db.query.devices.findFirst({
+      where: sql`fingerprint_hash like 'crowd-fp-%'`,
+    })
+    await devices.setBlocked(crowdRow!.id, true, 'admin-test', null)
+    const PHONE_G = '09150000007'
+    const peekG = await devices.peek(strongSignals(), PHONE_G)
+    const finG = await finalizeSignals(peekG, PHONE_G, strongSignals())
+    ok(
+      'S3: دستگاهِ هم‌مدل در جمعیتِ «مسدوددار» → وارثِ مسدودی «نشد» (df تخفیف کرد)',
+      finG.device.isBlocked === false,
+      `blocked=${finG.device.isBlocked} reason=${finG.device.blockedReason}`,
+    )
+    const evadeG = await database.db.query.deviceEvents.findMany({
+      where: sql`device_id = ${finG.device.id} and event = 'EVADED_BLOCK_LINK'`,
+    })
+    ok('S3: هیچ EVADED_BLOCK_LINKی برای بی‌گناه ثبت نشد', evadeG.length === 0)
+
+    // ── S4 — دروازه‌ی هم‌بستگیِ auto-block (با آستانه‌ی ۶۰ برای آزمون) ──
+    const configGate = new AppConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: url.toString(),
+      DEVICE_ENFORCEMENT: 'true',
+      DEVICE_MAX_PHONES_PER_DEVICE: '1',
+      DEVICE_AUTOBLOCK_SCORE: '60',
+      DEVICE_LINK_THRESHOLD: '0.7',
+      DEVICE_SIMILARITY_WINDOW_DAYS: '7',
+    })
+    const devicesGate = new DeviceService({ db: database.db, config: configGate })
+    const finalizeGate = async (phone: string, signals: ReturnType<typeof strongSignals>) => {
+      const peek = await devicesGate.peek(signals, phone)
+      return database.db.transaction(async (tx) =>
+        devicesGate.finalize(tx, { signals, phone, peek, event: 'REGISTER' }),
+      )
+    }
+    // فقط شواهدِ ضعیف: low-memory(25) + mobile-no-touch(20) + platform-mismatch(20) = 65 ≥ 60
+    const weakSignals: ReturnType<typeof strongSignals> = {
+      ...uniqueSignals('w'),
+      deviceMemory: 2,
+      touch: false,
+      platform: 'Android',
+    }
+    const PHONE_H = '09150000008'
+    const finH = await finalizeGate(PHONE_H, weakSignals)
+    ok(
+      'S4: انبارِ شواهدِ ضعیف (65 ≥ 60) → مسدود «نشد» (AUTO_BLOCK_DEFERRED)',
+      finH.device.isBlocked === false && finH.device.riskScore === 65,
+      `blocked=${finH.device.isBlocked} score=${finH.device.riskScore}`,
+    )
+    const deferredH = await database.db.query.deviceEvents.findMany({
+      where: sql`device_id = ${finH.device.id} and event = 'AUTO_BLOCK_DEFERRED'`,
+    })
+    ok('S4: رویدادِ معوق با دلیلِ weak-flags-only ثبت شد (بازبینیِ ادمین)', deferredH.length === 1)
+    // یک شاهدِ قوی: headless-ua(35) + low-memory(25) = 60
+    const headlessSignals: ReturnType<typeof strongSignals> = {
+      ...uniqueSignals('s'),
+      deviceMemory: 2,
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/124.0.0.0',
+    }
+    const PHONE_I = '09150000009'
+    const finI = await finalizeGate(PHONE_I, headlessSignals)
+    ok(
+      'S4: فلگِ قویِ headless-ua (60) → مسدود «شد»',
+      finI.device.isBlocked === true,
+      `blocked=${finI.device.isBlocked} reason=${finI.device.blockedReason}`,
+    )
+
+    // ── S5 — رویدادِ تصمیم (forensics) ──
+    const decisions = await database.db.query.deviceEvents.findMany({
+      where: sql`device_id = ${finF.device.id} and event = 'DEVICE_DECISION'`,
+    })
+    const metaF = (decisions[0]?.metadata ?? {}) as Record<string, unknown>
+    ok(
+      'S5: DEVICE_DECISION ثبت شد — لایه/ریسک/وراثت در یک رویداد',
+      decisions.length >= 1 &&
+        metaF['matchedBy'] === 'none' &&
+        metaF['evadedBlock'] !== null &&
+        metaF['autoBlock'] === 'no',
+      JSON.stringify(metaF).slice(0, 160),
+    )
   } finally {
     await database.close()
     const cleaner = new SQL(admin, { max: 1 })

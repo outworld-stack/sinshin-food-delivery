@@ -963,3 +963,85 @@ cd apps/api && bun run db:test:sep && bun run db:test:mellat && bun run db:test:
 
 ### فایل‌ها (۲۱: ۶ جدید + ۱۵ جایگزینی)
 بک: registration-permits.ts (جدید) · schema/index · drizzle/0007 (جدید) + meta/0007_snapshot (جدید) + _journal · registration-permit.service.ts (جدید) · auth.service · device.service · admin-settings.routes · app · index · package.json (db:test:permit) · test-registration-permit.ts (جدید) · test-migrations — قرارداد: packages/shared/contracts — فرانت: admin.ts (server) · queryKeys · queryOptions · RegistrationPermitCard.tsx (جدید) · routes/admin/settings/index — مستند: REFERENCE.md
+
+## ۲-۱۰-۱۲ — stage-80: هوشِ جمعیتیِ دستگاه — وزنِ IDF، وراثتِ مسدودی، هم‌بستگیِ auto-block
+
+> درخواست کارفرما: «پیشرفته‌ترین الگوریتم‌های بلاکِ دستگاه را عمیق بررسی کن، کدهای من را
+> به آن‌ها عرضه کن و سیستم را پیشرفته‌تر/بهینه‌تر/بدون‌خطاتر کن — خصوصاً تشخیصِ
+> اشتباهی (false positive) مطلقاً نباید باشد.»
+
+### ۰) خلاصه‌ی تحقیق عمیق (الگوریتم‌های پیشرفته → کمبودهای ما)
+| منبع/الگو | اصل | کمبودِ ما پیش از ۸۰ | رفع |
+|---|---|---|---|
+| Arkose/ShieldLabs — «collision در برابر division» | هر سیستم FP دو سو خطا دارد؛ تصمیمِ سخت باید «لایه‌بندی به اعتماد» باشد | امتیازِ ثابت | وزنِ جمعیتی (IDF) + دروازه‌های هم‌بستگی |
+| Fellegi–Sunter (1969) — اتصالِ احتمالاتی رکورد | وزنِ توافقِ هر فیلد = تابعِ فراوانیِ مقدار در جمعیت (log m/u) | توافقِ مقدارِ فراوان همان وزنِ کمیاب | `idfFactor(df)`: df≤3 کامل؛ بیشتر = 3/df |
+| anonymity-set (iOS هم‌مدل) | سیگنالی که جمعیت شریک‌اند تمییزنده نیست | دو آیفون هم‌مدل = لینکِ کاذب → crowded-cluster + قطعِ معرفی | جمعیت ≥ ۴ دستگاه → وزنِ هش‌ها فرو می‌ریزد |
+| tiered identity (FingerprintJS Pro/Castle) | شناسه‌ی قطعی جدا از احتمالاتی؛ تصمیمِ سخت با اعتمادِ بالا | auto-block با انبارِ فلگ‌های ضعیف (۲۵+۲۰+۲۰+۱۵=۸۰) | `autoBlockEligible`: حداقل یک فلگِ قوی |
+| graduated response (Sift/SEON) | approve/challenge/review/decline | auto/بازبینی دو حالت | `AUTO_BLOCK_DEFERRED` = صفِ بازبینی |
+| گرافِ دستگاه + سوپاپِ اپراتور | فرارِ storage-clear باید روی گراف شکار شود؛ استثنا = مجوزِ ۷۹ | لینک‌ها فقط نرم بودند | `cluster-block-inherit` + `EVADED_BLOCK_LINK` |
+
+### ۱) وزنِ جمعیتی (device-signals.ts — الگوی Fellegi–Sunter)
+- `signalSimilarity(a, b, stats?)`: پارامترِ اختیاریِ `SignalPopulationStats` (df چهار هش)؛
+  توافقِ هر هش در `idfFactor(df)` ضرب می‌شود؛ خروجی `weighted` + `agreeingHashes` اضافه شد.
+- `idfFactor(df)`: df≤`RARE_DF_CAP`(3) → ۱؛ df بزرگ → `3/df` (df=30 → ۰٫۱). جمعیتِ هم‌مدل
+  خودکار تخفیف می‌خورد؛ جفتِ واقعی (df=2) و دیتابیسِ کوچک/سرد بی‌آسیب.
+- **بدون stats رفتار بایت‌به‌بایت همانِ قبل** (`weighted === score`) — سازگاریِ کامل عقب.
+- سیگنال‌های غیر-هش (screen/platform/tzlang) عمداً بی‌تخفیف — اطلاع‌شان جمعیتی نیست.
+
+### ۲) لینک‌سازی (device.service.ts — گام ۲)
+- قبل از جست‌وجوی شباهت: `hashPopulationOn` = چهار `count(*)` ایندکس‌دار (مایگریشن ۰۰۰۸)
+  داخل همان tx برای df سیگنال‌های «واقعی» (missing هرگز پرس‌وجو نمی‌شود).
+- فیلترِ لینک: علاوه بر گاردهای قبلی، `weighted ≥ linkThreshold` — لینکِ کاذبِ جمعیتِ
+  هم‌مدل عملاً غیرممکن؛ رویداد LINK_CREATED حالا weighted را هم ثبت می‌کند.
+
+### ۳) وراثتِ مسدودی — شکارِ فرارِ «storage پاک + شماره‌ی جدید» (گام ۲-b + ۵-c)
+- سناریو: متخلفِ مسدودشده storage را پاک می‌کند (clientId/هشِ مرکب تازه) و با شماره‌ی
+  جدید ثبت‌نام می‌کند؛ لایه‌های ۱/۲ نمی‌گیرندش اما سیگنال‌های واقعی هنوز به ردیفِ مسدود
+  می‌خورند.
+- کاندیدهای مسدود «بدون پنجره‌ی زمانی» (سقف ۲۰۰، مرتبِ blockedAt) چک می‌شوند؛ معیارِ
+  `strongEvasionMatch`: score ≥ ۰٫۸۵ **و** weighted ≥ ۰٫۵ **و** ≥۳ هشِ برابر **و**
+  comparable ≥ ۴ — دستگاهِ بی‌گناهِ هم‌مدل هرگز (وزنِ جمعیتی) به این سطوح نمی‌رسد.
+- اجرا: پس از ثبت‌نامِ موفق، ردیفِ تازه `cluster-block-inherit` می‌شود (خارج از auto:% —
+  جاروی ۷۳ آزادش نمی‌کند) + سشن‌ها قطع + رویداد `EVADED_BLOCK_LINK` + لینکِ گراف.
+  فلسفه همان auto-block/permit-burn: «ثبت‌نام موفق، دستگاهِ مرده». سوپاپِ رسمی = مجوزِ ۷۹.
+- فقط REGISTER (ورودِ کاربرِ موجود دست‌نخورده). انتقالِ گذرا (ترانزیتیو) ممنوع — فقط
+  تطابقِ مستقیمِ سیگنال‌های همین ثبت‌نام با ردیفِ مسدود.
+
+### ۴) دروازه‌ی هم‌بستگیِ auto-block (گام ۵)
+- `STRONG_RISK_FLAGS = {headless-ua, canvas-drift}`؛ `autoBlockEligible` = امتیاز ≥ آستانه
+  **و** حداقل یک فلگِ قوی (پیش‌فرض؛ `DEVICE_AUTOBLOCK_REQUIRE_STRONG=false` = رفتارِ قبل).
+- انبارِ فلگ‌های ضعیف (۸۰) دیگر مسدود نمی‌کند → `AUTO_BLOCK_DEFERRED` + riskScore/flags
+  روی ردیف (بازبینیِ ادمین) — دستگاهِ بی‌گناهِ عجیب (رم کم/پلتفرم نادرست) قربانی نمی‌شود.
+
+### ۵) forensics — رویدادِ تصمیم (گام ۶)
+- هر REGISTER/LOGIN: `DEVICE_DECISION` با matchedBy/riskScore/flags/links/autoBlock/evadedBlock/
+  permitOverride — پاسخِ «چرا؟» برای بازبینی.
+
+### ۶) env (هر دو پیش‌فرض روشن — false = برگشتِ رفتارِ قبل)
+| متغیر | پیش‌فرض | نقش |
+|---|---|---|
+| `DEVICE_AUTOBLOCK_REQUIRE_STRONG` | true | auto-block فقط با فلگِ قوی |
+| `DEVICE_CLUSTER_BLOCK_INHERIT` | true | وراثتِ مسدودی فعال |
+
+### مایگریشن ۰۰۰۸
+- `0008_cool_thundra.sql` — چهار ایندکسِ btree (canvas/webgl/audio/fonts) برای countهای
+  جمعیت؛ تولیدشده با همان `db:generate` (drizzle-kit) — اعمال: `bun run db:migrate`.
+
+### تست‌ها
+- `db:test:intel` (جدید — **بدون PG**، ۲۸ بند): idfFactor، سقوطِ وزنِ جمعیت، جفتِ کمیاب،
+  سازگاریِ بدون-stats، دروازه‌های strongEvasionMatch، autoBlockEligible، پروتکلِ missing.
+- `db:test:device` (رشد یافت — PG): S1 جمعیت ۱۵تایی → صفر لینکِ کاذب · S2 فرارِ کامل →
+  cluster-block-inherit + EVADED_BLOCK_LINK + لینکِ گراف · S3 بی‌گناهِ هم‌مدل در جمعیتِ
+  مسدوددار → مصون · S4 آستانه ۶۰: انبارِ ضعیف (۶۵) → DEFERRED؛ headless (۶۰) → مسدود ·
+  S5 DEVICE_DECISION با متادیتای کامل. (رگرسیون‌های P0–P4 دست‌نخورده سبز.)
+- `db:test:migrations`: A2 جدید — چهار ایندکسِ ۰۰۰۸ ساخته می‌شوند؛ CHAIN_COUNT داینامیک.
+
+### راستی‌آزمایی
+- tsc api=۰ · tsc web=۰ · biome web = ۶۳۹/۱۴/۹ = دقیقاً baseline.
+- `db:test:intel` ۲۸/۲۸ (اجرای واقعی، بدون PG) · تست‌های PG (device/migrations/permit/…) در
+  محیطِ دارای PostgreSQL اجرا شوند — الگوی همیشگی.
+
+### فایل‌ها (۹: ۱ جدید + ۸ جایگزینی)
+بک: device-signals.ts · device.service.ts · schema/devices.ts · env.ts · drizzle/0008 (جدید)
++ meta/0008_snapshot (جدید) + _journal · package.json (db:test:intel) · scripts/test-device-intel.ts (جدید)
+· scripts/test-device-policy.ts · scripts/test-migrations.ts — مستند: REFERENCE.md

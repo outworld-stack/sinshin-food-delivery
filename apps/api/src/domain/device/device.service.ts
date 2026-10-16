@@ -24,17 +24,26 @@ import { Err } from '#/domain/shared/errors'
 import { isUniqueViolation, likePattern } from '#/domain/shared/pg'
 import { asDeviceId, asUserId, type DeviceId } from '#/domain/shared/brand'
 import {
+  autoBlockEligible,
   compositeFingerprintHash,
   computeRiskScore,
   isMissingHash,
   MIN_REAL_HASH_SIGNALS,
   realSignalCount,
   signalSimilarity,
+  strongEvasionMatch,
   type DeviceSignals,
+  type SignalPopulationStats,
 } from './device-signals'
 
 const CLUSTER_CAP = 50
 const SIMILARITY_CANDIDATE_CAP = 500
+/**
+ * stage-80 — سقفِ کاندیدهای مسدود در جست‌وجویِ وراثتِ مسدودی (بدون پنجره‌ی
+ * زمانی؛ مرتب بر اساس مسدودشدن). ردیف‌های مسدود کم‌اند و این پرس‌وجوی
+ * ایندکس‌دار (0008) است.
+ */
+const BLOCKED_CANDIDATE_CAP = 200
 
 /**
  * stage-70 — گاردِ لینک شباهت: علاوه بر آستانه‌ی score، لینک فقط وقتی
@@ -182,6 +191,9 @@ export class DeviceService {
     const { signals, phone, ip, peek, event } = input
     const composite = peek.fingerprintHash
     const linkedTo: { deviceId: string; similarity: number }[] = []
+    // ── stage-80 — وضعیتِ تصمیم‌های سخت (برای رویدادِ ممیزیِ پایان) ──
+    let evadedBlock: { deviceId: DeviceId; score: number; weighted: number } | null = null
+    let autoBlockOutcome: 'fired' | 'deferred-weak-flags' | 'no' = 'no'
 
     // ── ۱) ردیف دستگاه: به‌روزرسانیِ قفل‌شده یا درجِ race-safe ──
     let device: DeviceRow | undefined
@@ -317,6 +329,8 @@ export class DeviceService {
       // دقت: خودِ ردیفِ تازه از کاندیدها حذف می‌شود — درج + جست‌وجوی بعدی،
       // خودش را با شباهت ۱.۰ «لینک به خود» می‌ساخت (کشف E2E استیج ۷۰).
       if (realSignalCount(signals) >= MIN_REAL_HASH_SIGNALS) {
+        // stage-80 — آمارِ جمعیتِ چهار هش (df) — وزنِ تمییزدهندگیِ توافق‌ها
+        const stats = await this.hashPopulationOn(db, signals)
         const since = new Date(Date.now() - config.device.similarityWindowDays * 86_400_000)
         const candidates = await db
           .select()
@@ -326,10 +340,14 @@ export class DeviceService {
           .limit(SIMILARITY_CANDIDATE_CAP)
 
         const scored = candidates
-          .map((c) => ({ c, sim: signalSimilarity(c, signals) }))
+          .map((c) => ({ c, sim: signalSimilarity(c, signals, stats) }))
           .filter(
             (x) =>
               x.sim.score >= config.device.linkThreshold &&
+              // stage-80 — گاردِ جمعیت: توافقِ هش‌های «فراوان» (جمعیتِ هم‌مدل)
+              // تخفیف خورده؛ لینک فقط با شاهدِ تمییزدهنده (weighted) ساخته
+              // می‌شود — رفعِ collision کاذب (یافته‌ی اصلیِ تحقیقِ ۸۰)
+              x.sim.weighted >= config.device.linkThreshold &&
               x.sim.comparableWeight >= MIN_LINK_COMPARABLE_WEIGHT &&
               x.sim.comparableCount >= MIN_LINK_COMPARABLE_COUNT,
           )
@@ -347,7 +365,28 @@ export class DeviceService {
           await this.logEventOn(db, device.id, phone, 'LINK_CREATED', ip, signals.userAgent, {
             otherDeviceId: c.id,
             similarity: sim.score,
+            weighted: sim.weighted,
           })
+        }
+
+        // ── ۲-b) stage-80 — شکارِ فرارِ «پاک‌کردنِ storage» (وراثتِ مسدودی) ──
+        // کاندیدهای مسدود از پنجره‌ی زمانیِ شباهت «معاف‌اند» (ردیفِ مسدودِ
+        // کهنه دیده نمی‌شود اما فرارِ تازه‌وارد همچنان باید به آن بخورد).
+        // معیار: strongEvasionMatch — امتیاز خام بالا + وزنِ جمعیتیِ قوی +
+        // ≥۳ هشِ برابر؛ دستگاهِ بی‌گناهِ هم‌مدل با هش‌های فراوان هرگز به
+        // این سطوح نمی‌رسد (idf تخفیفش می‌کند). اجرای تصمیم: گام ۵-c.
+        const blockedCandidates = await db
+          .select()
+          .from(devices)
+          .where(and(eq(devices.isBlocked, true), ne(devices.id, device.id)))
+          .orderBy(desc(devices.blockedAt))
+          .limit(BLOCKED_CANDIDATE_CAP)
+        for (const c of blockedCandidates) {
+          const sim = signalSimilarity(c, signals, stats)
+          if (strongEvasionMatch(sim)) {
+            evadedBlock = { deviceId: c.id, score: sim.score, weighted: sim.weighted }
+            break
+          }
         }
       }
 
@@ -408,27 +447,43 @@ export class DeviceService {
     await this.attachIdentityOn(db, device.id, phone, event, ip, signals.userAgent ?? null)
 
     // ── ۵) مسدودسازی خودکار — فقط بعد از ثبت‌نام موفق + پشت flag (P1-۳) ──
+    // stage-80 — دروازه‌ی هم‌بستگی (graduated response): علاوه بر آستانه‌ی
+    // امتیاز، حداقل یک فلگِ قوی لازم است (canvas-drift / headless-ua)؛
+    // انبارِ شواهدِ ضعیف = ۸۰ فقط «معوق» می‌شود (AUTO_BLOCK_DEFERRED) و
+    // riskScore/flags روی ردیف می‌ماند تا ادمین در پنل ببیند — دستگاهِ
+    // بی‌گناهِ عجیب (قدیمی/پلتفرم‌گزارش‌دهنده‌ی نادرست) دیگر قربانی نمی‌شود.
     if (
       event === 'REGISTER' &&
       config.deviceEnforcement &&
       device.riskScore >= config.device.autoblockScore &&
       !device.isBlocked
     ) {
-      const [blocked] = await db
-        .update(devices)
-        .set({
-          isBlocked: true,
-          blockedAt: new Date(),
-          blockedReason: `auto: ${device.riskFlags.join(',')}`,
+      if (autoBlockEligible(device.riskScore, device.riskFlags, config.device.autoblockRequireStrong)) {
+        const [blocked] = await db
+          .update(devices)
+          .set({
+            isBlocked: true,
+            blockedAt: new Date(),
+            blockedReason: `auto: ${device.riskFlags.join(',')}`,
+          })
+          .where(eq(devices.id, device.id))
+          .returning()
+        device = blocked ?? device
+        autoBlockOutcome = 'fired'
+        await this.logEventOn(db, device.id, phone, 'AUTO_BLOCK', ip, signals.userAgent, {
+          score: device.riskScore,
+          flags: device.riskFlags,
         })
-        .where(eq(devices.id, device.id))
-        .returning()
-      device = blocked ?? device
-      await this.logEventOn(db, device.id, phone, 'AUTO_BLOCK', ip, signals.userAgent, {
-        score: device.riskScore,
-        flags: device.riskFlags,
-      })
-      await this.revokeDeviceSessionsOn(db, device.id, 'auto-block')
+        await this.revokeDeviceSessionsOn(db, device.id, 'auto-block')
+      } else {
+        autoBlockOutcome = 'deferred-weak-flags'
+        await this.logEventOn(db, device.id, phone, 'AUTO_BLOCK_DEFERRED', ip, signals.userAgent, {
+          score: device.riskScore,
+          flags: device.riskFlags,
+          reason: 'weak-flags-only',
+          hint: 'امتیاز به آستانه رسید اما هیچ فلگِ قوی‌ای نیست — بازبینیِ ادمین',
+        })
+      }
     }
 
     // ── ۵-b) stage-79 — سوختنِ سختِ مسیرِ مجوز ──
@@ -459,6 +514,63 @@ export class DeviceService {
         reason: 'permit-burn',
       })
     }
+
+    // ── ۵-c) stage-80 — وراثتِ مسدودی (cluster-block-inherit) ──
+    // سناریو: متخلفِ دستگاهِ مسدودشده، storage را پاک می‌کند (clientId و
+    // هش مرکب تازه) و با شماره‌ی جدید ثبت‌نام می‌کند؛ لایه‌های ۱/۲ ردیفش
+    // را پیدا نمی‌کنند اما «سیگنال‌های واقعی» هنوز به دستگاهِ مسدود
+    // می‌خورند. اگر شاهدِ قوی (امتیاز خام + وزنِ جمعیتی + ≥۳ هش) باشد،
+    // ثبت‌نام کامل می‌شود اما همان ردیفِ تازه هم مسدود — «ثبت‌نام موفق،
+    // دستگاهِ مرده»، همان فلسفه‌ی auto-block/permit-burn. دلیلِ عمداً خارج
+    // از خانواده‌ی auto:% است (جاروی ۷۳ آزادش نمی‌کند)؛ سوپاپِ رسمی =
+    // مجوزِ ثبت‌نامِ ۷۹ برای کاربرِ بعدیِ همان دستگاهِ فیزیکی.
+    // ترتیب: بعدِ permit-burn — اگر مجوز مصرف شده، device همین حالا مسدود
+    // است و این گام فقط رویداد اضافه نمی‌کند (مسیرِ مجوز از قبل قطعی است).
+    if (
+      event === 'REGISTER' &&
+      config.deviceEnforcement &&
+      config.device.clusterBlockInherit &&
+      evadedBlock &&
+      !device.isBlocked
+    ) {
+      const [inherited] = await db
+        .update(devices)
+        .set({
+          isBlocked: true,
+          blockedAt: new Date(),
+          blockedReason: 'cluster-block-inherit',
+        })
+        .where(eq(devices.id, device.id))
+        .returning()
+      device = inherited ?? device
+      await this.revokeDeviceSessionsOn(db, device.id, 'cluster-block-inherit')
+      // رابطه را در گراف هم ثبت کن (پنل ادمین: خوشه‌ی مسدودی‌ها)
+      const a = device.id < evadedBlock.deviceId ? device.id : evadedBlock.deviceId
+      const b = device.id < evadedBlock.deviceId ? evadedBlock.deviceId : device.id
+      await db.insert(deviceLinks).values({ deviceA: a, deviceB: b, similarity: evadedBlock.score }).onConflictDoNothing()
+      await this.logEventOn(db, device.id, phone, 'EVADED_BLOCK_LINK', ip, signals.userAgent, {
+        blockedDeviceId: evadedBlock.deviceId,
+        similarity: evadedBlock.score,
+        weighted: evadedBlock.weighted,
+        reason: 'cluster-block-inherit',
+      })
+    }
+
+    // ── ۶) stage-80 — رویدادِ تصمیم (forensics) ──
+    // هر ثبت‌نام/ورود: با چه لایه‌ای پیدا شد، چه ریسکی داشت، چه لینکی خورد و
+    // تصمیم‌های سخت چه شدند — یک رویداد برای پاسخِ «چرا؟» در بازبینیِ ادمین.
+    await this.logEventOn(db, device.id, phone, 'DEVICE_DECISION', ip, signals.userAgent ?? null, {
+      event,
+      matchedBy: peek.matchedBy,
+      riskScore: device.riskScore,
+      riskFlags: device.riskFlags,
+      links: linkedTo.length,
+      autoBlock: autoBlockOutcome,
+      evadedBlock: evadedBlock
+        ? { deviceId: evadedBlock.deviceId, weighted: evadedBlock.weighted }
+        : null,
+      permitOverride: input.permitOverride === true,
+    })
 
     return { device, linkedTo }
   }
@@ -708,6 +820,32 @@ export class DeviceService {
   }
 
   // ── داخلی ──
+
+  /**
+   * stage-80 — آمارِ جمعیتِ چهار هشِ سیگنال (df = شمارِ ردیف‌های شریکِ مقدار،
+   * شامل خودِ ردیفِ تازه). ورودیِ idfFactor در signalSimilarity — فقط برای
+   * مقادیرِ «واقعی» پرس‌وجو می‌شود (missing هرگز وزن نمی‌گیرد)؛ چهار
+   * count ایندکس‌دار (مایگریشن 0008) داخلِ همان tx.
+   */
+  private async hashPopulationOn(db: DbOrTx, signals: DeviceSignals): Promise<SignalPopulationStats> {
+    const hashColumns =
+      devices.canvasHash as typeof devices.canvasHash | typeof devices.webglHash | typeof devices.audioHash | typeof devices.fontsHash
+    const countOf = async (
+      col: typeof hashColumns,
+      value: string,
+    ): Promise<number> =>
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(devices)
+        .where(eq(col, value))
+        .then((rows) => rows[0]?.n ?? 0)
+
+    const canvasDf = isMissingHash(signals.canvasHash) ? 0 : await countOf(devices.canvasHash, signals.canvasHash)
+    const webglDf = isMissingHash(signals.webglHash) ? 0 : await countOf(devices.webglHash, signals.webglHash)
+    const audioDf = isMissingHash(signals.audioHash) ? 0 : await countOf(devices.audioHash, signals.audioHash)
+    const fontsDf = isMissingHash(signals.fontsHash) ? 0 : await countOf(devices.fontsHash, signals.fontsHash)
+    return { canvasDf, webglDf, audioDf, fontsDf }
+  }
 
   /**
    * drift دو-مرحله‌ای (D3): canvas باید «دو بار پشت‌سرهم» عوض شده باشد و

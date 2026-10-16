@@ -110,6 +110,23 @@ export interface DeviceConfig {
    *  ورود با شماره‌های «از قبل ثبت‌نام‌شده» همیشه آزاد است (گارد فقط در
    *  مسیر کاربرِ جدید فعال می‌شود). */
   maxPhonesPerDevice: number
+  /**
+   * stage-80 — الگوی graduated response: مسدودسازیِ خودکار فقط با
+   * «یک فلگِ قوی» (canvas-drift دومرحله‌ای / headless-ua) فعال می‌شود؛
+   * انبارِ شواهدِ ضعیف (low-memory + mobile-no-touch + platform-mismatch
+   * + crowded-cluster = ۸۰) فقط پرچمِ بازبینی می‌ماند (AUTO_BLOCK_DEFERRED).
+   * false = رفتارِ پیش از ۸۰ (فقط آستانه‌ی امتیاز).
+   */
+  autoblockRequireStrong: boolean
+  /**
+   * stage-80 — وراثتِ مسدودی (cluster-block-inherit): ثبت‌نامِ موفق از
+   * ردیفِ تازه‌ای که «به‌شدت و با وزنِ جمعیتیِ قوی» به دستگاهِ مسدود
+   * می‌خورد (مکانیسمِ فرار: پاک‌کردن storage + تغییر جزئی FP) ⇒ همان
+   * ردیفِ تازه هم بلاک می‌شود (ثبت‌نام کامل، دستگاه مرده — همان فلسفه‌ی
+   * auto-block/permit-burn). سوپاپِ رسمیِ آزادسازی: مجوزِ ۷۹.
+   * false = خاموش (رفتارِ پیش از ۸۰).
+   */
+  clusterBlockInherit: boolean
 }
 
 /** round-19 — دیده‌بان سلامت: پیامک هنگام قطعی/برگشت db/redis/uploads */
@@ -317,6 +334,9 @@ export class AppConfig {
       referralBlockAfter: Number(source['DEVICE_REFERRAL_BLOCK_AFTER']) || 3,
       similarityWindowDays: Number(source['DEVICE_SIMILARITY_WINDOW_DAYS']) || 7,
       maxPhonesPerDevice: Number.isFinite(maxPhones) && maxPhones >= 0 ? maxPhones : 1,
+      // stage-80 — پیش‌فرضِ روشن: هر دو به‌سختی تصمیمِ سخت می‌گیرند؛ false = برگشتِ رفتارِ قبل
+      autoblockRequireStrong: bool('DEVICE_AUTOBLOCK_REQUIRE_STRONG', true),
+      clusterBlockInherit: bool('DEVICE_CLUSTER_BLOCK_INHERIT', true),
     }
 
     // round-19 — بدون HEALTH_ALERT_PHONES، ادمین‌های اصلی گیرنده‌اند

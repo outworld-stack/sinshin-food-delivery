@@ -339,7 +339,7 @@ export const RegistrationPermitCard = memo(function RegistrationPermitCard() {
 										</span>
 										<span
 											dir="ltr"
-											className="text-sm font-mono font-DanaDemiBold text-gray-800 dark:text-white"
+											className="text-sm font-DanaDemiBold text-gray-800 dark:text-white"
 										>
 											{p.phone}
 										</span>

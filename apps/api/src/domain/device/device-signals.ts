@@ -94,6 +94,49 @@ export function realSignalCount(s: Pick<SignalLike, 'canvasHash' | 'webglHash' |
  */
 export const MIN_REAL_HASH_SIGNALS = 2
 
+// ═══ stage-80 — هوش جمعیّتی سیگنال (الگوی Fellegi–Sunter / anonymity-set) ═══
+//
+// پیشینه (تحقیقِ عمیقِ stage-80): امتیازِ شباهتِ ثابتِ وزن‌دار دو خطای
+// شناخته‌شده‌ی صنعت را دارد (Arkose/ShieldLabs: «collision در برابر
+// division»): دو دستگاهِ فیزیکیِ هم‌مدل (خروجی iOS روی سخت‌افزار یکسان
+// واقعاً یکسان است — یافته‌ی ۳ از استیج ۷۳) با canvas/webgl/audio/fonts
+// برابر به آستانه‌ی لینک (۰٫۷) می‌رسند → لینکِ کاذب → crowded-cluster
+// (+15 ریسک) + قطعِ پاداشِ معرفی (referral) برای کاربرِ بی‌گناه.
+//
+// اصولِ الگوبرداری‌شده از پیاده‌سازی‌های پیشرفته:
+//  ۱) Fellegi–Sunter (حلقه‌ی اتصالِ احتمالاتیِ رکورد، ۱۹۶۹): وزنِ
+//     «توافقِ» هر فیلد باید تابعِ فراوانیِ مقدار در جمعیت باشد — توافقِ
+//     مقدارِ کمیاب = شاهدِ قوی؛ توافقِ مقدارِ فراوان = نوفه (همان IDF).
+//  ۲) anonymity-set: هنگامی که ده‌ها دستگاه مقدارِ یک سیگنال را شریک‌اند،
+//     آن سیگنال «تمییزدهندگی»‌ی نزدیک صفر دارد — صرفِ برابری، نشانه‌ی
+//     «یک دستگاه بودن» نیست.
+//  ۳) tiered identity (FingerprintJS Pro / Castle): شناسه‌ی قطعی
+//     (clientId) از شناسه‌ی احتمالاتی (شباهت) جدا نگه داشته می‌شود و
+//     تصمیمِ سخت فقط با هم‌بستگیِ قوی گرفته می‌شود.
+//
+// رفعِ stage-80: وزنِ هر توافقِ هش‌محور در «آمارِ جمعیتِ همان لحظه» ضرب
+// می‌شود (idfFactor): df ≤ 3 (جفتِ واقعی یا خانواده‌ی کوچک) = وزنِ کامل؛
+// df بزرگ = سقفِ کسرِ 3/df — جمعیتِ هم‌مدل خودکار تخفیف می‌خورَند و
+// لینکِ کاذبِ جمعیت‌محور عملاً غیرممکن می‌شود، بدون آنکه لینکِ واقعیِ
+// جفتِ تازه (df=2) یا سردبودنِ دیتابیسِ کوچک آسیب ببیند.
+
+/** سقفِ df که توافق هنوز «کمیاب» شمرده می‌شود — قابل تیون */
+export const RARE_DF_CAP = 3
+
+/** فراوانی‌وزنِ سیگنال — ۱ = کمیاب/تمییزدهنده، جمعیتِ بزرگ → تخفیف */
+export function idfFactor(df: number): number {
+  if (df <= RARE_DF_CAP) return 1
+  return Math.min(1, RARE_DF_CAP / df)
+}
+
+/** شمارِ ردیف‌های devices که مقدارِ هر هش را شریک‌اند (شامل خودِ ما) */
+export interface SignalPopulationStats {
+  canvasDf: number
+  webglDf: number
+  audioDf: number
+  fontsDf: number
+}
+
 // ── شباهت وزن‌دار ──
 // سیگنال‌های GPU-محور وزن بیشتری دارند چون مرورگر/VPN عوض کنی هم ثابت می‌مانند.
 const W = {
@@ -113,6 +156,15 @@ export interface SimilarityResult {
   comparableWeight: number
   /** تعداد سیگنال‌های قابل مقایسه */
   comparableCount: number
+  /**
+   * stage-80 — امتیازِ جمعیت‌وزن‌دار: توافق‌های هش‌محور در idfFactor(df)
+   * ضرب می‌شوند؛ بدون stats برابرِ score است (سازگاری‌ی کامل با
+   * رفتارِ پیش از ۸۰). سیگنال‌های غیر-هش (screen/platform/tzlang) عمداً
+   * بی‌تخفیف می‌مانند — اطلاع‌شان جمعیتی نیست.
+   */
+  weighted: number
+  /** شمارِ هش‌های واقعاً برابر (canvas/webgl/audio/fonts) — شاهدِ GPU */
+  agreeingHashes: number
 }
 
 /**
@@ -120,27 +172,42 @@ export interface SimilarityResult {
  *  - سیگنال missing (هر طرف) → نه امتیاز، نه شمرده شدن قابل‌مقایسه.
  *  - خروجی علاوه بر score، کیفیت مقایسه را هم برمی‌گرداند تا گاردِ
  *    حداقل سیگنال در لینک‌سازی اعمال شود.
+ * stage-80 — پارامتر اختیاری stats: توافق‌های هش‌محور با فراوانیِ مقدار
+ * در جمعیت تخفیف می‌خورند (idfFactor). بدون stats رفتار بایت‌به‌بایت
+ * همانِ قبل است (weighted === score).
  */
-export function signalSimilarity(a: SignalLike, b: SignalLike): SimilarityResult {
+export function signalSimilarity(
+  a: SignalLike,
+  b: SignalLike,
+  stats?: SignalPopulationStats,
+): SimilarityResult {
   let score = 0
+  let weighted = 0
+  let agreeingHashes = 0
   let comparableWeight = 0
   let comparableCount = 0
 
-  const hashPair = (x: string, y: string, w: number): void => {
+  const hashPair = (x: string, y: string, w: number, df: number): void => {
     if (isMissingHash(x) || isMissingHash(y)) return // missing ≠ برابر
     comparableWeight += w
     comparableCount++
-    if (x === y) score += w
+    if (x === y) {
+      score += w
+      const fw = w * idfFactor(df)
+      weighted += fw
+      agreeingHashes++
+    }
   }
 
-  hashPair(a.canvasHash, b.canvasHash, W.canvas)
-  hashPair(a.webglHash, b.webglHash, W.webgl)
-  hashPair(a.audioHash, b.audioHash, W.audio)
-  hashPair(a.fontsHash, b.fontsHash, W.fonts)
+  hashPair(a.canvasHash, b.canvasHash, W.canvas, stats?.canvasDf ?? 0)
+  hashPair(a.webglHash, b.webglHash, W.webgl, stats?.webglDf ?? 0)
+  hashPair(a.audioHash, b.audioHash, W.audio, stats?.audioDf ?? 0)
+  hashPair(a.fontsHash, b.fontsHash, W.fonts, stats?.fontsDf ?? 0)
   if (a.screen && b.screen && a.screen === b.screen) {
     comparableWeight += W.screen
     comparableCount++
     score += W.screen
+    weighted += W.screen
   } else if (a.screen && b.screen) {
     comparableWeight += W.screen
     comparableCount++
@@ -148,15 +215,70 @@ export function signalSimilarity(a: SignalLike, b: SignalLike): SimilarityResult
   if (a.platform && b.platform) {
     comparableWeight += W.platform
     comparableCount++
-    if (a.platform === b.platform) score += W.platform
+    if (a.platform === b.platform) {
+      score += W.platform
+      weighted += W.platform
+    }
   }
   if (a.timezone && b.timezone && a.language && b.language) {
     comparableWeight += W.tzlang
     comparableCount++
-    if (a.timezone === b.timezone && a.language === b.language) score += W.tzlang
+    if (a.timezone === b.timezone && a.language === b.language) {
+      score += W.tzlang
+      weighted += W.tzlang
+    }
   }
 
-  return { score, comparableWeight, comparableCount }
+  return { score, weighted, agreeingHashes, comparableWeight, comparableCount }
+}
+
+// ═══ stage-80 — تصمیم‌های سخت: هم‌بستگی + وراثتِ بلاک ═══
+
+/**
+ * آستانه‌ی «شاهدِ قوی» برای وراثتِ مسدودی از دستگاهِ مسدود (cluster-block
+ * inherit) — بالاتر از آستانه‌ی لینکِ معمولی، با حداقلِ ۳ هشِ برابرِ واقعی
+ * و وزنِ جمعیتیِ قوی. مطالعه‌ی ضد-مثبت: دستگاهِ بی‌گناهِ هم‌مدل فقط با
+ * هش‌های فراوان (جمعیت) به این سطوح نمی‌رسد.
+ */
+export const EVADE_MIN_SCORE = 0.85
+export const EVADE_MIN_WEIGHTED = 0.5
+export const EVADE_MIN_HASH_SIGNALS = 3
+
+/** شاهدِ قویِ «این همان دستگاهِ مسدود است» — دروازه‌ی وراثتِ بلاک */
+export function strongEvasionMatch(sim: SimilarityResult): boolean {
+  return (
+    sim.score >= EVADE_MIN_SCORE &&
+    sim.weighted >= EVADE_MIN_WEIGHTED &&
+    sim.agreeingHashes >= EVADE_MIN_HASH_SIGNALS &&
+    sim.comparableCount >= 4
+  )
+}
+
+/**
+ * فلگ‌های «قوی» — یا جعل‌پذیرند و پشتِ تشخیصِ دومرحله‌ای‌اند (canvas-drift)
+ * یا امضای ابزارِ اتوماسیون‌اند (headless-ua). الگوی صنعتیِ graduated
+ * response: تصمیمِ سختِ خودکار فقط با «یک شاهدِ قوی»، نه انبارِ شواهدِ
+ * ضعیف (low-memory + mobile-no-touch + platform-mismatch + crowded-cluster
+ * = ۸۰ روی دستگاهِ بی‌گناهِ قدیمی/عجیب هم جمع می‌شود).
+ */
+export const STRONG_RISK_FLAGS: ReadonlySet<string> = new Set([
+  'headless-ua',
+  'canvas-drift',
+])
+
+/**
+ * آیا این امتیاز/فلگ‌ها «واجدِ مسدودسازیِ خودکار» است؟
+ *  - requireStrong=false → رفتارِ پیش از stage-80 (فقط آستانه‌ی امتیاز)
+ *  - requireStrong=true (پیش‌فرض) → علاوه بر آستانه، حداقل یک فلگِ قوی
+ */
+export function autoBlockEligible(
+  score: number,
+  flags: readonly string[],
+  requireStrong: boolean,
+): boolean {
+  if (score <= 0) return false
+  if (!requireStrong) return true
+  return flags.some((f) => STRONG_RISK_FLAGS.has(f))
 }
 
 // ── هش مرکب ──

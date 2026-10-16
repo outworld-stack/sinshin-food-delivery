@@ -275,6 +275,11 @@ await withScratch('a', async (url) => {
   ok('A2: جدول backfill_runs (DDL خالص ۰۰۰۶) ساخته شد', String(runsTable) === 'true')
   const permitsTable = await scalar(url, `select to_regclass('public.registration_permits') is not null as v`)
   ok('A2: جدول registration_permits (۰۰۰۷ stage-79) ساخته شد', String(permitsTable) === 'true')
+  const hashIdx = await scalar(
+    url,
+    `select count(*)::int as n from pg_indexes where indexname in ('devices_canvas_hash_idx','devices_webgl_hash_idx','devices_audio_hash_idx','devices_fonts_hash_idx')`,
+  )
+  ok('A2: چهار ایندکسِ جمعیتِ هش (۰۰۰۸ stage-80) ساخته شد', hashIdx === 4, `count=${hashIdx}`)
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)
   const expects: Array<[string, string | null, string | null]> = [

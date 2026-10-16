@@ -96,6 +96,13 @@ export const devices = pgTable(
     index('devices_risk_idx').on(t.riskScore),
     /** stage-70 — فیلتر نوع دستگاه در لیست کاربران ادمین */
     index('devices_type_idx').on(t.deviceType),
+    /** stage-80 — شمارش‌های جمعیت (df) چهار هش برای وزنِ idf در
+     * signalSimilarity (hashPopulationOn) — count ایندکس‌دار؛ سردبودنِ
+     * ردیف‌ها هم بی‌هزینه می‌ماند. */
+    index('devices_canvas_hash_idx').on(t.canvasHash),
+    index('devices_webgl_hash_idx').on(t.webglHash),
+    index('devices_audio_hash_idx').on(t.audioHash),
+    index('devices_fonts_hash_idx').on(t.fontsHash),
   ],
 )
 
