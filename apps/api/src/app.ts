@@ -70,6 +70,7 @@ import { menuRoutes } from '#/http/routes/menu.routes'
 import { addressRoutes } from '#/http/routes/address.routes'
 import { adminMenuRoutes } from '#/http/routes/admin-menu.routes'
 import { adminSettingsRoutes } from '#/http/routes/admin-settings.routes'
+import type { RegistrationPermitService } from '#/domain/auth/registration-permit.service'
 import { orderRoutes } from '#/http/routes/order.routes'
 import { paymentRoutes } from '#/http/routes/payment.routes'
 import { uploadRoutes } from '#/http/routes/upload.routes'
@@ -103,6 +104,8 @@ export interface AppDeps {
   admin: AdminService
   sessions: SessionService
   devices: DeviceService
+  /** stage-79 — مجوز ثبت‌نام ویژه */
+  permits: RegistrationPermitService
   menu: MenuService
   cart: CartService
   addresses: AddressService
@@ -253,6 +256,8 @@ export const buildApp = (deps: AppDeps) => {
         settings: deps.settings,
         admin2: deps.admin2,
         audit: deps.audit,
+        // stage-79 — مجوز ثبت‌نام ویژه
+        permits: deps.permits,
       }),
     )
     .use(adminOrderRoutes({ sessions: deps.sessions, orders: deps.orders, audit: deps.audit }))

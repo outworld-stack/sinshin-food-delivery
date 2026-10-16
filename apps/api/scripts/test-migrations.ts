@@ -194,6 +194,7 @@ async function buildLegacyAt0004(url: string): Promise<void> {
   const res = await runRealMigrate(url)
   if (res.code !== 0) throw new Error('migrate اولیه برای ساخت legacy ناموفق بود')
   await q(url, `
+    drop table if exists "registration_permits";
     drop table if exists "backfill_runs";
     drop index if exists "devices_client_id_uidx";
     drop index if exists "devices_type_idx";
@@ -272,6 +273,8 @@ await withScratch('a', async (url) => {
   ok(`A2: زنجیره‌ی journal (${CHAIN_COUNT} ورودی) اعمال شد`, journalRows === CHAIN_COUNT)
   const runsTable = await scalar(url, `select to_regclass('public.backfill_runs') is not null as v`)
   ok('A2: جدول backfill_runs (DDL خالص ۰۰۰۶) ساخته شد', String(runsTable) === 'true')
+  const permitsTable = await scalar(url, `select to_regclass('public.registration_permits') is not null as v`)
+  ok('A2: جدول registration_permits (۰۰۰۷ stage-79) ساخته شد', String(permitsTable) === 'true')
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)
   const expects: Array<[string, string | null, string | null]> = [
@@ -443,24 +446,34 @@ await withScratch('e3', async (url) => {
 
 // E4 — جدول backfill_runs نباشد (db:generate اجرا نشده)
 await withScratch('e4', async (url) => {
-  // زنجیره را موقتاً به حالتِ «بدون ۰۰۰۶» برگردان (فایل‌ها + journal)
+  // زنجیره را موقتاً به حالتِ «قبل از ۰۰۰۶» برگردان (فایل‌ها + journal)
+  // stage-79 — زنجیره رشد کرده (۰۰۰۷)؛ برش دیگر «آخرین» نیست، معنایی است:
+  // همه‌ی ورودی‌های بعد از ۰۰۰۵ حذف می‌شوند تا backfill_runs در زنجیره نباشد.
   const journalPath = join(DRIZZLE_DIR, 'meta', '_journal.json')
   const backupDir = `/tmp/sinshin-e4-chain-${process.pid}`
   mkdirSync(backupDir, { recursive: true })
   const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
-    entries: Array<{ tag: string }>
+    entries: Array<{ tag: string; idx: number }>
   }
-  const lastIdx = journal.entries.length - 1
-  const lastTag = journal.entries[lastIdx]?.tag ?? ''
-  const sqlFile = join(DRIZZLE_DIR, `${lastTag}.sql`)
-  const snapPath = join(DRIZZLE_DIR, 'meta', `${String(lastIdx).padStart(4, '0')}_snapshot.json`)
+  const cutIdx = journal.entries.findIndex((e) => e.tag.startsWith('0006'))
+  if (cutIdx < 1) throw new Error('ورودی ۰۰۰۶ در زنجیره پیدا نشد — E4 بی‌معنا')
+  const removed = journal.entries.slice(cutIdx)
+  const snapPathOf = (idx: number) =>
+    join(DRIZZLE_DIR, 'meta', `${String(idx).padStart(4, '0')}_snapshot.json`)
   try {
     copyFileSync(journalPath, join(backupDir, '_journal.json'))
-    copyFileSync(sqlFile, join(backupDir, `${lastTag}.sql`))
-    copyFileSync(snapPath, join(backupDir, 'snapshot.json'))
-    writeFileSync(journalPath, JSON.stringify({ ...journal, entries: journal.entries.slice(0, -1) }, null, 2))
-    rmSync(sqlFile)
-    rmSync(snapPath)
+    for (const e of removed) {
+      copyFileSync(join(DRIZZLE_DIR, `${e.tag}.sql`), join(backupDir, `${e.tag}.sql`))
+      copyFileSync(snapPathOf(e.idx), join(backupDir, `${String(e.idx).padStart(4, '0')}_snapshot.json`))
+    }
+    writeFileSync(
+      journalPath,
+      JSON.stringify({ ...journal, entries: journal.entries.slice(0, cutIdx) }, null, 2),
+    )
+    for (const e of removed) {
+      rmSync(join(DRIZZLE_DIR, `${e.tag}.sql`))
+      rmSync(snapPathOf(e.idx))
+    }
 
     const res = await runRealMigrate(url)
     ok('E4: db:migrate بدون ۰۰۰۶ (جدول backfill_runs نیست) بدون خطا', res.code === 0)
@@ -474,8 +487,10 @@ await withScratch('e4', async (url) => {
   } finally {
     // بازگرداندن زنجیره — قبل از هر چیز دیگری
     copyFileSync(join(backupDir, '_journal.json'), journalPath)
-    copyFileSync(join(backupDir, `${lastTag}.sql`), sqlFile)
-    copyFileSync(join(backupDir, 'snapshot.json'), snapPath)
+    for (const e of removed) {
+      copyFileSync(join(backupDir, `${e.tag}.sql`), join(DRIZZLE_DIR, `${e.tag}.sql`))
+      copyFileSync(join(backupDir, `${String(e.idx).padStart(4, '0')}_snapshot.json`), snapPathOf(e.idx))
+    }
     rmSync(backupDir, { recursive: true, force: true })
   }
 })

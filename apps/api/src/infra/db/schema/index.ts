@@ -14,6 +14,7 @@
 //src/infra/db/schema/index.ts
 export * from './users'
 export * from './devices'
+export * from './registration-permits'
 export * from './backfill-runs'
 export * from './sessions'
 export * from './admin2'

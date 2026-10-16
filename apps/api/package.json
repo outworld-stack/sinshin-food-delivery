@@ -21,7 +21,8 @@
     "db:test:notification": "bun scripts/test-notification-contract.ts",
     "db:test:zarinpal": "bun scripts/test-zarinpal-verify.ts",
     "db:test:sep": "bun scripts/test-sep-verify.ts",
-    "db:test:mellat": "bun scripts/test-mellat-verify.ts"
+    "db:test:mellat": "bun scripts/test-mellat-verify.ts",
+    "db:test:permit": "bun scripts/test-registration-permit.ts"
   },
   "dependencies": {
     "@elysia/html": "^1.4.1",

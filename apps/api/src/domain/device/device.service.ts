@@ -73,6 +73,16 @@ export interface DeviceFinalizeInput {
   peek: DevicePeek
   /** REGISTER = ثبت‌نام موفق (claim مالکیت)؛ LOGIN = ورود کاربر موجود */
   event: 'REGISTER' | 'LOGIN'
+  /**
+   * stage-79 — مسیرِ استثنای مجوز ثبت‌نام:
+   *  - claim مالکیت بی‌قیدوشرط اعمال می‌شود (بدون شرطِ «owner IS NULL»)،
+   *  - و پس از ثبت‌نام، دستگاه مسدود می‌شود (دلیل permit-burn).
+   * فقط وقتی مجوزی «اتمیک مصرف شده» باشد true می‌آید — peek به‌تنهایی
+   * کافی نیست (کاهش پنجره‌ی TOCTOU به صفر).
+   */
+  permitOverride?: boolean
+  /** شناسه‌ی مجوزِ مصرف‌شده — فقط برای رکوردِ ممیزی */
+  permitId?: string | null
 }
 
 export interface DeviceFinalizeResult {
@@ -367,15 +377,20 @@ export class DeviceService {
     // ── ۳) claim اتمیک مالکیت (فقط REGISTER) — P2-۵ ──
     // سقف سختِ «هر دستگاه یک ثبت‌نام» روی همین ردیف اعمال می‌شود؛
     // کل خوشه فقط سیگنال ریسک/معرف است (P1-۲).
+    // stage-79 — permitOverride (مجوزِ مصرف‌شده در همان tx): claim
+    // بی‌قیدوشرط — مالکِ قبلی بازنویسی می‌شود؛ این «استثنای ممیزی‌شده‌ی
+    // ادمین» است نه تغییرِ سیاست. تضمینِ پس از آن: گام ۵ (مسدودسازی).
     if (event === 'REGISTER' && config.deviceEnforcement && config.device.maxPhonesPerDevice > 0) {
       const [claimed] = await db
         .update(devices)
         .set({ registeredOwnerPhone: phone })
         .where(
-          and(
-            eq(devices.id, device.id),
-            sql`(${devices.registeredOwnerPhone} is null or ${devices.registeredOwnerPhone} = ${phone})`,
-          ),
+          input.permitOverride
+            ? eq(devices.id, device.id)
+            : and(
+                eq(devices.id, device.id),
+                sql`(${devices.registeredOwnerPhone} is null or ${devices.registeredOwnerPhone} = ${phone})`,
+              ),
         )
         .returning()
       if (claimed) {
@@ -414,6 +429,35 @@ export class DeviceService {
         flags: device.riskFlags,
       })
       await this.revokeDeviceSessionsOn(db, device.id, 'auto-block')
+    }
+
+    // ── ۵-b) stage-79 — سوختنِ سختِ مسیرِ مجوز ──
+    // درخواستِ صریحِ صاحب محصول: «بعد ثبت‌نام بلاک بشه دستگاهش». این
+    // تضمینِ دفاع-در-عمقِ استثناست: دستگاهی که از مسیرِ مجوز ثبت‌نام دیده،
+    // برای همیشه بسته می‌ماند — حتی اگر بعداً maxPhones بالا برود یا
+    // owner claim جایی جا بماند. دلیل عمداً خارج از خانواده‌ی auto:%
+    // است تا هیچ جارویِ آزادسازیِ خودکاری دستش را بگیرد (بک‌فیل ۷۳
+    // فقط auto:% را آزاد می‌کند و یک‌بارِ نسخه‌دار است — این دوتایی
+    // دفاع-در-عمق است، نه وابستگی). دستگاهِ از-قبل-مسدود فقط رویداد
+    // PERMIT_BURN می‌گیرد ( دلیل/زمانِ مسدودیِ اصلی دست‌نخورده می‌ماند).
+    if (event === 'REGISTER' && input.permitOverride) {
+      if (!device.isBlocked) {
+        const [burned] = await db
+          .update(devices)
+          .set({
+            isBlocked: true,
+            blockedAt: new Date(),
+            blockedReason: 'permit-burn',
+          })
+          .where(eq(devices.id, device.id))
+          .returning()
+        device = burned ?? device
+        await this.revokeDeviceSessionsOn(db, device.id, 'permit-burn')
+      }
+      await this.logEventOn(db, device.id, phone, 'PERMIT_BURN', ip, signals.userAgent, {
+        permitId: input.permitId ?? null,
+        reason: 'permit-burn',
+      })
     }
 
     return { device, linkedTo }

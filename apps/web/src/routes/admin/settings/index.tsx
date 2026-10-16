@@ -17,6 +17,7 @@ import {
   settingsTrackingOptions, settingsRestaurantOptions,
   aboutContentOptions, adminGalleryImagesOptions, deliveryZonesOptions,
   settingsIranOnlyOptions, settingsOutsideScopeOptions, settingsRestaurantStatusOptions,
+  settingsRegistrationPermitsOptions,
 } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { Toggle } from '#/components/shared/Toggle'
@@ -29,6 +30,8 @@ import { AboutContentForm } from '#/components/admin/settings/AboutContentForm'
 import { GalleryManager } from '#/components/admin/settings/GalleryManager'
 import { DeliveryZonesManager } from '#/components/admin/settings/DeliveryZonesManager'
 import { TemporaryCloseCard } from '#/components/admin/settings/TemporaryCloseCard'
+// stage-79 — کارت مجوز ثبت‌نام ویژه (فقط ادمین اصلی — بک هم requireAdmin)
+import { RegistrationPermitCard } from '#/components/admin/settings/RegistrationPermitCard'
 // رارد ۳۷ — کارت کامل دسترسی جغرافیایی (ایران + عراق) — جانشین کارت ساده‌ی «فقط ایران»
 import { GeoAccessCard } from '#/components/admin/settings/GeoAccessCard'
 import { Pin, Store, Discover2 } from 'reicon-react'
@@ -206,6 +209,10 @@ const SettingsContent = memo(function SettingsContent() {
               {/* رارد ۳۷ — کارت کامل دسترسی جغرافیایی: سوییچ ایران + باکس مجوز عراق +
                   انتخاب دامنه (فقط عراق / همه کشورها) + وضعیت زنده‌ی رنج‌ها */}
               <GeoAccessCard />
+
+              {/* stage-79 — مجوز ثبت‌نام ویژه: شماره → یک‌بار ثبت‌نام (حتی از
+                  دستگاه سوخته/مسدود) → بلاکِ دستگاه پس از ثبت‌نام */}
+              <RegistrationPermitCard />
             </>
           )}
         </div>
@@ -287,6 +294,8 @@ export const Route = createFileRoute('/admin/settings/')({
       // GeoAccessCard لود می‌شود — refetchInterval دارد، پری‌فچ لازم نیست)
       context.queryClient.query(settingsIranOnlyOptions),
       context.queryClient.query(settingsOutsideScopeOptions),
+      // stage-79 — فهرست مجوزهای ثبت‌نام (کارت زیرِ کارت جغرافیایی)
+      context.queryClient.query(settingsRegistrationPermitsOptions),
     ])
   },
 

@@ -907,3 +907,59 @@ cd apps/api && bun run db:test:sep && bun run db:test:mellat && bun run db:test:
 
 ### فایل‌ها (۱۳)
 بج/i18n: ProductCard · fa · ar — تم: styles.css · ArticleCard — شیدر: ShaderBackground.tsx (جدید) · products/$productId · Footer — گارد: ProductForm · types/forms · new · edit · admin-menu.routes
+
+## ۲-۱۰-۱۱ — stage-79: مجوز ثبت‌نام ویژه — استثنای ادمینِ اصلی + سوختنِ سختِ دستگاه
+
+> خواسته‌ی کارفرما: «به منطق دست نزن. به جاش تو صفحه‌ی تنظیمات یک دسترسی ویژه به ادمینِ اصلی بده که با وارد کردن یک شماره، اون شماره بتونه ثبت‌نام کنه؛ بعد ثبت‌نام بلاک بشه دستگاهش» — پس از دیپلویِ ۷۸ که بک‌فیلِ آزادسازیِ auto:% صفر نفر را آزاد کرد.
+
+### ۱) مدل داده (registration_permits — مایگریشن ۰۰۰۷)
+- جدول جدید + ایندکس یکتایِ **جزئی** `…pending_phone_uidx ON (phone) WHERE status='pending'` — حداکثر یک مجوزِ در انتظار به‌ازای شماره (race-safe صدور)؛ تاریخچه (used/revoked/expired) برای ممیزی می‌ماند.
+- چرخه: `pending → used` (claim اتمیک داخل tx ثبت‌نام) یا `revoked` (ادمین) یا `expired` (تنبل — در consume/list محاسبه، بدون job).
+- `created_by/revoked_by` FK به users؛ `used_device_id` uuid بدون FK عمدی (رکورد ممیزی است؛ حذفِ دستگاه نباید تاریخچه را cascade کند).
+
+### ۲) سرویس (registration-permit.service.ts — جدید)
+- `issue`: نرمال‌سازی شماره (۰۹…، ارقام فارسی/عربی)، ردِ شماره‌ی ثبت‌نام‌کرده (CONFLICT)، تازه‌سازیِ pending موجود (صدور دوباره = همان ردیف با انقضای جدید)؛ رقابتِ صدورِ هم‌زمان → unique-violation → دوباره تازه‌سازی.
+- `consumeForRegistration(dbOrTx, phone, deviceId)`: **claim اتمیکِ تک‌عبارتی** — `UPDATE … WHERE phone=? AND status='pending' AND expires_at>now() RETURNING` — الگوی CWE-367-safe (توکن دعوتِ تک‌مصرف). rollback ثبت‌نام ⇒ مجوز «نخورده» برمی‌گردد.
+- اعتبار: پیش‌فرض ۲۴ ساعت، سقف ۷۲ (PERMIT_MAX_TTL_HOURS)؛ TTL و یادداشت (سقف ۵۰۰) از پنل.
+- `revoke`: فقط pending (اتمیک)؛ لغوِ دوباره ⇒ CONFLICT.
+
+### ۳) اتصال به ثبت‌نام (auth.service — جراحیِ حداقلی)
+- ترتیبِ دو SELECT خواندنی عوض شد (user قبل از peek — محض تصمیمِ مجوز)؛ بقیه‌ی جریان همان است.
+- مجوز فقط برای «کاربرِ تازه» معنا دارد — `permit = isNewUser ? peek : null`؛ **ورودِ کاربرِ موجود هیچ‌وقت از مسیرِ مجوز نمی‌گذرد**.
+- مسدودیِ دستگاه (`peek.device.isBlocked`): بدون مجوز ⇒ همان FORBIDDENِ قبلی؛ با مجوز ⇒ گذر + رویداد `PERMIT_BYPASS` (ممیزی روی خودِ دستگاه).
+- سقفِ DEVICE_PHONE_LIMIT (چکِ قبل از tx و بازبینیِ داخل tx): با مجوزِ «مصرف‌شده» نادیده — claim مالکیت در finalize بی‌قیدوشرط بازنویسی می‌کند.
+- **داخل tx، قبل از هر تصمیمِ استثنا**: claim اتمیک مجوز. لغو/انقضای هم‌زمان (peek دید ولی claim نکرد) ⇒ permitOverride=false و «تصمیمِ گذر از مسدودی» برمی‌گردد (FORBIDDEN سخت) — پنجره‌ی TOCTOU صفر.
+- پایانِ ثبت‌نامِ مجوزدار: دستگاه مسدود (`permit-burn`) + رویداد `PERMIT_BURN` (با permitId) + قطع سشن‌های همان دستگاه + پیامِ متمایز: «ثبت‌نام شما کامل شد، اما این دستگاه طبق مجوز ثبت‌نام بلاک شد؛ برای ورود از دستگاه دیگری استفاده کنید.» — همان فلسفه‌ی auto-blockِ راند ۷۲ (ثبت‌نام موفق، دستگاه مرده).
+- **بدون مجوز، رفتار بایت‌به‌بایت همانِ پیش از ۷۹ است** (گروه A تست: ۵ رگرسیون).
+
+### ۴) سوختنِ سخت — دفاع-در-عمق (device.service — گام ۵-b)
+- دلیلِ `permit-burn` عمداً **خارج از خانواده‌ی `auto:%`** است — جاروی یک‌باره‌ی بک‌فیل ۷۳ (و هر جاروی آینده) هرگز نمی‌تواند مجوز-سوختن را آزاد کند.
+- دستگاهِ از-قبل-مسدود: فقط رویداد PERMIT_BURN می‌گیرد (دلیل/زمانِ مسدودیِ اصلی — مثلاً دستِ ادمین — دست‌نخورده).
+- دستگاه تازه/سوخته‌ی نرم: isBlocked + blockedAt + reason + قطع سشن‌ها — تضمین «هر دستگاه در عمرش یک ثبت‌نام» حتی در مسیرِ استثنا.
+- مسدودیِ دستگاه قابلِ رفع با ابزارِ موجودِ UNBLOCK پنل دستگاه‌ها است (ادمین اگر شخص را می‌شناسد)؛ claim مالکیت می‌ماند ⇒ ثبت‌نامِ شماره‌ی دوم از همان دستگاه همچنان ناممکن.
+
+### ۵) روت‌ها (admin-settings.routes — فقط ادمین اصلی، requireAdmin)
+- `GET /admin/settings/registration-permits` — ۱۰۰ ردیفِ اخیر با وضعیتِ مؤثر.
+- `POST /admin/settings/registration-permits` — {phone, note?, ttlHours? (۱-۷۲)} + ممیزی `REG_PERMIT_ISSUE`.
+- `POST /admin/settings/registration-permits/revoke` — {id: uuid} + ممیزی `REG_PERMIT_REVOKE`.
+- ادمین۲ روی هر سه ⇒ ۴۰۳ (تست با نشستِ واقعی).
+
+### ۶) پنل (کارت تنظیمات — فقط ادمین اصلی)
+- `RegistrationPermitCard.tsx` (جدید): فرم شماره (نرمال‌سازی ارقام فارسی/عربی — **کشفِ مرورگر: تبدیل کد بدون +0x30 = NUL، نه رقم**؛ درسِ عمومی برای همه‌ی نرمال‌سازهای ارقام) + اعتبار (۱۲/۲۴/۴۸/۷۲ ساعت) + یادداشت + دکمه‌ی صدور.
+- فهرست: وضعیت (در انتظار/مصرف شد/منقضی/لغو شد) + تاریخ شمسی + `DEV-xxxxxx` (۶ رقم آخر uuid دستگاه برای پنل دستگاه‌ها) + یادداشت + دکمه‌ی لغو فقط برای pending. max-h-96 + اسکرول. ۳90px بدون overflowX.
+- سیم‌کشی: qk.settingsRegistrationPermits + فکتوری staleTime=0 + سرور-فانکشن‌ها (authJson) + پری‌فچ loader + `RegistrationPermitDto` در @sinshin/shared.
+- کارت زیرِ GeoAccessCard در ستونِ چپِ تنظیمات — ادمین۲ آن را نمی‌بیند (همان isMainAdmin که بقیه‌ی کارت‌ها را می‌پوشاند).
+
+### ۷) مایگریشن و ابزار
+- زنجیره: `0007_nebulous_monster_badoon.sql` (جدول + ۴ ایندکس + FK) — drizzle-kit generate، همان مسیرِ `db:migrate`.
+- تست‌ها: `db:test:permit` (۳۳ بند — گروه A رگرسیونِ بدون-مجوز، گروه B جریانِ کاملِ مجوز شامل لغوِ mid-flight و rollback-اتمی، گروه C سرویس) + `db:test:migrations` ۵۷→۵۸ (سناریو A حالا ۰۰۰۷ را هم می‌سازد/برمی‌گرداند؛ E4 برشِ زنجیره معنایی شد — همه‌ی ورودی‌های بعد از ۰۰۰۵).
+
+### راستی‌آزمایی
+- دروازه‌ها: tsc api=۰ web=۰ shared=۰ · biome web = ۶۳۹/۱۴/۹ = دقیقاً baseline.
+- تست‌ها (۲ دور): permit ۳۳/۳۳ · device ۱۹/۱۹ · migrations ۵۸/۵۸ · pay ۳۸/۳۸ · zarinpal ۱۶ · sep ۲۷ · mellat ۲۹ · notification ۱۴ · auth-session ۱۳ · fetch-timeout ۵ · sse ۲۵ · push-json ۶ · device-fingerprint ۱۱.
+- اجرای واقعیِ HTTP: مسدودسازی دستگاه با پنل → صدور مجوز با curl → ثبت‌نام از دستگاهِ مسدود ⇒ کاربر ساخته شد + PERMIT_BYPASS/REGISTER/PERMIT_BURN + مجوز used + مالک بازنویسی + سشنِ همان دستگاه قطع شد (ادمینِ روی همان دستگاه هم بیرون افتاد — درست مثل بلاکِ دستی).
+- اجرای واقعیِ مرورگر (vite:3001 + api:3002 + PG + mini-redis): ورودِ ادمین → کارت + فهرست (مصرف‌شده‌ها با تاریخ/DEV) → صدور با ارقام فارسی → لغو → مسیرِ طلایی: دستگاهِ مرورگر مسدود → ثبت‌نام ۰۹…۲۲/۳۳ از صفحه‌ی ورود ⇒ پیام «ثبت‌نام شما کامل شد، اما این دستگاه طبق مجوز ثبت‌نام بلاک شد…» روی فرم + ردیف used تازه در کارت · ادمین۲: کارت مخفی + هر سه روت ۴۰۳.
+- کشف جانبی (گزارش، بدون دست‌کاری — بیرون از scope): الگوی `String.fromCharCode(x - 0x06f0)` در useCheckoutPage هم همان افسردگیِ NUL را دارد ⇒ ارقام فارسیِ کدِ کوپن در آن مسیر حذف می‌شوند؛ فرم OTP هم «خود-ارسالِ ۶رقمی» دارد (دوبار-ثبت اگر کاربر همان لحظه دکمه را هم بزند — دومین ۴۲۲ بی‌ضرر).
+
+### فایل‌ها (۲۱: ۶ جدید + ۱۵ جایگزینی)
+بک: registration-permits.ts (جدید) · schema/index · drizzle/0007 (جدید) + meta/0007_snapshot (جدید) + _journal · registration-permit.service.ts (جدید) · auth.service · device.service · admin-settings.routes · app · index · package.json (db:test:permit) · test-registration-permit.ts (جدید) · test-migrations — قرارداد: packages/shared/contracts — فرانت: admin.ts (server) · queryKeys · queryOptions · RegistrationPermitCard.tsx (جدید) · routes/admin/settings/index — مستند: REFERENCE.md

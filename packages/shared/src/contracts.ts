@@ -601,6 +601,26 @@ export interface RestaurantStatusDto {
   anyClosed: boolean
 }
 
+// ═══════════ مجوز ثبت‌نام ویژه (stage-79) ═══════════
+
+/** stage-79 — وضعیتِ مؤثر مجوز؛ expired = pendingِ گذشته (محاسبه‌ی سمت سرور در list) */
+export type RegistrationPermitStatus = 'pending' | 'used' | 'revoked' | 'expired'
+
+/** stage-79 — ردیف مجوز ثبت‌نام ویژه (کارت تنظیمات — فقط ادمین اصلی) */
+export interface RegistrationPermitDto {
+  id: string
+  phone: string
+  status: RegistrationPermitStatus
+  note: string | null
+  createdBy: string
+  createdAt: string
+  expiresAt: string
+  usedAt: string | null
+  /** دستگاهِ مصرف‌کننده (وقتی used) — uuid خام برای نمایش */
+  usedDeviceId: string | null
+  revokedAt: string | null
+}
+
 /** رارد ۴۷ — نمای نمایشی وضعیت رستوران در چک‌اوت — view-model عمدی:
  *  «بسته‌ی ساعتی» و «بسته‌ی موقت» (round-29) در یک isOpen ادغام می‌شوند و
  *  علت/زمانِ موقت بر ساعت اصلی مقدم است. مبدل در server/checkout فرانت است. */

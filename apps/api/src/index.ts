@@ -25,6 +25,7 @@ import { TokenService } from '#/domain/auth/token.service'
 import { OtpService } from '#/domain/auth/otp.service'
 import { SessionService } from '#/domain/auth/session.service'
 import { DeviceService } from '#/domain/device/device.service'
+import { RegistrationPermitService } from '#/domain/auth/registration-permit.service'
 import { AuthService } from '#/domain/auth/auth.service'
 import { SettingsService } from '#/domain/settings/settings.service'
 import { MenuService } from '#/domain/menu/menu.service'
@@ -109,6 +110,8 @@ const tokens = new TokenService(config)
 const otp = new OtpService({ redis, config, sms })
 const sessions = new SessionService({ db, config, tokens })
 const devices = new DeviceService({ db, config })
+// stage-79 — مجوز ثبت‌نام ویژه (استثنای ادمینِ اصلی روی قواعد دستگاه)
+const permits = new RegistrationPermitService({ db })
 const settings = new SettingsService({ db, config }) // round-13 — config برای مختصات env رستوران
 // round-28 — سبد: دسته‌ای از loadPricingBases مشترک؛ دیگر به menu نیاز ندارد
 const cart = new CartService({ db })
@@ -143,7 +146,7 @@ const reports = new ReportService({ db, config, sms, links, reconcile, dockerLog
 // stage-10: باکس گزارشات داشبورد + لاگ ممیزی ادمین اصلی
 const audit = new AuditService({ db })
 const reportQueries = new ReportQueryService({ db, audit })
-const auth = new AuthService({ db, config, otp, sessions, devices, admin2 })
+const auth = new AuthService({ db, config, otp, sessions, devices, admin2, permits })
 const articles = new ArticleService({ db, redis })
 const gallery = new GalleryService({ db })
 const geo = new GeoService({ db, config, settings })
@@ -228,6 +231,7 @@ const app = buildApp({
   auth,
   sessions,
   devices,
+  permits,
   menu,
   cart,
   addresses,

@@ -22,6 +22,7 @@ import type {
         LiveOrderDetailDto,
         LiveOrdersDataDto,
         OutsideScope,
+        RegistrationPermitDto,
         RestaurantStatusDto,
         StaffInvoice,
         StaffInvoiceItem,
@@ -474,5 +475,31 @@ export async function setTemporaryClose(input: {
                 // round-34 — علت عربی ('' → null = حذف ترجمه = بازگشت به فارسی)
                 reasonAr: input.data.reasonAr?.trim() || null,
         })
+        return { success: true }
+}
+
+// ═════════════ stage-79 — مجوز ثبت‌نام ویژه (فقط ادمین اصلی) ═════════════
+// شماره‌ای که اینجا صادر شود می‌تواند یک‌بار (در پنجره‌ی اعتبار) ثبت‌نام کند —
+// حتی از دستگاهِ سوخته/مسدود — و بعد از ثبت‌نامِ موفق همان دستگاه بلاک می‌شود.
+
+export async function getRegistrationPermits(): Promise<RegistrationPermitDto[]> {
+        return authJson<RegistrationPermitDto[]>('/admin/settings/registration-permits', 'GET')
+}
+
+export async function issueRegistrationPermit(input: {
+        data: { phone: string; note?: string | null; ttlHours?: number }
+}): Promise<RegistrationPermitDto> {
+        const d = await authJson<{ permit: RegistrationPermitDto }>(
+                '/admin/settings/registration-permits',
+                'POST',
+                input.data,
+        )
+        return d.permit
+}
+
+export async function revokeRegistrationPermit(input: {
+        data: { id: string }
+}): Promise<{ success: boolean }> {
+        await authJson<unknown>('/admin/settings/registration-permits/revoke', 'POST', input.data)
         return { success: true }
 }

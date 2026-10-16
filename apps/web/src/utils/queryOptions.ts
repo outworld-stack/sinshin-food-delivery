@@ -46,6 +46,7 @@ import {
   getOrderDetailsByRole,
   // رارد ۳۷ — قفل جغرافیایی عراق
   getOutsideScope,
+  getRegistrationPermits,
   getRestaurantOpen,
   getRestaurantStatusFull,
   // ⬅ NEW (بچ ۵): جزئیات نقش‌محور + گزینه‌های پنل زنده
@@ -416,6 +417,14 @@ export const geoStatusOptions = queryOptions({
   queryFn: () => getGeoStatus(),
   staleTime: 15_000,
   refetchInterval: 30_000,
+})
+
+// stage-79 — مجوزهای ثبت‌نام ویژه — staleTime صفر: صدور/لغو/مصرفِ مجوز
+// باید همان لحظه در کارت دیده شود (مصرف از مسیر ثبت‌نام هم ردیف را عوض می‌کند)
+export const settingsRegistrationPermitsOptions = queryOptions({
+  queryKey: qk.settingsRegistrationPermits,
+  queryFn: () => getRegistrationPermits(),
+  staleTime: 0,
 })
 
 // قوانین — نسخه‌دار؛ مودال ثبت‌نام و ادیتور ادمین یک کش مشترک

@@ -11,6 +11,7 @@ import type { SessionService, SessionIssue } from './session.service'
 import type { DeviceService } from '#/domain/device/device.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { DeviceSignals } from '#/domain/device/device-signals'
+import type { RegistrationPermitService } from '#/domain/auth/registration-permit.service'
 import type { AuthUser, Role } from '@sinshin/shared'
 import { asUserId } from '#/domain/shared/brand'
 
@@ -51,6 +52,8 @@ export class AuthService {
       sessions: SessionService
       devices: DeviceService
       admin2: Admin2Service
+      /** stage-79 — مجوز ثبت‌نام ویژه (استثنای ادمینِ اصلی) */
+      permits: RegistrationPermitService
     },
   ) { }
 
@@ -92,9 +95,15 @@ export class AuthService {
    *  ۱) کد چک می‌شود
    *  ۲) پیش‌بینیِ فقط-خواندنیِ دستگاه (stage-70: بدون اثر دائمی)
    *  ۳) دستگاه مسدود → رد (مسدودی = فقط تصمیم ادمین یا ریسکِ پس از ثبت‌نام)
+   *     stage-79 — استثنا: مجوزِ ثبت‌نامِ فعال برای همین شماره (کاربرِ
+   *     تازه) مسدودیِ دستگاه را برای همین ثبت‌نام رد می‌کند (PERMIT_BYPASS).
    *  ۴) کاربر جدید: قوانین + مالکِ ردیفِ دستگاه + معرف — سپس در «یک
    *     تراکنش»: ساخت کاربر + نهایی‌سازی دستگاه (claim اتمیک مالکیت)
+   *     stage-79 — داخل tx: مجوز «اتمیک مصرف» می‌شود (claim شرطی)؛ اگر
+   *     در فاصله‌ی peek→tx لغو/منقضی شده باشد، مسیر به حالتِ سختِ عادی
+   *     برمی‌گردد (رفتارِ پیش از ۷۹) — پنجره‌ی TOCTOU صفر است.
    *  ۵) کاربر موجود: در همان الگو — به‌روزرسانی + نهایی‌سازی LOGIN
+   *     (مجوز هرگز روی ورودِ کاربرِ موجود اثر ندارد)
    *  ۶) نشست روی دستگاه فیزیکی
    *  ۷) admin2: قواعد لاگین / onLogin
    */
@@ -108,16 +117,43 @@ export class AuthService {
     const { db, config } = this.deps
     await this.deps.otp.verify(phone, code)
 
+    // ── stage-79 — وضعیتِ کاربر قبل از تصمیمِ مسدودی (خواندنِ خالص؛
+    // فقط ترتیبِ دو SELECT خواندنی عوض شد). مجوز فقط برای «ثبت‌نامِ
+    // کاربرِ تازه» معنا دارد — کاربرِ موجود هیچ‌وقت از مسیرِ مجوز
+    // نمی‌گذرد (توافقِ صریح: به منطقِ ورود دست نزنیم). ──
+    let user = await db.query.users.findFirst({ where: eq(users.phone, phone) })
+    const isNewUser = !user
+    const permit = isNewUser ? await this.deps.permits.peekActivePermit(phone) : null
+
     // ── هوشمندی دستگاه — فقط پیش‌بینی، صفر اثر جانبی ──
     const peek = await this.deps.devices.peek(signals, phone)
-    if (peek.device?.isBlocked) {
+    if (peek.device?.isBlocked && !permit) {
       throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
     }
 
-    let user = await db.query.users.findFirst({ where: eq(users.phone, phone) })
-    const isNewUser = !user
+    // stage-79 — ممیزیِ گذرِ استثنا: رویداد PERMIT_BYPASS روی همین ردیفِ
+    // دستگاه (پنل ادمین می‌بیند). مصرفِ واقعی بعداً داخل tx اتفاق می‌افتد.
+    if (permit && peek.device) {
+      const owner = peek.device.registeredOwnerPhone ?? null
+      await this.deps.devices.logEvent(
+        peek.device.id,
+        phone,
+        'PERMIT_BYPASS',
+        ip,
+        signals.userAgent ?? null,
+        {
+          permitId: permit.id,
+          deviceBlocked: peek.device.isBlocked,
+          ownerConflict: owner !== null && owner !== phone,
+        },
+      )
+    }
+
     const maxPhones = config.device.maxPhonesPerDevice
     let finalDevice: DeviceRow | undefined
+    // stage-79 — آیا همین ثبت‌نام از مسیرِ مجوزِ مصرف‌شده گذشت؟ (برای
+    // پیامِ پایانی و اطمینان از سوختن دستگاه در tx)
+    let permitUsed = false
 
     if (!user) {
       if (!opts.termsAccepted) {
@@ -127,8 +163,10 @@ export class AuthService {
       // ── سقف شماره‌های دستگاه (stage-60/62) — stage-70: فقط «همین ردیف» ──
       // مالکِ ردیفِ دستگاهِ فعلی؛ کل خوشه دیگر معیار رد نیست (P1-۲).
       // ورود با شماره‌های ثبت‌نام‌شده (کاربر موجود) همیشه آزاد است.
+      // stage-79 — مجوزِ فعال: این چکِ «قبل از tx» نادیده گرفته می‌شود؛
+      // مرزِ امن داخل tx بعد از claim اتمیک مجوز است (پایین‌تر).
       const owner = peek.device?.registeredOwnerPhone ?? null
-      if (config.deviceEnforcement && maxPhones > 0 && owner && owner !== phone) {
+      if (config.deviceEnforcement && maxPhones > 0 && owner && owner !== phone && !permit) {
         if (peek.device) {
           await this.deps.devices.logEvent(
             peek.device.id,
@@ -176,17 +214,36 @@ export class AuthService {
       // stage-72 (P2-۹/۱۰): ① سهمیه داخل tx بعد از قفلِ شماره (TOCTOU)
       // ② ثبت‌نامِ هم‌زمانِ همان شماره = 409 تمیز نه 500 خام  ③ رویداد
       // PHONE_LIMIT_BLOCKED بعد از rollback (بیرون tx) ثبت می‌شود
+      // stage-79: ④ مجوز با claim اتمیکِ تک‌عبارتی «اولِ tx» مصرف می‌شود —
+      // لغو/انقضای هم‌زمان یعنی permitOverride=false و ادامه با قواعدِ
+      // کاملِ سختِ عادی (بدون هیچ باقی‌ماندنی از استثنا). مصرف داخل tx
+      // است ⇒ rollback ثبت‌نام، مجوز را هم دست‌نخورده برمی‌گرداند.
       const outcome = await this.withRegistrationGuards(
         db.transaction(async (tx) => {
           // قفلِ شماره: ثبت‌نام/ورودِ هم‌زمانِ همین شماره سریال می‌شود
           await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+
+          // ── stage-79 — claim اتمیکِ مجوز (قبل از هر تصمیمِ استثنا) ──
+          const claimedPermit = permit
+            ? await this.deps.permits.consumeForRegistration(tx, phone, peek.device?.id ?? null)
+            : null
+          const permitOverride = claimedPermit !== null
+
+          // مجوزِ لحظه‌ای (peek) دیده شد ولی claim نشد — لغو/انقضای هم‌زمان:
+          // تصمیمِ گذر از مسدودیِ مرحله‌ی peek را برگردان (مسیرِ سختِ عادی)
+          if (permit && !permitOverride && peek.device?.isBlocked) {
+            throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
+          }
 
           // بازبینی سهمیه زیر قفل — دو ورودِ هم‌زمانِ همین شماره دیگر سقف
           // دستگاه‌ها را رد نمی‌کنند (P2-۹)
           await this.deps.devices.assertQuotaOn(tx, phone, willBeRole, peek.device?.id ?? null)
 
           // بازبینی مالکیت زیر قفل — رقیبی بین peek و تراکنش claim کرده باشد
-          if (peek.device) {
+          // (stage-79: با مجوزِ مصرف‌شده این چک نادیده گرفته می‌شود —
+          // finalize با claim بی‌قیدوشرط مالک را بازنویسی می‌کند و گام ۵-b
+          // دستگاه را برای همیشه می‌بندد)
+          if (peek.device && !permitOverride) {
             const rows = await tx
               .select({ owner: devices.registeredOwnerPhone })
               .from(devices)
@@ -218,13 +275,23 @@ export class AuthService {
             ip,
             peek,
             event: 'REGISTER',
+            ...(permitOverride
+              ? { permitOverride: true, permitId: claimedPermit?.id ?? null }
+              : {}),
           })
-          return { user: createdUser, device }
+
+          // رکوردِ ممیزی: ردیفِ دستگاهِ نهایی که مجوز را مصرف کرد
+          if (claimedPermit) {
+            await this.deps.permits.recordUsedDevice(tx, claimedPermit.id, device.id)
+          }
+
+          return { user: createdUser, device, permitUsed: permitOverride }
         }),
         { phone, ip, userAgent: signals.userAgent ?? null, peekDeviceId: peek.device?.id ?? null },
       )
       user = outcome.user
       finalDevice = outcome.device
+      permitUsed = outcome.permitUsed
     } else {
       if (user.bannedAt) throw Err.banned()
 
@@ -271,8 +338,17 @@ export class AuthService {
     // قبلاً revoke سشن‌ها داخل tx بود اما createSession «بعد از» تراکنش صادر
     // می‌شد و سشنِ تازه از ابطال فرار می‌کرد. ثبت‌نام موفق است (کاربر ساخته
     // شد) اما استفاده از این دستگاه مسدود است — همان خطای ورودِ بعدی.
+    // stage-79 — همان قاعده‌ی طلایی برای مسیرِ مجوز: ثبت‌نام کامل شد (که
+    // خواسته‌ی اصلی بود) اما دستگاه طبق قراردادِ مجوز سوخت؛ پیامِ متمایز
+    // تا شخص بداند سرِ کجاست — با دستگاهِ دیگری وارد شود (ادمین هم
+    // می‌تواند با ابزارِ موجودِ UNBLOCK دستگاه را برای ورود باز کند؛
+    // claim مالکیت می‌ماند و ثبت‌نامِ بعدی از همان دستگاه ممکن نمی‌شود).
     if (deviceRow.isBlocked) {
-      throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
+      throw Err.forbidden(
+        permitUsed
+          ? 'ثبت‌نام شما کامل شد، اما این دستگاه طبق مجوز ثبت‌نام بلاک شد؛ برای ورود از دستگاه دیگری استفاده کنید.'
+          : 'این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.',
+      )
     }
 
     // ── قلاب admin2 — قبل از سشن: قواعد لاگین (ساعتی بسته → رد) ──

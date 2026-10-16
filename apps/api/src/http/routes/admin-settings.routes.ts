@@ -12,6 +12,7 @@ import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { AuditService } from '#/domain/audit/audit.service'
+import type { RegistrationPermitService } from '#/domain/auth/registration-permit.service'
 import { SETTING_KEYS } from '#/infra/db/schema'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
@@ -23,6 +24,8 @@ export interface AdminSettingsRoutesDeps {
   admin2: Admin2Service
   /** stage-10: لاگ ممیزی — تغییرات پولی/سراسری ادمین اصلی */
   audit: AuditService
+  /** stage-79 — مجوز ثبت‌نام ویژه (فقط ادمین اصلی) */
+  permits: RegistrationPermitService
 }
 
 export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
@@ -276,6 +279,76 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           summary: 'Set outside-Iran access scope — main admin only',
           description:
             "'iraq' allows Iranian + Iraqi IPs only; 'world' opens the site to every country. Effective within ~15s (cached). Audit-logged as OUTSIDE_SCOPE_SET.",
+        },
+      },
+    )
+
+    // ═══ stage-79 — مجوز ثبت‌نام ویژه (فقط ادمین اصلی) ═══
+    // دسترسیِ ویژه: شماره‌ای که اینجا صادر شود می‌تواند یک‌بار (در پنجره‌ی
+    // اعتبار) ثبت‌نام کند — حتی از دستگاهِ سوخته/مسدود — و بعد از ثبت‌نامِ
+    // موفق، همان دستگاه بلاک می‌شود (PERMIT_BURN / دلیل permit-burn).
+    // مصرفِ مجوز اتمیک و داخل تراکنشِ ثبت‌نام است؛ لغو هر لحظه ممکن است.
+    .get(
+      '/registration-permits',
+      () => deps.permits.list(),
+      {
+        detail: {
+          summary: 'List recent registration permits — main admin only',
+          description:
+            'Latest 100 permits with effective status (pending/used/revoked/expired), note, expiry, and the device that consumed it.',
+        },
+      },
+    )
+    .post(
+      '/registration-permits',
+      async ({ body, user }) => {
+        const permit = await deps.permits.issue({
+          rawPhone: body.phone,
+          note: body.note ?? null,
+          ttlHours: body.ttlHours,
+          adminId: user.id,
+        })
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'REG_PERMIT_ISSUE',
+          entity: 'registration-permit',
+          entityId: permit.id,
+          metadata: { phone: permit.phone, ttlHours: body.ttlHours ?? null, note: permit.note },
+        })
+        return { permit }
+      },
+      {
+        body: t.Object({
+          phone: t.String({ minLength: 4, maxLength: 20 }),
+          note: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
+          ttlHours: t.Optional(t.Number({ minimum: 1, maximum: 72 })),
+        }),
+        detail: {
+          summary: 'Issue/refresh a registration permit — main admin only',
+          description:
+            'Grants ONE phone number a single-use registration pass (default 24h, max 72h). The number must not already have an account. During the permit window that number may register even from a burned/blocked device; when the registration succeeds the device is hard-blocked (reason: permit-burn) and the permit is atomically consumed inside the registration transaction. Re-issuing for the same pending number refreshes expiry/note. Audit-logged as REG_PERMIT_ISSUE.',
+        },
+      },
+    )
+    .post(
+      '/registration-permits/revoke',
+      async ({ body, user }) => {
+        await deps.permits.revoke({ permitId: body.id, adminId: user.id })
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'REG_PERMIT_REVOKE',
+          entity: 'registration-permit',
+          entityId: body.id,
+          metadata: {},
+        })
+        return { success: true }
+      },
+      {
+        body: t.Object({ id: t.String({ format: 'uuid' }) }),
+        detail: {
+          summary: 'Revoke a pending registration permit — main admin only',
+          description:
+            'Only pending permits can be revoked. Atomic; if a registration is consuming the permit at this exact moment, the database transaction serializes the two (revocation wins → registration falls back to strict device rules). Audit-logged as REG_PERMIT_REVOKE.',
         },
       },
     )

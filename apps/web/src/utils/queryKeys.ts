@@ -140,6 +140,9 @@ export const qk = {
   settingsOutsideScope: ['settings-outside-scope'] as const,
   geoStatus: ['geo-status'] as const,
 
+  // stage-79 — مجوز ثبت‌نام ویژه (کارت تنظیمات — فقط ادمین اصلی)
+  settingsRegistrationPermits: ['settings-registration-permits'] as const,
+
   // کتگوری‌ها — فرم محصول/کوپن + فیلتر لیست‌ها همه از یک کش
   categories: ['categories'] as const,
 
