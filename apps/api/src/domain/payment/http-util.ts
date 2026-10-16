@@ -2,6 +2,8 @@
 // فراخوانی HTTP مشترک درگاه‌ها — منبع واحد رارد ۴۸ (اسکن A11).
 // پیش از این، همین الگوی «POST با هدر JSON + مهلت کانفیگی + پاسخ
 // غیر-JSON یعنی null» در شش نقطه‌ی چهار آداپتر تکرار می‌شد.
+// stage-74 — fetch سراسری (در Bun همان Bun.fetch است؛ رفتار production
+// یکسان) تا در تست‌ها mock-پذیر باشد — تست‌های آداپتور بدون شبکه‌ی واقعی.
 
 /** POST با بدنه‌ی JSON؛ پاسخ غیر-JSON (صفحه‌ی خطای HTML شاپرک) = null، نه کرش */
 export async function postGatewayJson<T>(
@@ -9,7 +11,7 @@ export async function postGatewayJson<T>(
   body: unknown,
   timeoutMs: number,
 ): Promise<T | null> {
-  const res = await Bun.fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),

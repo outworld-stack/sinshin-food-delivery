@@ -602,3 +602,81 @@ Cookies) دیگر شکست نمی‌خورند: هر مخزن جداگانه bes
 `randomUUID` با fallback، و در زمینه‌های ناامن (HTTP) همه‌ی هش‌ها
 missing (قرارداد stage-70+) — مسیر تأیید OTP همیشه زنده می‌ماند.
 تست: `cd apps/web && bun run test:device` (۱۱ بند).
+
+---
+
+## ۲-۱۰-۶) stage-74 — «مجموع پرداخت‌ها» فقط پولِ واقعی + لغوی زرین‌پال + پایداری PWA
+
+### الف) قرارداد مالی «پولِ واقعاً دریافت‌شده»
+
+جمعِ مبلغِ هر آمار مالی فقط روی سفارش‌هایی که **`payment_status='SUCCESS'
+و `status<>'CANCELED'`** دارند حساب می‌شود (REFUNDED هم بیرون می‌ماند —
+پول برگشته). این قرارداد از قبل در admin.service (درآمد KPI)،
+report-query و myReferrals بود؛ **تنها جایی که جا افتاده بود
+`myOrdersPage.totalSpent` بود** — همان باکس «مجموع پرداخت‌ها» در صفحه‌ی
+سفارشات، که سفارشِ PENDING_PAYMENT (مثل پرداختِ لغوشده در زرین‌پال) را هم
+جمع می‌زد. رفع: aggregate با `sum(...) filter (where payment_status='SUCCESS'
+and status<>'CANCELED')` — شمارشِ `total` دست‌نخورده (لیست همه‌ی سفارش‌ها
+را نشان می‌دهد).
+
+### ب) callback زرین‌پال — لغو، شکلِ پاسخ، و خطای شبکه
+
+**ریشه‌ی «سفارش تا ابد در انتظار پرداخت»:** زرین‌پال برای پرداختِ
+لغوشده (Status=NOK در callback) در Verify پاسخی برمی‌گرداند که کدش
+غالباً در **آرایه/شیءِ `errors`** می‌آید نه `data.code`. آداپتور فقط
+`data.code` می‌خواند ⇒ undefined ⇒ indeterminate ⇒ سفارش PENDING می‌ماند
+تا R12ِ ۲۴ساعته. رفع: کدهای -9/-10/-11 از **هر دو شکل** خوانده می‌شوند
+(آرایه و شیء) ⇒ شکستِ قطعی ⇒ سفارش CANCELED + آزادسازی کیف/کوپن.
+
+**چرا Status=NOK به‌تنهایی نهایی نمی‌کند؟** پارامترِ کوئری قابلِ جعل
+است (state در URL پرداختِ خودِ کاربر است). منبعِ حقیقت فقط پاسخِ
+سرور-به-سرورِ Verify است: پرداختِ واقعی + NOK جعلی ⇒ Verify=100 ⇒ موفق
+(Verify مقدم). NOK فقط لاگ می‌شود — شکلِ واقعی پاسخِ indeterminate هم
+لاگ می‌شود تا کدهای جدیدِ درگاه در تست‌های عملی دیده شوند.
+
+**باگ جدید (کشف stage-74):** خطای شبکه در verify (تایم‌اوت/قطعی) تا
+`runCallbackSafe` سرریز می‌کرد و مشتریِ تازه-پرداخت‌کرده **JSON خامِ 500**
+می‌دید. الان: catch ⇒ indeterminate ⇒ 302 به صفحه‌ی سفارش با
+`payment=pending` — کارِ تایم‌اوتِ ۵ دقیقه‌ای بعداً قطعی‌اش می‌کند.
+
+### ج) پایداری PWA — معماری «هیچ درخواستی برای همیشه معلق نمی‌ماند»
+
+علتِ «فریز نیم‌ساعته‌ی ادمین»: توکنِ ۱۵ دقیقه‌ای منقضی می‌شود ⇒ اولین
+401 وارد `tryRefresh` می‌شود ⇒ تایمرِ refresh بعد از **headers** پاک
+می‌شد و `res.json()` بی‌مرز بود ⇒ **refreshPromise مشترک** بین همه‌ی
+درخواست‌های احراز برای همیشه معلق ⇒ کل پنل فریز؛ بستنِ اپ = ری‌ستِ
+state ماژول. سه لایه‌ی رفع:
+
+1. **`fetchWithTimeout` (api-fetch):** تایمر تا «پایان خواندنِ بدنه»
+   زنده می‌ماند — پاسخ با Proxy پوشیده شده؛ بودجه = کلِ چرخه
+   (اتصال+headers+بدنه). abort ⇒ خواندن reject.
+2. **`tryRefresh` (auth-session):** ددلاین سرتاسری (fetch+بدنه) +
+   **watchdog**: promise در سقفِ (۲×مهلت+۵s) «همیشه» settle می‌شود و
+   `refreshPromise` آزاد می‌شود (finally روی خودِ promise) — حتی با
+   باگِ آینده. watchdog فقط false (بدون خروج؛ خروج فقط از 401/403 قطعیِ
+   خودِ سرور). 2xx بدون accessToken ⇒ false نرم (قبلاً undefined در
+   setAccessToken می‌نشست و hasSession بی‌توکن true می‌شد).
+3. **`sse-client` (فایل جدید):** کلاینتِ مشترکِ fetch-SSE —
+   تایم‌اوتِ اتصال ۱۵s (headers گیر نکند) + **watchdog سکوت ۴۵s**
+   (سرور هر ۱۵s ضربان می‌فرستد؛ نبودِ ۳ ضربان = مرگِ خاموش ⇒ بازسازی)
+   + retry ۶۰s + بازسازی روی online/برگشت از پس‌زمینه (استریمِ کهنه >
+   ۲۰s = بازسازی فوری — سوکتِ پس‌زمینه مرده). مصرف‌کنندگان:
+   useAdmin2Panel + useNotificationInboxPage (useMenuLive با EventSource
+   مرورگر — بدون auth — دست‌نخورده).
+
+**پولینگ پس‌زمینه:** قبلاً PAID در صف ⇒ ۲.۵s حتی در تب مخفی
+(~۱۴۴۰ req/h). الان: پس‌زمینه = ۳۰s (با SSE ۶۰s) + **refetch فوری روی
+برگشت به اپ** (visibilitychange).
+
+### تست‌ها (stage-74 — همه روی سرویس/سرور واقعی)
+
+| تست | بند | دستور |
+|---|---|---|
+| آداپتور زرین‌پال (هر دو شکل errors، ضد-جعل، پارامترها) | ۱۶ | `cd apps/api && bun run db:test:zarinpal` |
+| مسیر پول (myOrdersPage + callback×۵ روی PG واقعی) | ۱۸ | `cd apps/api && bun run db:test:pay` |
+| fetchWithTimeout (بدنه‌ی گیرکرده/کند/abort بیرونی) | ۵ | `cd apps/web && bun run test:fetch-timeout` |
+| auth-session (watchdog/پیوند/401/429/آزادسازی) | ۱۲ | `cd apps/web && bun run test:auth-session` |
+| sse-client (مرگ خاموش/تایم‌اوت اتصال/wake/stop) | ۱۸ | `cd apps/web && bun run test:sse-client` |
+
+مجموع: **۶۹ بند** — PG امبدد (`sinshin_e2e_pay_…`) برای مسیر پول؛
+بقیه بدون دیتابیس.

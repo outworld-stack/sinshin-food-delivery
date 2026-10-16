@@ -404,8 +404,9 @@ export type MyOrdersSort = 'newest' | 'oldest' | 'expensive' | 'cheap'
  * stage-56 — صفحه‌بندی سروریِ «سفارشات من» (GET /orders?page&limit&sort):
  *  • orders: ردیف‌های همان صفحه (newest اول به‌جز sortهای دیگر)
  *  • total: کل سفارش‌های کاربر (بدون سقف ۲۰۰) — مبنای شمار صفحات
- *  • totalSpent: جمع مبلغ همه‌ی سفارش‌ها (همان چیزی که قبلاً ردیف‌های
- *    سقف‌دار در کلاینت جمع می‌زدند — الان از SQL واقعی می‌آید)
+ *  • totalSpent: جمع مبلغ سفارش‌هایِ «واقعاً پرداخت‌شده» (stage-74 —
+ *    paymentStatus='SUCCESS' و status<>'CANCELED'؛ قبلاً همه‌ی سفارش‌ها
+ *    جمع می‌شدند و پرداختِ لغوشده هم «پرداختی» حساب می‌شد)
  */
 export interface UserOrdersData {
   orders: UserOrder[]

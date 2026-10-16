@@ -153,7 +153,20 @@ export class PaymentService {
     }
 
     const gw = this.gateway(gatewayId)
-    const v = await gw.verify({ gatewayRef: payment.gatewayRef, amount: payment.amount, query })
+
+    // stage-74 — خطای شبکه به درگاه (تایم‌اوت/قطعی/Connection refused) از
+    // verify بالا می‌آید؛ قبلاً تا runCallbackSafe سرریز می‌کرد و مشتریِ
+    // تازه-پرداخت‌کرده JSON خامِ 500 می‌دید (سناریوی «خطای شبکه‌ی درگاه»
+    // کارفرما). الان: مثلِ نتیجه‌ی indeterminate — 302 به صفحه‌ی سفارش با
+    // payment=pending؛ کارِ تایم‌اوتِ ۵ دقیقه‌ای بعداً با ری-وریفای قطعی‌اش
+    // می‌کند (پول در خطر نیست؛ settle/fail فقط با پاسخِ درگاه رخ می‌دهد).
+    let v: Awaited<ReturnType<PaymentGateway['verify']>>
+    try {
+      v = await gw.verify({ gatewayRef: payment.gatewayRef, amount: payment.amount, query })
+    } catch (e) {
+      console.error(`[payments] callback ${gatewayId}: خطای شبکه در verify — indeterminate:`, e)
+      v = { success: false, gatewayRef: payment.gatewayRef, indeterminate: true }
+    }
 
     // phase-fix: نتیجه‌ی قطعی نیست (خطای گذرای درگاه) — سفارش را شکست نده؛
     // کارِ تایم‌اوت دوباره تایید می‌کند و مشتری به صفحه سفارشش برمی‌گردد.

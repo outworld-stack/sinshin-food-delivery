@@ -16,7 +16,9 @@
     "db:seed:deploy": "bun drizzle/seed.deploy.ts",
     "db:studio": "drizzle-kit studio",
     "db:test:migrations": "bun scripts/test-migrations.ts",
-    "db:test:device": "bun scripts/test-device-policy.ts"
+    "db:test:device": "bun scripts/test-device-policy.ts",
+    "db:test:pay": "bun scripts/test-payment-money-path.ts",
+    "db:test:zarinpal": "bun scripts/test-zarinpal-verify.ts"
   },
   "dependencies": {
     "@elysia/html": "^1.4.1",

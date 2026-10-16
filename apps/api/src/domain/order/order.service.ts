@@ -1048,8 +1048,10 @@ export class OrderService {
          * صفحه‌ی «سفارشات من» را با offset-pagination واقعی می‌دهد:
          *  • هیچ سقفی نیست — مشتری وفادار با هزار سفارش همه را صفحه‌به‌صفحه می‌بیند
          *  • total = count(*)::int — مبنای شمار صفحات (الگوی getAdminOrders)
-         *  • totalSpent = sum(total_amount) — همان آماری که قبلاً کلاینت روی
-         *    ردیف‌های سقف‌دار می‌زد؛ الان دقیق و کامل از SQL می‌آید
+         *  • totalSpent = sum(total_amount) فقط روی سفارش‌های واقعاً پرداخت‌شده
+         *    (stage-74: paymentStatus='SUCCESS' و status<>'CANCELED' — قبلاً
+         *    بدون شرط جمع می‌زد و پرداختِ لغوشده در زرین‌پال هم «پرداختی»
+         *    حساب می‌شد؛ همان قرارداد admin.service/report-query)
          *  • sort: newest (پیش‌فرض) / oldest / expensive / cheap — همان مقادیرِ
          *    sort صفحه‌ی داشبورد؛ مرتب‌سازی در DB، نه در کلاینت
          */
@@ -1062,6 +1064,17 @@ export class OrderService {
                 const limit = Math.min(Math.max(5, opts.limit ?? 10), 100);
                 const sort: MyOrdersSort = opts.sort ?? "newest";
                 const where = eq(orders.userId, userId);
+                // stage-74 — «مجموع پرداخت‌ها» فقط سفارش‌هایِ «واقعاً پرداخت‌شده»:
+                //   paymentStatus = 'SUCCESS'  → پول واقعاً دریافت شده (settlePayment)
+                //   status <> 'CANCELED'       → سفارشِ لغو‌شده (پرداخت ناموفق) نه
+                // گزارش قبلی: sum بدون شرط → سفارشِ PENDING_PAYMENT (مثلِ پرداختِ
+                // لغوشده در زرین‌پال) هم وارد «مجموع پرداخت‌ها» می‌شد و صفحه‌ی
+                // سفارشات مبلغِ هرگز-پرداخت‌نشده را نشان می‌داد.
+                // این همان قراردادِ مالیِ کل پروژه است (admin.service:67/241/404،
+                // report-query:448/571، profile.service:253) — اینجا تنها جایی
+                // بود که جا افتاده بود. REFUNDED (= بازگشت وجه) هم بیرون می‌ماند:
+                // paymentStatus='REFUNDED' ≠ 'SUCCESS'. (شمارشِ total دست‌نخورده —
+                // لیست همه‌ی سفارش‌ها را نشان می‌دهد؛ فقط «مبلغ» فیلتر می‌شود.)
                 const orderBy =
                         sort === "oldest"
                                 ? asc(orders.createdAt)
@@ -1082,7 +1095,7 @@ export class OrderService {
                         this.deps.db
                                 .select({
                                         count: sql<number>`count(*)::int`,
-                                        totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
+                                        totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::bigint`,
                                 })
                                 .from(orders)
                                 .where(where),
