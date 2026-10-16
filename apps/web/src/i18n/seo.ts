@@ -56,6 +56,8 @@ export interface SeoStrings {
 	cart: TitleOnlySeo
 	checkout: TitleOnlySeo
 	geoBlocked: TitleOnlySeo
+	// stage-75 (P3-30) — عنوان دوزبانه‌ی صندوق اعلان (قبلاً <title> فارسیِ هاردکد)
+	notifications: TitleOnlySeo
 	notFoundProduct: TitleOnlySeo
 	notFoundArticle: TitleOnlySeo
 	/** نام‌های BreadcrumbList در JSON-LD صفحات محصول/مقاله */
@@ -115,6 +117,7 @@ const fa: SeoStrings = {
 	cart: { title: 'سبد خرید | سین شین' },
 	checkout: { title: 'تسویه حساب | سین شین' },
 	geoBlocked: { title: 'دسترسی محدود | سین شین' },
+	notifications: { title: 'صندوق اعلان‌ها | سین شین' },
 	notFoundProduct: { title: 'محصول یافت نشد | سین شین' },
 	notFoundArticle: { title: 'مقاله یافت نشد | سین شین' },
 	breadcrumb: { home: 'خانه', products: 'منو', articles: 'مقالات' },
@@ -173,6 +176,7 @@ const ar: SeoStrings = {
 	cart: { title: 'سلة الطلب | سين شين' },
 	checkout: { title: 'إتمام الطلب | سين شين' },
 	geoBlocked: { title: 'الوصول مقيّد | سين شين' },
+	notifications: { title: 'صندوق الإشعارات | سين شين' },
 	notFoundProduct: { title: 'المنتج غير موجود | سين شين' },
 	notFoundArticle: { title: 'المقال غير موجود | سين شين' },
 	breadcrumb: {

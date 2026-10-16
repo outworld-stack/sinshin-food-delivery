@@ -577,6 +577,8 @@ export const fa = {
         'notify.inbox.over9': 'بیش از {n}+',
         'notify.inbox.loadError': 'بارگذاری اعلان‌ها ناموفق بود؛ دوباره تلاش کنید.',
         'notify.inbox.retry': 'تلاش مجدد',
+        // stage-75 (P3-28) — سقفِ سروری لیست؛ {n} = ۳۰
+        'notify.inbox.capped': 'آخرین {n} اعلان نمایش داده می‌شود',
         'notify.type.coupon': 'کوپن تخفیف',
         'notify.type.discount': 'تخفیف محصول',
         'notify.type.broadcast': 'اطلاعیه عمومی',

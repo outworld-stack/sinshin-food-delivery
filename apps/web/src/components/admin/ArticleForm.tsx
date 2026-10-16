@@ -185,6 +185,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         <Toggle
           isOn={formData.isFeatured}
           onToggle={() => setFormData(prev => ({ ...prev, isFeatured: !prev.isFeatured }))}
+          label="مقاله ویژه (سنجاق‌شده)"
         />
       </div>
 

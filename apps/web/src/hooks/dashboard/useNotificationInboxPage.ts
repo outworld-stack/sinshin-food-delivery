@@ -95,6 +95,20 @@ export function useNotificationInboxPage(userId: string | undefined) {
 		onSuccess: invalidate,
 	})
 
+	// stage-75 (P3-28) — callbackهای پایدار: قبلاً صفحه‌ی مصرف‌کننده
+	// arrowِ درون‌خطی می‌ساخت (هویتِ تازه هر رندر) و memo(InboxRow) را
+	// بی‌اثر می‌کرد — هر رندرِ والد، همه‌ی ردیف‌ها را دوباره رندر می‌کرد.
+	// mutate در React-Query v5 پایدار است؛ فقط یک بار ساخته می‌شود.
+	const onMarkRead = useCallback(
+		(id: string) => markRead.mutate(id),
+		[markRead.mutate],
+	)
+	const onMarkAllRead = useCallback(
+		() => markAllRead.mutate(),
+		[markAllRead.mutate],
+	)
+	const onRetry = useCallback(() => void refetch(), [refetch])
+
 	// ── SSE زنده — فقط وقتی userId هست ──
 	useEffect(() => {
 		if (!userId) return
@@ -203,8 +217,12 @@ export function useNotificationInboxPage(userId: string | undefined) {
 		// stage-72 (P2-۱۳) — برای دکمه‌ی «تلاش مجدد» در حالت خطا
 		isFetching,
 		refetch,
+		// stage-75 (P3-28) — پایدار برای memo(InboxRow)
+		onRetry,
 		markRead,
 		markAllRead,
+		onMarkRead,
+		onMarkAllRead,
 		pushPhase,
 		handleEnablePush,
 		handleRecheck,

@@ -680,3 +680,78 @@ state ماژول. سه لایه‌ی رفع:
 
 مجموع: **۶۹ بند** — PG امبدد (`sinshin_e2e_pay_…`) برای مسیر پول؛
 بقیه بدون دیتابیس.
+
+## ۲-۱۰-۷) stage-75 — خطایابیِ تست نشست (محیط‌زدگی) + بستنِ P3های باقی‌مانده‌ی scan-72
+
+### الف) راستی‌آزمایی کامیت seventy-four + ریشه‌یابیِ ۶ خطای «test:auth-session»
+
+کامیت `11f0cea` بایت‌به‌بایت با تحویل ۷۴ راستی‌آزمایی شد (۱۷/۱۸ یکسان؛
+`sse-client.ts` فقط تفاوتِ تورفتگی — محتوای منطقی یکسان).
+
+شش خطای گزارش‌شده (R1×2، R4-hits=0، R4-آزادسازی، R5، R7-پس‌از-watchdog)
+با الگوی `hits=0` + `dt≈2ms` قابل بازتولید کامل بود:
+
+**ریشه — محیط‌زدگیِ تست، نه باگِ ماژول.** Bun هنگام اجرای
+`bun scripts/test-auth-session.ts` (از `apps/web`) فایل‌های `.env` همان
+پوشه را در `import.meta.env` بار می‌کند. در محیطِ توسعه‌ی روشنِ شما
+`VITE_API_URL` ست است ⇒ `refreshFetch` (auth-session.ts:67 —
+`import.meta.env.VITE_API_URL || window.location.origin`) به «API واقعی»
+می‌رفت: بدون کوکی ⇒ 401ِ فوری ⇒ خروج و پاک‌شدنِ توکن ⇒ دقیقاً همان ۶
+خطا (و دقیقاً همان ۶ موفقیتِ «انتظارِ شکست»). نشانه‌ها:
+`hits=0` (هیچ درخواستی به سرورِ تست نرسید)، `dt≈0-2ms` (پاسخِ فوریِ
+401، نه گیرکردن).
+
+**اثبات (بازتولید + شفا):** سرورِ 401ِ جعلی روی پورت 9899 + `.env` با
+`VITE_API_URL=http://localhost:9899` ⇒ تستِ ۷۴ دقیقاً **۶ ✓ / 6 ✗** با
+همان شش خطا. سپس تستِ ۷۵ (هرمتیک) در «همان محیطِ آلوده» ⇒ **۱۳ ✓ / 0 ✗**
+(×۳ دور + یک دورِ تمیز بدون `.env`).
+
+**اصلاح:** `apps/web/scripts/test-auth-session.ts` — wrapper سراسریِ
+fetch هر URL ای که به `/api/auth/refresh` ختم شود را به سرورِ خودِ تست
+بازنویسی می‌کند (init دست‌نخورده — signal/credentials)؛ R0 تازه اضافه
+شده: «بوت به سرورِ تست رسید — هرمتیک» و اگر `VITE_API_URL` در محیط
+حاضر باشد گزارشش می‌کند. خودِ `auth-session.ts` **دست نخورد** —
+`VITE_API_URL` در پروداکشن همان رفتارِ مطلوبِ تفکیکِ web/api است.
+
+### ب) ده یافته‌ی P3 باقی‌مانده‌ی scan-72 (۲۴..۳۵ منجای بسته‌شده‌ها)
+
+| # | یافته | اصلاح |
+|---|---|---|
+| 24 | لودینگ consumers متنِ «...» (پرش چیدمان) | اسکلتونِ هم‌قدِ ردیف‌ها + aria-busy — `$couponId.tsx` |
+| 25 | خطای fetch اول = «کوپنی ثبت نشده» | حالتِ خطا + دکمه‌ی تلاش مجدد (الگوی InboxList) — `coupons/index.tsx` |
+| 27 | z-9999 بنرهای PWA روی مودال‌ها (z-100) | z-90 (زیرِ مودال/بات‌شیت، بالای هدرِ z-40) — `PushAutoPrompt` + `register-sw` ×۳ |
+| 28 | InboxList: aria-live نبود، callback درون‌خطی، سقف ۳۰ بی‌یادآوری | aria-live=polite + callbackهای پایدار از هوک + یادداشتِ «آخرین ۳۰» (کلید `notify.inbox.capped` fa/ar) |
+| 29 | ترتیب دستگاه‌های پروفایل NULLS-first ≠ ادمین | `desc nulls last` + کلید دومِ firstLoginAt (آینه‌ی admin.service) — `auth.service.ts` |
+| 30 | `<title>` فارسیِ هاردکد | `noindexHead('notifications')` + کلیدِ دوزبانه در dict سئو (fa/ar) |
+| 31 | overmatch برند: «Note N» خالی ⇒ xiaomi | توکنِ بدونِ نشانه‌ی برند = null (صادق) — «Redmi Note…» همچنان xiaomi — `deviceIdentity.ts` |
+| 32 | کد مرده: attachIdentity عمومی + releaseNudgeClaim | هر دو حذف + کامنت‌های تاریخی به‌روز + import پاک |
+| 33 | role=switch بی‌نامِ accessible | prop اجباریِ `label` در Toggle + برچسبِ معنادار در هر ۲۳ استفاده (پرداخت چک‌آوت از dict دوزبانه) |
+| 35 | محوِ تعویض زبان در تب مخفی می‌ماند (rAF متوقف) | تایمرِ اطمینانِ مستقل از رندر (700ms) + پاک‌سازیِ صحیح در کلیکِ سریع/unmount — `i18n/index.tsx` |
+
+بسته‌شده‌های قبلی (stage-72): 24-جزئیات دیگر، 26 (min-w-0)، 34
+(maxLength)، 27-بخش 44px، 30-بخش TTL، 31-بخش‌های کد مرده/ترناری.
+
+### ج) تست‌ها و دروازه‌ها (stage-75)
+
+| تست | نتیجه | دستور |
+|---|---|---|
+| auth-session هرمتیک (R0..R7) | **۱۳ ✓** ×۴ دور | `cd apps/web && bun run test:auth-session` |
+| sse-client (رگرسیون) | ۱۸ ✓ | `cd apps/web && bun run test:sse-client` |
+| fetch-timeout (رگرسیون) | ۵ ✓ | `cd apps/web && bun run test:fetch-timeout` |
+| device-policy (رگرسیون — حذف attachIdentity) | ۱۹ ✓ | `cd apps/api && DATABASE_URL=… bun run db:test:device` |
+| migrations (رگرسیون) | ۵۷ ✓ | `cd apps/api && DATABASE_URL=… bun run db:test:migrations` |
+| مسیر پول (رگرسیون — coupon.service) | ۱۸ ✓ | `cd apps/api && DATABASE_URL=… bun run db:test:pay` |
+| زرین‌پال (رگرسیون) | ۱۶ ✓ | `cd apps/api && bun run db:test:zarinpal` |
+
+درگاه‌های ایستا: `tsc --noEmit` api و web = صفر · biome web =
+**۶۴۱/۱۴/۹ = دقیقاً baseline کامیت شما** (صفر جدید؛ سه خطای فرمتِ
+واردشده در همان لحظه فرمت شد) · برابری کلیدهای fa↔ar = ۴۹۴/۴۹۴.
+
+### نحوه اعمال
+
+```bash
+# بسته‌ی fixes/stage75 را روی ریشه‌ی ریپو کپی کنید (۳۲ فایل؛ همه جایگزینی)
+docker compose up -d --build web api
+# تست تازه (در محیطِ روشنِ توسعه‌تان — دیگر مهم نیست .env چه دارد):
+cd apps/web && bun run test:auth-session
+```

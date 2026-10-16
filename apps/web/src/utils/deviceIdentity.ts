@@ -151,7 +151,12 @@ function normalizeModel(brand: string, rawModel: string): string {
 function androidBrand(model: string): string | null {
 	const m = model.toLowerCase()
 	if (/^sm-|^gt-|^sc-|samsung|galaxy/.test(m)) return 'samsung'
-	if (/redmi|poco|xiaomi|^mi\s|^m2\d{3}|^hm|^note\s?\d|^2\d{4}[a-z]?/.test(m))
+	// stage-75 (P3-31) — «^note\s?\d» حذف شد: توکنِ خالیِ «Note N» برندِ
+	// قطعی نیست — Infinix Note / Tecno هم همین الگو را می‌سازند و «شیائومی»
+	// برچسبِ غلط می‌خوردند. ردیف‌های واقعیِ شیائومی همیشه نشانه‌ی برند دارند
+	// («Redmi Note…» با redmi، «Mi Note…» با ^mi\s). مدلِ بدونِ نشانه = برند
+	// نامشخن (null) — نمایشِ صادق‌ترِ «سایر» به‌جای ادعای غلط.
+	if (/redmi|poco|xiaomi|^mi\s|^m2\d{3}|^hm|^2\d{4}[a-z]?/.test(m))
 		return 'xiaomi'
 	if (/huawei|harmony|^ane-|^clt-|^els-|^jny-/.test(m)) return 'huawei'
 	if (/honor|^hry-|^cma-/.test(m)) return 'honor'

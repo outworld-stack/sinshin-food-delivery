@@ -319,7 +319,14 @@ export class AuthService {
       .from(deviceIdentities)
       .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
       .where(eq(deviceIdentities.phone, user.phone))
-      .orderBy(desc(deviceIdentities.lastLoginAt))
+      // stage-75 (P3-29) — هم‌راستا با ادمین (admin.service): desc پیش‌فرضِ
+      // PG یعنی NULLS FIRST — دستگاه‌هایی که هرگز لاگین نکرده‌اند اولِ لیست
+      // می‌آمدند و پروفایل/ادمین برای همان کاربر دو ترتیبِ متفاوت نشان
+      // می‌دادند. کلیدِ دوم هم آینه‌ی ادمین: firstLoginAt desc.
+      .orderBy(
+        sql`${deviceIdentities.lastLoginAt} desc nulls last`,
+        desc(deviceIdentities.firstLoginAt),
+      )
 
     return {
       user: this.publicUser(user),

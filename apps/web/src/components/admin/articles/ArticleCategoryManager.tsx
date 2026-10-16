@@ -197,7 +197,11 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
 
             <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-[#1a0a0e]">
               <span className="text-sm text-gray-700 dark:text-gray-300">فعال کردن ساب‌کتگوری</span>
-              <Toggle isOn={form.hasSub} onToggle={() => set({ hasSub: !form.hasSub })} />
+              <Toggle
+                isOn={form.hasSub}
+                onToggle={() => set({ hasSub: !form.hasSub })}
+                label="فعال کردن ساب‌کتگوری"
+              />
             </div>
 
             {form.hasSub && (

@@ -289,8 +289,11 @@ export function PushAutoPrompt() {
                         role="status"
                         aria-label={t['notify.enable.title']}
                         // bottom-24: بالاتر از بنرهای نصب/آپدیتِ register-sw (bottom-4)
-                        // تا روی هم نیفتند — هر دو z-9999 ولی جاهای متفاوت.
-                        className="fixed bottom-24 left-1/2 -translate-x-1/2 z-9999 flex items-center gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]"
+                        // تا روی هم نیفتند — هر دو z-90 ولی جاهای متفاوت.
+                        // stage-75 (P3-27) — z-9999 → z-90: بنر دیگر مودال/بات‌شیتِ
+                        // باز (z-100) را نمی‌پوشاند؛ دیالوگِ کاربر همیشه اولویت دارد.
+                        // (هدر z-40 — بنر همچنان بالای محتوای صفحه.)
+                        className="fixed bottom-24 left-1/2 -translate-x-1/2 z-90 flex items-center gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]"
                 >
                         <span className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
                                 <BellRing size={20} />

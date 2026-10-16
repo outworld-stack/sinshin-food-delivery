@@ -455,18 +455,12 @@ export class DeviceService {
     }
   }
 
-  /** ثبت/به‌روزرسانی هویت + رویداد LOGIN یا REGISTER */
-  async attachIdentity(
-    deviceId: string,
-    phone: string,
-    event: 'LOGIN' | 'REGISTER',
-    ip?: string | null,
-    userAgent?: string | null,
-  ): Promise<void> {
-    await this.attachIdentityOn(this.deps.db, deviceId, phone, event, ip, userAgent)
-  }
-
-  /** حذف دستگاه کاربر — هویت + سشن‌های همان دستگاه */
+  /**
+   * حذف دستگاه کاربر — هویت + سشن‌های همان دستگاه
+   * (stage-75 P3-32 — attachIdentity عمومیِ بی‌فراخوان حذف شد: مسیر واقعی
+   *  attachIdentityOn را مستقیم صدا می‌زند؛ این پوشش بی‌استفاده فقط API
+   *  مرده بود.)
+   */
   async revokeIdentity(userId: string, phone: string, deviceId: string): Promise<boolean> {
     const { db } = this.deps
     const id = asDeviceId(deviceId)

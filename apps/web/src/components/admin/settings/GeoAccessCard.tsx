@@ -140,7 +140,11 @@ export const GeoAccessCard = memo(function GeoAccessCard() {
             </p>
           </div>
         </div>
-        <Toggle isOn={iranOnly ?? true} onToggle={handleLockToggle} />
+        <Toggle
+          isOn={iranOnly ?? true}
+          onToggle={handleLockToggle}
+          label="قفل «فقط ایران»"
+        />
       </div>
 
       {/* ②③ انتخاب دامنه — وقتی قفل روشن است، قفل و غیرقابل تغییر */}

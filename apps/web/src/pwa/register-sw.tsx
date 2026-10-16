@@ -200,9 +200,12 @@ export function PwaRegister() {
 
   return (
     <>
-      {/* بنر آپدیت — مینیمال + «بعداً» (pwa-۳) */}
+      {/* بنر آپدیت — مینیمال + «بعداً» (pwa-۳)
+          stage-75 (P3-27) — هر سه بنرِ این فایل z-90: زیرِ مودال/بات‌شیتِ
+          باز (z-100) و بالای هدر (z-40) — بنرِ اطلاع‌رسانی هرگز دیالوگِ
+          فعالِ کاربر را نمی‌پوشاند. */}
       {showUpdate && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-9999 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
           <span className="text-[13px] text-gray-700 dark:text-gray-200 text-center font-DanaMedium">
             نسخه‌ی جدید آماده است
           </span>
@@ -227,7 +230,7 @@ export function PwaRegister() {
 
       {/* install-prompt اندروید — stage-59: موبایل دو ردیف (متن بالا، دکمه‌ها کنار هم پایین) */}
       {showInstall && !showIosGuide && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-9999 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
           <span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold text-center">
             سین شین را روی دستگاه خود نصب کنید
           </span>
@@ -256,7 +259,7 @@ export function PwaRegister() {
       {/* راهنمای iOS — بستنش ۳۰ روز پایدار است (pwa-۲)
           stage-59: همان متن گرادیانی نصب + راهنمای Share در خط دوم */}
       {showIosGuide && !showUpdate && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-9999 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
           <div className="text-center">
             <span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold">
               سین شین را روی دستگاه خود نصب کنید

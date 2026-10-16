@@ -568,6 +568,8 @@ export const ar: Dict = {
         'notify.inbox.over9': 'أكثر من {n}+',
         'notify.inbox.loadError': 'فشل تحميل الإشعارات؛ حاول مرة أخرى.',
         'notify.inbox.retry': 'إعادة المحاولة',
+        // stage-75 (P3-28) — سقفِ سروری لیست؛ {n} = 30
+        'notify.inbox.capped': 'يتم عرض آخر {n} إشعارًا فقط',
         'notify.type.coupon': 'قسيمة خصم',
         'notify.type.discount': 'خصم منتج',
         'notify.type.broadcast': 'إشعار عام',

@@ -13,6 +13,7 @@ import { InboxPushCard } from '#/components/dashboard/notifications/InboxPushCar
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { useNotificationInboxPage } from '#/hooks/dashboard/useNotificationInboxPage'
 import { tpl, useI18n } from '#/i18n'
+import { noindexHead } from '#/lib/seo'
 import {
         myNotificationsOptions,
         userProfileLightClientOptions,
@@ -62,10 +63,10 @@ const NotificationInboxPage = memo(function NotificationInboxPage() {
                                 isLoading={page.isLoading}
                                 isError={page.isError}
                                 isRefetching={page.isFetching}
-                                onRetry={() => void page.refetch()}
+                                onRetry={page.onRetry}
                                 isMarkingAll={page.markAllRead.isPending}
-                                onMarkRead={(id) => page.markRead.mutate(id)}
-                                onMarkAllRead={() => page.markAllRead.mutate()}
+                                onMarkRead={page.onMarkRead}
+                                onMarkAllRead={page.onMarkAllRead}
                         />
                 </div>
         )
@@ -82,10 +83,8 @@ export const Route = createFileRoute('/dashboard/notifications/')({
         },
 
         errorComponent: RouteError,
-        head: () => ({
-                meta: [
-                        { title: 'صندوق اعلان‌ها | سین شین' },
-                        { name: 'robots', content: 'noindex, nofollow' },
-                ],
-        }),
+        // stage-75 (P3-30) — عنوان دوزبانه از dict سئو (قبلاً <title> فارسیِ
+        // هاردکد بود؛ تب مرورگرِ کاربرِ عربی هم فارسی می‌ماند). router.invalidate
+        // (تعویض زبان) head را دوباره اجرا می‌کند → عنوان هم‌زمان با زبان عوض می‌شود.
+        head: noindexHead('notifications'),
 })

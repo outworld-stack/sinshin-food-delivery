@@ -5,15 +5,27 @@ interface ToggleProps {
   isOn: boolean
   onToggle: () => void
   disabled?: boolean
+  /**
+   * stage-75 (P3-33) — نامِ accessible برای سوئیچ. role="switch" بدون نام،
+   * در صفحه‌خوان فقط «switch، روشن/خاموش» اعلام می‌شود — بدون اینکه «چه چیزی»
+   * روشن/خاموش می‌شود. متنِ برچسبِ کنارِ هر استفاده، همان رشته‌ی مرئی است.
+   */
+  label: string
 }
 
 // سوئیچ مشترک — قبلاً ۵ بار کپی‌پیست شده بود، حالا یک‌جاست
-export const Toggle = memo(function Toggle({ isOn, onToggle, disabled = false }: ToggleProps) {
+export const Toggle = memo(function Toggle({
+  isOn,
+  onToggle,
+  disabled = false,
+  label,
+}: ToggleProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={isOn}
+      aria-label={label}
       onClick={onToggle}
       disabled={disabled}
       className={`relative w-12 h-6 rounded-full transition shrink-0 ${

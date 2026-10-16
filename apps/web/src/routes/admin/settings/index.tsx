@@ -147,7 +147,11 @@ const SettingsContent = memo(function SettingsContent() {
                       </p>
                     </div>
                   </div>
-                  <Toggle isOn={tracking ?? false} onToggle={handleTrackingToggle} />
+                  <Toggle
+                    isOn={tracking ?? false}
+                    onToggle={handleTrackingToggle}
+                    label="نمایش آنلاین مسیر پیک"
+                  />
                 </div>
                 <div className="mt-4 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-start gap-2">
                   <Discover2 size={16} className="text-blue-500 shrink-0 mt-0.5" />
@@ -176,7 +180,11 @@ const SettingsContent = memo(function SettingsContent() {
                       </p>
                     </div>
                   </div>
-                  <Toggle isOn={restaurant?.isOpen ?? true} onToggle={handleRestaurantToggle} />
+                  <Toggle
+                    isOn={restaurant?.isOpen ?? true}
+                    onToggle={handleRestaurantToggle}
+                    label="باز/بسته بودن رستوران"
+                  />
                 </div>
 
                 {!restaurant?.isOpen && (

@@ -256,7 +256,11 @@ export const MainCategoryManager = memo(function MainCategoryManager({ canWrite 
                     {mc.isDefault ? '★ پیش‌فرض' : '★ پیش‌فرض کن'}
                   </button>
 
-                  <Toggle isOn={mc.isActive} onToggle={() => handleToggle(mc.id)} />
+                  <Toggle
+                    isOn={mc.isActive}
+                    onToggle={() => handleToggle(mc.id)}
+                    label={`${mc.name} — فعال‌سازی`}
+                  />
 
                   <button
                     type="button"

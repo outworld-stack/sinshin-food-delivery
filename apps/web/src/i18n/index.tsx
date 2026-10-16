@@ -250,9 +250,14 @@ export function I18nProvider({
 
         // stage-63 — تایمرِ رقصِ محو برای تعویض زبان (پاک‌سازی در جداشدن Provider)
         const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+        // stage-75 (P3-35) — تایمرِ اطمینانِ پایانِ محو: rAF در تبِ مخفی اجرا
+        // نمی‌شود؛ بدونِ این، کلاس lang-switching (body با opacity:0) تا
+        // برگشتنِ کاربر به تب می‌ماند. پاک‌سازی در جداشدن Provider.
+        const fadeSafetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
         useEffect(
                 () => () => {
                         if (fadeTimer.current) clearTimeout(fadeTimer.current)
+                        if (fadeSafetyTimer.current) clearTimeout(fadeSafetyTimer.current)
                         document.documentElement.classList.remove('lang-switching')
                 },
                 [],
@@ -317,19 +322,33 @@ export function I18nProvider({
                         }
 
                         const root = document.documentElement
-                        // رقصِ محوِ در-جریان را قطع و از نو شروع کن (کلیکِ سریعِ پشت‌سرهم)
+                        // رقصِ محوِ در-جریان را قطع و از نو شروع کن (کلیکِ سریعِ پشت‌سرهم) —
+                        // تایمرِ اطمینانِ دورِ قبلی هم خاموش می‌شود تا محوِ جدید را نشکاند
                         if (fadeTimer.current) clearTimeout(fadeTimer.current)
+                        if (fadeSafetyTimer.current) {
+                                clearTimeout(fadeSafetyTimer.current)
+                                fadeSafetyTimer.current = null
+                        }
                         root.classList.add('lang-switching')
                         fadeTimer.current = setTimeout(() => {
                                 swap()
                                 // دو rAF ⇒ حداقل یک فریم با محتوای تازه در تاریکی رندر شده؛ سپس
                                 // نور برمی‌گردد — هیچ «فلشی» دیده نمی‌شود.
-                                requestAnimationFrame(() =>
-                                        requestAnimationFrame(() => {
-                                                root.classList.remove('lang-switching')
-                                                fadeTimer.current = null
-                                        }),
-                                )
+                                // stage-75 (P3-35) — rAF در تبِ مخفی متوقف است: اگر کاربر
+                                // همین‌جا تب را عوض کند، finish تا برگشتن اجرا نمی‌شود و صفحه
+                                // در محو می‌ماند. تایمرِ مستقل از رندر همیشه (حتی مخفی) کلاس
+                                // را می‌بندد؛ در حالتِ عادی rAF زودتر رسیده و این no-op است.
+                                const finish = () => {
+                                        root.classList.remove('lang-switching')
+                                        fadeTimer.current = null
+                                        if (fadeSafetyTimer.current) {
+                                                clearTimeout(fadeSafetyTimer.current)
+                                                fadeSafetyTimer.current = null
+                                        }
+                                }
+                                requestAnimationFrame(() => requestAnimationFrame(finish))
+                                if (fadeSafetyTimer.current) clearTimeout(fadeSafetyTimer.current)
+                                fadeSafetyTimer.current = setTimeout(finish, 700)
                         }, 130)
                 },
                 [lang, queryClient, router],

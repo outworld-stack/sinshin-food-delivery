@@ -17,6 +17,14 @@ import { type Fmt, tpl, useI18n } from '#/i18n'
 // حذف شد — یک منبع حقیقت (NOTIFICATION_TTL_DAYS سرویس).
 const FALLBACK_TTL_DAYS = 7
 
+/**
+ * stage-75 (P3-28) — سقفِ سروری GET /notifications (notification.routes:
+ * list(user.id, 30)). وقتی لیست به این سقف رسیده، «آخرین N اعلان» زیرِ
+ * لیست یادآوری می‌شود تا اختلافِ احتمالیِ بجِ خوانده‌نشده > طولِ لیست،
+ * «اعلان گم‌شده» تعبیر نشود.
+ */
+const INBOX_SERVER_CAP = 30
+
 type TypeIcon = { icon: ReactNode; label: string }
 
 function iconOf(type: string, t: { [k: string]: string }): TypeIcon {
@@ -79,8 +87,8 @@ const InboxRow = memo(function InboxRow({
                                 aria-hidden="true"
                                 title={label}
                                 className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${unread
-                                                ? 'bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary'
-                                                : 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-400 dark:text-gray-500'
+                                        ? 'bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary'
+                                        : 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-400 dark:text-gray-500'
                                         }`}
                         >
                                 {icon}
@@ -96,8 +104,8 @@ const InboxRow = memo(function InboxRow({
                                         )}
                                         <p
                                                 className={`font-DanaDemiBold text-sm truncate ${unread
-                                                                ? 'text-gray-800 dark:text-gray-100'
-                                                                : 'text-gray-500 dark:text-gray-400'
+                                                        ? 'text-gray-800 dark:text-gray-100'
+                                                        : 'text-gray-500 dark:text-gray-400'
                                                         }`}
                                         >
                                                 {item.title}
@@ -105,8 +113,8 @@ const InboxRow = memo(function InboxRow({
                                 </div>
                                 <p
                                         className={`font-DanaRegular text-[13px] leading-relaxed mt-1 line-clamp-2 ${unread
-                                                        ? 'text-gray-600 dark:text-gray-300'
-                                                        : 'text-gray-400 dark:text-gray-500'
+                                                ? 'text-gray-600 dark:text-gray-300'
+                                                : 'text-gray-400 dark:text-gray-500'
                                                 }`}
                                 >
                                         {item.body}
@@ -129,8 +137,8 @@ const InboxRow = memo(function InboxRow({
         )
 
         const className = `w-full flex items-center gap-3 text-right p-3 sm:p-4 rounded-xl transition-colors cursor-pointer ${unread
-                        ? 'bg-white dark:bg-[#2a1015] hover:bg-gray-50 dark:hover:bg-[#331319] border border-gray-200 dark:border-[#3a151c]'
-                        : 'bg-gray-50 dark:bg-[#23090d] hover:bg-gray-100 dark:hover:bg-[#2a1015] border border-transparent'
+                ? 'bg-white dark:bg-[#2a1015] hover:bg-gray-50 dark:hover:bg-[#331319] border border-gray-200 dark:border-[#3a151c]'
+                : 'bg-gray-50 dark:bg-[#23090d] hover:bg-gray-100 dark:hover:bg-[#2a1015] border border-transparent'
                 }`
 
         if (item.url) {
@@ -256,7 +264,13 @@ export function InboxList({
                                         </p>
                                 </div>
                         ) : (
-                                <div className="max-h-96 overflow-y-auto space-y-2.5 pr-1">
+                                <div
+                                        // stage-75 (P3-28) — aria-live: اعلانِ تازه (SSE →
+                                        // invalidate → آیتم جدید در همین ناحیه) توسط صفحه‌خوان
+                                        // اعلام می‌شود (قبلاً ظاهرِ بی‌صدا بود)
+                                        aria-live="polite"
+                                        className="max-h-96 overflow-y-auto space-y-2.5 pr-1"
+                                >
                                         {items.map((item) => (
                                                 <InboxRow
                                                         key={item.id}
@@ -267,6 +281,14 @@ export function InboxList({
                                                         lessThanDayLabel={t['notify.inbox.lessThanDay']}
                                                 />
                                         ))}
+                                        {items.length >= INBOX_SERVER_CAP && (
+                                                // stage-75 (P3-28) — سقفِ سروری ۳۰ آیتم: بجِ
+                                                // خوانده‌نشده می‌تواند بزرگ‌تر از لیست باشد؛
+                                                // بدون این یادداشت کاربر فکر می‌کند اعلان گم شده
+                                                <p className="text-center text-[11px] font-DanaMedium text-gray-400 dark:text-gray-500 pt-2">
+                                                        {tpl(t['notify.inbox.capped'], { n: fmt.num(INBOX_SERVER_CAP) })}
+                                                </p>
+                                        )}
                                 </div>
                         )}
                 </section>

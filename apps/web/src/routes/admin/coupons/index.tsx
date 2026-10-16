@@ -12,7 +12,7 @@ import type { CouponWithConditionsDto } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { memo, useCallback, useState } from 'react'
-import { Ban, Check, Pen, Plus, Trash2 } from 'reicon-react'
+import { AlertTriangle, ArrowsRotate, Ban, Check, Pen, Plus, Trash2 } from 'reicon-react'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { AdminCouponsPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
@@ -223,7 +223,7 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [couponToDelete, setCouponToDelete] = useState<string | null>(null)
 
-  const { data: coupons, isLoading } = useQuery(adminCouponsOptions)
+  const { data: coupons, isLoading, isError, refetch } = useQuery(adminCouponsOptions)
 
   // رارد ۴۸ — جهش‌ها از هوک مشترک؛ حذف اپتیمیستیک همان الگوی قبل از phase-9
   const deleteMut = useCouponDelete({
@@ -280,6 +280,29 @@ const AdminCouponsPage = memo(function AdminCouponsPage() {
 
   if (isLoading) {
     return <AdminCouponsPageSkeleton />
+  }
+
+  // stage-75 (P3-25) — خطای بارگذاری ≠ «کوپنی ثبت نشده»: قبلاً شکستِ fetch
+  // اول (data=undefined، isLoading=false) مستقیم به حالتِ خالی می‌رفت و
+  // ادمین فکر می‌کرد کوپن‌ها پاک شده‌اند. حالتِ خطا + تلاش مجدد (همان
+  // الگوی InboxList)؛ refetch پس‌زمینه با داده‌ی کهنه ادامه‌ی نمایش می‌دهد.
+  if (isError && !coupons) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
+        <AlertTriangle size={44} className="text-red-400 mb-4" />
+        <p className="font-DanaMedium text-sm text-gray-500 dark:text-gray-400 mb-5">
+          بارگذاری کوپن‌ها ناموفق بود؛ دوباره تلاش کنید.
+        </p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="inline-flex items-center gap-1.5 px-4 min-h-11 rounded-xl text-[12px] font-DanaDemiBold bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition cursor-pointer"
+        >
+          <ArrowsRotate size={14} />
+          تلاش مجدد
+        </button>
+      </div>
+    )
   }
 
   return (

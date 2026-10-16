@@ -17,8 +17,9 @@
 //     cascade همه‌ی nudgeها را می‌کشت و سقف ۲ صفر می‌شد. شمارشِ سقف
 //     در findNudgeCandidates مستقل از join است — ردیف‌های set-null
 //     در شمارش می‌مانند و قابل ارسال نیستند.
-//   • releaseNudgeClaim فقط ابزار عملیاتی ماند (جاب ارسال حالا
-//     «اول ارسال، بعد claim» است — کامنت جاب).
+//   • releaseNudgeClaim حذف شد (stage-75 P3-32): جاب از stage-67
+//     «اول ارسال، بعد claim» است — شکستِ ارسال ردیف را pending نگه
+//     می‌دارد و آزادسازی لازم نیست؛ متد هیچ فراخوانی نداشت (کد مرده).
 //
 // stage-66 — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/coupon/coupon.service.ts
@@ -33,7 +34,8 @@
 //   ④ findNudgeCandidates: شرطِ ناقصِ «واقعی» و قطعی (اولین ناراضی) +
 //     فاصله‌ی واقعی (remaining) + سقف ۲ یادآور به‌ازای کاربر-کوپن
 //     (سیاست‌های ۲ و ۳) + ORDER BY قطعی
-//   ⑤ releaseNudgeClaim: شکست ارسال یادآور → claim آزاد برای retry
+//   ⑤ (تاریخی) releaseNudgeClaim — در stage-67 مازاد شد (اول ارسال، بعد
+//     claim) و در stage-75 (P3-32) به‌عنوان کد مرده حذف شد
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
@@ -57,7 +59,8 @@ import type { Db, DbOrTx } from '#/infra/db/client'
 import {
   couponConditions,
   couponGrants,
-  couponNudges,
+  // couponNudges — stage-75 (P3-32): با حذف releaseNudgeClaim دیگر مصرف‌کننده‌ای
+  // در این فایل نیست (job خودش از جدول می‌خواند)
   couponRedemptions,
   coupons,
   orders,
@@ -484,21 +487,6 @@ export class CouponService {
       })
     }
     return candidates
-  }
-
-  /**
-   * stage-66 (⑤) / stage-67 — آزادسازی claim یادآور (ابزار عملیاتی):
-   * جابِ ارسال حالا «اول ارسال، بعد claim» است (ترتیب در stage-67 عوض
-   * شد تا کرش بین claim و notify سهم نسوزاند)؛ شکستِ ارسال ردیف را
-   * pending نگه می‌دارد و نیازی به آزادسازی ندارد. این متد برای
-   * بازنشانی دستی/عملیاتی (مثلاً ردیفِ اشتباهاً claim شده) باقی است.
-   */
-  async releaseNudgeClaim(nudgeId: string): Promise<void> {
-    if (!UUID_RE.test(nudgeId)) return
-    await this.deps.db
-      .update(couponNudges)
-      .set({ smsSentAt: null })
-      .where(eq(couponNudges.id, nudgeId))
   }
 
   // ══ CRUD ادمین ══

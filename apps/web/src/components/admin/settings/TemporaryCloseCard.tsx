@@ -120,7 +120,11 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
             </p>
           </div>
         </div>
-        <Toggle isOn={!temporarilyClosed} onToggle={handleToggle} />
+        <Toggle
+          isOn={!temporarilyClosed}
+          onToggle={handleToggle}
+          label="باز/بسته موقت رستوران"
+        />
       </div>
 
       {/* علت فعلی بسته‌بودن */}

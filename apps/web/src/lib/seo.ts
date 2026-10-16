@@ -49,7 +49,12 @@ export const SEO_PATHS: Record<SeoPathKey, string> = {
 }
 
 /** کلیدهای صفحات noindex که فقط عنوان دوزبانه می‌خواهند */
-export type SeoNoindexKey = 'login' | 'cart' | 'checkout' | 'geoBlocked'
+export type SeoNoindexKey =
+    | 'login'
+    | 'cart'
+    | 'checkout'
+    | 'geoBlocked'
+    | 'notifications'
 
 /** برچسب زبان برای inLanguage در JSON-LD */
 const LOCALE_TAG: Record<Lang, string> = { fa: 'fa-IR', ar: 'ar-IQ' }

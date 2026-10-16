@@ -263,8 +263,24 @@ function CouponDetailPage() {
         </div>
 
         {consumersLoading && !consumers ? (
-          <div className="text-center py-10 text-gray-400 dark:text-gray-500 font-DanaMedium text-sm">
-            در حال بارگذاری...
+          /* stage-75 (P3-24) — اسکلتون هم‌قدِ ردیف‌های واقعی (نه متنِ
+             «در حال بارگذاری» که باعث پرشِ چیدمان می‌شد)؛ aria-busy */
+          <div className="space-y-2" aria-busy="true">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={`cons-skel-${i}`}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-4 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e]"
+              >
+                <div className="min-w-0 space-y-1.5">
+                  <div className="h-4 w-28 rounded bg-gray-100 dark:bg-[#2a1015] animate-pulse" />
+                  <div className="h-3 w-24 rounded bg-gray-100 dark:bg-[#2a1015] animate-pulse" />
+                </div>
+                <div className="flex items-center gap-4 shrink-0">
+                  <div className="h-3 w-12 rounded bg-gray-100 dark:bg-[#2a1015] animate-pulse" />
+                  <div className="h-3 w-16 rounded bg-gray-100 dark:bg-[#2a1015] animate-pulse" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : (consumers?.rows.length ?? 0) === 0 ? (
           <div className="text-center py-10 text-gray-400 dark:text-gray-500 font-DanaMedium text-sm">
