@@ -15,6 +15,21 @@ const PAYMENT_PAGE = 'https://sep.shaparak.ir/api/v1/Payment/PaymentPage'
 const VERIFY_URL = 'https://sep.shaparak.ir/api/v1/Payment/VerifyPayment'
 
 /**
+ * stage-76 — CellNumber به فرمتِ مستندِ سامان (98xxxxxxxxxx).
+ *
+ * مستندات Token API شاپرک برای CellNumber فرمتِ «98 + شماره بدون صفرِ ابتدا»
+ * می‌خواهد؛ شماره‌ی کاربران در DB به شکل 09xxxxxxxxx ذخیره می‌شود و همان‌طور
+ * (با صفرِ ابتدا) فرستاده می‌شد. بعضی ترمینال‌های سامان مقدارِ خارج از
+ * فرمت را با کد خطا رد می‌کنند ⇒ «init ناموفق» بدون هیچ دلیلِ قابل‌رؤیت.
+ * نرمال‌سازی: 09xxxxxxxxx → 98xxxxxxxxx؛ هر شکلِ دیگر (خالی/غیر-ایرانی)
+ * حذف می‌شود — CellNumber اختیاری است و نباید کلِ init را به خطر بیندازد.
+ */
+const sepCellNumber = (mobile: string | null | undefined): string | undefined => {
+  if (!mobile) return undefined
+  return /^09\d{9}$/.test(mobile) ? `98${mobile.slice(1)}` : undefined
+}
+
+/**
  * بانک سامان (سامان‌کیش) — مستقیم، REST جدید شاپرک (Token API).
  *
  * جریان:
@@ -61,7 +76,7 @@ export class SepAdapter implements PaymentGateway {
         Amount: input.amount * 10, // تومان → ریال
         ResNum: input.paymentId, // یکتا — همان شناسه‌ی پرداخت داخلی
         RedirectUrl: input.callbackUrl,
-        CellNumber: input.mobile ?? undefined,
+        CellNumber: sepCellNumber(input.mobile),
       },
       this.config.gateway.timeoutMs,
     )
@@ -70,6 +85,11 @@ export class SepAdapter implements PaymentGateway {
     const ok = (json?.IsSuccess ?? json?.isSuccess) === true
     if (!ok || !token) {
       const code = json?.ResultCode
+      // stage-76 — هم‌تراز زرین‌پال: شکلِ واقعی پاسخِ ردشده لاگ می‌شود تا
+      // در تست‌های عملی، کدِ ترمینالِ واقعی دیده شود (null = غیر-JSON).
+      console.error(
+        `[sep] init ناموفق: ResultCode=${code ?? '-'} token=${token ? 'دارد' : 'ندارد'} پاسخ=${JSON.stringify(json)}`,
+      )
       throw Err.conflict(
         `ایجاد پرداخت سامان ناموفق بود${code !== undefined && code !== null ? ` (کد ${code})` : ''}.`,
       )
@@ -117,6 +137,7 @@ export class SepAdapter implements PaymentGateway {
         isSuccess?: boolean
         Amount?: number
         amount?: number
+        ResultCode?: string | number
       }>(
         VERIFY_URL,
         {
@@ -126,6 +147,11 @@ export class SepAdapter implements PaymentGateway {
         this.config.gateway.timeoutMs,
       )
       if (json === null || (json.IsSuccess ?? json.isSuccess) === undefined) {
+        // stage-76 — هم‌تراز زرین‌پال: شکلِ واقعی پاسخِ نامشخص لاگ می‌شود
+        // تا کدهای واقعیِ ترمینال در تست‌های عملی دیده و مستند شوند.
+        console.warn(
+          `[sep] verify indeterminate: RefNum=${refNum} State=${input.query.State ?? '-'} TraceNo=${input.query.TraceNo ?? '-'} پاسخ=${JSON.stringify(json)}`,
+        )
         return { success: false, gatewayRef: refNum, indeterminate: true }
       }
 
@@ -145,9 +171,18 @@ export class SepAdapter implements PaymentGateway {
       if (ok && !amountOk) {
         return { success: false, gatewayRef: refNum, indeterminate: true }
       }
+      if (!ok) {
+        // stage-76 — شکستِ قطعی با کدِ درگاه لاگ می‌شود (هم‌تراز لاگ‌های
+        // زرین‌پال) — کدهای ترمینال‌های سامان در تست‌های عملی از اینجا
+        // خوانده و در صورتِ «قطعاً پرداخت‌نشده» بودن به تحلیل اضافه می‌شوند.
+        console.warn(
+          `[sep] verify قطعی-ناموفق: RefNum=${refNum} State=${input.query.State ?? '-'} ResultCode=${json.ResultCode ?? '-'}`,
+        )
+      }
       return { success: ok, gatewayRef: refNum }
-    } catch {
+    } catch (e) {
       // شبکه/تایم‌اوت — وضعیت نامشخص
+      console.error(`[sep] verify خطای شبکه — indeterminate: RefNum=${refNum}`, e)
       return { success: false, gatewayRef: refNum, indeterminate: true }
     }
   }

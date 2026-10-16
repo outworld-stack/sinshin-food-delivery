@@ -98,6 +98,22 @@ const parsePayResult = (raw: string): { code: string; refId: string } => {
 }
 
 /**
+ * stage-76 — خواندن فیلد از فرم/کوئریِ callback با حساسیت‌به‌حروفِ
+ * بی‌تفاوت — هم‌تراز زرین‌پال (Status/status) و سامان (RefNum/refNum/refnum).
+ * بانک ملت فیلدها را با حروف دقیقِ مستند می‌فرستد، اما هر واسط/پروکسی
+ * (URL-encode مجدد، بازنویسی فرم) می‌تواند بزرگ/کوچک‌سازی کند — شکستِ
+ * «ResCode ناخوانده» یعنی indeterminate ابدی در حالی که callback رسیده.
+ */
+const qget = (query: Record<string, string>, name: string): string | undefined => {
+  if (query[name] !== undefined) return query[name]
+  const lower = name.toLowerCase()
+  for (const [k, v] of Object.entries(query)) {
+    if (k.toLowerCase() === lower) return v
+  }
+  return undefined
+}
+
+/**
  * بانک ملت (به‌پرداخت) — مستقیم، ساب قدیمی شاپرک.
  *
  * جریان:
@@ -182,7 +198,7 @@ export class MellatAdapter implements PaymentGateway {
       return this.verifyAndSettle(orderId, storedRef)
     }
 
-    const resCode = input.query.ResCode ?? input.query.resCode
+    const resCode = qget(input.query, 'ResCode')
     if (resCode === undefined) {
       // رارد H6 — کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback:
       // کاربر ممکن است در بانک پرداخته و callback نرسیده باشد → پول در PSP
@@ -196,12 +212,15 @@ export class MellatAdapter implements PaymentGateway {
     }
 
     // توکن فرم باید با توکن init یکی باشد — جعلِ پیوند تراکنش ممنوع
-    const formRef = input.query.RefId ?? input.query.refId
+    const formRef = qget(input.query, 'RefId')
     if (formRef !== undefined && formRef !== storedRef) {
+      console.warn(
+        `[mellat] callback: RefId فرم (${formRef}) با توکن init (${storedRef}) نمی‌خواند — پیوند جعلی، شکست قطعی.`,
+      )
       return { success: false, gatewayRef: input.gatewayRef }
     }
 
-    const saleReferenceId = input.query.SaleReferenceId ?? input.query.saleReferenceId
+    const saleReferenceId = qget(input.query, 'SaleReferenceId')
     if (!saleReferenceId) {
       // ResCode=0 بدون مرجع — پاسخ ناقص بانک؛ قطعی نیست
       return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
@@ -236,15 +255,26 @@ export class MellatAdapter implements PaymentGateway {
     const verified = await this.bpCall('bpVerifyRequest', common)
     if (verified === null) {
       // فالت/شبکه — قطعی نیست؛ کار دوباره می‌کوشد
+      console.warn(
+        `[mellat] verify فالت/شبکه — indeterminate: orderId=${orderId} saleRef=${saleReferenceId}`,
+      )
       return { success: false, gatewayRef: composite, indeterminate: true }
     }
     if (verified === '48') {
       // پول به مشتری برگشته — قطعی
+      console.warn(
+        `[mellat] verify کد ۴۸ — تراکنش برگشت خورده (قطعی-ناموفق): orderId=${orderId} saleRef=${saleReferenceId}`,
+      )
       return { success: false, gatewayRef: composite }
     }
     if (verified !== '0' && verified !== '43') {
       // بقیه‌ی کدها قطعی نیستند — failPayment بدون اطمینان یعنی
-      // بازگشت وجه اشتباه (هم‌تراز زرین‌پال/سامان)
+      // بازگشت وجه اشتباه (هم‌تراز زرین‌پال/سامان). stage-76: کدِ درگاه
+      // لاگ می‌شود تا در تست‌های عملی، کدهای «قطعاً پرداخت‌نشده» به این
+      // جدول اضافه شوند (الگوی -9/-10/-11 زرین‌پال).
+      console.warn(
+        `[mellat] verify کد ناشناخته ${verified} — indeterminate: orderId=${orderId} saleRef=${saleReferenceId}`,
+      )
       return { success: false, gatewayRef: composite, indeterminate: true }
     }
 
@@ -253,11 +283,18 @@ export class MellatAdapter implements PaymentGateway {
     if (settled === '0' || settled === '45') {
       return { success: true, gatewayRef: composite }
     }
-    console.error(`[mellat] تسویه ناموفق (کد ${settled ?? 'نامعتبر'}) — تراکنش ${saleReferenceId}`)
+    console.error(
+      `[mellat] تسویه ناموفق (کد ${settled ?? 'نامعتبر'}) — indeterminate: تراکنش ${saleReferenceId} (کد verify=${verified})`,
+    )
     return { success: false, gatewayRef: composite, indeterminate: true }
   }
 
-  /** فراخوانی متد ساب — مقدار <return>؛ فالت یا خطای شبکه = null */
+  /** فراخوانی متد ساب — مقدار <return>؛ فالت یا خطای شبکه = null
+   *
+   * stage-76 — fetch سراسری (در Bun همان Bun.fetch است؛ رفتار production
+   * یکسان) تا در تست‌ها mock-پذیر باشد — همان درسِ stage-74 برای http-util:
+   * آداپتور ملت آخرین درگاهِ متصل به Bun.fetch بود و تستِ بدون-شبکه‌اش
+   * ناممکن می‌کرد. */
   private async bpCall(op: string, params: BpParam[]): Promise<string | null> {
     const fields = params
       .map((p) => `      <${p.name} xsi:type="xsd:${p.type}">${escapeXml(p.value)}</${p.name}>`)
@@ -276,7 +313,7 @@ export class MellatAdapter implements PaymentGateway {
       '</soapenv:Envelope>'
 
     try {
-      const res = await Bun.fetch(SOAP_URL, {
+      const res = await fetch(SOAP_URL, {
         method: 'POST',
         headers: { 'content-type': 'text/xml; charset=utf-8', soapaction: '""' },
         body: envelope,
@@ -285,8 +322,13 @@ export class MellatAdapter implements PaymentGateway {
       })
       const xml = await res.text()
       if (/<(?:[A-Za-z][\w-]*:)?Fault[\s>]/.test(xml)) return null
-      const m = /<return[^>]*>([^<]*)<\/return>/i.exec(xml)
-      const value = m?.[1]
+      // stage-76 — <return> با پیشوندِ namespace هم پذیرفته می‌شود
+      // (هم‌ترازِ رجکسِ Fault بالاتر): پاسخِ ساب می‌تواند به شکلِ
+      // <ns:return> یا <ax23:return> بیاید (بسته به استکِ سابِ بانک)؛
+      // رجکسِ قبلی فقط <return> لِترال می‌گرفت ⇒ مقدار گم می‌شد ⇒ null ⇒
+      // همه‌چیز indeterminate. پیشوندِ تگِ باز و بسته باید یکی باشد (\1).
+      const m = /<([\w-]*:)?return[^>]*>([^<]*)<\/\1return>/i.exec(xml)
+      const value = m?.[2]
       return value === undefined ? null : unescapeXml(value.trim())
     } catch {
       return null

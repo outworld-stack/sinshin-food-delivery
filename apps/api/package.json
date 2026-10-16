@@ -18,7 +18,9 @@
     "db:test:migrations": "bun scripts/test-migrations.ts",
     "db:test:device": "bun scripts/test-device-policy.ts",
     "db:test:pay": "bun scripts/test-payment-money-path.ts",
-    "db:test:zarinpal": "bun scripts/test-zarinpal-verify.ts"
+    "db:test:zarinpal": "bun scripts/test-zarinpal-verify.ts",
+    "db:test:sep": "bun scripts/test-sep-verify.ts",
+    "db:test:mellat": "bun scripts/test-mellat-verify.ts"
   },
   "dependencies": {
     "@elysia/html": "^1.4.1",
