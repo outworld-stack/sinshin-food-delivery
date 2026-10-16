@@ -43,6 +43,13 @@
       "when": 1792104230349,
       "tag": "0005_many_marvel_zombies",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792108549564,
+      "tag": "0006_stage71_device_backfills",
+      "breakpoints": true
     }
   ]
 }
