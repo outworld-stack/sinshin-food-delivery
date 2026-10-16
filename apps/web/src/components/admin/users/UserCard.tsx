@@ -104,7 +104,7 @@ export const UserCard = memo(function UserCard({ user, canToggle, onToggle }: Us
             <p className="text-[11px] text-gray-500 dark:text-gray-400">{formatDate(user.registeredAt)}</p>
           </div>
         </div>
-        <div className="flex flex-col gap-2 items-center justify-center">
+        <div className="flex flex-col gap-2 items-center justify-center min-w-0">
           <div className="flex flex-col items-center min-w-0">
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">نام دستگاه</p>
             <DeviceCell user={user} />

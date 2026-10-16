@@ -12,7 +12,7 @@ import { InboxList } from '#/components/dashboard/notifications/InboxList'
 import { InboxPushCard } from '#/components/dashboard/notifications/InboxPushCard'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { useNotificationInboxPage } from '#/hooks/dashboard/useNotificationInboxPage'
-import { useI18n } from '#/i18n'
+import { tpl, useI18n } from '#/i18n'
 import {
         myNotificationsOptions,
         userProfileLightClientOptions,
@@ -31,7 +31,7 @@ import {
  *  • هر اعلان ۷ روز پس از «ایجاد» خودکار حذف می‌شود (تایمر سروری)
  */
 const NotificationInboxPage = memo(function NotificationInboxPage() {
-        const { t } = useI18n()
+        const { t, fmt } = useI18n()
         // userId از پروفایل سبک (لایوت داشبورد همین را کش کرده — بدون رفت‌وبرگشت)
         const { data: user } = useQuery(userProfileLightClientOptions)
 
@@ -44,17 +44,25 @@ const NotificationInboxPage = memo(function NotificationInboxPage() {
                                         {t['dash.nav.notifications']}
                                 </h1>
                                 <p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium text-sm">
-                                        {t['notify.inbox.subtitle']}
+                                        {tpl(t['notify.inbox.subtitle'], { n: fmt.num(page.ttlDays) })}
                                 </p>
                         </div>
 
-                        <InboxPushCard phase={page.pushPhase} onEnable={page.handleEnablePush} />
+                        <InboxPushCard
+                                phase={page.pushPhase}
+                                onEnable={page.handleEnablePush}
+                                onRecheck={() => void page.handleRecheck()}
+                                ttlDays={page.ttlDays}
+                        />
 
                         <InboxList
                                 items={page.items}
                                 unread={page.unread}
                                 ttlDays={page.ttlDays}
                                 isLoading={page.isLoading}
+                                isError={page.isError}
+                                isRefetching={page.isFetching}
+                                onRetry={() => void page.refetch()}
                                 isMarkingAll={page.markAllRead.isPending}
                                 onMarkRead={(id) => page.markRead.mutate(id)}
                                 onMarkAllRead={() => page.markAllRead.mutate()}

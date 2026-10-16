@@ -4,7 +4,8 @@ import { desc, eq, sql } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import { devices, deviceIdentities, users, type UserRow, type DeviceRow } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
-import { Err } from '#/domain/shared/errors'
+import { AppError, Err } from '#/domain/shared/errors'
+import { isUniqueViolation } from '#/domain/shared/pg'
 import type { OtpService } from './otp.service'
 import type { SessionService, SessionIssue } from './session.service'
 import type { DeviceService } from '#/domain/device/device.service'
@@ -172,46 +173,56 @@ export class AuthService {
       await this.deps.devices.assertQuota(phone, willBeRole, peek.device?.id ?? null)
 
       // ── تراکنش اتمیک: کاربر + دستگاه + claim مالکیت — یا هیچ ──
-      const outcome = await db.transaction(async (tx) => {
-        // قفلِ شماره: ثبت‌نام/ورودِ هم‌زمانِ همین شماره سریال می‌شود
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+      // stage-72 (P2-۹/۱۰): ① سهمیه داخل tx بعد از قفلِ شماره (TOCTOU)
+      // ② ثبت‌نامِ هم‌زمانِ همان شماره = 409 تمیز نه 500 خام  ③ رویداد
+      // PHONE_LIMIT_BLOCKED بعد از rollback (بیرون tx) ثبت می‌شود
+      const outcome = await this.withRegistrationGuards(
+        db.transaction(async (tx) => {
+          // قفلِ شماره: ثبت‌نام/ورودِ هم‌زمانِ همین شماره سریال می‌شود
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
 
-        // بازبینی مالکیت زیر قفل — رقیبی بین peek و تراکنش claim کرده باشد
-        if (peek.device) {
-          const rows = await tx
-            .select({ owner: devices.registeredOwnerPhone })
-            .from(devices)
-            .where(eq(devices.id, peek.device.id))
-            .for('update')
-          const currentOwner = rows[0]?.owner ?? null
-          if (config.deviceEnforcement && maxPhones > 0 && currentOwner && currentOwner !== phone) {
-            throw Err.devicePhoneLimit(maxPhones)
+          // بازبینی سهمیه زیر قفل — دو ورودِ هم‌زمانِ همین شماره دیگر سقف
+          // دستگاه‌ها را رد نمی‌کنند (P2-۹)
+          await this.deps.devices.assertQuotaOn(tx, phone, willBeRole, peek.device?.id ?? null)
+
+          // بازبینی مالکیت زیر قفل — رقیبی بین peek و تراکنش claim کرده باشد
+          if (peek.device) {
+            const rows = await tx
+              .select({ owner: devices.registeredOwnerPhone })
+              .from(devices)
+              .where(eq(devices.id, peek.device.id))
+              .for('update')
+            const currentOwner = rows[0]?.owner ?? null
+            if (config.deviceEnforcement && maxPhones > 0 && currentOwner && currentOwner !== phone) {
+              throw Err.devicePhoneLimit(maxPhones)
+            }
           }
-        }
 
-        const [createdUser] = await tx
-          .insert(users)
-          .values({
+          const [createdUser] = await tx
+            .insert(users)
+            .values({
+              phone,
+              role: willBeRole,
+              lastLoginAt: new Date(),
+              referralCode: await this.generateUniqueReferralCode(),
+              referredBy,
+              termsAcceptedAt: new Date(),
+              termsVersion: opts.termsVersion ?? null,
+            })
+            .returning()
+          if (!createdUser) throw Err.internal('ذخیره‌سازی کاربر ناموفق بود؛ دوباره تلاش کن.')
+
+          const { device } = await this.deps.devices.finalize(tx, {
+            signals,
             phone,
-            role: willBeRole,
-            lastLoginAt: new Date(),
-            referralCode: await this.generateUniqueReferralCode(),
-            referredBy,
-            termsAcceptedAt: new Date(),
-            termsVersion: opts.termsVersion ?? null,
+            ip,
+            peek,
+            event: 'REGISTER',
           })
-          .returning()
-        if (!createdUser) throw Err.internal('ذخیره‌سازی کاربر ناموفق بود؛ دوباره تلاش کن.')
-
-        const { device } = await this.deps.devices.finalize(tx, {
-          signals,
-          phone,
-          ip,
-          peek,
-          event: 'REGISTER',
-        })
-        return { user: createdUser, device }
-      })
+          return { user: createdUser, device }
+        }),
+        { phone, ip, userAgent: signals.userAgent ?? null, peekDeviceId: peek.device?.id ?? null },
+      )
       user = outcome.user
       finalDevice = outcome.device
     } else {
@@ -222,6 +233,9 @@ export class AuthService {
       const existingUser = user
       const outcome = await db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+
+        // stage-72 (P2-۹) — بازبینی سهمیه داخل tx (همان الگوی ثبت‌نام)
+        await this.deps.devices.assertQuotaOn(tx, phone, existingUser.role, peek.device?.id ?? null)
 
         const patch: Partial<typeof users.$inferInsert> = { lastLoginAt: new Date() }
         if (config.isSuperAdmin(phone) && existingUser.role !== 'admin') patch.role = 'admin'
@@ -252,6 +266,14 @@ export class AuthService {
     if (!finalDevice) throw Err.internal('تفسیر دستگاه ناموفق بود؛ دوباره تلاش کنید.')
 
     const deviceRow = finalDevice
+
+    // stage-72 (P2-۱۰) — دستگاهِ تازه auto-blockشده دیگر سشنِ کاری نمی‌گیرد:
+    // قبلاً revoke سشن‌ها داخل tx بود اما createSession «بعد از» تراکنش صادر
+    // می‌شد و سشنِ تازه از ابطال فرار می‌کرد. ثبت‌نام موفق است (کاربر ساخته
+    // شد) اما استفاده از این دستگاه مسدود است — همان خطای ورودِ بعدی.
+    if (deviceRow.isBlocked) {
+      throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
+    }
 
     // ── قلاب admin2 — قبل از سشن: قواعد لاگین (ساعتی بسته → رد) ──
     await this.deps.admin2.assertLoginAllowed(user)
@@ -326,5 +348,40 @@ export class AuthService {
       if (!clash) return code
     }
     return `SIN-${Date.now().toString(36).toUpperCase()}`
+  }
+
+  /**
+   * stage-72 (P2-۹/۱۰) — پوششِ خطاهای تراکنشِ ثبت‌نام:
+   *  ① 23505 روی users_phone_key (OTP double-verify / دو تب هم‌زمان) →
+   *    خطای 409 تمیز دامنه‌ای، نه 500 خام
+   *  ② سقف شماره‌ی دستگاه (DEVICE_PHONE_LIMIT) → رویدادِ ممیزیِ
+   *    PHONE_LIMIT_BLOCKED بعد از rollback بیرون tx ثبت و دوباره پرتاب
+   *    می‌شود (قبلاً داخل tx لاگ می‌شد و با rollback گم می‌شد)
+   */
+  private async withRegistrationGuards<T>(
+    run: Promise<T>,
+    ctx: { phone: string; ip?: string | null; userAgent?: string | null; peekDeviceId?: string | null },
+  ): Promise<T> {
+    try {
+      return await run
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw Err.conflict(
+          'ثبت‌نام این شماره همین لحظه انجام شد؛ چند ثانیه بعد دوباره وارد شوید.',
+        )
+      }
+      if (error instanceof AppError && error.code === 'DEVICE_PHONE_LIMIT' && ctx.peekDeviceId) {
+        const limit = this.deps.config.device.maxPhonesPerDevice
+        await this.deps.devices.logEvent(
+          ctx.peekDeviceId,
+          ctx.phone,
+          'PHONE_LIMIT_BLOCKED',
+          ctx.ip,
+          ctx.userAgent,
+          { phone: ctx.phone, limit, race: true },
+        )
+      }
+      throw error
+    }
   }
 }

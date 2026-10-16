@@ -39,8 +39,21 @@ export const adminUsersSearchSchema = z.object({
   search: searchTextField,
   // stage-70 — فیلترهای واقعی دستگاه (enum + catch: زباله → پیش‌فرض)
   deviceType: z.enum(['all', 'mobile', 'tablet', 'desktop']).catch('all').default('all'),
+  // stage-72 (P2-۱۶) — برندهای دسکتاپ هم اضافه شدند (فیلتر ادمین با سرور هم‌راستا)
   deviceBrand: z
-    .enum(['all', 'apple', 'samsung', 'xiaomi', 'huawei', 'honor', 'google', 'other'])
+    .enum([
+      'all',
+      'apple',
+      'samsung',
+      'xiaomi',
+      'huawei',
+      'honor',
+      'google',
+      'windows',
+      'macos',
+      'linux',
+      'other',
+    ])
     .catch('all')
     .default('all'),
   status: z.string().catch('all').default('all'),
@@ -226,7 +239,18 @@ export function useAdminUsersPage() {
     dispatch({ type: 'SET_TEMP_DEVICE_TYPE', payload: val })
   }, [])
   const handleTempDeviceBrand = useCallback((v: string) => {
-    const known = ['apple', 'samsung', 'xiaomi', 'huawei', 'honor', 'google', 'other'] as const
+    const known = [
+      'apple',
+      'samsung',
+      'xiaomi',
+      'huawei',
+      'honor',
+      'google',
+      'windows',
+      'macos',
+      'linux',
+      'other',
+    ] as const
     const val: AdminUsersSearch['deviceBrand'] =
       (known as readonly string[]).includes(v) ? (v as AdminUsersSearch['deviceBrand']) : 'all'
     dispatch({ type: 'SET_TEMP_DEVICE_BRAND', payload: val })

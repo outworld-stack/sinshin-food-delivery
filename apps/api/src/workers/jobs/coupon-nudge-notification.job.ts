@@ -60,7 +60,6 @@ import { and, eq, isNull, notExists, sql } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import type { NotificationService } from '#/domain/notification/notification.service'
-import type { CouponService } from '#/domain/coupon/coupon.service'
 import { couponConditions, couponGrants, couponNudges, users, coupons } from '#/infra/db/schema'
 // stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
 import { faNum } from '#/domain/report/format'
@@ -107,18 +106,22 @@ function gapLabel(type: string, remaining: number): string {
  *    اعلان‌ها» در پروفایل — مصرف‌کننده‌ی واقعیِ همین ردیف‌ها).
  *  • تکرارناپذیر: یکتایی (user, coupon, scan_date) — بدون تکرار بین رپلیکاها.
  *  • بعد از ۱۳:۰۰ توقف.
+ *  • stage-72 (P2-۱۹) — catchUp روشن: اگر پروسه لحظه‌ی ارسال پایین بود، در
+ *    بوتِ بعدی (قبل از ددلاین ۱۳:۰۰) اجرای جبرانی می‌گیرد؛ ری‌استارتِ بعد از
+ *    انقضای قفل (۶ ساعت) هم فقط ردیف‌های pending را retry می‌کند — ددلاین و
+ *    claim هر تکراری را بی‌اثر می‌کنند. وابستگی CouponService‌ی مرده هم حذف شد.
  */
 export class CouponNudgeJob implements DailyJob {
   readonly name = 'coupon-nudge'
   readonly time: string
-  readonly catchUp = false
+  /** stage-72 (P2-۱۹) — جبرانِ اجرای ازدست‌رفته در بوت (قبل از ددلاین ۱۳:۰۰) */
+  readonly catchUp = true
 
   constructor(
     private readonly deps: {
       config: AppConfig
       db: Db
       notifications: NotificationService
-      coupons: CouponService
     },
   ) {
     this.time = deps.config.couponNudgeTime

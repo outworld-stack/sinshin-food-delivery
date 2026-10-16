@@ -207,7 +207,8 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
   const browser = browserLabel(navigator.userAgent)
 
   // stage-70 — برند/مدل/نوع دستگاه (فقط نمایشی)
-  const identity = detectDeviceIdentity(navigator.userAgent, highEntropy)
+  // stage-72 (P2-۲۳) — maxTouchPoints برای آیپدِ دسکتاپ‌مود (UA مک)
+  const identity = detectDeviceIdentity(navigator.userAgent, highEntropy, navigator.maxTouchPoints)
 
   return {
     clientId: getClientId(),

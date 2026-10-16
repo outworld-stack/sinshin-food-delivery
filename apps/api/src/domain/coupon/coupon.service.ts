@@ -75,6 +75,27 @@ import {
 import { UUID_RE } from '#/domain/shared/ids'
 
 /**
+ * stage-72 (P2-۲۰) — انقضای کوپن باید «امروزِ تهران به بعد» باشد؛ کوپنِ
+ * منقضی-به-دنیا-آمده هیچ‌وقت قابل استفاده نمی‌شود (create و update هر دو).
+ * مقایسه در سطح «روز» انجام می‌شود — تاریخِ خودِ امروز مجاز است.
+ */
+function assertExpiryNotPast(expiryDate: string | null | undefined): void {
+  if (!expiryDate) return
+  const expiry = new Date(expiryDate)
+  if (Number.isNaN(expiry.getTime())) return // NaN جداگانه ۴۲۲ می‌گیرد
+  const todayTehran = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tehran',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+  const startOfToday = new Date(`${todayTehran}T00:00:00Z`).getTime()
+  if (expiry.getTime() < startOfToday) {
+    throw Err.validation('تاریخ انقضا نمی‌تواند در گذشته باشد — امروز یا آینده را انتخاب کنید')
+  }
+}
+
+/**
  * stage-66 (سیاست ۳ کارفرما) — حداکثر تعداد یادآور برای هر (کوپن، کاربر).
  * سقف با شمارش ردیف‌های «ارسال‌شده» (smsSentAt != null) اعمال می‌شود؛
  * ردیف‌های اسکن‌شده ولی هرگز ارسال‌نشده به سهم کاربر حساب نمی‌شوند.
@@ -571,6 +592,9 @@ export class CouponService {
     if (input.expiryDate && Number.isNaN(new Date(input.expiryDate).getTime())) {
       throw Err.validation('تاریخ انقضا معتبر نیست')
     }
+    // stage-72 (P2-۲۰) — انقضای گذشته دیگر قابل ذخیره نیست (کلاینت+سرور):
+    // کوپنِ منقضی-به-دنیا-آمده هیچ‌وقت قابل استفاده نمی‌شود.
+    assertExpiryNotPast(input.expiryDate)
     try {
       return await this.deps.db.transaction(async (tx) => {
         // stage-55 — کل فرایند اتمی: قبلاً بین insert کوپن و insert شرط‌ها
@@ -663,6 +687,8 @@ export class CouponService {
     if (input.expiryDate && Number.isNaN(new Date(input.expiryDate).getTime())) {
       throw Err.validation('تاریخ انقضا معتبر نیست')
     }
+    // stage-72 (P2-۲۰) — هم‌الگوی create: انقضای گذشته رد می‌شود
+    assertExpiryNotPast(input.expiryDate)
     const clash = await db.query.coupons.findFirst({ where: eq(coupons.code, code) })
     if (clash && clash.id !== id) {
       throw Err.conflict('این کد قبلاً ثبت شده است')

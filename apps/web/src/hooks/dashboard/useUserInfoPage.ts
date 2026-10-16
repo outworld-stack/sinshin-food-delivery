@@ -18,7 +18,12 @@ interface UserInfoState {
 type UserInfoAction =
 	| { type: 'SET_FIELD'; field: keyof UserInfoState; payload: string }
 	| { type: 'HYDRATE'; payload: Omit<UserInfoState, 'isDirty'> }
-	| { type: 'MARK_SAVED' }
+	// stage-72 (P2-۱۱) — snapshotِ مقادیرِ ذخیره‌شده: MARK_SAVED فقط وقتی
+	// isDirty را پاک می‌کند که از لحظه‌ی submit چیزی تغییر نکرده باشد
+	| {
+			type: 'MARK_SAVED'
+			payload: { firstName: string; lastName: string; email: string }
+	  }
 
 const initialUserInfoState: UserInfoState = {
 	firstName: '',
@@ -48,7 +53,15 @@ function userInfoReducer(
 				: next
 		}
 		case 'MARK_SAVED':
-			return state.isDirty ? { ...state, isDirty: false } : state
+			// stage-72 (P2-۱۱) — تایپِ حینِ in-flight save: قبلاً بی‌قید
+			// isDirty پاک می‌شد و ریفچِ نتیجه، تایپِ تازه را revert می‌کرد.
+			// حالا فقط اگر مقادیر فعلی همانِ snapshotِ submit باشد پاک می‌شود.
+			if (!state.isDirty) return state
+			return state.firstName === action.payload.firstName &&
+				state.lastName === action.payload.lastName &&
+				state.email === action.payload.email
+				? { ...state, isDirty: false }
+				: state
 		default:
 			return state
 	}
@@ -105,10 +118,19 @@ export function useUserInfoPage(
 			lastName?: string
 			email?: string
 		}) => updateUserProfile(data),
-		onSuccess: () => {
+		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({ queryKey: qk.userProfile })
 			showToast(t['dash.info.savedToast'])
-			dispatch({ type: 'MARK_SAVED' }) // ⬅ بعد ذخیره، اجازه‌ی سینک مجدد با داده‌ی تازه
+			// ⬅ بعد ذخیره، اجازه‌ی سینک مجدد با داده‌ی تازه — فقط اگر
+			// کاربر در این بین چیزی تایپ نکرده باشد (P2-۱۱)
+			dispatch({
+				type: 'MARK_SAVED',
+				payload: {
+					firstName: variables?.firstName ?? state.firstName,
+					lastName: variables?.lastName ?? state.lastName,
+					email: variables?.email ?? state.email,
+				},
+			})
 		},
 	})
 

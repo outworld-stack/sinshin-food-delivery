@@ -120,6 +120,7 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
           limit: t.Number({ minimum: 5, maximum: 100 }),
           search: t.Optional(t.String({ maxLength: 40 })),
           deviceType: t.Optional(t.Union([t.Literal('mobile'), t.Literal('tablet'), t.Literal('desktop'), t.Literal('all')])),
+          // stage-72 (P2-۱۶) — برندهای دسکتاپ هم رسیدند؛ «other» = برند نامشناخته
           deviceBrand: t.Optional(
             t.Union([
               t.Literal('apple'),
@@ -128,12 +129,15 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
               t.Literal('huawei'),
               t.Literal('honor'),
               t.Literal('google'),
+              t.Literal('windows'),
+              t.Literal('macos'),
+              t.Literal('linux'),
               t.Literal('other'),
               t.Literal('all'),
             ]),
           ),
-          status: t.Optional(t.String()),
-          sorts: t.Optional(t.String()),
+          status: t.Optional(t.String({ maxLength: 20 })),
+          sorts: t.Optional(t.String({ maxLength: 120 })),
         }),
         detail: {
           summary: 'Admin users — paginated, filterable, sortable (usersRead)',

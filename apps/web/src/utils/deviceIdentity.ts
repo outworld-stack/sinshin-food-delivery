@@ -170,8 +170,11 @@ function androidModelFromUa(ua: string): string | null {
 	const model = m[1].trim()
 	// UA کاهش‌یافته‌ی کروم (فریز): «K» یا «Android» → مدل واقعی باید از
 	// high-entropy بیاید؛ اگر نیامد، null (نمایش فقط برند).
-	if (/^(k|android)$/i.test(model)) return null
-	if (/^w\)$/i.test(model)) return null
+	// stage-72 (P2-۸) — توکن‌های غیر-مدل هم رد می‌شوند: فایرفاکس-اندروید
+	// به‌جای مدل «Mobile»/«Tablet» می‌دهد؛ UAهای قدیمی «en-us» (locale) —
+	// قبلاً «سایر Mobile» در پنل می‌ساختند.
+	if (/^(k|android|mobile|tablet)$/i.test(model)) return null
+	if (/^[a-z]{2}-[a-z]{2}$/i.test(model)) return null
 	return model
 }
 
@@ -184,11 +187,17 @@ function iosVersionFromUa(ua: string): string | null {
 
 /**
  * تشخیص هویت دستگاه — خالص و ایزومورفیک (نه window نه document)؛
- * navigator/userAgentData به‌عنوان ورودی داده می‌شوند.
+ * navigator/userAgentData/maxTouchPoints به‌عنوان ورودی داده می‌شوند.
+ *
+ * stage-72 (P2-۲۳) — maxTouchPoints: آیپدِ iPadOS 13+ به‌صورت پیش‌فرض
+ * «وب‌سایت دسکتاپ» می‌خواهد و UAاش دقیقاً مک است؛ تشخیص فقط از «لمسِ
+ * چندنقطه‌ای» ممکن است (مک واقعی صفحه‌ی لمسی ندارد — 0؛ آیپد ۵).
+ * undefined = بدون سیگنال → همان رفتار قبل (دسکتاپ مک).
  */
 export function detectDeviceIdentity(
 	ua: string,
 	highEntropy?: HighEntropyInfo | null,
+	maxTouchPoints?: number | null,
 ): DeviceIdentity {
 	const uaL = ua.toLowerCase()
 	const heModel = highEntropy?.model?.trim() || null
@@ -241,6 +250,14 @@ export function detectDeviceIdentity(
 		hePlatform === 'macos' ||
 		hePlatform === 'darwin'
 	) {
+		// stage-72 (P2-۲۳) — مکِ لمس‌پذیر وجود ندارد؛ UA مک + لمس چندنقطه‌ای = آیپد
+		if (
+			maxTouchPoints !== undefined &&
+			maxTouchPoints !== null &&
+			maxTouchPoints > 1
+		) {
+			return { type: 'tablet', brand: 'apple', model: 'iPad' }
+		}
 		return { type: 'desktop', brand: 'macos', model: null }
 	}
 	if (
@@ -248,11 +265,8 @@ export function detectDeviceIdentity(
 		hePlatform === 'linux' ||
 		hePlatform === 'chromeos'
 	) {
-		return {
-			type: 'desktop',
-			brand: hePlatform === 'chromeos' ? 'linux' : 'linux',
-			model: null,
-		}
+		// stage-72 (P3) — ternary بی‌اثر حذف شد (هر دو شاخه 'linux' بود)
+		return { type: 'desktop', brand: 'linux', model: null }
 	}
 
 	return { type: 'desktop', brand: null, model: null }

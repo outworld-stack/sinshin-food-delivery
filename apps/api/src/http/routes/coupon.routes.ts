@@ -246,7 +246,13 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           action: 'COUPON_UPDATE',
           entity: 'coupon',
           entityId: params.id,
-          metadata: { code: body.code, discount: body.discountPercentage },
+          // stage-72 (P2-۲۱) — همان نرمال‌سازیِ سرویس (DB کد uppercase نگه
+          // می‌دارد)؛ قبلاً code خامِ body لاگ می‌شد و ردیف ممیزی با DB
+          // یکسان نبود.
+          metadata: {
+            code: body.code.trim().toUpperCase().slice(0, 16),
+            discount: body.discountPercentage,
+          },
         })
         return res
       },

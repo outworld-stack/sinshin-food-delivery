@@ -156,8 +156,8 @@ if (!g.__sinshin_cron_registered) {
   g.__sinshin_cron_registered = true
   scheduler.register(new CouponScanJob({ config, db, coupons }))
   // فاز-۲ — یادآور کوپن حالا پوش نوتیفیکیشن است (به‌جای پیامک)
-  // stage-66 — سرویس کوپن هم وصل شد: آزادسازی claim در شکست ارسال (⑤)
-  scheduler.register(new CouponNudgeJob({ config, db, notifications, coupons }))
+  // stage-72 (P2-۱۹) — وابستگی CouponService‌ی مرده از جاب حذف شد
+  scheduler.register(new CouponNudgeJob({ config, db, notifications }))
   scheduler.register(new DailyReportJob({ config, db, sms, reports }))
   scheduler.register(new WeeklyReportJob({ config, db, sms, reports }))
   scheduler.register(new ReconcileJob({ config, db, reconcile }))

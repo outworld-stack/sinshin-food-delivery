@@ -77,7 +77,7 @@ export function useNotificationInboxPage(userId: string | undefined) {
         const showToast = useToastStore((s) => s.showToast)
         const { t } = useI18n()
 
-        const { data, isLoading, isError, refetch } = useQuery({
+        const { data, isLoading, isError, isFetching, refetch } = useQuery({
                 ...myNotificationsOptions,
                 enabled: Boolean(userId),
         })
@@ -234,6 +234,14 @@ export function useNotificationInboxPage(userId: string | undefined) {
                 }
         }, [showToast, t])
 
+        // stage-72 (P2-۱۵) — «بررسی مجدد مجوز» در حالت denied: بعد از تغییر
+        // مجوز از تنظیمات مرورگر، کاربر اینجا وضعیت را تازه می‌کند
+        const handleRecheck = useCallback(async () => {
+                setPushPhase('loading')
+                const s = await getPushState().catch(() => null)
+                setPushPhase(s ? phaseOf(s) : 'denied')
+        }, [])
+
         return {
                 items: data?.items ?? [],
                 unread: data?.unread ?? 0,
@@ -242,10 +250,13 @@ export function useNotificationInboxPage(userId: string | undefined) {
                 ttlDays: data?.ttlDays ?? 7,
                 isLoading,
                 isError,
+                // stage-72 (P2-۱۳) — برای دکمه‌ی «تلاش مجدد» در حالت خطا
+                isFetching,
                 refetch,
                 markRead,
                 markAllRead,
                 pushPhase,
                 handleEnablePush,
+                handleRecheck,
         }
 }

@@ -43,14 +43,13 @@ import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
 // stage-49 — NotificationBell حذف شد (بازخورد ۳)
 // stage-68 (F6) — بج خوانده‌نشده‌ی صندوق (کوئری مشترک با صفحه‌ی صندوق)
 import { useI18n, tpl } from '#/i18n'
-import { faNum } from '#/utils/format'
 import { myNotificationsOptions } from '#/utils/queryOptions'
 
 export function DashboardLayout() {
   const hydrated = useHydrated()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const navigate = useNavigate()
-  const { t } = useI18n()
+  const { t, fmt } = useI18n()
   const activeOrderId = useAuthStore((state) => state.activeOrderId)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
@@ -128,10 +127,10 @@ export function DashboardLayout() {
                   {/* stage-68 (F6) — بج صندوق فقط روی آیتم خودش (سایدبار دسکتاپ) */}
                   {item.to === '/dashboard/notifications' && unreadBadge > 0 && (
                     <span
-                      title={tpl(t['notify.unreadCount'], { n: faNum(unreadBadge) })}
+                      title={tpl(t['notify.unreadCount'], { n: fmt.num(unreadBadge) })}
                       className="mr-auto min-w-5 h-5 px-1.5 rounded-full bg-white dark:bg-[#2a1015] text-primary dark:text-dark-primary text-[11px] font-DanaDemiBold flex items-center justify-center border border-primary/30 dark:border-dark-primary/30 shrink-0"
                     >
-                      {unreadBadge > 9 ? '۹+' : faNum(unreadBadge)}
+                      {unreadBadge > 9 ? tpl(t['notify.inbox.over9'], { n: fmt.num(9) }) : fmt.num(unreadBadge)}
                     </span>
                   )}
                 </Link>
@@ -211,10 +210,10 @@ export function DashboardLayout() {
                     {/* stage-68 (F6) — همان بج در منوی کشویی موبایل */}
                     {item.to === '/dashboard/notifications' && unreadBadge > 0 && (
                       <span
-                        title={tpl(t['notify.unreadCount'], { n: faNum(unreadBadge) })}
+                        title={tpl(t['notify.unreadCount'], { n: fmt.num(unreadBadge) })}
                         className="mr-auto min-w-5 h-5 px-1.5 rounded-full bg-white dark:bg-[#2a1015] text-primary dark:text-dark-primary text-[11px] font-DanaDemiBold flex items-center justify-center border border-primary/30 dark:border-dark-primary/30 shrink-0"
                       >
-                        {unreadBadge > 9 ? '۹+' : faNum(unreadBadge)}
+                        {unreadBadge > 9 ? tpl(t['notify.inbox.over9'], { n: fmt.num(9) }) : fmt.num(unreadBadge)}
                       </span>
                     )}
                   </Link>

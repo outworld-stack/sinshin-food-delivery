@@ -74,8 +74,10 @@ export const devices = pgTable(
     uniqueIndex('devices_fingerprint_hash_key').on(t.fingerprintHash),
     index('devices_client_id_idx').on(t.clientId),
     /** stage-70 (P2-۷) — یکتایی clientId غیر-null؛ هم‌زمانی دیگر دو ردیف
-     * با یک clientId نمی‌سازد (دروازه‌ی مهاجرت ۰۰۰۵ اول duplicates را پاک
-     * می‌کند). ایندکس قدیمیِ عادی برای سازگاری می‌ماند (کوئری‌های موجود). */
+     * با یک clientId نمی‌سازد. گیتِ خنثی‌سازیِ clientIdهای تکراریِ قدیمی
+     * «قبل از» اعمال زنجیره در migrate.ts (بک‌فیلِ pre) اجرا می‌شود —
+     * سپس این ایندکسِ ساخته‌ی ۰۰۰۵ روی دیتابیس قدیمی هم بی‌خطر است.
+     * ایندکس قدیمیِ عادی برای سازگاری می‌ماند (کوئری‌های موجود). */
     uniqueIndex('devices_client_id_uidx')
       .on(t.clientId)
       .where(sql`client_id is not null`),

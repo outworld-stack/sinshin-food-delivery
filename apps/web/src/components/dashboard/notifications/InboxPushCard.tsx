@@ -7,11 +7,15 @@
 // src/components/dashboard/notifications/InboxPushCard.tsx
 import { BellRing, CheckCircle, Refresh } from 'reicon-react'
 import type { InboxPushPhase } from '#/hooks/dashboard/useNotificationInboxPage'
-import { useI18n } from '#/i18n'
+import { tpl, useI18n } from '#/i18n'
 
 interface InboxPushCardProps {
 	phase: InboxPushPhase
 	onEnable: () => void
+	/** stage-72 (P2-۱۵) — دکمه‌ی «بررسی مجدد مجوز» در حالت denied */
+	onRecheck: () => void
+	/** stage-72 (P3) — TTL واقعی سرور برای متن‌های «{n} روز» */
+	ttlDays: number
 }
 
 /**
@@ -23,8 +27,8 @@ interface InboxPushCardProps {
  * دکمه‌ی فعال‌سازی مبتنی بر کلیک است (همان درس stage-64 — بدون ژستِ
  * کاربر مرورگرها پرامپت را رد/quiet می‌کنند؛ enablePush فقط داخل کلیک).
  */
-export function InboxPushCard({ phase, onEnable }: InboxPushCardProps) {
-	const { t } = useI18n()
+export function InboxPushCard({ phase, onEnable, onRecheck, ttlDays }: InboxPushCardProps) {
+	const { t, fmt } = useI18n()
 
 	const busy = phase === 'busy'
 
@@ -43,10 +47,10 @@ export function InboxPushCard({ phase, onEnable }: InboxPushCardProps) {
 
 				<div className="min-w-0 flex-1 space-y-2">
 					<h2 className="font-DanaDemiBold text-base sm:text-lg text-gray-800 dark:text-white leading-relaxed">
-						{t['notify.inbox.intro']}
+						{tpl(t['notify.inbox.intro'], { n: fmt.num(ttlDays) })}
 					</h2>
 					<p className="font-DanaRegular text-[13px] sm:text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-						{t['notify.inbox.ttlNote']}
+						{tpl(t['notify.inbox.ttlNote'], { n: fmt.num(ttlDays) })}
 					</p>
 
 					{/* وضعیت پوش — متن/دکمه بر اساس فاز */}
@@ -83,9 +87,26 @@ export function InboxPushCard({ phase, onEnable }: InboxPushCardProps) {
 						)}
 
 						{phase === 'denied' && (
-							<p className="text-[13px] text-orange-500 dark:text-orange-400 font-DanaMedium leading-relaxed">
-								{t['notify.enable.deniedHint']}
-							</p>
+							// stage-72 (P2-۱۵) — قبلاً بن‌بستِ متنی بود؛ گام‌های stage-50
+							// + دکمه‌ی «بررسی مجدد مجوز» که وعده‌شان را می‌داد حالا هست
+							<div className="space-y-2">
+								<p className="text-[13px] text-orange-500 dark:text-orange-400 font-DanaMedium leading-relaxed">
+									{t['notify.enable.deniedHint']}
+								</p>
+								<ol className="text-[12px] text-gray-500 dark:text-gray-400 font-DanaRegular leading-relaxed space-y-0.5 list-decimal list-inside">
+									<li>{t['notify.enable.deniedStep1']}</li>
+									<li>{t['notify.enable.deniedStep2']}</li>
+									<li>{t['notify.enable.deniedStep3']}</li>
+								</ol>
+								<button
+									type="button"
+									onClick={onRecheck}
+									className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-gray-300 dark:border-[#3a151c] text-gray-700 dark:text-gray-200 text-[13px] font-DanaDemiBold hover:bg-gray-100 dark:hover:bg-[#1a0a0e] transition cursor-pointer min-h-11"
+								>
+									<Refresh size={15} />
+									{t['notify.enable.recheck']}
+								</button>
+							</div>
 						)}
 
 						{phase === 'unsupported' && (

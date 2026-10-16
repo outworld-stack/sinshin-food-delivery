@@ -28,9 +28,26 @@ export function likePattern(input: string): string {
   return `%${escapeLike(input.trim())}%`
 }
 
-/** خطای یکتایی Postgres (رقابت هم‌زمان روی insert) */
+/**
+ * خطای یکتایی Postgres (رقابت هم‌زمان روی insert).
+ *
+ * stage-72 — رفع باگ واقعیِ تشخیص (کشفِ تست E2E): درایور Bun.sql کد PG را در
+ * «errno» می‌گذارد (code = ERR_POSTGRES_SERVER_ERROR عمومی است) و drizzle هم
+ * خطای درایور را داخل DrizzleQueryError.cause می‌پیچد. چکِ قبلیِ فقطِ
+ * e.code==='23505' (قرارداد pg کلاسیک) در این استک هیچ‌وقت true نمی‌شد — یعنی
+ * همه‌ی مسیرهای «رقابت هم‌زمان» (review/menu/coupon/auth/device) به‌صورت خام
+ * ۵۰۰ می‌دادند. حالا هر سه شکل پوشش داده می‌شود: pg کلاسیک (code)، Bun.sql
+ * مستقیم (errno) و wrapper درایور (cause.errno).
+ */
 export function isUniqueViolation(e: unknown): boolean {
-  return typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505'
+  if (typeof e !== 'object' || e === null) return false
+  const hit = (x: object): boolean => {
+    const err = x as { code?: unknown; errno?: unknown }
+    return err.code === '23505' || err.errno === '23505' || err.errno === 23505
+  }
+  if (hit(e)) return true
+  const cause = (e as { cause?: unknown }).cause
+  return typeof cause === 'object' && cause !== null && hit(cause)
 }
 
 /** ماسک شماره برای نمایش/لاگ — شماره کامل فقط برای ادمین اصلی */

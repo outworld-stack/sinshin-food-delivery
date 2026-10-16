@@ -106,6 +106,8 @@ export const qk = {
   // stage-65 — مصرف‌کنندگان کوپن (صفحه‌بندی سروری؛ صفحه در کلید)
   adminCouponConsumers: (id: string, page: number) =>
     ['admin-coupon-consumers', id, page] as const,
+  // stage-72 (P2-۲۲) — پیشوندِ کلید برای removeQueries همه‌ی صفحات
+  adminCouponConsumersBase: (id: string) => ['admin-coupon-consumers', id] as const,
   // phase-9: جزئیات کوپن — صفحه‌ی اختصاصی
   adminCouponDetails: (id: string) => ['admin-coupon-details', id] as const,
   deliveryZones: ['delivery-zones'] as const,

@@ -9,9 +9,8 @@ import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 // src/components/dashboard/notifications/InboxList.tsx
 import { memo } from 'react'
-import { Bell, Check, ChevronLeft, Clock, Gift, InfoCircle } from 'reicon-react'
-import { tpl, useI18n } from '#/i18n'
-import { faNum, formatRelative } from '#/utils/format'
+import { AlertTriangle, Bell, Check, ChevronLeft, Clock, Gift, InfoCircle } from 'reicon-react'
+import { type Fmt, tpl, useI18n } from '#/i18n'
 
 // stage-68 (F8) — TTL از prop سروری می‌آید (ttlDays در NotificationInboxData
 // پاسخ GET /notifications). ۷ فقط fallback پیش از پاسخ است؛ هاردکدِ موازی
@@ -40,13 +39,15 @@ function ttlBadge(
         ttlDays: number,
         daysLeftLabel: string,
         lessThanDayLabel: string,
+        // stage-72 (P1-۱) — رقمِ زبانِ رابط (fmt.num) به‌جای faNumِ فقط-فارسی
+        num: Fmt['num'],
 ): string {
         const created = new Date(item.createdAt)
         if (Number.isNaN(created.getTime())) return ''
         const msLeft = created.getTime() + ttlDays * 86_400_000 - Date.now()
         if (msLeft <= 0) return ''
         const days = Math.floor(msLeft / 86_400_000)
-        if (days >= 1) return tpl(daysLeftLabel, { n: faNum(days) })
+        if (days >= 1) return tpl(daysLeftLabel, { n: num(days) })
         return lessThanDayLabel
 }
 
@@ -66,21 +67,21 @@ const InboxRow = memo(function InboxRow({
         daysLeftLabel,
         lessThanDayLabel,
 }: InboxRowProps) {
-        const { t } = useI18n()
+        const { t, fmt } = useI18n()
         const { icon, label } = iconOf(item.type, t)
         const unread = item.readAt === null
-        const ttl = ttlBadge(item, ttlDays, daysLeftLabel, lessThanDayLabel)
+        // stage-72 (P1-۱) — رقم بج TTL هم زبانِ رابط را می‌گیرد
+        const ttl = ttlBadge(item, ttlDays, daysLeftLabel, lessThanDayLabel, fmt.num)
 
         const inner = (
                 <>
                         <span
                                 aria-hidden="true"
                                 title={label}
-                                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                                        unread
+                                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${unread
                                                 ? 'bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary'
                                                 : 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-400 dark:text-gray-500'
-                                }`}
+                                        }`}
                         >
                                 {icon}
                         </span>
@@ -94,26 +95,24 @@ const InboxRow = memo(function InboxRow({
                                                 />
                                         )}
                                         <p
-                                                className={`font-DanaDemiBold text-sm truncate ${
-                                                        unread
+                                                className={`font-DanaDemiBold text-sm truncate ${unread
                                                                 ? 'text-gray-800 dark:text-gray-100'
                                                                 : 'text-gray-500 dark:text-gray-400'
-                                                }`}
+                                                        }`}
                                         >
                                                 {item.title}
                                         </p>
                                 </div>
                                 <p
-                                        className={`font-DanaRegular text-[13px] leading-relaxed mt-1 line-clamp-2 ${
-                                                unread
+                                        className={`font-DanaRegular text-[13px] leading-relaxed mt-1 line-clamp-2 ${unread
                                                         ? 'text-gray-600 dark:text-gray-300'
                                                         : 'text-gray-400 dark:text-gray-500'
-                                        }`}
+                                                }`}
                                 >
                                         {item.body}
                                 </p>
                                 <div className="flex items-center gap-3 mt-2 text-[11px] font-DanaMedium text-gray-400 dark:text-gray-500">
-                                        <span>{formatRelative(item.createdAt)}</span>
+                                        <span>{fmt.relative(item.createdAt)}</span>
                                         {ttl && (
                                                 <span className="inline-flex items-center gap-1">
                                                         <Clock size={12} />
@@ -129,11 +128,10 @@ const InboxRow = memo(function InboxRow({
                 </>
         )
 
-        const className = `w-full flex items-center gap-3 text-right p-3 sm:p-4 rounded-xl transition-colors cursor-pointer ${
-                unread
+        const className = `w-full flex items-center gap-3 text-right p-3 sm:p-4 rounded-xl transition-colors cursor-pointer ${unread
                         ? 'bg-white dark:bg-[#2a1015] hover:bg-gray-50 dark:hover:bg-[#331319] border border-gray-200 dark:border-[#3a151c]'
                         : 'bg-gray-50 dark:bg-[#23090d] hover:bg-gray-100 dark:hover:bg-[#2a1015] border border-transparent'
-        }`
+                }`
 
         if (item.url) {
                 return (
@@ -163,6 +161,10 @@ interface InboxListProps {
         /** stage-68 (F8) — قرارداد TTL از سرور (پاسخ GET /notifications) */
         ttlDays?: number
         isLoading: boolean
+        /** stage-72 (P2-۱۳) — خطای کوئری: حالت خطا با تلاش مجدد (قبلاً خطا = حالت خالی گمراه‌کننده) */
+        isError: boolean
+        isRefetching: boolean
+        onRetry: () => void
         isMarkingAll: boolean
         onMarkRead: (id: string) => void
         onMarkAllRead: () => void
@@ -177,11 +179,14 @@ export function InboxList({
         unread,
         ttlDays = FALLBACK_TTL_DAYS,
         isLoading,
+        isError,
+        isRefetching,
+        onRetry,
         isMarkingAll,
         onMarkRead,
         onMarkAllRead,
 }: InboxListProps) {
-        const { t } = useI18n()
+        const { t, fmt } = useI18n()
 
         return (
                 <section
@@ -193,7 +198,7 @@ export function InboxList({
                                         {t['notify.title']}
                                         {unread > 0 && (
                                                 <span className="text-[11px] font-DanaDemiBold px-2 py-0.5 rounded-full bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary">
-                                                        {tpl(t['notify.unreadCount'], { n: faNum(unread) })}
+                                                        {tpl(t['notify.unreadCount'], { n: fmt.num(unread) })}
                                                 </span>
                                         )}
                                 </h3>
@@ -226,6 +231,22 @@ export function InboxList({
                                                         </div>
                                                 </div>
                                         ))}
+                                </div>
+                        ) : isError ? (
+                                // stage-72 (P2-۱۳) — خطا ≠ خالی: دکمه‌ی تلاش مجدد، نه «اعلانی نیست»‌ی دروغ
+                                <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                                        <AlertTriangle size={40} className="text-red-400 mb-3" />
+                                        <p className="font-DanaMedium text-sm text-gray-500 dark:text-gray-400 mb-4">
+                                                {t['notify.inbox.loadError']}
+                                        </p>
+                                        <button
+                                                type="button"
+                                                onClick={onRetry}
+                                                disabled={isRefetching}
+                                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-DanaDemiBold bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-wait min-h-11"
+                                        >
+                                                {t['notify.inbox.retry']}
+                                        </button>
                                 </div>
                         ) : items.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-12 px-4 text-center">

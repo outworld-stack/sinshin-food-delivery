@@ -13,7 +13,7 @@
 // ═════════════════════════════════════════════════════════════
 
 // src/domain/admin/admin.service.ts
-import { and, asc, desc, eq, exists, gte, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import {
@@ -80,7 +80,6 @@ export class AdminService {
                     id: users.id,
                     phone: users.phone,
                     name: users.name,
-                    device: sql<string>`'web'`,
                     registeredAt: users.createdAt,
                 }).from(users)
                     .orderBy(desc(users.createdAt))
@@ -92,6 +91,46 @@ export class AdminService {
                     .from(orders)
                     .where(and(gte(orders.createdAt, currentPeriodStart()), ne(orders.status, 'CANCELED'))),
             ])
+
+        // stage-72 (P1-۳) — دستگاهِ واقعیِ آخرین کاربران (قبلاً 'web' هاردکد بود)؛
+        // همان معنای getAdminUsers: تازه‌ترین هویتِ شماره (lastLoginAt desc
+        // nulls last → firstLoginAt desc) → نام نمایشی دستگاه
+        const latestPhones = latestUsers.map((u) => u.phone)
+        const latestIdentityRows = latestPhones.length
+            ? await db
+                  .select({
+                      phone: deviceIdentities.phone,
+                      deviceType: devices.deviceType,
+                      deviceBrand: devices.deviceBrand,
+                      deviceModel: devices.deviceModel,
+                      platform: devices.platform,
+                      userAgent: devices.userAgent,
+                      touch: devices.touch,
+                      rank: sql<number>`row_number() over (
+                      partition by ${deviceIdentities.phone}
+                      order by ${deviceIdentities.lastLoginAt} desc nulls last,
+                               ${deviceIdentities.firstLoginAt} desc
+                  )::int`.as('rank'),
+                  })
+                  .from(deviceIdentities)
+                  .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
+                  .where(inArray(deviceIdentities.phone, latestPhones))
+            : []
+        const deviceByPhone = new Map(
+            latestIdentityRows
+                .filter((r) => r.rank === 1)
+                .map((r) => [
+                    r.phone,
+                    deviceDisplayName({
+                        deviceType: r.deviceType,
+                        deviceBrand: r.deviceBrand,
+                        deviceModel: r.deviceModel,
+                        platform: r.platform,
+                        userAgent: r.userAgent,
+                        touch: r.touch,
+                    }),
+                ]),
+        )
 
         return {
             totalUsers,
@@ -110,7 +149,7 @@ export class AdminService {
                 id: asUserId(u.id),
                 phone: u.phone,
                 name: u.name ?? u.phone,
-                device: u.device,
+                device: deviceByPhone.get(u.phone) ?? '—',
                 registeredAt: u.registeredAt,
             })),
         }
@@ -150,34 +189,35 @@ export class AdminService {
             }
         }
 
-        // stage-70 — فیلتر واقعی نوع/برند دستگاه (قبلاً پارامتر device کاملاً
-        // mock بود و بک‌اند نادیده‌اش می‌گرفت). «دستگاهِ کاربر» = هویتِ تازه‌ترین
-        // ورودِ همان شماره → ردیف devices آن.
+        // stage-70 — فیلتر واقعی نوع/برند دستگاه. stage-72 (P2-۱۶): فیلتر
+        // روی «آخرین» دستگاهِ کاربر (همان ردیفی که ستون «نام دستگاه» نشان
+        // می‌دهد) — قبلاً هر دستگاهِ تاریخی مطابقت می‌داد و نتیجه‌ی فیلتر با
+        // ردیفِ نمایش‌داده‌شده تناقض داشت. ساب‌کوئریِ اسکالر با همان ترتیبِ
+        // rank (lastLoginAt desc nulls last → firstLoginAt desc) = همان
+        // انتخابِ getAdminUsers.
+        const latestDeviceCol = (col: 'device_type' | 'device_brand') =>
+            sql`(
+                select d.${sql.raw(`"${col}"`)}
+                from "device_identities" di
+                join "devices" d on d."id" = di."device_id"
+                where di."phone" = ${users.phone}
+                order by di."last_login_at" desc nulls last, di."first_login_at" desc
+                limit 1
+            )`
         if (filters.deviceType && filters.deviceType !== 'all') {
-            const devExists = db
-                .select({ one: sql`1` })
-                .from(deviceIdentities)
-                .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
-                .where(
-                    and(
-                        eq(deviceIdentities.phone, users.phone),
-                        eq(devices.deviceType, filters.deviceType),
-                    ),
-                )
-            conditions.push(exists(devExists))
+            conditions.push(sql`${latestDeviceCol('device_type')} = ${filters.deviceType}`)
         }
         if (filters.deviceBrand && filters.deviceBrand !== 'all') {
-            const brandExists = db
-                .select({ one: sql`1` })
-                .from(deviceIdentities)
-                .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
-                .where(
-                    and(
-                        eq(deviceIdentities.phone, users.phone),
-                        eq(devices.deviceBrand, filters.deviceBrand),
-                    ),
+            if (filters.deviceBrand === 'other') {
+                // «سایر» = دستگاهِ آخرین هویت هست، اما برندش قاعده‌مند نیست
+                // (NULL) — قبلاً literal 'other' با هیچ ردیفی مطابقت نمی‌داد
+                conditions.push(
+                    sql`exists (select 1 from "device_identities" di where di."phone" = ${users.phone})
+                        and ${latestDeviceCol('device_brand')} is null`,
                 )
-            conditions.push(exists(brandExists))
+            } else {
+                conditions.push(sql`${latestDeviceCol('device_brand')} = ${filters.deviceBrand}`)
+            }
         }
 
         const where = conditions.length > 0 ? and(...conditions) : undefined
@@ -266,6 +306,7 @@ export class AdminService {
                       deviceModel: devices.deviceModel,
                       platform: devices.platform,
                       userAgent: devices.userAgent,
+                      touch: devices.touch,
                       rank: sql<number>`row_number() over (
                       partition by ${deviceIdentities.phone}
                       order by ${deviceIdentities.lastLoginAt} desc nulls last,
@@ -287,6 +328,7 @@ export class AdminService {
                         deviceModel: r.deviceModel,
                         platform: r.platform,
                         userAgent: r.userAgent,
+                        touch: r.touch,
                     },
                 ]),
         )
@@ -373,6 +415,7 @@ export class AdminService {
                     deviceBrand: devices.deviceBrand,
                     deviceModel: devices.deviceModel,
                     userAgent: devices.userAgent,
+                    touch: devices.touch,
                     lastActiveAt: devices.lastSeenAt,
                 }).from(deviceIdentities)
                     .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
@@ -447,6 +490,7 @@ export class AdminService {
                           deviceModel: deviceRows[0]?.deviceModel ?? null,
                           platform: deviceRows[0]?.platform ?? null,
                           userAgent: deviceRows[0]?.userAgent ?? null,
+                          touch: deviceRows[0]?.touch ?? null,
                       })
                     : '—',
             registeredAt: user.createdAt,

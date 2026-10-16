@@ -88,6 +88,9 @@ export function readLangCookie(): Lang | null {
 
 /** رارد ۳۸ — عمومی شد: root beforeLoad (سمت سرورِ ?lang=) هم کوکی می‌نویسد */
 export function writeLangCookie(lang: Lang): void {
+        // stage-72 (P2-۱۲) — گارد non-DOM: شاخه‌ی «تعویض آنی» (بدون DOM) در
+        // محیط تست/SSR هم صدا می‌شود و document.cookie اینجا ReferenceError می‌داد
+        if (typeof document === 'undefined') return
         // biome-ignore lint/suspicious/noDocumentCookie: همان الگوی themeStore موجود — Cookie Store API هنوز در همه‌ی مرورگرهای هدف نیست
         document.cookie = `${LANG_COOKIE}=${lang}; path=/; max-age=31536000; samesite=lax`
 }

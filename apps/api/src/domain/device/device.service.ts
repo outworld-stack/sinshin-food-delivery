@@ -21,7 +21,7 @@ import {
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
-import { likePattern } from '#/domain/shared/pg'
+import { isUniqueViolation, likePattern } from '#/domain/shared/pg'
 import { asDeviceId, asUserId, type DeviceId } from '#/domain/shared/brand'
 import {
   compositeFingerprintHash,
@@ -196,37 +196,66 @@ export class DeviceService {
         canvasDrift: drift,
       })
 
-      const [updated] = await db
-        .update(devices)
-        .set({
-          // clientId فقط وقتی خالی است پر می‌شود — بازنویسی ممنوع (D6)؛
-          // با ایندکس یکتا، بازنویسیِ هم‌زمان two-row خطای خام می‌داد.
-          clientId: device.clientId ?? signals.clientId ?? null,
-          fingerprintHash: composite,
-          canvasHash: signals.canvasHash,
-          webglHash: signals.webglHash,
-          audioHash: signals.audioHash,
-          fontsHash: signals.fontsHash,
-          screen: signals.screen ?? device.screen,
-          platform: signals.platform ?? device.platform,
-          timezone: signals.timezone ?? device.timezone,
-          language: signals.language ?? device.language,
-          hardwareConcurrency: signals.hardwareConcurrency ?? device.hardwareConcurrency,
-          deviceMemory: signals.deviceMemory ?? device.deviceMemory,
-          touch: signals.touch ?? device.touch,
-          networkType: signals.networkType ?? device.networkType,
-          userAgent: signals.userAgent ?? device.userAgent,
-          label: signals.label ?? device.label,
-          deviceType: signals.deviceType ?? device.deviceType,
-          deviceBrand: signals.deviceBrand ?? device.deviceBrand,
-          deviceModel: signals.deviceModel ?? device.deviceModel,
-          prevCanvasHash: device.canvasHash,
-          riskScore: score,
-          riskFlags: flags,
-          lastSeenAt: new Date(),
+      // stage-72 (P2-۱۰) — بازنویسیِ نهاییِ دستگاه با تابِ خطای یکتایی:
+      // در رِیسِ نادر (دو تب/دو ردیف، بین peek و finalize) ممکن است clientId
+      // یا fingerprintHash لحظه‌ای به ردیف دیگری تعلق گرفته باشد → 23505 خام.
+      // مسیر INSERT از قبل retry دارد؛ UPDATE نداشت. تابِ سه‌مرحله‌ای:
+      // کامل → بدون clientId → بدون clientId و fingerprintHash (هویتِ ردیف
+      // دست‌نخورده می‌ماند؛ اتصالِ کلاینت در ورود بعدی از همان کلیدِ موجود
+      // برقرار می‌شود). هر تنزل با رویداد UNIQUE_RETRY ثبت می‌شود.
+      const patch: Partial<typeof devices.$inferInsert> = {
+        // clientId فقط وقتی خالی است پر می‌شود — بازنویسی ممنوع (D6)؛
+        // با ایندکس یکتا، بازنویسیِ هم‌زمان two-row خطای خام می‌داد.
+        clientId: device.clientId ?? signals.clientId ?? null,
+        fingerprintHash: composite,
+        canvasHash: signals.canvasHash,
+        webglHash: signals.webglHash,
+        audioHash: signals.audioHash,
+        fontsHash: signals.fontsHash,
+        screen: signals.screen ?? device.screen,
+        platform: signals.platform ?? device.platform,
+        timezone: signals.timezone ?? device.timezone,
+        language: signals.language ?? device.language,
+        hardwareConcurrency: signals.hardwareConcurrency ?? device.hardwareConcurrency,
+        deviceMemory: signals.deviceMemory ?? device.deviceMemory,
+        touch: signals.touch ?? device.touch,
+        networkType: signals.networkType ?? device.networkType,
+        userAgent: signals.userAgent ?? device.userAgent,
+        label: signals.label ?? device.label,
+        deviceType: signals.deviceType ?? device.deviceType,
+        deviceBrand: signals.deviceBrand ?? device.deviceBrand,
+        deviceModel: signals.deviceModel ?? device.deviceModel,
+        prevCanvasHash: device.canvasHash,
+        riskScore: score,
+        riskFlags: flags,
+        lastSeenAt: new Date(),
+      }
+      let updated: DeviceRow | undefined
+      // قفل مقدار برای closure — TS و رِیسِ مقدار
+      const target: DeviceRow = device
+      const runUpdate = async (p: Partial<typeof devices.$inferInsert>) =>
+        (await db.update(devices).set(p).where(eq(devices.id, target.id)).returning())[0]
+      try {
+        updated = await runUpdate(patch)
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error
+        console.log(`[device] unique-retry #1 (device=${device.id}) — clientId dropped`)
+        await this.logEventOn(db, device.id, phone, 'UNIQUE_RETRY', ip, signals.userAgent, {
+          dropped: ['clientId'],
         })
-        .where(eq(devices.id, device.id))
-        .returning()
+        try {
+          const { clientId: _drop, ...patchNoClientId } = patch
+          updated = await runUpdate(patchNoClientId)
+        } catch (error2) {
+          if (!isUniqueViolation(error2)) throw error2
+          console.log(`[device] unique-retry #2 (device=${device.id}) — fingerprintHash kept`)
+          await this.logEventOn(db, device.id, phone, 'UNIQUE_RETRY', ip, signals.userAgent, {
+            dropped: ['clientId', 'fingerprintHash'],
+          })
+          const { clientId: _c, fingerprintHash: _f, ...patchMinimal } = patch
+          updated = await runUpdate(patchMinimal)
+        }
+      }
       device = updated ?? device
 
       if (flags.length > 0 && (score !== peek.riskScore || flags.length !== peek.riskFlags.length)) {
@@ -352,12 +381,10 @@ export class DeviceService {
       if (claimed) {
         device = claimed
       } else {
-        // بین peek و تراکنش، دستگاهِ دیگری claimش کرده — رد تمیز دامنه‌ای
-        await this.logEventOn(db, device.id, phone, 'PHONE_LIMIT_BLOCKED', ip, signals.userAgent, {
-          phone,
-          limit: config.device.maxPhonesPerDevice,
-          race: true,
-        })
+        // بین peek و تراکنش، دستگاهِ دیگری claimش کرده — رد تمیز دامنه‌ای.
+        // stage-72 (P2-۱۰): رویداد PHONE_LIMIT_BLOCKED اینجا داخل tx لاگ
+        // نمی‌شود — throw کل tx را رولبک می‌کرد و رویداد ممیزی گم می‌شد؛
+        // auth.service بعد از rollback (بیرون tx) آن را ثبت می‌کند.
         throw Err.devicePhoneLimit(config.device.maxPhonesPerDevice)
       }
     }
@@ -394,7 +421,22 @@ export class DeviceService {
 
   /** سهمیه: دستگاهِ جدید برای این شماره وقتی سقف پر است → خطا (ادمین معاف) */
   async assertQuota(phone: string, role: string, currentDeviceId?: string | null): Promise<void> {
-    const { db, config } = this.deps
+    await this.assertQuotaOn(this.deps.db, phone, role, currentDeviceId)
+  }
+
+  /**
+   * stage-72 (P2-۹) — نسخه‌ی tx-آگاهِ همان چک: auth.service آن را «داخلِ
+   * تراکنش و بعد از قفلِ advisory شماره» صدا می‌زند. قبلاً سهمیه فقط بیرونِ
+   * tx چک می‌شد؛ دو ورودِ هم‌زمانِ یک شماره (TOCTOU) می‌توانست هر دو را
+   * از فیلترِ سقفِ maxDevicesPerUser رد کند و سقف رد شود.
+   */
+  async assertQuotaOn(
+    db: DbOrTx,
+    phone: string,
+    role: string,
+    currentDeviceId?: string | null,
+  ): Promise<void> {
+    const { config } = this.deps
     if (!config.deviceEnforcement) return
     if (role === 'admin') return
 

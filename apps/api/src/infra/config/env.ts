@@ -377,11 +377,29 @@ export class AppConfig {
       nudgeTime = '11:00'
     }
     if (this.couponScanTime >= nudgeTime) {
-      console.warn(
-        `[env] COUPON_SCAN_TIME="${this.couponScanTime}" بعد از COUPON_NUDGE_TIME="${nudgeTime}" است — ` +
-          `نامزدهای امروز بعد از ارسال ساخته می‌شدند و فرستاده نمی‌شدند؛ اسکن به "02:00" برگشت (stage-67).`,
-      )
-      this.couponScanTime = '02:00'
+      // stage-72 (P2-۱۸) — قبلاً scan فقط به '02:00' ریست می‌شد؛ وقتی
+      // NUDGE_TIME ≤ 02:00 بود این ریست «بی‌اثر» بود (scan همچنان بعد از
+      // nudge می‌ماند) و نامزدها هرگز same-day ارسال نمی‌شدند. حالا scan
+      // واقعاً قبل از nudge می‌نشیند (۳۰ دقیقه قبل، کف ۰۰:۰۰)؛ فقط اگر خودِ
+      // nudge آن‌قدر زود باشد که هیچ scanای نمی‌تواند قبلش باشد (≤ ۰۰:۳۰)،
+      // nudge به پیش‌فرض برمی‌گردد.
+      if (nudgeTime <= '00:30') {
+        console.warn(
+          `[env] COUPON_NUDGE_TIME="${nudgeTime}" آن‌قدر زود است که اسکنِ همان روز قبلش ممکن نیست؛ ` +
+            `به "11:00" برگشت (stage-72).`,
+        )
+        nudgeTime = '11:00'
+      } else {
+        const nudgeMinutes =
+          Number.parseInt(nudgeTime.slice(0, 2), 10) * 60 + Number.parseInt(nudgeTime.slice(3, 5), 10)
+        const scanMinutes = Math.max(0, nudgeMinutes - 30)
+        const scanTime = `${String(Math.floor(scanMinutes / 60)).padStart(2, '0')}:${String(scanMinutes % 60).padStart(2, '0')}`
+        console.warn(
+          `[env] COUPON_SCAN_TIME="${this.couponScanTime}" بعد از COUPON_NUDGE_TIME="${nudgeTime}" است — ` +
+            `نامزدهای امروز بعد از ارسال ساخته می‌شدند و فرستاده نمی‌شدند؛ اسکن به "${scanTime}" برگشت (stage-72).`,
+        )
+        this.couponScanTime = scanTime
+      }
     }
     this.couponNudgeTime = nudgeTime
 

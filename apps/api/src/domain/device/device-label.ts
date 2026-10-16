@@ -23,6 +23,8 @@ export interface DeviceLabelInput {
   deviceModel: string | null
   platform: string | null
   userAgent: string | null
+  /** stage-72 (P2-۲۳) — آیپدِ دسکتاپ‌مود (UA مک) فقط از لمس تشخیص‌پذیر است */
+  touch?: boolean | null
 }
 
 const BRAND_FA: Record<string, string> = {
@@ -48,6 +50,8 @@ export function deviceBrandFa(brand: string | null | undefined): string | null {
 export function deriveLegacyDevice(input: {
   platform: string | null
   userAgent: string | null
+  /** stage-72 (P2-۲۳) — مکِ لمس‌پذیر = آیپدِ دسکتاپ‌مود */
+  touch?: boolean | null
 }): { type: 'mobile' | 'tablet' | 'desktop' | null; brand: string | null } {
   const uaL = (input.userAgent ?? '').toLowerCase()
   const platform = (input.platform ?? '').toLowerCase()
@@ -68,6 +72,8 @@ export function deriveLegacyDevice(input: {
     return { type: 'desktop', brand: 'windows' }
   }
   if (/macintosh|mac os/.test(uaL) || platform === 'macintel') {
+    // stage-72 (P2-۲۳) — مک صفحه‌ی لمسی ندارد؛ UA مک + touch = آیپد
+    if (input.touch) return { type: 'tablet', brand: 'apple' }
     return { type: 'desktop', brand: 'macos' }
   }
   if (/linux|ubuntu|fedora|cros/.test(uaL) || platform.includes('linux')) {
@@ -81,7 +87,11 @@ export function deviceDisplayName(input: DeviceLabelInput): string {
   let type = input.deviceType
   let brand = input.deviceBrand
   if (!type || !brand) {
-    const legacy = deriveLegacyDevice({ platform: input.platform, userAgent: input.userAgent })
+    const legacy = deriveLegacyDevice({
+      platform: input.platform,
+      userAgent: input.userAgent,
+      touch: input.touch,
+    })
     type = type ?? legacy.type
     brand = brand ?? legacy.brand
   }
@@ -89,6 +99,8 @@ export function deviceDisplayName(input: DeviceLabelInput): string {
   const brandFa = deviceBrandFa(brand)
   if (type === 'desktop') return brandFa ?? 'رایانه'
   if (!brandFa) return type === 'mobile' ? 'موبایل' : 'تبلت'
+  // آیپدِ legacy بدون مدل — نمایش «آیپد» به‌جای فقط «اپل»
+  if (type === 'tablet' && brand === 'apple' && !input.deviceModel?.trim()) return 'آیپد'
   const model = input.deviceModel?.trim() ?? ''
   return model ? `${brandFa} ${model}` : brandFa
 }

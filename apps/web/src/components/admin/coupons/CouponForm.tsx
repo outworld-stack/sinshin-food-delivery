@@ -201,7 +201,9 @@ const EMPTY_FORM: CouponFormState = {
 	expiryJalali: null,
 	expiryTime: '23:59',
 	maxUses: 0,
-	maxPerUser: 1,
+	// stage-72 (P2-۲۰) — ۰ = بدون سقف (رفتار قبلی)؛ متن راهنما همین را می‌گفت
+	// اما پیش‌فرضِ ۱ مخالفتش می‌کرد و کوپنِ تازه بدون خواست ادمین سقف می‌گرفت
+	maxPerUser: 0,
 	isPublic: true,
 	cronEnabled: false,
 	announceSuppressed: false,
@@ -343,6 +345,19 @@ export function CouponForm({
 			showToast('حداکثر استفاده نمی‌تواند منفی باشد', 'error')
 			return
 		}
+		// stage-72 (P2-۲۰) — انقضای گذشته کلاینت هم رد می‌کند (سرور هم ۴۲۲
+		// می‌دهد؛ اینجا بدون رفت‌وبرگشت پیام روشن می‌گیرد). مقایسه در سطح
+		// «روزِ تهران» — تاریخِ خودِ امروز مجاز است.
+		if (form.expiryJalali) {
+			const todayJalali = jalaliToISO(gregorianToJalali(new Date()))
+			if (form.expiryJalali < todayJalali) {
+				showToast(
+					'تاریخ انقضا نمی‌تواند در گذشته باشد — امروز یا آینده را انتخاب کنید',
+					'error',
+				)
+				return
+			}
+		}
 		// stage-66 — سقف مصرف به‌ازای کاربر (فقط عمومی؛ عدد صحیح ≥ ۰)
 		if (form.isPublic && (!Number.isFinite(form.maxPerUser) || form.maxPerUser < 0)) {
 			showToast('حداکثر مصرف به‌ازای هر کاربر نمی‌تواند منفی باشد', 'error')
@@ -378,7 +393,8 @@ export function CouponForm({
 		onSubmit({
 			code,
 			discountPercentage: form.discount,
-			maxUses: form.maxUses,
+			// stage-72 (P2-۲۰) — هم‌الگوی maxPerUser: عدد صحیح ≥ ۰
+			maxUses: Math.max(0, Math.floor(form.maxUses)),
 			// stage-66 — سقف per-user؛ خصوصی گرنت یکتا دارد (ذاتی ۱) → ۰
 			maxPerUser: form.isPublic ? Math.max(0, Math.floor(form.maxPerUser)) : 0,
 			isPublic: form.isPublic,
