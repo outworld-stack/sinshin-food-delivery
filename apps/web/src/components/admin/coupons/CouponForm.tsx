@@ -284,11 +284,16 @@ export function CouponForm({
                 return d.toISOString()
         }, [form.expiryJalali, form.expiryTime])
 
+        // stage-77 (P3-17) — پشتیبان مرورگرهای قدیمی (iOS < 15.4): نبود
+        // randomUUID یعنی TypeError لحظه‌ی «افزودن شرط» — الگوی چک‌اوت
+        const newRuleKey = (): string =>
+                crypto.randomUUID?.() ?? `rule-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
         const addRule = useCallback(() => {
                 set({
                         rules: [
                                 ...form.rules,
-                                { key: crypto.randomUUID(), type: 'MIN_ORDERS_COUNT', value: '' },
+                                { key: newRuleKey(), type: 'MIN_ORDERS_COUNT', value: '' },
                         ],
                 })
         }, [form.rules, set])

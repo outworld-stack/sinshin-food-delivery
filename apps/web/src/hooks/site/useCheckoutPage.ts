@@ -9,7 +9,14 @@
 import type { CheckoutItemInput } from '@sinshin/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useReducer,
+	useRef,
+	useState,
+} from 'react'
 import { useMenuLive } from '#/hooks/shared/useMenuLive'
 import { tpl, useI18n } from '#/i18n'
 import { mockPay, processCheckout } from '#/server/checkout'
@@ -117,13 +124,19 @@ export function useCheckoutPage(deps: {
 	const setActiveOrderId = useAuthStore((s) => s.setActiveOrderId)
 	const showToast = useToastStore((s) => s.showToast)
 	// رارد ۳۲ — توست‌ها/خطاهای دوزبانه؛ پیام‌های سرور تا رارد ۳۳ فارسی می‌مانند
-	const { t, fmt } = useI18n()
+	const { t, fmt, apiError } = useI18n()
 
 	// phase-fix: پشتیبان برای مرورگرهای قدیمی (iOS < 15.4 / WebView ناامن) —
 	// نبود randomUUID یعنی TypeError در لحظه‌ی ثبت سفارش = چک‌اوت مرده
 	const newIdempotencyKey = (): string =>
 		crypto.randomUUID?.() ??
 		`idm-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+
+	// stage-77 (P3-16) — گاردِ دوبله‌زدن در فلوی MOCK: onSuccessِ میوتیشن
+	// «موفق» شده و isPending=false می‌شود در حالی که mockPay هنوز در جریان
+	// است؛ کلیکِ دوباره ⇒ processCheckout دوباره با همان کلید (سرور رد
+	// می‌کند) + mockPay/توستِ تکراری. دکمه تا پایانِ ناوبری قفل می‌ماند.
+	const [mockPayPending, setMockPayPending] = useState(false)
 
 	// phase-3: تکرارناپذیری — یک کلید به‌ازای هر نیت خرید؛ تلاش مجدد شبکه همان کلید
 	// را می‌فرستد → سفارش دوم ساخته نمی‌شود. فقط بعد از «شکست قطعی» تازه می‌شود.
@@ -189,13 +202,27 @@ export function useCheckoutPage(deps: {
 
 	const hasUnavailableItems = blocked.unavailableNames.length > 0
 
-	// اعلان نتیجه‌ی کوپن — فقط یک‌بار به‌ازای هر کدِ تثبیت‌شده
+	// اعلان نتیجه‌ی کوپن — stage-77 (P3-9): به‌ازای «گذارِ اعتبار»، نه یک‌بار
+	// به‌ازای کد. قبلاً بعد از اولین پاسخِ معتبر، تغییرِ بعدیِ سبد (سقفِ حداقل
+	// سفارش دیگر برقرار نبود) تخفیف را بی‌صدا حذف می‌کرد و کاربر فقط خطای
+	// کلیِ submit را می‌دید. حالا هر تغییرِ «معتبر→نامعتبر» یا کدِ تازه پیام
+	// خودش را می‌گیرد؛ «نامعتبر→نامعتبر» تکراری بی‌صدا می‌ماند (اسپم نه).
 	const announcedCoupon = useRef<string | null>(null)
+	const announcedCouponInvalid = useRef(false)
 	useEffect(() => {
 		const c = previewData?.coupon
 		const code = state.couponCode
-		if (!code || !c || announcedCoupon.current === code) return
+		if (!code || !c) return
+		if (announcedCoupon.current === code) {
+			// همان کد — فقط گذارِ معتبر→نامعتبر خبر می‌شود
+			if (!c.valid && !announcedCouponInvalid.current) {
+				announcedCouponInvalid.current = true
+				showToast(apiError(c.message, t['checkout.couponInvalid']), 'error')
+			}
+			return
+		}
 		announcedCoupon.current = code
+		announcedCouponInvalid.current = !c.valid
 		if (c.valid) {
 			showToast(
 				tpl(t['checkout.couponApplied'], {
@@ -203,9 +230,11 @@ export function useCheckoutPage(deps: {
 				}),
 			)
 		} else {
-			showToast(c.message ?? t['checkout.couponInvalid'], 'error')
+			// stage-77 (P3-14) — پیام سروری از لایه‌ی apiError (عربی = ترجمه؛
+			// قبلاً متن فارسی خام به کاربر عربی)
+			showToast(apiError(c.message, t['checkout.couponInvalid']), 'error')
 		}
-	}, [previewData?.coupon, state.couponCode, showToast, t, fmt])
+	}, [previewData?.coupon, state.couponCode, showToast, t, fmt, apiError])
 
 	// خطای پیش‌نمایش → کاربر بداند چرا ثبت قفل است
 	useEffect(() => {
@@ -282,7 +311,17 @@ export function useCheckoutPage(deps: {
 		// (سرور: [A-Z0-9\u0600-\u06FF_-]{3,16}) ولی این sanitizer حروف فارسی و
 		// خط تیره را می‌زداشت → کوپن فارسی عملاً در چک‌اوت قابل تایپ نبود.
 		// هم‌الگوی سرور + سقف ۱۶ (نه ۲۰).
+		// stage-77 (P2-4) — ارقام فارسی/عربی → لاتین: کیبورد فارسی «۲۰»
+		// می‌فرستاد نه «20» ⇒ کدِ معتبر SINSHIN20 رد می‌شد («کد نامعتبر»).
+		// حروف فارسی (کدهای الفبایی) دست‌نخورده می‌مانند؛ فقط رقم‌ها ترجمه
+		// می‌شوند.
 		const sanitized = raw
+			.replace(/[\u06F0-\u06F9]/g, (d) =>
+				String.fromCharCode(d.charCodeAt(0) - 0x06f0),
+			)
+			.replace(/[\u0660-\u0669]/g, (d) =>
+				String.fromCharCode(d.charCodeAt(0) - 0x0660),
+			)
 			.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '')
 			.toUpperCase()
 			.slice(0, 16)
@@ -334,6 +373,7 @@ export function useCheckoutPage(deps: {
 			if (res.paymentUrl) {
 				// ── MOCK (URL نسبی) — فلوی برنامه‌ای محیط توسعه ──
 				if (!res.paymentUrl.startsWith('http')) {
+					setMockPayPending(true)
 					try {
 						const payResult = await mockPay(res.paymentUrl, true)
 						if (payResult.paymentStatus === 'SUCCESS') {
@@ -358,6 +398,8 @@ export function useCheckoutPage(deps: {
 							err instanceof Error ? err.message : t['checkout.payError'],
 							'error',
 						)
+					} finally {
+						setMockPayPending(false)
 					}
 					return
 				}
@@ -405,7 +447,9 @@ export function useCheckoutPage(deps: {
 		// رارد L15 — درگاهِ انتخاب‌نشده = ثبت قفل شود (نه اینکه حدسِ MELLAT
 		// اولین ثبتِ درگاهی را با خطا بشکند). کاربر خودش درگاه را انتخاب می‌کند.
 		if (!isGatewayDisabled && state.selectedGateway === '') {
-			showToast('درگاه پرداخت را انتخاب کنید.', 'error')
+			// stage-77 (P2-3) — کلید دوزبانه (قبلاً رشته‌ی فارسی هاردکد؛
+			// کاربر عربی پیام فارسی می‌دید)
+			showToast(t['checkout.pickGateway'], 'error')
 			return
 		}
 		if (isSubmitBlocked) {
@@ -454,6 +498,8 @@ export function useCheckoutPage(deps: {
 		isDeliveryBlocked,
 		deliveryBlockedFor,
 		checkoutMutation,
+		// stage-77 (P3-16) — قفلِ دکمه در پنجره‌ی mockPay (isPendingِ میوتیشن تم شده)
+		mockPayPending,
 		handleDeliveryTypeChange,
 		handleSelectAddress,
 		handleOpenAddressModal,

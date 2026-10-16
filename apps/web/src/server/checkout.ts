@@ -13,7 +13,7 @@ import type {
 	RestaurantStatusDto,
 } from '@sinshin/shared'
 // src/server/checkout.ts — تماماً API + auth
-import { authJson, getJson } from '#/lib/api-fetch'
+import { authJson, fetchWithTimeout, getJson } from '#/lib/api-fetch'
 import type { RestaurantStatus } from '#/types/site/checkout'
 
 // رارد ۴۶ — دو یونیون درون‌خطی «DELIVERY | PICKUP | DINE_IN» در امضاهای
@@ -126,7 +126,10 @@ export async function mockPay(
 	const base = import.meta.env.VITE_API_URL || window.location.origin
 	const fullUrl = paymentUrl.startsWith('http') ? paymentUrl : base + paymentUrl
 
-	const res = await fetch(fullUrl, {
+	// stage-77 (P3-16) — همان استانداردِ fetchWithTimeout پروژه (بودجه تا
+	// پایانِ خواندنِ بدنه — درسِ stage-60/74): قبلاً fetch خامِ بی‌سقف؛
+	// بک‌اندِ devِ گیرکرده یعنی چک‌اوتِ آزمایشی برای همیشه معلق.
+	const res = await fetchWithTimeout(fullUrl, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ success }),

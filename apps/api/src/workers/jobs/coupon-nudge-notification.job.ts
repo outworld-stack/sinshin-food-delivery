@@ -205,7 +205,35 @@ export class CouponNudgeJob implements DailyJob {
 
     let sent = 0
     let skipped = 0
+    // stage-77 (N12) — بازبینیِ مهلت «قبل از ۱۳:۰۰» داخل حلقه: فهرستِ
+    // نامزدها بدون سقف ردیف خوانده می‌شود و هر notifyUser (درج + فان‌اوت
+    // پوش با تایم‌اوت‌های ۱۰ ثانیه‌ای) زمان می‌برد — با انباشتگیِ زیاد،
+    // یادآورِ «قبل از ناهار» می‌توانست بعد از ساعت ۱۳ هم برود. هر ۲۵ ردیف
+    // یک‌بار ساعت تهران دوباره خوانده می‌شود؛ عبور از مهلت = توقفِ ارسال
+    // (ردیف‌ها pending می‌مانند و سهم سقف ۲ نمی‌سوزند — قراردادِ claim).
+    const tehranHour = (): number =>
+      Number.parseInt(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Tehran',
+          hour: '2-digit',
+          hour12: false,
+        }).format(new Date()),
+        10,
+      )
+    let deadlineHit = false
     for (const row of pending) {
+      if (deadlineHit) {
+        skipped++
+        continue
+      }
+      if ((sent + skipped) % 25 === 24 && tehranHour() >= DEADLINE_HOUR) {
+        deadlineHit = true
+        console.warn(
+          `[cron:coupon-nudge] deadline hit mid-run at ${tehranHour()}:00 Tehran — ${pending.length - sent - skipped} row(s) left pending`,
+        )
+        skipped++
+        continue
+      }
       // سیاست ۲ — فاصله‌ی واقعی؛ ردیف قدیمی بدون remaining → «یک قدم»
       const gap =
         row.remainingCount !== null && row.remainingCount !== undefined && row.remainingCount > 0

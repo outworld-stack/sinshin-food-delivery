@@ -334,6 +334,12 @@ function AdminNotificationsPage() {
 			)
 			setStatus('sent')
 			setTargeted(json.targeted ?? 0)
+			// stage-77 (N10) — فرم بعد از ارسالِ موفق پاک می‌شود: دکمه با
+			// valid=false قفل می‌ماند (باز-ارسالِ ناخواسته به ۵۰ هزار کاربر
+			// با همان متن غیرممکن می‌شود؛ ارسال تازه = فرم تازه).
+			setTitle('')
+			setBody('')
+			setUrl('')
 			// تاریخچه فوراً رفرش شود — ارسالِ تازه دیده شود
 			void historyQuery.refetch()
 		} catch {

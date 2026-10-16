@@ -42,8 +42,11 @@ const sseChunk = (event: string, data: unknown): Uint8Array =>
 // ── phase-1: کانال‌های مجاز (سفت‌تر از قبل) ──
 // demo:* (تست) | orders:new (پنل) | orders:{displayId یا uuid} (ردیابی)
 // فاز-۲: notify:{uuid} — صندوق نوتیفیکیشن زنده‌ی خودِ کاربر (فقط مالک)
+// stage-77 (N2): notify:all — کانال عمومیِ «شاید اعلان تازه داری» برای
+// پخش‌های گروهی (broadcast/تخفیف/کوپن عمومی) — هر کاربرِ لاگین‌شده؛
+// محتوای اعلان در پیام نیست (نه مالکیت، نه نشت)؛ مشتری خودش رفچ می‌زند.
 const CHANNEL_RE =
-  /^(demo:[A-Za-z0-9_-]{1,40}|orders:new|orders:(ord-[a-z0-9]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})|notify:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+  /^(demo:[A-Za-z0-9_-]{1,40}|orders:new|orders:(ord-[a-z0-9]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})|notify:all|notify:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 
 const HEARTBEAT_MS = 15_000
 const MAX_QUEUE = 128 // سقف صفِ هر اتصال — بک‌پرشر: بیشتر نشود، قدیمی‌ترین می‌افتد
@@ -92,6 +95,8 @@ async function authorizeChannel(
   }
 
   // فاز-۲ — notify:{userId}: صندوق شخصی؛ فقط مالکِ همان شناسه
+  // stage-77 (N2) — notify:all: عمومی برای هر کاربرِ لاگین‌شده (بدون محتوا)
+  if (channel === 'notify:all') return
   if (channel.startsWith('notify:')) {
     if (channel.slice('notify:'.length) !== user.id) {
       throw Err.forbidden('این کانال مال شما نیست.')
@@ -233,7 +238,7 @@ export const realtimeRoutes = (deps: RealtimeDeps) => {
         detail: {
           summary: 'SSE live stream',
           description:
-            'Auth via Bearer header only (fetch-based SSE on the frontend — tokens never travel in URLs). Channel authorization: demo:* = any user; orders:new = admins only; orders:{id} = admins or the order owner. Pull-based stream (backpressure-safe, bounded queue), 15s heartbeat. Connection caps: 5 per user, 500 total (round-28).',
+            'Auth via Bearer header only (fetch-based SSE on the frontend — tokens never travel in URLs). Channel authorization: demo:* = any user; orders:new = admins only; orders:{id} = admins or the order owner; notify:{userId} = owner only; notify:all = any authenticated user (content-free "new notification" ping — stage-77). Pull-based stream (backpressure-safe, bounded queue), 15s heartbeat. Connection caps: 5 per user, 500 total (round-28).',
         },
       },
     )

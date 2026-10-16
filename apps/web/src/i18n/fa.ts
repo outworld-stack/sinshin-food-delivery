@@ -274,6 +274,7 @@ export const fa = {
         'checkout.payError': 'خطا در پرداخت',
         'checkout.orderProcessFail': 'پردازش سفارش ناموفق بود',
         'checkout.orderProcessError': 'خطا در پردازش سفارش',
+        'checkout.pickGateway': 'لطفاً درگاه پرداخت را انتخاب کنید',
         'checkout.pickAddress': 'لطفاً آدرس تحویل را انتخاب کنید',
         'checkout.fixPriceError': 'ابتدا خطای قیمت‌گذاری را برطرف کنید',
         'checkout.applyOrRemoveCoupon': 'ابتدا کد تخفیف را اعمال یا حذف کنید',

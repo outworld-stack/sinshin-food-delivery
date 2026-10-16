@@ -18,7 +18,8 @@
     "test:device": "bun scripts/test-device-fingerprint.ts",
     "test:fetch-timeout": "bun scripts/test-fetch-timeout.ts",
     "test:auth-session": "bun scripts/test-auth-session.ts",
-    "test:sse-client": "bun scripts/test-sse-client.ts"
+    "test:sse-client": "bun scripts/test-sse-client.ts",
+    "test:push-json-timeout": "bun scripts/test-push-json-timeout.ts"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",

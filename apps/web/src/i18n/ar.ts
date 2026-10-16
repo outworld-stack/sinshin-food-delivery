@@ -271,6 +271,7 @@ export const ar: Dict = {
         'checkout.payError': 'خطأ في الدفع',
         'checkout.orderProcessFail': 'فشلت معالجة الطلب',
         'checkout.orderProcessError': 'خطأ في معالجة الطلب',
+        'checkout.pickGateway': 'يُرجى اختيار وسيلة الدفع',
         'checkout.pickAddress': 'يُرجى اختيار عنوان التسليم',
         'checkout.fixPriceError': 'صحّح أولاً خطأ التسعير',
         'checkout.applyOrRemoveCoupon': 'طبّق رمز الخصم أو احذفه أولاً',

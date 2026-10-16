@@ -187,7 +187,7 @@ function CheckoutPage() {
 					deliveryType={page.state.deliveryType}
 					isLoading={page.isDetailsLoading}
 					isSubmitBlocked={page.isSubmitBlocked}
-					isSubmitting={page.checkoutMutation.isPending}
+					isSubmitting={page.checkoutMutation.isPending || page.mockPayPending}
 					onSubmit={page.handleFinalSubmit}
 					restaurantStatus={restaurantStatus}
 				/>

@@ -6,6 +6,8 @@ import {
   type QueryClientConfig,
 } from '@tanstack/react-query'
 import { useToastStore } from '#/stores/toastStore'
+import { arApiErrorMessage, errCodeOf } from '#/i18n/apiErrors'
+import { readLangCookie } from '#/i18n'
 
 // تنظیمات مشترک — سرور و کلاینت هر دو از getContext می‌گیرن
 const queryClientConfig: QueryClientConfig = {
@@ -27,7 +29,14 @@ const queryClientConfig: QueryClientConfig = {
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
       if (mutation.meta?.silent === true) return
-      useToastStore.getState().showToast(error?.message || 'خطایی رخ داد', 'error')
+      // stage-77 (P3-13) — توستِ سراسری از لایه‌ی apiError می‌گذرد: کاربر
+      // عربی پیامِ فارسیِ خام سرور نمی‌بیند (نقشه‌ی ترجمه‌ی کدها + فالبک
+      // دوزبانه با کوکی زبان). بیرون از React — مستقیم از کوکی خوانده می‌شود.
+      const raw = error?.message || ''
+      const lang = readLangCookie() ?? 'fa'
+      const fallback = lang === 'ar' ? 'حدث خطأ' : 'خطایی رخ داد'
+      const message = raw ? (lang === 'ar' ? arApiErrorMessage(errCodeOf(error), raw) : raw) : fallback
+      useToastStore.getState().showToast(message, 'error')
     },
   }),
 

@@ -1,5 +1,5 @@
 // src/components/dashboard/order-detail/FeedbackBox.tsx
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { Check, MessageSquare } from 'reicon-react'
 import type { UserOrderItem as OrderItem } from '@sinshin/shared'
 import { useI18n } from '#/i18n'
@@ -9,11 +9,17 @@ interface FeedbackBoxProps {
   reviewedProductIds: string[]
   isSubmitting: boolean
   onSubmit: (productId: string, feedback: string) => void
+  /**
+   * stage-77 (P3-10) — شمارنده‌ی «ثبت موفق»: والد با هر onSuccess آن را
+   * زیاد می‌کند؛ متن فقط «بعد از» موفقیت پاک می‌شود (قبلاً هم‌زمان با
+   * submit پاک می‌شد و خطای شبکه متنِ تایپ‌شده را نابود می‌کرد).
+   */
+  successTick?: number
 }
 
 // آیتم ۹: نظر به‌ازای هر محصول — انتخاب با چیپ، محصولات نظرداده قفل با تیک
 export const FeedbackBox = memo(function FeedbackBox({
-  items, reviewedProductIds, isSubmitting, onSubmit,
+  items, reviewedProductIds, isSubmitting, onSubmit, successTick = 0,
 }: FeedbackBoxProps) {
   const { t, fmt } = useI18n()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -32,10 +38,15 @@ export const FeedbackBox = memo(function FeedbackBox({
     setText(e.target.value.slice(0, 500))
   }, [])
 
+  // stage-77 (P3-10) — پاک‌سازی متن فقط با «ثبت موفق» (successTick از
+  // والد می‌آید)؛ شکست شبکه متن را حفظ می‌کند تا کاربر دوباره بفرستد
+  useEffect(() => {
+    if (successTick > 0) setText('')
+  }, [successTick])
+
   const handleSubmit = useCallback(() => {
     if (!effectiveSelected || !text.trim()) return
     onSubmit(effectiveSelected, text.trim())
-    setText('') // پاک برای محصول بعدی
   }, [effectiveSelected, text, onSubmit])
 
   // همه‌ی محصولات نظر داده شدند → حالت موفقیت

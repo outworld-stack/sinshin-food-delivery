@@ -55,6 +55,8 @@ export type SeoNoindexKey =
     | 'checkout'
     | 'geoBlocked'
     | 'notifications'
+    | 'orders'
+    | 'orderDetail'
 
 /** برچسب زبان برای inLanguage در JSON-LD */
 const LOCALE_TAG: Record<Lang, string> = { fa: 'fa-IR', ar: 'ar-IQ' }

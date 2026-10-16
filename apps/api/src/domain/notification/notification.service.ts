@@ -375,6 +375,18 @@ export class NotificationService {
     // (خطاها داخل pushToSubscribedUsers لاگ می‌شوند؛ پاسخ مسیر نمی‌ماند)
     // stage-67 — cutoff برشِ مخاطب پاس می‌شود (کامنت بالا)
     void this.pushToSubscribedUsers(input, logId, cutoff).catch(() => {})
+
+    // stage-77 (N2) — زنده‌سازی صندوقِ «باز»: پخش قبلاً هیچ SSE نداشت —
+    // کاربرِ روی صفحه‌ی اعلان‌ها (یا داشبورد با بج) تا focus/navigation
+    // هیچ چیز نمی‌دید در حالی که پوشِ سطح-مرورگر می‌رسید. کانال عمومیِ
+    // notify:all (auth=هر کاربرِ لاگین‌شده، realtime.routes) یک پیامِ
+    // «شاید اعلان تازه داری» می‌دهد؛ مشتری خودش invalidate/رفچ می‌زند.
+    // فایر-اند-فورگت + try/catch — قانون طلایی.
+    try {
+      this.deps.hub.publish('notify:all', { event: 'notification', data: { reason: 'broadcast' } })
+    } catch (err) {
+      console.error('[notify] broadcast: publish notify:all ناموفق:', err)
+    }
     return { targeted: inserted }
   }
 
@@ -570,10 +582,19 @@ export class NotificationService {
   }
 
   async markAllRead(userId: string): Promise<number> {
+    // stage-77 (N5) — همان پنجره‌ی ۷ روزه‌ی list/unreadCount: قبلاً بدون
+    // cutoff بود ⇒ «همه را خواندم» ردیف‌های نامرئیِ (>۷ روز) را هم علامت
+    // می‌زد و عددِ marked از بجِ خوانده‌نشده بیشتر می‌شد (ناهماهنگی قرارداد).
     const rows = await this.deps.db
       .update(notifications)
       .set({ readAt: new Date() })
-      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          isNull(notifications.readAt),
+          gte(notifications.createdAt, this.inboxCutoff()),
+        ),
+      )
       .returning({ id: notifications.id })
     return rows.length
   }

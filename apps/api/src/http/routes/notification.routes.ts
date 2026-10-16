@@ -118,7 +118,11 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
 
     .get(
       '/',
-      async ({ user }) => {
+      async ({ user, set }) => {
+        // stage-77 (N11) — صندوق اعلان شخصی هرگز کش نمی‌شود: پاسخ بدون
+        // Cache-Control رفتارِ خنثیِ پیش‌فرض داشت ولی کشِ واسطه‌ای را هم
+        // تضمین نمی‌کرد (درسِ «فهرست کهنه» استیج‌های قبل) — no-store صریح.
+        set.headers['cache-control'] = 'no-store'
         const [items, unread] = await Promise.all([
           deps.notifications.list(user.id, 30),
           deps.notifications.unreadCount(user.id),
@@ -142,7 +146,11 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
 
     .get(
       '/unread-count',
-      async ({ user }) => ({ unread: await deps.notifications.unreadCount(user.id) }),
+      async ({ user, set }) => {
+        // stage-77 (N11) — مثل صندوق: no-store صریح روی داده‌ی احراز-شده
+        set.headers['cache-control'] = 'no-store'
+        return { unread: await deps.notifications.unreadCount(user.id) }
+      },
       { detail: { summary: 'Unread count only (lightweight polling)' } },
     )
 

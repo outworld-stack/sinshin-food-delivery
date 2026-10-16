@@ -22,7 +22,7 @@ import { useNavigate } from '@tanstack/react-router'
 // src/hooks/admin/useAdmin2Panel.ts
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { apiBase } from '#/lib/api'
-import { getAccessToken, onUnauthorized } from '#/lib/auth-session'
+import { getAccessToken, onUnauthorized, tryRefresh } from '#/lib/auth-session'
 import { createFetchSse } from '#/lib/sse-client'
 import { subAdminLogout, viewOrderNote } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
@@ -207,6 +207,10 @@ export function useAdmin2Panel() {
 			},
 			onFrame: parseFrame,
 			onStreamClosed: () => setSseConnected(false),
+			// stage-77 (N1) — 401: نوسازی نشست + اتصال فوری؛ استریم ادمین
+			// بعد از انقضای توکن (تبِ پنلِ بازِ طولانی) دیگر به حلقه‌ی
+			// 60s×401 نمی‌افتاد و پنل زنده خاموش می‌شد تا رفرش صفحه.
+			onUnauthorized: () => tryRefresh(),
 			reconnectOnWake: true,
 		})
 

@@ -55,7 +55,7 @@ export const ProductInfo = memo(function ProductInfo({
 				{product.name}
 			</h1>
 
-			<p className="text-base text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
+			<p className="text-base text-gray-600 font-DanaMedium dark:text-gray-300 mb-6 leading-relaxed">
 				{product.description}
 			</p>
 

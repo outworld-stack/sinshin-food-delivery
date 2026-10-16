@@ -31,12 +31,6 @@ export const OrderBreakdownCard = memo(function OrderBreakdownCard({ breakdown, 
             <span>- {fmt.price(breakdown.discount)} {t['common.toman']}</span>
           </div>
         )}
-        {breakdown.walletDeduction > 0 && (
-          <div className="flex justify-between font-DanaRegular text-blue-500 text-sm">
-            <span>{t['checkout.walletLine']}</span>
-            <span>- {fmt.price(breakdown.walletDeduction)} {t['common.toman']}</span>
-          </div>
-        )}
         <div className="flex justify-between font-DanaRegular text-gray-600 dark:text-gray-300 text-sm">
           <span>{t['checkout.deliveryFee']}</span>
           <span>{breakdown.deliveryFee > 0 ? `${fmt.price(breakdown.deliveryFee)} ${t['common.toman']}` : t['bd.free']}</span>
@@ -52,6 +46,18 @@ export const OrderBreakdownCard = memo(function OrderBreakdownCard({ breakdown, 
           <span>{t['cart.totalAmount']}</span>
           <span>{fmt.price(breakdown.totalAmount)} {t['common.toman']}</span>
         </div>
+        {/* stage-77 (P2-5) — خطِ کیف پول بعد از «مبلغ کل» (نه قبلش):
+            قرارداد سرور: totalAmount = کلِ سفارشِ قبل از کیف پول و
+            amountPaidOnline = بعد از آن. قبلاً «-کیف پول» بین تخفیف و
+            ارسال چاپ می‌شد و «مبلغ کل» آن را نادیده می‌گرفت ⇒ جمعِ ستونِ
+            کاربر با ردیفِ بولد نمی‌خواند. حالا همان ترتیبِ چک‌اوت:
+            مبلغ کل → کسر کیف پول → پرداخت آنلاین. */}
+        {breakdown.walletDeduction > 0 && (
+          <div className="flex justify-between font-DanaRegular text-blue-500 text-sm">
+            <span>{t['checkout.walletLine']}</span>
+            <span>- {fmt.price(breakdown.walletDeduction)} {t['common.toman']}</span>
+          </div>
+        )}
         <div className="flex justify-between items-center bg-primary dark:bg-dark-primary text-white p-3 rounded-xl mt-2">
           <span className="font-DanaMedium text-sm">{t['bd.paidOnline']}</span>
           <span className="font-MorabbaBold text-lg">{fmt.price(breakdown.amountPaidOnline)} {t['common.toman']}</span>

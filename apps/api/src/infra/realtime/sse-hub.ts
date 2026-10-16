@@ -32,7 +32,6 @@ export class SseHub {
   /** تابع لغو اشتراک برمی‌گرداند */
   subscribe(channel: string, subscriber: SseSubscriber): () => void {
     let set = this.channels.get(channel)
-    const firstLocal = !set
     if (!set) {
       set = new Set()
       this.channels.set(channel, set)
@@ -40,7 +39,12 @@ export class SseHub {
     set.add(subscriber)
 
     // اولین مشترکِ محلی → اشتراک Redis برای این کانال
-    if (firstLocal && !this.relayed.has(channel)) {
+    // stage-77 (N6) — شرط «اولین مشترک» برداشته شد: اگر subscribe قبلیِ
+    // ردیس در قطعیِ لحظه‌ای شکست خورده باشد (relayed پاک شده ولی مدخل
+    // کانال زنده است)، مشترکِ بعدی firstLocal نمی‌بیند و پل تا خروجِ
+    // آخرین مشترک محلی بازسازی نمی‌شد — تکرار subscribe خودش ارزان و
+    // idempotent است (ردیس دوباره‌اش را در همان connection جایگزین می‌کند).
+    if (!this.relayed.has(channel)) {
       this.relayed.add(channel)
       void this.redis.subscribe(`sse:${channel}`, (raw) => {
         try {

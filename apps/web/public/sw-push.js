@@ -79,7 +79,15 @@ self.addEventListener('push', (event) => {
 // کلیک روی نوتیف — باز/فوکوس تب سایت روی URL مقصد
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const url = (event.notification.data && event.notification.data.url) || '/products'
+  // stage-77 (P3-7) — فقط مسیرِ داخلیِ خودمان: payload قابل-تزریق است؛
+  // openWindow/navigate با URL بیرونی = فیشینگ. سرور url را internal-path
+  // اعتبارسنجی می‌کند (notification.routes) — اینجا دفاعِ دومِ خود SW.
+  const rawUrl = (event.notification.data && event.notification.data.url) || '/products'
+  let url = '/products'
+  try {
+    const resolved = new URL(rawUrl, self.location.origin)
+    if (resolved.origin === self.location.origin) url = resolved.pathname + resolved.search
+  } catch { /* بی‌شکل — همان پیش‌فرض */ }
   event.waitUntil(
     (async () => {
       const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })

@@ -184,6 +184,9 @@ function CartPage() {
 					total={cartStats.total}
 					totalSavings={cartStats.totalSavings}
 					hasUnavailable={cartStats.hasUnavailable}
+						// stage-77 (P3-18) — خطای قیمت بدون داده ⇒ قفلِ ادامه (قبلاً
+						// «۰ تومان» با دکمه‌ی فعال می‌رفت تا در چک‌اوت خطا بخورد)
+						checkoutLocked={isError && !cartData}
 				/>
 			</div>
 
@@ -191,6 +194,9 @@ function CartPage() {
 			<CartMobileBar
 				total={cartStats.total}
 				hasUnavailable={cartStats.hasUnavailable}
+						// stage-77 (P3-18) — خطای قیمت بدون داده ⇒ قفلِ ادامه (قبلاً
+						// «۰ تومان» با دکمه‌ی فعال می‌رفت تا در چک‌اوت خطا بخورد)
+						checkoutLocked={isError && !cartData}
 			/>
 
 			{/* مودال تایید خالی کردن */}

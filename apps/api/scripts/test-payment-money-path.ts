@@ -34,6 +34,7 @@
  *     • D4 MELLAT: bpPayRequest → callback ResCode=0 → verify+settle → PAID
  *       + gatewayRef ماندگار «orderId:s:SaleReferenceId»
  *     • D5 MELLAT: لغو ResCode=17 → CANCELED فوری
+ *     • D7 (stage-77): شکستِ قطعی → اعلانِ «پرداخت ناموفق» برای مشتری
  *     • D6 MELLAT: فالت settle → pending + مرجع ماندگار → کارِ تایم‌اوت
  *       ری-وریفای (kind=s) → PAID
  *  E) totalSpent نهایی: فقط PAIDها — لغوها و PENDINGها بیرون
@@ -486,6 +487,7 @@ async function main(): Promise<void> {
     (await refreshOrder(d5.order.id)).status === 'CANCELED' && (await refreshPayment(d5.payment.id)).status === 'FAILED',
   )
 
+
   // ── D6: MELLAT — فالت settle → pending + مرجع ماندگار → کارِ تایم‌اوت PAID ──
   const d6 = await orderAndPayment('MELLAT', 170_000, null)
   mellatPay = '0,555601'
@@ -538,6 +540,36 @@ async function main(): Promise<void> {
     pageFinal2.totalSpent === 1_000_000,
     `got=${pageFinal2.totalSpent}`,
   )
+
+  // ── D7 (stage-77/N4): شکستِ قطعیِ پرداخت ⇒ اعلانِ مشتری ──
+  // قبلاً سفارش CANCELED می‌شد و مشتری «هیچ» خبری نمی‌گرفت؛ حالا ردیفِ
+  // صندوق type=system + url صفحه‌ی سفارش (پوش فایر-اند-فورگت — اینجا فقط
+  // ردیف). دقیقاً سه شکستِ قطعی در این تست هست: B1 (NOK زرین‌پال)،
+  // D2 (SEP لغو) و D5 (MELLAT لغو) — موفق‌ها (A1/B4/D1/D4/D6) و
+  // نامشخص‌ها (B2/B3) اعلان نمی‌گیرند.
+  {
+    const { notifications: notifRows } = await import('../src/infra/db/schema')
+    const notifs = await db
+      .select()
+      .from(notifRows)
+      .where(eq(notifRows.userId, uid))
+    const payFails = notifs.filter(
+      (n) => n.type === 'system' && (n.data as { source?: string })?.source === 'payment-failed',
+    )
+    ok(
+      'D7: هر سه شکستِ قطعی (B1+D2+D5) اعلانِ payment-failed ساختند — نه بیشتر',
+      payFails.length === 3,
+      `count=${payFails.length}`,
+    )
+    ok(
+      'D7: اعلانِ D5 به صفحه‌ی همان سفارش اشاره می‌کند (url)',
+      payFails.some((n) => (n.url ?? '').includes(d5.order.displayId)),
+    )
+    ok(
+      'D7: اعلانِ D2 به صفحه‌ی همان سفارش اشاره می‌کند (url)',
+      payFails.some((n) => (n.url ?? '').includes(d2.order.displayId)),
+    )
+  }
 
   await wait(300)
 

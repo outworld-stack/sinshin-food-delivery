@@ -23,6 +23,8 @@ import { OrderDetails } from '#/components/dashboard/order-detail/OrderDetails'
 import { OrderStatusHeader } from '#/components/dashboard/order-detail/OrderStatusHeader'
 // stage-58 — «ادامه‌ی پرداخت» برای PENDING_PAYMENT (قولِ پیام خطای چک‌اوت)
 import { PendingPaymentBox } from '#/components/dashboard/order-detail/PendingPaymentBox'
+import { noindexHead, headLang, type HeadFnCtx } from '#/lib/seo'
+import { SEO } from '#/i18n/seo'
 import { ReferralProfitBox } from '#/components/dashboard/order-detail/ReferralProfitBox'
 import { OrderDetailSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
@@ -37,6 +39,12 @@ import {
 	orderReviewedOptions,
 	userProfileOptions,
 } from '#/utils/queryOptions'
+
+/** stage-77 (P3-15) — «سفارش {id} | سین شین» به زبانِ فعال (fa/ar) */
+function orderHeadTitle(matches: HeadFnCtx['matches'], id: string): string {
+	const title = SEO[headLang(matches)].orderDetail.title
+	return title.includes('{id}') ? title.replace('{id}', id) : `${id} | ${title}`
+}
 
 const OrderDetailPage = memo(function OrderDetailPage() {
 	const { orderId } = Route.useParams()
@@ -90,11 +98,15 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 
 	// دیتا فقط لحظه‌ی اول (بدون لودر) undefined است؛ لودر تضمینش کرده.
 	// بعد از نامعتبرسازی دیتای قبلی حفظ می‌شود (فقط رفرش در پس‌زمینه)
+	const hasReferrer = useMemo(() => !!userProfile?.referrerCode, [userProfile])
+	// stage-77 (P2-2) — این useMemo از قبلِ returnِ شرطی بالا آمده: قانونِ
+	// هوک‌ها می‌گفت رندرِ اول (اسکلتون — بدون hook) و رندرِ دوم (با داده —
+	// یک hook بیشتر) = «Rendered more hooks…» و کرشِ کل مسیر. شاخه‌ی
+	// اسکلتون عمداً نگه داشته شده بود ولی خودش ماشه‌ی همین باگ بود.
 	if (!order) {
 		return <OrderDetailSkeleton />
 	}
 
-	const hasReferrer = useMemo(() => !!userProfile?.referrerCode, [userProfile])
 	const isDelivered = order.status === 'DELIVERED'
 	// امن-۷: دکمه تایید تحویل فقط بعد از تایید رستوران —
 	// PAID/PENDING_PAYMENT دیگر قابل بستن نیست (قرارداد جدید بک‌اند)
@@ -159,6 +171,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 							reviewedProductIds={reviewedData?.productIds ?? []}
 							isSubmitting={page.submitFeedbackMutation.isPending}
 							onSubmit={page.handleSubmitFeedback}
+							successTick={page.feedbackSuccessTick}
 						/>
 					)}
 				</div>
@@ -190,12 +203,14 @@ export const Route = createFileRoute('/dashboard/orders/$orderId')({
 	errorComponent: RouteError,
 	notFoundComponent: RouteNotFound,
 
-	head: ({ loaderData }) => ({
+	head: ({ loaderData, matches }) => ({
 		meta: loaderData
 			? [
-					{ title: `سفارش ${loaderData.id} | سین شین` },
+					// stage-77 (P3-15) — عنوان دوزبانه با شناسه‌ی سفارش
+					// (قبلاً فارسیِ هاردکد؛ الگوی {id} از دیکشنری سئو)
+					{ title: orderHeadTitle(matches, loaderData.id) },
 					{ name: 'robots', content: 'noindex, nofollow' },
 				]
-			: [{ title: 'سفارش یافت نشد | سین شین' }],
+			: noindexHead('orderDetail')({ matches }).meta,
 	}),
 })

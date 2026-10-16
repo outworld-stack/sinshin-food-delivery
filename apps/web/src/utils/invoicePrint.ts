@@ -78,6 +78,12 @@ async function salesSection(inv: StaffInvoice) {
 		formatPrice(i.price * i.quantity),
 	])
 	const b = inv.breakdown
+	// stage-77 (P2-5) — حسابِ رسید سر و ته می‌خورد: قرارداد سرور:
+	// totalAmount = کلِ سفارش «قبل از» کیف پول؛ amountPaidOnline = بعد از
+	// آن. قبلاً «کسر از کیف پول» ردیفِ منفی بود ولی «مبلغ نهایی» =
+	// totalAmount چاپ می‌شد ⇒ جمعِ ردیف‌ها با ردیفِ آخر دقیقاً به‌اندازه‌ی
+	// walletDeduction نمی‌خواند (رسیدِ فروش، مبنای تسویه صندوق/پی‌اس‌پی).
+	// حالا: مبلغ کل سفارش → کسر کیف پول → مبلغ نهایی (پرداخت آنلاین).
 	const stats = [
 		{ label: 'جمع اقلام', value: `${formatPrice(b.foodTotal)} تومان` },
 		...(b.discount > 0
@@ -89,10 +95,19 @@ async function salesSection(inv: StaffInvoice) {
 		...(b.packagingFee > 0
 			? [{ label: 'بسته‌بندی', value: formatPrice(b.packagingFee) }]
 			: []),
+		{ label: 'مبلغ کل سفارش', value: `${formatPrice(b.totalAmount)} تومان` },
 		...(b.walletDeduction > 0
-			? [{ label: 'کسر از کیف پول', value: formatPrice(b.walletDeduction) }]
+			? [
+					{
+						label: 'کسر از کیف پول',
+						value: `−${formatPrice(b.walletDeduction)}`,
+					},
+				]
 			: []),
-		{ label: 'مبلغ نهایی', value: `${formatPrice(b.totalAmount)} تومان` },
+		{
+			label: 'مبلغ نهایی (پرداخت آنلاین)',
+			value: `${formatPrice(b.amountPaidOnline)} تومان`,
+		},
 	]
 
 	const meta = [

@@ -159,6 +159,16 @@ const PATTERNS_AR: { re: RegExp; build: (m: RegExpExecArray) => string }[] = [
  * ورودی: کد و پیامِ خطای پرتاب‌شده از handleResponse (پیام = فارسی سرور).
  * خروجی: پیام عربی اگر نقشه شد؛ «همان فارسی» اگر نشد (تصمیم کاربر).
  */
+/**
+ * stage-77 (P3-13) — کد خطای پرتاب‌شده (Error با فیلد code / شیء { code }) —
+ * برای مسیرهای بیرون از React (مثل MutationCache سراسری). همان منطقِ
+ * خصوصیِ i18n/index — اینجا عمومی شد تا root-provider هم به آن برسد.
+ */
+export function errCodeOf(err: unknown): string | undefined {
+        const c = (err as { code?: unknown } | null | undefined)?.code
+        return typeof c === 'string' ? c : undefined
+}
+
 export function arApiErrorMessage(
         code: string | undefined,
         message: string,

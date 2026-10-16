@@ -28,229 +28,266 @@
 //     هوک می‌دهد (مثلاً فقط با فریمِ connected سرور) — نه با headers.
 
 export interface SseTimings {
-    /** سقفِ رسیدن headers (و شروع خواندن) */
-    connectTimeoutMs: number
-    /** سکوت استریم بیشتر از این = مرده (heartbeat سرور = ۱۵s) */
-    silenceTimeoutMs: number
-    /** فاصله‌ی retry */
-    retryMs: number
-    /** توکن غایب — فاصله‌ی چکِ بعدی */
-    tokenWaitMs: number
-    /** برگشت از پس‌زمینه: آخرین بایتِ قدیمی‌تر از این = بازسازی فوری */
-    wakeStaleMs: number
+	/** سقفِ رسیدن headers (و شروع خواندن) */
+	connectTimeoutMs: number
+	/** سکوت استریم بیشتر از این = مرده (heartbeat سرور = ۱۵s) */
+	silenceTimeoutMs: number
+	/** فاصله‌ی retry */
+	retryMs: number
+	/** توکن غایب — فاصله‌ی چکِ بعدی */
+	tokenWaitMs: number
+	/** برگشت از پس‌زمینه: آخرین بایتِ قدیمی‌تر از این = بازسازی فوری */
+	wakeStaleMs: number
 }
 
 export const DEFAULT_SSE_TIMINGS: SseTimings = {
-    connectTimeoutMs: 15_000,
-    silenceTimeoutMs: 45_000,
-    retryMs: 60_000,
-    tokenWaitMs: 5_000,
-    wakeStaleMs: 20_000,
+	connectTimeoutMs: 15_000,
+	silenceTimeoutMs: 45_000,
+	retryMs: 60_000,
+	tokenWaitMs: 5_000,
+	wakeStaleMs: 20_000,
 }
 
 export interface FetchSseHandle {
-    /** توقف کامل + پاکسازی (unmount) */
-    stop(): void
-    /** استریمِ فعلی باز است و می‌خواند؟ */
-    isStreaming(): boolean
+	/** توقف کامل + پاکسازی (unmount) */
+	stop(): void
+	/** استریمِ فعلی باز است و می‌خواند؟ */
+	isStreaming(): boolean
 }
 
 export interface FetchSseOptions {
-    /**
-     * هر بار connect صدا می‌شود. null = پیش‌نیاز (توکن) هنوز آماده نیست —
-     * tokenWaitMs بعد دوباره پرسیده می‌شود.
-     */
-    url: () => string | null
-    /** هدرهای هر تلاش اتصال (تازه خوانده می‌شوند — توکنِ تازه) */
-    headers?: () => Record<string, string>
-    /** فریمِ کامل SSE («event: …\ndata: …»)؛ فریم‌های heartbeat (: ping) اینجا نمی‌آیند */
-    onFrame?: (frame: string) => void
-    /** استریم باز شد و خواندن شروع شد (headers رسیده — نه لزوماً فریمِ connected) */
-    onStreamOpen?: () => void
-    /** استریم بسته شد — هر دلیلی: خطا/سکوت/abort/پایان از سمت سرور */
-    onStreamClosed?: () => void
-    timings?: Partial<SseTimings>
-    /** بازگشت از پس‌زمینه/online → اتصالِ فوری در صورت نیاز (پیش‌فرض روشن) */
-    reconnectOnWake?: boolean
+	/**
+	 * هر بار connect صدا می‌شود. null = پیش‌نیاز (توکن) هنوز آماده نیست —
+	 * tokenWaitMs بعد دوباره پرسیده می‌شود.
+	 */
+	url: () => string | null
+	/** هدرهای هر تلاش اتصال (تازه خوانده می‌شوند — توکنِ تازه) */
+	headers?: () => Record<string, string>
+	/** فریمِ کامل SSE («event: …\ndata: …»)؛ فریم‌های heartbeat (: ping) اینجا نمی‌آیند */
+	onFrame?: (frame: string) => void
+	/** استریم باز شد و خواندن شروع شد (headers رسیده — نه لزوماً فریمِ connected) */
+	onStreamOpen?: () => void
+	/** استریم بسته شد — هر دلیلی: خطا/سکوت/abort/پایان از سمت سرور */
+	onStreamClosed?: () => void
+	timings?: Partial<SseTimings>
+	/** بازگشت از پس‌زمینه/online → اتصالِ فوری در صورت نیاز (پیش‌فرض روشن) */
+	reconnectOnWake?: boolean
+	/**
+	 * stage-77 (N1) — connect با 401 جواب داد: توکن احتمالاً منقضی شده.
+	 * این هوک (معمولاً tryRefresh از auth-session) یک‌بار صدا زده می‌شود؛
+	 * اگر true برگرداند (توکن تازه شد) اتصال بلافاصله (۱ ثانیه) دوباره
+	 * زده می‌شود؛ وگرنه همان ریتمِ عادیِ retryMs می‌ماند.
+	 * بدون این هوک، استریمِ کاربرِ متمرکز-روی-صفحه برای همیشه در حلقه‌ی
+	 * 60s×401 می‌چرخید — هیچ درخواست احراز دیگری روی صفحه رخ نمی‌داد تا
+	 * توکن را تازه کند (authJson این کار را برای fetchها می‌کرد؛ SSE نه).
+	 * خودِ هوک باید باند باشد (tryRefresh: watchdog + سقف ۲۰s) — اینجا
+	 * فقط await می‌شود و خطایش مثل false رفتار می‌کند.
+	 */
+	onUnauthorized?: () => Promise<boolean>
 }
 
 export function createFetchSse(opts: FetchSseOptions): FetchSseHandle {
-    const T: SseTimings = { ...DEFAULT_SSE_TIMINGS, ...opts.timings }
+	const T: SseTimings = { ...DEFAULT_SSE_TIMINGS, ...opts.timings }
 
-    let disposed = false
-    let abort: AbortController | null = null
-    let retryTimer: ReturnType<typeof setTimeout> | null = null
-    let connectTimer: ReturnType<typeof setTimeout> | null = null
-    let silenceTimer: ReturnType<typeof setTimeout> | null = null
-    let streaming = false
-    let lastByteAt = 0
+	let disposed = false
+	let abort: AbortController | null = null
+	// stage-77 — بیمه‌ی ضد-حلقه: ۳ بارِ پیاپیِ «401 + refresh موفق» یعنی
+	// مشکل سمت سرور است (نه توکن)؛ بعدش ریتمِ عادیِ retryMs می‌آید.
+	let fast401Streak = 0
+	let retryTimer: ReturnType<typeof setTimeout> | null = null
+	let connectTimer: ReturnType<typeof setTimeout> | null = null
+	let silenceTimer: ReturnType<typeof setTimeout> | null = null
+	let streaming = false
+	let lastByteAt = 0
 
-    const clearRetry = () => {
-        if (retryTimer) {
-            clearTimeout(retryTimer)
-            retryTimer = null
-        }
-    }
-    const clearConnect = () => {
-        if (connectTimer) {
-            clearTimeout(connectTimer)
-            connectTimer = null
-        }
-    }
-    const clearSilence = () => {
-        if (silenceTimer) {
-            clearTimeout(silenceTimer)
-            silenceTimer = null
-        }
-    }
+	const clearRetry = () => {
+		if (retryTimer) {
+			clearTimeout(retryTimer)
+			retryTimer = null
+		}
+	}
+	const clearConnect = () => {
+		if (connectTimer) {
+			clearTimeout(connectTimer)
+			connectTimer = null
+		}
+	}
+	const clearSilence = () => {
+		if (silenceTimer) {
+			clearTimeout(silenceTimer)
+			silenceTimer = null
+		}
+	}
 
-    const scheduleRetry = (ms: number) => {
-        if (disposed) return
-        clearRetry()
-        retryTimer = setTimeout(() => {
-            retryTimer = null
-            void connect()
-        }, ms)
-    }
+	const scheduleRetry = (ms: number) => {
+		if (disposed) return
+		clearRetry()
+		retryTimer = setTimeout(() => {
+			retryTimer = null
+			void connect()
+		}, ms)
+	}
 
-    const failStream = () => {
-        if (!streaming) return
-        streaming = false
-        clearSilence()
-        abort?.abort()
-        abort = null
-        opts.onStreamClosed?.()
-        // استریم از سمت سرور بسته شد / watchdog سکوت / خطا → مثل خطا: retry
-        scheduleRetry(T.retryMs)
-    }
+	const failStream = () => {
+		if (!streaming) return
+		streaming = false
+		clearSilence()
+		abort?.abort()
+		abort = null
+		opts.onStreamClosed?.()
+		// استریم از سمت سرور بسته شد / watchdog سکوت / خطا → مثل خطا: retry
+		scheduleRetry(T.retryMs)
+	}
 
-    const connect = async (): Promise<void> => {
-        if (disposed) return
-        const url = opts.url()
-        if (!url) {
-            // پیش‌نیاز (توکن) هنوز نرسیده — کوتاه‌مدت دوباره می‌خواهیم
-            if (!retryTimer) scheduleRetry(T.tokenWaitMs)
-            return
-        }
+	const connect = async (): Promise<void> => {
+		if (disposed) return
+		const url = opts.url()
+		if (!url) {
+			// پیش‌نیاز (توکن) هنوز نرسیده — کوتاه‌مدت دوباره می‌خواهیم
+			if (!retryTimer) scheduleRetry(T.tokenWaitMs)
+			return
+		}
 
-        abort = new AbortController()
-        streaming = false
+		abort = new AbortController()
+		streaming = false
 
-        // ① سقفِ اتصال: headers باید در connectTimeoutMs برسند؛ وگرنه abort
-        //    (قبلاً: fetch بی‌سقف ⇒ connect برای همیشه معلق ⇒ بدون retry)
-        connectTimer = setTimeout(() => {
-            connectTimer = null
-            abort?.abort(
-                new DOMException('مهلت اتصال استریم به پایان رسید.', 'TimeoutError'),
-            )
-        }, T.connectTimeoutMs)
+		// ① سقفِ اتصال: headers باید در connectTimeoutMs برسند؛ وگرنه abort
+		//    (قبلاً: fetch بی‌سقف ⇒ connect برای همیشه معلق ⇒ بدون retry)
+		connectTimer = setTimeout(() => {
+			connectTimer = null
+			abort?.abort(
+				new DOMException('مهلت اتصال استریم به پایان رسید.', 'TimeoutError'),
+			)
+		}, T.connectTimeoutMs)
 
-        try {
-            const res = await fetch(url, {
-                headers: opts.headers?.() ?? {},
-                cache: 'no-store',
-                signal: abort.signal,
-            })
-            if (disposed) {
-                abort?.abort()
-                abort = null
-                return
-            }
-            clearConnect()
-            if (!res.ok || !res.body) throw new Error(`SSE failed (${res.status})`)
+		try {
+			const res = await fetch(url, {
+				headers: opts.headers?.() ?? {},
+				cache: 'no-store',
+				signal: abort.signal,
+			})
+			if (disposed) {
+				abort?.abort()
+				abort = null
+				return
+			}
+			clearConnect()
+			if (!res.ok || !res.body) {
+				// stage-77 (N1) — 401: توکن منقضی؛ یک تلاشِ نوسازی نشست.
+				// موفق ⇒ اتصال فوری (توکن تازه از headers() خوانده می‌شود)؛
+				// شکست/غیرقطعی ⇒ همان مسیرِ عادیِ retry ۶۰s (هوک خودش
+				// خروج/۴۲۹/… را طبق قرارداد auth-session تصمیم می‌گیرد).
+				if (res.status === 401 && opts.onUnauthorized) {
+					const refreshed = await opts.onUnauthorized().catch(() => false)
+					if (disposed) {
+						abort?.abort()
+						abort = null
+						return
+					}
+					if (refreshed && fast401Streak < 3) {
+						fast401Streak++
+						abort?.abort()
+						abort = null
+						scheduleRetry(1_000)
+						return
+					}
+				}
+				throw new Error(`SSE failed (${res.status})`)
+			}
 
-            // ② خواندن — watchdog سکوت: هر بایت تایمر را ریست می‌کند؛ سکوتِ
-            //    > silenceTimeoutMs یعنی استریم مرده است (سرور هر ۱۵s ضربان
-            //    می‌فرستد — نبودِ ۳ ضربان = مرگِ خاموش)
-            streaming = true
-            lastByteAt = Date.now()
-            opts.onStreamOpen?.()
-            const armSilence = () => {
-                clearSilence()
-                silenceTimer = setTimeout(() => {
-                    silenceTimer = null
-                    failStream()
-                }, T.silenceTimeoutMs)
-            }
-            armSilence()
+			// ② خواندن — watchdog سکوت: هر بایت تایمر را ریست می‌کند؛ سکوتِ
+			//    > silenceTimeoutMs یعنی استریم مرده است (سرور هر ۱۵s ضربان
+			//    می‌فرستد — نبودِ ۳ ضربان = مرگِ خاموش)
+			streaming = true
+			fast401Streak = 0 // استریمِ واقعاً باز شد — رشته‌ی 401 قطع شد
+			lastByteAt = Date.now()
+			opts.onStreamOpen?.()
+			const armSilence = () => {
+				clearSilence()
+				silenceTimer = setTimeout(() => {
+					silenceTimer = null
+					failStream()
+				}, T.silenceTimeoutMs)
+			}
+			armSilence()
 
-            const reader = res.body.getReader()
-            const decoder = new TextDecoder()
-            let buffer = ''
-            for (; ;) {
-                const { done, value } = await reader.read()
-                if (done) break
-                lastByteAt = Date.now()
-                armSilence()
-                buffer += decoder.decode(value, { stream: true })
-                const frames = buffer.split('\n\n')
-                buffer = frames.pop() ?? ''
-                for (const f of frames) {
-                    // فریم‌های heartbeat/comment (خطِ «: ping») مستقیم رد می‌شوند —
-                    // اما «رسیدنشان» watchdog را بالا ریست کرد (کارِ اصلی‌شان)
-                    if (f.trimStart().startsWith(':')) continue
-                    opts.onFrame?.(f)
-                }
-            }
-            // استریم از سمت سرور بسته شد → مثل خطا
-            failStream()
-        } catch {
-            clearConnect()
-            if (disposed) return
-            if (streaming) {
-                failStream()
-            } else {
-                // شکست در فازِ اتصال (headers) → retry معمول
-                abort?.abort()
-                abort = null
-                scheduleRetry(T.retryMs)
-            }
-        }
-    }
+			const reader = res.body.getReader()
+			const decoder = new TextDecoder()
+			let buffer = ''
+			for (;;) {
+				const { done, value } = await reader.read()
+				if (done) break
+				lastByteAt = Date.now()
+				armSilence()
+				buffer += decoder.decode(value, { stream: true })
+				const frames = buffer.split('\n\n')
+				buffer = frames.pop() ?? ''
+				for (const f of frames) {
+					// فریم‌های heartbeat/comment (خطِ «: ping») مستقیم رد می‌شوند —
+					// اما «رسیدنشان» watchdog را بالا ریست کرد (کارِ اصلی‌شان)
+					if (f.trimStart().startsWith(':')) continue
+					opts.onFrame?.(f)
+				}
+			}
+			// استریم از سمت سرور بسته شد → مثل خطا
+			failStream()
+		} catch {
+			clearConnect()
+			if (disposed) return
+			if (streaming) {
+				failStream()
+			} else {
+				// شکست در فازِ اتصال (headers) → retry معمول
+				abort?.abort()
+				abort = null
+				scheduleRetry(T.retryMs)
+			}
+		}
+	}
 
-    // ③ بازگشت از پس‌زمینه / وصل‌شدن شبکه:
-    //    • در پنجره‌ی retry → اتصال فوری (صبر به ۶۰s معنا ندارد)
-    //    • استریمِ بازِ کهنه (آخرین بایت > wakeStaleMs پیش — سوکت بعد از
-    //      پس‌زمینه مرده) → بازسازی فوری به جای انتظارِ watchdog کامل
-    //    • استریمِ تازه و سالم → دست نمی‌زنیم
-    const onWake = () => {
-        if (disposed) return
-        if (streaming) {
-            if (Date.now() - lastByteAt > T.wakeStaleMs) {
-                failStream()
-                clearRetry()
-                void connect()
-            }
-            return
-        }
-        if (!retryTimer) return // در حال connect/token-wait — همان ادامه می‌دهد
-        clearRetry()
-        void connect()
-    }
+	// ③ بازگشت از پس‌زمینه / وصل‌شدن شبکه:
+	//    • در پنجره‌ی retry → اتصال فوری (صبر به ۶۰s معنا ندارد)
+	//    • استریمِ بازِ کهنه (آخرین بایت > wakeStaleMs پیش — سوکت بعد از
+	//      پس‌زمینه مرده) → بازسازی فوری به جای انتظارِ watchdog کامل
+	//    • استریمِ تازه و سالم → دست نمی‌زنیم
+	const onWake = () => {
+		if (disposed) return
+		if (streaming) {
+			if (Date.now() - lastByteAt > T.wakeStaleMs) {
+				failStream()
+				clearRetry()
+				void connect()
+			}
+			return
+		}
+		if (!retryTimer) return // در حال connect/token-wait — همان ادامه می‌دهد
+		clearRetry()
+		void connect()
+	}
 
-    if (opts.reconnectOnWake !== false && typeof window !== 'undefined') {
-        window.addEventListener('online', onWake)
-        document.addEventListener('visibilitychange', onWake)
-    }
+	if (opts.reconnectOnWake !== false && typeof window !== 'undefined') {
+		window.addEventListener('online', onWake)
+		document.addEventListener('visibilitychange', onWake)
+	}
 
-    void connect()
+	void connect()
 
-    return {
-        stop() {
-            disposed = true
-            if (typeof window !== 'undefined' && opts.reconnectOnWake !== false) {
-                window.removeEventListener('online', onWake)
-                document.removeEventListener('visibilitychange', onWake)
-            }
-            clearRetry()
-            clearConnect()
-            clearSilence()
-            streaming = false
-            abort?.abort()
-            abort = null
-        },
-        isStreaming() {
-            return streaming
-        },
-    }
+	return {
+		stop() {
+			disposed = true
+			if (typeof window !== 'undefined' && opts.reconnectOnWake !== false) {
+				window.removeEventListener('online', onWake)
+				document.removeEventListener('visibilitychange', onWake)
+			}
+			clearRetry()
+			clearConnect()
+			clearSilence()
+			streaming = false
+			abort?.abort()
+			abort = null
+		},
+		isStreaming() {
+			return streaming
+		},
+	}
 }

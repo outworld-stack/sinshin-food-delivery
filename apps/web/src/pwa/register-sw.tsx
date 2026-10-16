@@ -91,6 +91,11 @@ export function PwaRegister() {
     // round-16 — پاک‌کننده‌های ثبتِ SW (داخل then پر می‌شوند؛ cleanup انتها می‌گیردشان)
     const swCleanupFns: Array<() => void> = []
 
+    // stage-77 (P3-8) — ثبت بعد از load: precache کلِ بیلد (js/css/png/woff)
+    // نباید با اولین رندرِ صفحه‌ی تازه‌وارد بر سرِ پهنای‌باند ۳G رقابت کند
+    // (الگوی استاندارد registration). readyState کامل ⇒ همین حالا.
+    let onWindowLoad: (() => void) | null = null
+    const registerProdSw = () => {
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
@@ -146,6 +151,13 @@ export function PwaRegister() {
           .register('/sw-push.js')
           .catch(() => {/* پوش در این مرورگر ممکن نیست — اپ عادی */ })
       })
+    }
+    if (document.readyState === 'complete') registerProdSw()
+    else {
+      // stage-77 — قابلیت حذف در unmount (لحظه‌ی بین mount و load)
+      onWindowLoad = registerProdSw
+      window.addEventListener('load', onWindowLoad, { once: true })
+    }
 
     // ── install-prompt اندروید ──
     const onBeforeInstall = (e: Event) => {
@@ -174,6 +186,7 @@ export function PwaRegister() {
     return () => {
       window.removeEventListener('beforeinstallprompt', onBeforeInstall)
       window.removeEventListener('appinstalled', onAppInstalled)
+      if (onWindowLoad) window.removeEventListener('load', onWindowLoad)
       for (const fn of swCleanupFns) fn()
     }
   }, [])
@@ -229,7 +242,7 @@ export function PwaRegister() {
       )}
 
       {/* install-prompt اندروید — stage-59: موبایل دو ردیف (متن بالا، دکمه‌ها کنار هم پایین) */}
-      {showInstall && !showIosGuide && (
+      {showInstall && !showIosGuide && !showUpdate && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
           <span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold text-center">
             سین شین را روی دستگاه خود نصب کنید

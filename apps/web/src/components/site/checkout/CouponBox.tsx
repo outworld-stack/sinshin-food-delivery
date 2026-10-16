@@ -40,6 +40,15 @@ export const CouponBox = memo(function CouponBox({ status, code, applied, onStat
             onChange={handleChange}
             disabled={applied}
             maxLength={16}
+            // stage-77 (P3-8) — نامِ دسترس‌پذیر (placeholder فقط-نمایان برای
+            // اسکرین‌ریدر نام فیلد نیست) + Enter = اعمال (فرمی وجود ندارد)
+            aria-label={t['checkout.couponPlaceholder']}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !applied) {
+                e.preventDefault()
+                onApply()
+              }
+            }}
             className="flex-1 px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white font-DanaMedium disabled:opacity-50"
             placeholder={t['checkout.couponPlaceholder']}
           />

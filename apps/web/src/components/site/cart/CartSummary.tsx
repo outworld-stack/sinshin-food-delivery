@@ -12,6 +12,11 @@ interface CartSummaryProps {
 	totalSavings: number
 	/** stage-48 — آیتم ناموجود در سبد هست؟ (سروری) */
 	hasUnavailable?: boolean
+	/**
+	 * stage-77 (P3-18) — قفلِ مستقل از دلیل (خطای قیمت، بدون متنِ
+	 * ناموجودی — علت در بنر قرمزِ صفحه است)
+	 */
+	checkoutLocked?: boolean
 }
 
 export const CartSummary = memo(function CartSummary({
@@ -19,7 +24,9 @@ export const CartSummary = memo(function CartSummary({
 	total,
 	totalSavings,
 	hasUnavailable = false,
+	checkoutLocked = false,
 }: CartSummaryProps) {
+	const locked = hasUnavailable || checkoutLocked
 	const { t, fmt } = useI18n()
 
 	return (
@@ -71,7 +78,7 @@ export const CartSummary = memo(function CartSummary({
 					</div>
 				)}
 
-				{hasUnavailable ? (
+				{locked ? (
 					<button
 						type="button"
 						disabled

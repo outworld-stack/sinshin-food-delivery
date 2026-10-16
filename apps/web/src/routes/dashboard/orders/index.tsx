@@ -18,6 +18,7 @@
 // apiError (نقشه‌ی رارد ۳۳ — فارسی همان پیام سرور، عربی از نقشه).
 
 import { createFileRoute, Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { noindexHead } from '#/lib/seo'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback } from 'react'
 import { z } from 'zod'
@@ -183,7 +184,7 @@ const OrdersPage = memo(function OrdersPage() {
                       <div className="flex items-center justify-between md:justify-end gap-6">
                         <div className="text-right">
                           <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">{t['dash.orders.status']}</p>
-                          <StatusBadge status={order.paymentStatus === 'FAILED' ? 'PAYMENT_FAILED' : order.status} />
+                          <StatusBadge status={order.status} />
                         </div>
                         <div className="text-left">
                           <p className="text-xs text-gray-400 dark:text-gray-500 font-DanaMedium mb-1">{t['dash.col.amount']}</p>
@@ -280,10 +281,5 @@ export const Route = createFileRoute('/dashboard/orders/')({
   component: OrdersPage,
   pendingComponent: DashboardOrdersSkeleton,
   errorComponent: RouteError,
-  head: () => ({
-    meta: [
-      { title: 'سفارشات من | سین شین' },
-      { name: 'robots', content: 'noindex, nofollow' },
-    ],
-  }),
+  head: noindexHead('orders'),
 })

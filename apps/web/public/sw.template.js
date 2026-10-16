@@ -34,23 +34,36 @@ for (const entry of PRECACHE_MANIFEST) {
   precacheMap.set(new URL(entry.url, self.location.origin).pathname, key)
 }
 
-// ── نصب: precache (به‌ترین تلاش — یک مدخلِ خطادار کل نصب را نکشد) ──
+// ── نصب: precache ──
+// stage-77 (P3-2) — دو ترمیم: ① پاسخِ غیر-ok (404/500) دیگر کش نمی‌شود
+// (قبلاً صفحه‌ی خطا در precache می‌نشست و «همیشه» سرو می‌شد)؛ ② اگر
+// offline.html خودش نیامد، install شکست می‌خورد ⇒ مرورگر نصب را در
+// ناوبریِ بعدی دوباره تلاش می‌کند (قبلاً «نصبِ موفقِ» با کشِ خالی =
+// آفلاینِ صفحه‌ی خطای مرورگر به‌جای صفحه‌ی آفلاین ما). بقیه‌ی مدخل‌ها
+// همچنان best-effort هستند — یک آیکونِ خطادار کل نصب را نمی‌کشد.
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(PRECACHE)
-      await Promise.allSettled(
+      let offlineOk = false
+      await Promise.all(
         PRECACHE_MANIFEST.map(async (entry) => {
           if (!entry || !entry.url) return
           const key = entry.revision ? `${entry.url}?__WB_REVISION__=${entry.revision}` : entry.url
           const req = new Request(key, { cache: 'reload' }) // دور زدن کش HTTP
           try {
-            await cache.put(req, await fetch(req))
+            const res = await fetchWithTimeout(req, ASSET_FETCH_TIMEOUT_MS)
+            if (!res || !res.ok) return // ① فقط پاسخِ سالم کش می‌شود
+            if (new URL(key, self.location.origin).pathname === '/offline.html') offlineOk = true
+            await cache.put(req, res)
           } catch {
             /* به‌ترین تلاش — آفلاینِ لحظه‌ی نصب یک فایل را نمی‌کشد */
           }
         }),
       )
+      if (!offlineOk && PRECACHE_MANIFEST.length > 0) {
+        throw new Error('[sw] install failed: offline.html not precached — will retry on next navigation')
+      }
     })(),
   )
 })
@@ -99,6 +112,9 @@ async function offlineResponse() {
  * (بدون AbortSignal.timeout — مرورگرهای قدیمیِ PWA پشتیبانیش ندارند.)
  */
 const NAV_FETCH_TIMEOUT_MS = 20_000
+// stage-77 — پای دومِ ناوبری (بالاتر توضیح) + مهلتِ پرکردنِ کش‌های asset
+const NAV_RETRY_TIMEOUT_MS = 5_000
+const ASSET_FETCH_TIMEOUT_MS = 15_000
 const API_FETCH_TIMEOUT_MS = 20_000
 
 /** رقابتِ promise با تایمر — برنده‌ی اول؛ اتصالِ بازنده abort می‌شود */
@@ -128,9 +144,13 @@ async function handleNavigation(request) {
   }
   // round-14 — retry: قطعی‌های لحظه‌ای (تعویض آنتن/وای‌فای در گوشی‌ها،
   // فشار لحظه‌ای سرور) با یک تلاش دوم و مکث کوتاه رفع می‌شوند.
+  // stage-77 (P3-9) — پای دوم کوتاه (۵s): قبلاً ۲۰s+۰.۶+۲۰s ≈ ۴۱ ثانیه
+  // صفحه‌ی سفید قبل از آفلاین — برای اپِ سفارش غذا بی‌رحمانه طولانی.
+  // تلاشِ اولِ کامل (۲۰s) برای شبکه‌های کند می‌ماند؛ retry فقط برای
+  // قطعی‌های لحظه‌ای است.
   await new Promise((r) => setTimeout(r, 600))
   try {
-    return await fetchWithTimeout(request, NAV_FETCH_TIMEOUT_MS)
+    return await fetchWithTimeout(request, NAV_RETRY_TIMEOUT_MS)
   } catch {
     return offlineResponse()
   }
@@ -158,7 +178,8 @@ async function handleCacheFirst(request, cacheName, maxEntries) {
   const hit = await cache.match(request)
   if (hit) return hit
   try {
-    const res = await fetch(request)
+    // stage-77 (P3-4) — پرکردنِ کش هم سقف دارد (فچِ بی‌سقف = اسپینرِ بی‌پایانِ تصویر)
+    const res = await fetchWithTimeout(request, ASSET_FETCH_TIMEOUT_MS)
     if (res && res.ok && res.type === 'basic') {
       try {
         await cache.put(request, res.clone())
@@ -210,7 +231,7 @@ self.addEventListener('fetch', (event) => {
   const precacheKey = precacheMap.get(url.pathname)
   if (precacheKey) {
     event.respondWith(
-      (async () => (await caches.match(precacheKey)) ?? (await fetch(request)))(),
+      (async () => (await caches.match(precacheKey)) ?? (await fetchWithTimeout(request, ASSET_FETCH_TIMEOUT_MS)))(),
     )
     return
   }
@@ -285,7 +306,15 @@ self.addEventListener('push', (event) => {
 // کلیک روی نوتیف — باز/فوکوس تب سایت روی URL مقصد
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const url = (event.notification.data && event.notification.data.url) || '/products'
+  // stage-77 (P3-7) — فقط مسیرِ داخلیِ خودمان: payload قابل-تزریق است؛
+  // openWindow/navigate با URL بیرونی = فیشینگ. سرور url را internal-path
+  // اعتبارسنجی می‌کند (notification.routes) — اینجا دفاعِ دومِ خود SW.
+  const rawUrl = (event.notification.data && event.notification.data.url) || '/products'
+  let url = '/products'
+  try {
+    const resolved = new URL(rawUrl, self.location.origin)
+    if (resolved.origin === self.location.origin) url = resolved.pathname + resolved.search
+  } catch { /* بی‌شکل — همان پیش‌فرض */ }
   event.waitUntil(
     (async () => {
       const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })

@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/hooks/dashboard/useOrderDetailPage.ts
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
@@ -15,6 +15,8 @@ import { useI18n } from '#/i18n'
 
 // --- هوک: تایید تحویل + ارسال نظر (نظر به‌ازای هر محصول) ---
 export function useOrderDetailPage(orderId: string) {
+
+  const [feedbackSuccessTick, setFeedbackSuccessTick] = useState(0)
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
   const { t, apiError } = useI18n()
@@ -42,6 +44,8 @@ export function useOrderDetailPage(orderId: string) {
       queryClient.invalidateQueries({ queryKey: qk.orderReviewed(orderId) })
       // پریفکس — بازخورد سفارش به نظرات محصول تبدیل می‌شه → همه‌ی product-reviews رفرش
       queryClient.invalidateQueries({ queryKey: qk.productReviewsPrefix })
+      // stage-77 (P3-10) — تیک موفقیت: FeedbackBox متن را همین‌جا پاک می‌کند
+      setFeedbackSuccessTick((n: number) => n + 1)
       showToast(t['dash.feedback.thanksToast'])
     },
   })
@@ -58,6 +62,7 @@ export function useOrderDetailPage(orderId: string) {
     confirmDeliveryMutation,
     handleConfirmDelivery,
     submitFeedbackMutation,
+		feedbackSuccessTick,
     handleSubmitFeedback,
   }
 }

@@ -79,8 +79,8 @@ const SW_PUSH_URL = '/sw-push.js'
 
 /** stage-58 — throttle پرامپت خودکار: دوباره‌پرسیدن حداکثر هر ۳ روز
  *  (کروم بعد از ~۳ رد خودش پرامپت را quiet می‌کند؛ ما هم اذیت نمی‌کنیم) */
-export const AUTO_PROMPT_KEY =  'sinshin-push-prompt-last'
-export const AUTO_PROMPT_RETRY_DAYS =  3
+export const AUTO_PROMPT_KEY = 'sinshin-push-prompt-last'
+export const AUTO_PROMPT_RETRY_DAYS = 3
 
 /** مهلت‌های انتظار — هیچ await معلق نمی‌ماند */
 const READY_TIMEOUT_MS = 8_000
@@ -95,6 +95,25 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 		p,
 		new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
 	])
+}
+
+/**
+ * stage-77 (PWA P2-1) — خواندنِ بدنه زیرِ مهلت: withTimeout قبلاً فقط خودِ
+ * fetch را می‌پوشاند (رسیدنِ headers)؛ res.json() بی‌مرز بود — سیاه‌چاله‌ی
+ * «headers آمد ولی بدنه هرگز» یعنی enablePush/reconcile برای همیشه معلق
+ * و بنرِ PushAutoPrompt در فازِ busy (دکمه‌ی رد پنهان) گیر می‌کند. همان
+ * درسِ auth-session (stage-74) — این آخرین مسیرِ fetchِ بی‌سقفِ بدنه بود.
+ */
+export async function readJsonWithTimeout<T>(
+	res: Response,
+	ms: number,
+	fallback: T,
+): Promise<T> {
+	try {
+		return await withTimeout(res.json() as Promise<T>, ms, fallback)
+	} catch {
+		return fallback
+	}
 }
 
 /**
@@ -226,13 +245,13 @@ async function fetchVapidKey(): Promise<Uint8Array<ArrayBuffer> | null> {
 		)
 		return null
 	}
-	let key: string | undefined
-	try {
-		;({ key } = (await keyRes.json()) as { key?: string })
-	} catch {
-		console.warn('[push] vapid-public: JSON خراب')
-		return null
-	}
+	// stage-77 — بدنه زیرِ همان مهلت (نه بی‌سقف)
+	const parsed = await readJsonWithTimeout<{ key?: string }>(
+		keyRes,
+		FETCH_TIMEOUT_MS,
+		{},
+	)
+	const key: string | undefined = parsed.key
 	if (!key) {
 		console.warn('[push] vapid-public: کلید خالی برگشت')
 		return null
@@ -315,13 +334,15 @@ async function registerOnServer(
 
 	// ── گره‌ی ۴۰۹: اشتراکِ متعلق به حساب قبلی — بازسازی تازه ──
 	if (res.status === 409) {
-		let owned = false
-		try {
-			const body = (await res.clone().json()) as { error?: { code?: string } }
-			owned = body.error?.code === 'PUSH_SUB_OWNED'
-		} catch {
-			owned = true // ۴۰۹ از این مسیر فقط همین معنی را دارد
-		}
+		// stage-77 — بدنه زیرِ مهلت؛ خطا/مهلت/بدنه‌ی بی-کد = فرضِ «متعلق به
+		// دیگری» (محافظه‌کارانه‌ی قبلی — ۴۰۹ از این مسیر فقط همین معنی را دارد)
+		const body = await readJsonWithTimeout<{ error?: { code?: string } }>(
+			res.clone(),
+			FETCH_TIMEOUT_MS,
+			{},
+		)
+		const owned =
+			body.error?.code === 'PUSH_SUB_OWNED' || body.error?.code === undefined
 		if (owned) {
 			console.warn('[push] اشتراک به حساب دیگری تعلق داشت — بازسازی تازه')
 			try {
@@ -451,14 +472,17 @@ export async function reconcileSubscription(): Promise<PushState> {
 		if (!statusRes.ok) {
 			return { state: 'granted', subscribed: false, failureReason: 'register' }
 		}
-		let endpoints: string[] = []
-		try {
-			const body = (await statusRes.json()) as { endpoints?: string[] }
-			endpoints = Array.isArray(body.endpoints) ? body.endpoints : []
-		} catch {
+		// stage-77 — بدنه زیرِ مهلت؛ نامفهوم/مهلت = همان تصمیمِ محافظه‌کارانه
+		const body = await readJsonWithTimeout<{ endpoints?: string[] } | null>(
+			statusRes,
+			FETCH_TIMEOUT_MS,
+			null,
+		)
+		if (body === null || !Array.isArray(body.endpoints)) {
 			/* بدنه‌ی نامفهوم — محافظه‌کارانه: POST نمی‌زنیم */
 			return { state: 'granted', subscribed: false }
 		}
+		const endpoints: string[] = body.endpoints
 
 		if (endpoints.includes(sub.endpoint)) {
 			return { state: 'granted', subscribed: true }
@@ -474,7 +498,6 @@ export async function reconcileSubscription(): Promise<PushState> {
 		return { state: 'granted', subscribed: false, failureReason: 'register' }
 	}
 }
-
 
 /** لغو اشتراک — هم مرورگر هم بک‌اند */
 export async function disablePush(): Promise<PushState> {

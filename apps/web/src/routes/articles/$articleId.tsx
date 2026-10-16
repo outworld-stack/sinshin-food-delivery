@@ -150,7 +150,7 @@ function ArticleDetailPage() {
                                 )}
                         </div>
 
-                        <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 leading-relaxed border-r-4 border-primary dark:border-dark-primary pr-4">
+                        <p className="text-lg text-gray-600 dark:text-gray-300 font-DanaMedium mb-8 leading-relaxed border-r-4 border-primary dark:border-dark-primary pr-4">
                                 {article.excerpt}
                         </p>
 

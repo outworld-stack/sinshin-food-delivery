@@ -552,6 +552,24 @@ export class PaymentService {
     // try/catch دارد و هرگز مسیر پرداخت را نمی‌شکند.
     await this.deps.orders.grantCouponsAfterCommit(result.userId)
 
+    // stage-77 (N4) — شکستِ پرداخت دیگر برای مشتری «بی‌خبر» تمام نمی‌شود:
+    // سفارش CANCELED/FAILED می‌شود ولی کاربر فقط با بازگشت به سایت متوجه
+    // می‌شد (callback درگاه عملاً به صفحه‌ی سفارش برمی‌گرداند؛ ولی مسیرِ
+    // کارِ تایم‌اوت ۳۰ دقیقه‌ای/۲۴ ساعته و شکستِ قطعیِ درگاهِ غیر-eager
+    // هیچ خبری نمی‌فرستاد). اعلان درون‌بری + پوش — فایر-اند-فورگت،
+    // قانون طلایی: نوتیف هرگز مسیر پول را زمین نمی‌خواباند.
+    if (result.paymentStatus === 'FAILED') {
+      void this.deps.notifications
+        .notifyUser(result.userId, {
+          type: 'system',
+          title: '❌ پرداخت سفارش ناموفق بود',
+          body: `پرداخت سفارش ${result.orderDisplayId} تکمیل نشد. پولی از حساب شما کسر نشده و رزرو کیف پول/کد تخفیف (در صورت استفاده) آزاد شد — از صفحه‌ی سفارش می‌توانید دوباره تلاش کنید.`,
+          url: `/dashboard/orders/${result.orderDisplayId}`,
+          data: { order: result.orderDisplayId, source: 'payment-failed' },
+        })
+        .catch(() => { /* ضد-کرش دوبل — قانون طلایی نوتیف */ })
+    }
+
     // round-16 — پس از commit (نه داخل tx): پنل زنده با SSE فوراً باخبر می‌شود.
     // موفق = سفارش جدید در صف | شکست = حذف از صف (پنل رفرش می‌کند)
     try {

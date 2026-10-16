@@ -22,6 +22,14 @@
  *  S8) stop() ⇒ هیچ اتصال/تایمرِ بازی
  *  S9) فریم‌های heartbeat (": ping") به onFrame نمی‌روند ولی watchdog
  *      را ریست می‌کنند (مرزِ درست)
+ *
+ * stage-77 (N1) — نوسازی نشست روی 401ِ استریم:
+ *  S10) 401 + refresh موفق ⇒ اتصال فوری (~۱s) با توکن تازه؛
+ *       onUnauthorized فقط روی 401 صدا زده می‌شود
+ *  S11) 401 + refresh ناموفق ⇒ همان ریتمِ عادیِ retry (حلقه‌ی تند نه)
+ *  S12) 404 (خطای غیر-401) ⇒ onUnauthorized صدا زده نمی‌شود
+ *  S13) بیمه‌ی ضد-حلقه: سه بارِ پیاپیِ «401+refresh موفق» ⇒ بعدش
+ *       ریتم عادی — استریمِ سالم رشته را صفر می‌کند
  */
 
 let pass = 0
@@ -70,7 +78,8 @@ Object.defineProperty(globalThis, 'document', {
 })
 
 // ── سرور SSE آزمون ──
-let mode: 'healthy' | 'silent' | 'hang-headers' | 'close-after-connect' = 'healthy'
+// stage-77: 'unauthorized' → سرور 401 برمی‌گرداند (توکن منقضی)
+let mode: 'healthy' | 'silent' | 'hang-headers' | 'close-after-connect' | 'unauthorized' = 'healthy'
 let sseConnections = 0
 const encoder = new TextEncoder()
 
@@ -87,6 +96,10 @@ const server = Bun.serve({
     if (mode === 'hang-headers') {
       // حتی headers نمی‌رسد — قبلاً: fetch بی‌سقف = معلقِ ابدی
       return new Promise<Response>(() => {})
+    }
+    if (mode === 'unauthorized') {
+      // stage-77 (N1) — توکن منقضی؛ کلاینت باید refresh بزند و سریع برگردد
+      return new Response('{"error":{"code":"UNAUTHORIZED"}}', { status: 401 })
     }
 
     const stream = new ReadableStream({
@@ -324,6 +337,102 @@ async function main(): Promise<void> {
     })
     await wait(T.retryMs + 400)
     ok('S9: سرور استریم را بست ⇒ onStreamClosed + retry', closed >= 1 && sseConnections >= 2, `closed=${closed} conns=${sseConnections}`)
+    sse.stop()
+  }
+
+  // ── S10: 401 + refresh موفق ⇒ اتصال فوری ──
+  mode = 'unauthorized'
+  sseConnections = 0
+  {
+    let refreshCalls = 0
+    let tokenV = 1
+    const sse = createFetchSse({
+      url: () => sseUrl,
+      headers: () => ({ authorization: `Bearer t${tokenV}` }),
+      onUnauthorized: async () => {
+        refreshCalls++
+        tokenV++ // توکن تازه — سرور 401 می‌ماند برای S13 ولی اینجا بعد از اولین موفق healthy می‌کنیم
+        return true
+      },
+      timings: T,
+    })
+    await wait(80)
+    ok('S10: 401 ⇒ onUnauthorized صدا زده شد', refreshCalls >= 1, `calls=${refreshCalls}`)
+    mode = 'healthy' // refresh «موفق» — اتصال بعدی سالم است
+    await wait(1_300) // fast-retry ثابتِ ۱s
+    ok(
+      'S10: refresh موفق ⇒ اتصال فوری (~۱s) + استریم باز',
+      sseConnections >= 2 && sse.isStreaming(),
+      `conns=${sseConnections}`,
+    )
+    ok('S10: refresh فقط یک‌بار (dedup در این استریم)', refreshCalls === 1, `calls=${refreshCalls}`)
+    sse.stop()
+  }
+
+  // ── S11: 401 + refresh ناموفق ⇒ ریتم عادی (نه مسیرِ تند) ──
+  // retryMs عمداً «کندتر» از fast-retryِ ثابتِ ۱s می‌شود (۱۵۰۰ms) تا مسیرها
+  // از هم تفکیک شوند: اگر مسیرِ تند گرفته می‌شد، اتصالِ دوم ~۱s می‌آمد؛
+  // با ریتم عادی، تا ۱.۴s هنوز فقط اتصالِ اول است.
+  mode = 'unauthorized'
+  sseConnections = 0
+  {
+    const sse = createFetchSse({
+      url: () => sseUrl,
+      onUnauthorized: async () => false, // refresh شکست خورد (شبکه/۴۲۹)
+      timings: { ...T, retryMs: 1_500 },
+    })
+    await wait(80)
+    const connsAtFail = sseConnections // = 1 (تلاش اول)
+    await wait(1_400) // < retryMs؛ در مسیرِ تند اینجا اتصالِ دوم می‌آمد
+    ok(
+      'S11: refresh ناموفق ⇒ مسیرِ تند گرفته نشد (هیچ اتصالی تا ۱.۴s)',
+      sseConnections === connsAtFail && !sse.isStreaming(),
+      `conns=${sseConnections}/${connsAtFail}`,
+    )
+    sse.stop()
+  }
+
+  // ── S12: خطای غیر-401 ⇒ onUnauthorized هرگز ──
+  mode = 'healthy'
+  {
+    let refreshCalls = 0
+    const sse = createFetchSse({
+      url: () => `${sseUrl}-not-found`, // سرور 404 می‌دهد
+      onUnauthorized: async () => {
+        refreshCalls++
+        return true
+      },
+      timings: T,
+    })
+    await wait(600)
+    ok('S12: 404 ⇒ onUnauthorized صدا زده نشد', refreshCalls === 0, `calls=${refreshCalls}`)
+    sse.stop()
+  }
+
+  // ── S13: بیمه‌ی ضد-حلقه — ۳ بار تند، بعدش آهسته ──
+  mode = 'unauthorized'
+  sseConnections = 0
+  {
+    const sse = createFetchSse({
+      url: () => sseUrl,
+      onUnauthorized: async () => true, // همیشه «موفق» — ولی سرور 401 می‌دهد
+      timings: T,
+    })
+    // سه fast-retry پیاپی (هر ~۱s)
+    await wait(3_600)
+    const connsAfterFast = sseConnections
+    // پنجره‌ی بعدی: اگر حلقه‌ی تند بی‌سقف بود، در ۱.۲s بعدی هم اتصال می‌آمد؛
+    // با گارد، فقط retry عادیِ 350ms هر بار... نه — گارد یعنی دیگر fast نیست
+    // ولی retryMs عادی هنوز فعال است. تعداد اتصال‌ها باید «کند» رشد کند.
+    await wait(1_200)
+    const connsAfterSlow = sseConnections
+    const growth = connsAfterSlow - connsAfterFast
+    ok(
+      'S13: بعد از ۳ بارِ 401+refresh موفق، اتصالِ تند متوقف شد',
+      growth <= 4, // retry عادیِ 350ms در 1.2s ≈ حداکثر ~۳-۴ + حاشیه
+      `fast=${connsAfterFast} slow=${connsAfterSlow} growth=${growth}`,
+    )
+    ok('S13: استریم هرگز باز نشد (سرور 401 می‌دهد)', !sse.isStreaming())
     sse.stop()
   }
 
