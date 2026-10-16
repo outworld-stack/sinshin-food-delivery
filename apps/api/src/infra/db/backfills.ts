@@ -10,9 +10,27 @@
  *    INDEX مایگریشن ۰۰۰۵ اجرا شود؛ در زنجیره‌ی خطیِ مایگریشن، فایلِ
  *    بعدی هرگز قبل از فایل قبلی نمی‌رود. گیتِ پیش-مایگریشن (pre) اینجا
  *    حلش می‌کند.
- * ③ ایدمپوتنت: هر بلاک فقط ردیف‌های «هنوز خالی/هنوز قفل‌شده» را می‌گیرد؛
- *    اجرای دوباره = no-op — پس دیتابیسِ ناقص/قدیمی هر جا که باشد،
- *    `bun run db:migrate` همیشه به همان نتیجه‌ی نهایی می‌رسد.
+ *
+ * ═══ stage-73 — «پاک‌سازی» نسخه‌دار شد (یافته‌ی ۲ کارفرما) ═══
+ *
+ * پیشینه: بندِ آزادسازی مسدودی‌های auto:% در stage-72 در هر اجرای
+ * db:migrate تکرار می‌شد. تکرارِ آن برای ردیف‌های «خالی» بی‌ضرر بود؛
+ * اما مسدودیِ خودکاری که «بعد از» deploy قبلی ساخته شده بود (با منطق
+ * درستِ stage-70+) هم الگوی auto:% داشت → در deploy بعدی آزاد می‌شد —
+ * یعنی قفل‌های خودکارِ جدید هرگز پایدار نبودند.
+ *
+ * تفکیک دقیق (خواسته‌ی کارفرما: «پاک‌سازی باید مهاجرت داده‌ی یک‌باره و
+ * نسخه‌دار باشد، نه عملیاتی که در هر deploy تکرار شود»):
+ *  • بندهای ①/② (نوع/برند/مالک) — فقط null می‌پرند؛ اجرا در هر
+ *    db:migrate بی‌ضرر و مفید است (ردیف‌های legacy هر زمانی بیایند
+ *    شفا می‌یابند) → همچنان همیشه اجرا می‌شوند.
+ *  • بند ③ (آزادسازی auto:%) — «پاک‌سازیِ یک‌باره» است → از حالا
+ *    نسخه‌دار: فقط یک‌بار در عمرِ دیتابیس، با مارکرِ جدول
+ *    backfill_runs (DDL خالص؛ تولید با همان db:generate). روی
+ *    دیتابیسِ کاریِ کارفرما، شواهدِ اجرای stage-72 (رویداد AUTO_UNBLOCK
+ *    یا ردیف auto-cleared:backfill) به‌طور خودکار تشخیص و فقط مارکر
+ *    ثبت می‌شود — هیچ آزادسازی‌ای تکرار نمی‌شود.
+ *    جزئیات و سناریوهای بازیابی: REFERENCE بخش ۲-۱۰-۵.
  *
  * نگاشت برند/نوع دقیقاً با deriveLegacyDevice (device-label.ts) هم‌راستا
  * است — CASE ترتیب درست دارد (Mac→macos قابل‌دسترس؛ اندرویدِ ناشناخته
@@ -21,6 +39,7 @@
 import { sql } from 'drizzle-orm'
 
 import type { Db } from './client'
+import { backfillRuns } from './schema/backfill-runs'
 
 /** خروجی گیتِ پیش-مایگریشن — برای لاگ شفاف در migrate.ts */
 export interface PreMigrateResult {
@@ -37,6 +56,22 @@ export interface PostMigrateResult {
   backfilledBrand: number
   backfilledOwner: number
   autoUnblocked: number
+}
+
+/** وضعیتِ «پاک‌سازیِ نسخه‌دار» — لاگ دقیق migrate.ts از همین */
+export type VersionedBackfillStatus =
+  | 'ran' // ③ اجرا شد — مارکر ثبت شد
+  | 'ran-skip-auto-unblock' // ③ با پرچم env اپراتور رد شد — مارکر ثبت شد
+  | 'already-applied' // مارکر موجود — ۳ هرگز دوباره اجرا نمی‌شود
+  | 'seeded-from-evidence' // شواهدِ اجرای stage-72 → فقط مارکر
+  | 'table-missing' // جدول backfill_runs هنوز ساخته نشده — راهنما لاگ شد
+
+export interface VersionedBackfillResult {
+  status: VersionedBackfillStatus
+  /** بندهای ①/② در همه‌ی وضعیت‌ها اجرا شده‌اند (ایدمپوتنتِ بی‌ضرر) */
+  applied: PostMigrateResult
+  /** فقط برای seeded-from-evidence — شواهدِ تشخیص */
+  evidence?: 'auto-unblock-events' | 'auto-cleared-rows'
 }
 
 /** اجرای یک عبارتِ خامِ بدون-پارامتر (فقط رشته‌های ثابتِ داخلی — بدون ورودی کاربر) */
@@ -81,6 +116,10 @@ async function columnExists(db: Db, column: string): Promise<boolean> {
  * این گیت «شرط لازمِ» موفقیت CREATE UNIQUE INDEX مایگریشن ۰۰۰۵ روی
  * دیتابیس‌های قدیمیِ با داده‌ی تکراری است — بدون آن، db:migrate روی
  * همان ۰۰۰۵ با خطای duplicate key می‌ایستد.
+ *
+ * stage-73: این گیت نسخه‌دار «نمی‌شود» و نباید شود — وظیفه‌اش سلامتِ
+ * خودِ DDL است؛ روی دیتابیسِ سالم no-op کامل است و تا وقتی زنجیره ۰۰۰۵
+ * را اعمال نکرده‌ای هر بار لازم است.
  */
 export async function preMigrateDedupClientIds(db: Db): Promise<PreMigrateResult> {
   if (!(await columnExists(db, 'client_id'))) {
@@ -110,7 +149,7 @@ export async function preMigrateDedupClientIds(db: Db): Promise<PreMigrateResult
 }
 
 /**
- * بک‌فیل‌های پس-مایگریشن (مرحله‌ی ۳ — بعد از drizzle migrate):
+ * بک‌فیلِ بندهای ①/② (همیشه — ایدمپوتنتِ بی‌ضرر):
  *
  * ① نوع/برند ردیف‌های موجود از user_agent — مدل عمداً خالی می‌ماند
  *    (استخراج مدل از UA در SQL کدفر و ناقص است؛ نام کامل با ورود بعدیِ
@@ -118,9 +157,9 @@ export async function preMigrateDedupClientIds(db: Db): Promise<PreMigrateResult
  * ② مالکِ هر دستگاه از «اولین REGISTER موفقِ همان ردیف» (device_events) —
  *    دقیقاً هم‌معنای claim ران‌تایمِ stage-70 که فقط در ثبت‌نام موفق
  *    اعمال می‌شود (نه از هر LOGIN قدیمی — بلاکِ گذشته‌نگر نمی‌سازد).
- * ③ آزادسازی مسدودی‌های «خودکارِ» قدیمی (auto:%) + رویداد AUTO_UNBLOCK —
- *    سیاست stage-70 مسدودسازیِ خودکار را فقط «پس از ثبت‌نام موفق» اجرا
- *    می‌کند؛ مسدودی «دستیِ» ادمین و auto-cleared قبلی دست‌نخورده می‌ماند.
+ *
+ * هر بند فقط ردیف‌های «هنوز خالی» را می‌گیرد — تکرار = no-op؛ ردیفِ
+ * legacy در هر زمانی که وارد شود، در db:migrate بعدی شفا می‌یابد.
  */
 export async function postMigrateDeviceBackfills(db: Db): Promise<PostMigrateResult> {
   if (!(await columnExists(db, 'device_type'))) {
@@ -208,8 +247,30 @@ export async function postMigrateDeviceBackfills(db: Db): Promise<PostMigrateRes
     )
   }
 
-  // ③) آزادسازی مسدودی‌های خودکارِ قدیمی — اول رویداد، بعد آپدیت
-  //    (بعد از آپدیت، ردیف‌ها دیگر «auto:%» نیستند → اجرای دوباره no-op)
+  return {
+    skipped: false,
+    backfilledType: typePending,
+    backfilledBrand: brandPending,
+    backfilledOwner: ownerPending,
+    autoUnblocked: 0,
+  }
+}
+
+// ═══ stage-73 — پاک‌سازیِ یک‌باره‌ی مسدودی‌های auto:% (نسخه‌دار) ═══
+
+const DEVICE_BACKFILL_NAME = 'device-auto-unblock'
+const DEVICE_BACKFILL_VERSION = 1
+
+/**
+ * اجرای بندِ ۳ — آزادسازی مسدودی‌های «خودکارِ» قدیمی (auto:%):
+ * سیاست stage-70 مسدودسازیِ خودکار را فقط «پس از ثبت‌نام موفق» اجرا
+ * می‌کند؛ مسدودی «دستیِ» ادمین و auto-cleared قبلی دست‌نخورده می‌ماند.
+ * اول رویداد AUTO_UNBLOCK، بعد آپدیت (بعد از آپدیت، ردیف‌ها دیگر
+ * auto:% نیستند). فقط از runDeviceBackfillsVersioned (یک‌بار) صدا زده
+ * می‌شود — ردیف‌هایی که بعد از آن با منطق stage-70+ مسدودِ خودکار شوند
+ * دیگر هرگز توسط بک‌فیل آزاد نمی‌شوند (مرکز یافته‌ی ۲).
+ */
+async function releaseLegacyAutoBlocks(db: Db): Promise<number> {
   const blockedPending = await count(
     db,
     `select count(*)::int as n from "devices"
@@ -220,7 +281,7 @@ export async function postMigrateDeviceBackfills(db: Db): Promise<PostMigrateRes
       db,
       `insert into "device_events" ("device_id", "phone", "event", "user_agent", "metadata", "created_at")
        select "id", null, 'AUTO_UNBLOCK', null,
-         jsonb_build_object('reason', 'runtime backfill', 'previousReason', "blocked_reason", 'riskScore', "risk_score"),
+         jsonb_build_object('reason', 'versioned backfill v1', 'previousReason', "blocked_reason", 'riskScore', "risk_score"),
          now()
        from "devices"
        where "is_blocked" = true and "blocked_reason" like 'auto:%'`,
@@ -232,12 +293,115 @@ export async function postMigrateDeviceBackfills(db: Db): Promise<PostMigrateRes
        where "is_blocked" = true and "blocked_reason" like 'auto:%'`,
     )
   }
+  return blockedPending
+}
 
+/** آیا جدول backfill_runs ساخته شده؟ (DDL مایگریشن ۰۰۰۶ هنوز اعمال نشده) */
+async function backfillRunsTableExists(db: Db): Promise<boolean> {
+  const result = (await db.execute(
+    sql`select to_regclass('public.backfill_runs') is not null as ok`,
+  )) as unknown as { rows?: Array<{ ok?: boolean }> } & Array<{ ok?: boolean }>
+  const row = result.rows?.[0] ?? result[0]
+  return row?.ok === true
+}
+
+/** مارکرِ (name, version≥جاری) موجود است؟ */
+async function backfillMarkerPresent(db: Db): Promise<boolean> {
+  const rows = await db
+    .select({ one: sql<number>`1` })
+    .from(backfillRuns)
+    .where(
+      sql`${backfillRuns.name} = ${DEVICE_BACKFILL_NAME} and ${backfillRuns.version} >= ${DEVICE_BACKFILL_VERSION}`,
+    )
+    .limit(1)
+  return rows.length > 0
+}
+
+/**
+ * شواهدِ «این دیتابیس قبلاً بک‌فیلِ stage-72 را اجرا کرده» —
+ *  • auto-unblock-events: رویداد AUTO_UNBLOCK (stage-72 موقع آزادسازی می‌نوشت)
+ *  • auto-cleared-rows: ردیف devices با blocked_reason='auto-cleared:backfill'
+ *
+ * کاربرد: دیتابیسِ کاریِ کارفرما (که db:migrate استیج ۷۲ رویش اجرا شده)
+ * جدول backfill_runs را ندارد؛ بدون این تشخیص، v1 یک‌بار دیگر اجرا می‌شد
+ * و مسدودی‌های auto:% «پس از» آن اجرا را آزاد می‌کرد — همان باگ، این‌بار
+ * در لحظه‌ی ارتقا. با شواهد، فقط مارکر ثبت می‌شود و هیچ چیز تکرار نمی‌شود.
+ */
+async function priorStage72RunEvidence(
+  db: Db,
+): Promise<'auto-unblock-events' | 'auto-cleared-rows' | null> {
+  if (!(await columnExists(db, 'device_type'))) return null
+  const events = await count(
+    db,
+    `select count(*)::int as n from "device_events" where "event" = 'AUTO_UNBLOCK'`,
+  )
+  if (events > 0) return 'auto-unblock-events'
+  const cleared = await count(
+    db,
+    `select count(*)::int as n from "devices"
+     where "blocked_reason" = 'auto-cleared:backfill'`,
+  )
+  if (cleared > 0) return 'auto-cleared-rows'
+  return null
+}
+
+/** ثبت/ارتقای مارکر (idempotent روی name) */
+async function markBackfillRun(db: Db): Promise<void> {
+  await db
+    .insert(backfillRuns)
+    .values({ name: DEVICE_BACKFILL_NAME, version: DEVICE_BACKFILL_VERSION })
+    .onConflictDoUpdate({
+      target: backfillRuns.name,
+      set: {
+        version: sql`greatest(${backfillRuns.version}, ${DEVICE_BACKFILL_VERSION})`,
+        ranAt: new Date(),
+      },
+    })
+}
+
+/**
+ * stage-73 — مرحله‌ی ۳ db:migrate:
+ *
+ *  • بندهای ①/② (نوع/برند/مالک) — همیشه اجرا؛ ایدمپوتنتِ بی‌ضرر (فقط
+ *    null می‌پرند؛ ردیفِ legacy در هر زمان شفا می‌یابد).
+ *  • بندِ ③ (آزادسازی auto:%) — «پاک‌سازیِ نسخه‌دار»؛ فقط یک‌بار در
+ *    عمرِ دیتابیس:
+ *      ۱) جدول backfill_runs نیست → table-missing (migrate.ts راهنمای
+ *         db:generate را لاگ می‌کند؛ ①② اجرا شده‌اند)
+ *      ۲) مارکر ≥ v1 هست → already-applied — تضمینِ «نه در هر deploy»
+ *      ۳) شواهدِ اجرای stage-72 (رویداد AUTO_UNBLOCK / ردیف auto-cleared)
+ *         → فقط مارکر (seeded-from-evidence) — دیتابیسِ کاریِ کارفرما
+ *      ۴) در غیر این صورت → اجرای ③ + مارکر (دیتابیسِ بازگردانده از
+ *         بکاپِ قبل از stage-72 و …)
+ *
+ * opts.skipAutoUnblock — پرچم یک‌بارمصرفِ اپراتور (env
+ * DEVICE_BACKFILL_SKIP_AUTO_UNBLOCK=1 در migrate.ts خوانده می‌شود):
+ * ③ رد می‌شود ولی مارکر ثبت می‌گردد. برای دیتابیس‌هایی که مطمئن‌اند
+ * auto:% هایشان باید بمانند.
+ */
+export async function runDeviceBackfillsVersioned(
+  db: Db,
+  opts: { skipAutoUnblock?: boolean } = {},
+): Promise<VersionedBackfillResult> {
+  // ①/② — همیشه (ایدمپوتنتِ بی‌ضرر)
+  const base = await postMigrateDeviceBackfills(db)
+
+  // ③ — نسخه‌دار
+  if (!(await backfillRunsTableExists(db))) {
+    return { status: 'table-missing', applied: base }
+  }
+  if (await backfillMarkerPresent(db)) {
+    return { status: 'already-applied', applied: base }
+  }
+  const evidence = await priorStage72RunEvidence(db)
+  if (evidence) {
+    await markBackfillRun(db)
+    return { status: 'seeded-from-evidence', evidence, applied: base }
+  }
+  const autoUnblocked = opts.skipAutoUnblock ? 0 : await releaseLegacyAutoBlocks(db)
+  await markBackfillRun(db)
   return {
-    skipped: false,
-    backfilledType: typePending,
-    backfilledBrand: brandPending,
-    backfilledOwner: ownerPending,
-    autoUnblocked: blockedPending,
+    status: opts.skipAutoUnblock ? 'ran-skip-auto-unblock' : 'ran',
+    applied: { ...base, autoUnblocked },
   }
 }

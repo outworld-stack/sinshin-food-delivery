@@ -13,6 +13,25 @@
 //      هشِ یکسانِ unavailable بین دستگاه‌های نامرتبط لینک کاذب می‌ساخت).
 //      مقادیر degenerate (فونت صفر/صدا صفر) هم missing می‌شوند (D2).
 //   ۲) تشخیص نوع/برند/مدل دستگاه (deviceIdentity.ts) — فقط نمایشی.
+//
+// ═══ stage-73 (یافته‌ی ۵) — «هرگز پرتاب نکن» ═══
+//
+// پیشینه: خواندن localStorage/کوکی/sessionStorage در getClientId محافظت
+// نبود. مرورگرهایی که دسترسی storage را با exception رد می‌کنند (Safari
+// با «Block All Cookies»، Chrome با «Block third-party cookies» در برخی
+// حالت‌ها، WebViewهای قفل‌شده) → SecurityError → کل collectDeviceSignals
+// می‌شکست → درخواست تأیید OTP «هرگز» ارسال نمی‌شد و ورود آن کاربر
+// بی‌دلیل قطع می‌شد.
+//
+// ریشه‌ای‌ترین رفع: «مسیر ورود، گروگانِ سیگنال‌های اختیاری نیست» —
+//  • هر مخزن جداگانه best-effort خوانده می‌شود (خطا = null، نه پرتاب)؛
+//  • randomUUID جایگزینِ Math.random برای زمینه‌های ناامن (HTTP غیر
+//    localhost — crypto.randomUUID فقط secure-context است)؛
+//  • sha256Hex بدون crypto.subtle (همان زمینه‌ها) → مقدار missing؛
+//    سرورِ stage-70+ این مقدار را «بی‌اطلاع» می‌شناسد و مسیر lowq-scoped
+//    (clientId/شماره) را می‌رود — ورود سالم می‌ماند، فقط سیگنال کم‌کیفیت؛
+//  • Intl/زبان هم best-effort.
+// نتیجه: collectDeviceSignals دیگر در هیچ مرورگری پرتاب نمی‌کند.
 
 import { browserLabel } from '#/lib/browserSupport'
 import { detectDeviceIdentity, readHighEntropy } from '#/utils/deviceIdentity'
@@ -20,35 +39,81 @@ import { detectDeviceIdentity, readHighEntropy } from '#/utils/deviceIdentity'
 const DID_KEY = 'sinshin_did'
 /** نشانگر سیگنال ناموجود — سرور sha256 همین را «missing» می‌شناسد */
 const MISSING_SIGNAL = 'sinshin-missing-v1'
+/**
+ * stage-73 — sha256('sinshin-missing-v1') از پیش‌محاسبه‌شده.
+ * زمینه‌های ناامن (بدون crypto.subtle) مقدار سیگنال را نمی‌توانند هش
+ * کنند؛ همه‌ی سیگنال‌ها این مقدار ثابت را می‌گیرند = «missing» برای
+ * سرور (قرارداد stage-70). مقدار با sha256 خود Bun در تست‌ها تطبیق
+ * داده شده (scripts/test-device-fingerprint.ts — بند T4).
+ */
+const MISSING_HASH_HEX = 'f020fbda2d9a8b1bdf1f7016373e52ecb26742cddd3a32f7cd7ee8f1a66c9bb5'
+
+/** خواندِ best-effort — خطای دسترسی = null، هرگز پرتاب (یافته‌ی ۵) */
+function safeGet(read: () => string | null): string | null {
+  try {
+    return read()
+  } catch {
+    return null
+  }
+}
 
 function readCookie(name: string): string | null {
-  const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
-  return m ? decodeURIComponent(m[1]) : null
+  try {
+    const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
+    return m ? decodeURIComponent(m[1]) : null
+  } catch {
+    // document.cookie در حالت «Block All Cookies» با SecurityError رد می‌شود
+    return null
+  }
 }
 
 function writeCookie(name: string, value: string): void {
   document.cookie = `${name}=${encodeURIComponent(value)}; max-age=31536000; path=/; samesite=lax`
 }
 
+/** UUID با fallback — زمینه‌ی ناامنِ crypto.randomUUID ندارد (stage-73) */
+function randomId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {
+    /* زمینِ قفل‌شده — پایین بیا */
+  }
+  const hex = (n: number): string =>
+    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${hex(4)}-${hex(12)}`
+}
+
 /** لایه ۱ — uuid ماندگار؛ هر جای ممکنی ذخیره می‌شود تا پاک‌کردنش سخت باشد */
 export function getClientId(): string {
-  let id = localStorage.getItem(DID_KEY) ?? readCookie(DID_KEY) ?? sessionStorage.getItem(DID_KEY)
-  if (!id || !/^[0-9a-f-]{16,64}$/i.test(id)) {
-    id = crypto.randomUUID()
-  }
+  // stage-73 — هر مخزن «جداگانه» best-effort: رد شدنِ یکی (SecurityError
+  // مرورگرهای قفل‌شده) مسیر ورود را متوقف نمی‌کند
+  const id =
+    safeGet(() => localStorage.getItem(DID_KEY)) ??
+    readCookie(DID_KEY) ??
+    safeGet(() => sessionStorage.getItem(DID_KEY))
+  const finalId = !id || !/^[0-9a-f-]{16,64}$/i.test(id) ? randomId() : id
   // هر بار همه‌ی مخزن‌ها را تازه کن — یکی پاک شه، بقیه زنده‌اند
-  try { localStorage.setItem(DID_KEY, id) } catch { /* حالت خصوصی */ }
-  try { sessionStorage.setItem(DID_KEY, id) } catch { /* هیچ‌کاری نمی‌کند */ }
-  try { writeCookie(DID_KEY, id) } catch { /* هیچ‌کاری نمی‌کند */ }
-  return id
+  try { localStorage.setItem(DID_KEY, finalId) } catch { /* حالت خصوصی */ }
+  try { sessionStorage.setItem(DID_KEY, finalId) } catch { /* هیچ‌کاری نمی‌کند */ }
+  try { writeCookie(DID_KEY, finalId) } catch { /* هیچ‌کاری نمی‌کند */ }
+  return finalId
 }
 
 async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input)
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+  try {
+    // زمینه‌ی ناامن (HTTP غیر localhost): crypto.subtle تعریف نشده —
+    // مقدار missing ثابت (سرور آن را بی‌اطلاع می‌شناسد؛ ورود سالم می‌ماند)
+    if (typeof crypto === 'undefined' || !crypto.subtle) return MISSING_HASH_HEX
+    const data = new TextEncoder().encode(input)
+    const digest = await crypto.subtle.digest('SHA-256', data)
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  } catch {
+    return MISSING_HASH_HEX
+  }
 }
 
 // ── لایه ۲ — سیگنال‌ها ──
@@ -186,7 +251,19 @@ export interface DeviceSignalsPayload {
   deviceModel: string | null
 }
 
-/** جمع‌آوری کامل — قبل از فراخوانیِ تایید */
+/** مقدار رشته‌ایِ best-effort — خطا/خالی = fallback (stage-73) */
+function safeStr(read: () => string, fallback: string): string {
+  try {
+    const v = read()
+    return v || fallback
+  } catch {
+    return fallback
+  }
+}
+
+/** جمع‌آوری کامل — قبل از فراخوانیِ تایید
+ * stage-73: این تابع دیگر «هرگز» پرتاب نمی‌کند — هر سیگنالِ شکست‌خورده
+ * به missing/مقدار پیش‌فرض تنزل می‌کند تا مسیر تأیید OTP سالم بماند. */
 export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
   const [canvasHash, webglHash, audioHash, fontsHash, highEntropy] = await Promise.all([
     sha256Hex(canvasSignal()),
@@ -201,7 +278,7 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
     deviceMemory?: number
     connection?: { effectiveType?: string }
   }
-  const platform = nav.userAgentData?.platform ?? nav.platform ?? 'unknown'
+  const platform = safeStr(() => nav.userAgentData?.platform ?? nav.platform ?? '', 'unknown')
   // رارد ۳۱ — «Windows · 1920x1080 · Chrome 141» به‌جای «Windows · 1920x1080»؛
   // ادمین در فهرست دستگاه‌های کاربر می‌بیند کاربر با چه مرورگری آمده
   const browser = browserLabel(navigator.userAgent)
@@ -210,21 +287,33 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
   // stage-72 (P2-۲۳) — maxTouchPoints برای آیپدِ دسکتاپ‌مود (UA مک)
   const identity = detectDeviceIdentity(navigator.userAgent, highEntropy, navigator.maxTouchPoints)
 
+  const screenDesc = safeStr(
+    () => `${screen.width}x${screen.height}x${screen.colorDepth}@${devicePixelRatio}`,
+    'unknown',
+  )
+  const timezone = safeStr(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+    'unknown',
+  )
+  const language = safeStr(() => navigator.language, 'unknown')
+
   return {
     clientId: getClientId(),
     canvasHash,
     webglHash,
     audioHash,
     fontsHash,
-    screen: `${screen.width}x${screen.height}x${screen.colorDepth}@${devicePixelRatio}`,
+    screen: screenDesc,
     platform,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'unknown',
-    language: navigator.language ?? 'unknown',
-    hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+    timezone,
+    language,
+    hardwareConcurrency: nav.hardwareConcurrency ?? null,
     deviceMemory: nav.deviceMemory ?? null,
     touch: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
     networkType: nav.connection?.effectiveType ?? null,
-    label: browser ? `${platform} · ${screen.width}x${screen.height} · ${browser}` : `${platform} · ${screen.width}x${screen.height}`,
+    label: browser
+      ? `${platform} · ${safeStr(() => `${screen.width}x${screen.height}`, '?')} · ${browser}`
+      : `${platform} · ${safeStr(() => `${screen.width}x${screen.height}`, '?')}`,
     deviceType: identity.type,
     deviceBrand: identity.brand,
     deviceModel: identity.model,

@@ -14,7 +14,8 @@
     "build:pwa": "bun run build && bun scripts/build-sw.mjs && bun scripts/copy-sw.mjs",
     "format": "biome format",
     "lint": "biome lint",
-    "check": "biome check"
+    "check": "biome check",
+    "test:device": "bun scripts/test-device-fingerprint.ts"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",

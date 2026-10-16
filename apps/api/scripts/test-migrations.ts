@@ -4,7 +4,7 @@
  *
  *   bun scripts/test-migrations.ts        (یا: bun run db:test:migrations)
  *
- * چه می‌کند؟ روی «دیتابیس‌های موقتیِ» همان سرور (sinshin_e2e_…) چهار
+ * چه می‌کند؟ روی «دیتابیس‌های موقتیِ» همان سرور (sinshin_e2e_…) پنج
  * سناریو را اجرا می‌کند — به دیتابیسِ خودِ DATABASE_URL دست نمی‌زند:
  *
  *  A) بازتولید دقیقِ خطای کارفرما: دیتابیسِ قدیمیِ روی ۰۰۰۴ با clientIdهای
@@ -15,15 +15,28 @@
  *     اجرای دوباره = صفر تغییر (ایدمپوتنت).
  *  B) دیتابیس فریش: زنجیره‌ی کامل تمیز اعمال می‌شود؛ اجرای دوباره no-op.
  *  C) دیتابیسِ «روی ۰۰۰۵» (پروداکشن قبل از stage-71): ردیف‌های legacy
- *     بدون نوع/برند/مالک → بک‌فیل‌ها پر می‌شوند؛ اجرای دوباره no-op.
+ *     بدون نوع/برند/مالک → بک‌فیل‌های ①/② پر می‌شوند؛ اجرای دوباره no-op.
  *  D) دیتابیسِ با journalِ جلوتر از زنجیره (۰۰۰۶ِ قدیمیِ دستی اعمال‌شده):
  *     db:migrate بدون خطا رد می‌شود و چیزی خراب نمی‌کند.
+ *  E) stage-73 — «پاک‌سازیِ auto:% نسخه‌دار» (یافته‌ی ۲ کارفرما):
+ *     E1 = دقیقاً دیتابیسِ کاریِ کارفرما: بک‌فیل stage-72 قبلاً اجرا شده
+ *          (رویداد AUTO_UNBLOCK موجود) + مسدودیِ خودکارِ «جدید» →
+ *          db:migrate فقط مارکر می‌نویسد؛ مسدودیِ جدید زنده می‌ماند.
+ *     E2 = ضمانتِ یک‌باره: دیتابیسِ بدون-execution (بازگردانی از بکاپ) →
+ *          اجرای اول مسدودی‌های قدیمی را آزاد می‌کند؛ مسدودیِ ساخته‌شده
+ *          «بعد از» آن، در db:migrate بعدی آزاد «نمی‌شود» (باگ اصلی).
+ *     E3 = پرچم اپراتور: DEVICE_BACKFILL_SKIP_AUTO_UNBLOCK=1 → آزادسازی
+ *          رد؛ بندهای بی‌ضرر اجرا؛ مارکر ثبت.
+ *     E4 = جدول backfill_runs نباشد (db:generate اجرا نشده) → db:migrate
+ *          بدون خطا + راهنمای صریح؛ بندهای ①/② همچنان اجرا.
  *
  * پیش‌نیاز: کاربر دیتابیس اختیار CREATE DATABASE داشته باشد (برای
  * ساخت/حذف دیتابیس‌های موقتی). در پایان همه‌ی موقتی‌ها drop می‌شوند.
  */
 import { SQL } from 'bun'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 // ── ابزار ─────────────────────────────────────────────────────────
 
@@ -34,7 +47,7 @@ interface UrlParts {
 }
 
 function parseUrl(): UrlParts {
-  const raw = process.env.DATABASE_URL ?? 'postgres://sinshin:sinshin_local@localhost:5432/sinshin'
+  const raw = process.env.DATABASE_URL ?? 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin'
   const url = new URL(raw)
   const targetDb = url.pathname.replace(/^\//, '')
   if (!targetDb) throw new Error('DATABASE_URL باید نام دیتابیس داشته باشد')
@@ -44,6 +57,14 @@ function parseUrl(): UrlParts {
 }
 
 const { admin, target, targetDb } = parseUrl()
+
+/** تعداد ورودی‌های زنجیره‌ی روی دیسک — داینامیک (قبل/بعد از db:generate کار می‌کند) */
+const DRIZZLE_DIR = join(import.meta.dir, '..', 'drizzle')
+const CHAIN_COUNT = (
+  JSON.parse(readFileSync(join(DRIZZLE_DIR, 'meta', '_journal.json'), 'utf8')) as {
+    entries: unknown[]
+  }
+).entries.length
 
 const scratches: string[] = []
 let pass = 0
@@ -88,13 +109,14 @@ async function withScratch(name: string, fn: (url: string) => Promise<void>): Pr
   }
 }
 
-/** شناسه‌ی امن برای create/drop database (فقط نام‌های داخلی) */
-
 /** اجرای db:migrate واقعی (همان اسکریپت deploy) روی URL داده‌شده */
-async function runRealMigrate(url: string): Promise<{ code: number; out: string }> {
+async function runRealMigrate(
+  url: string,
+  env: Record<string, string> = {},
+): Promise<{ code: number; out: string }> {
   const proc = Bun.spawn(['bun', 'src/infra/db/migrate.ts'], {
     cwd: import.meta.dir + '/..',
-    env: { ...process.env, DATABASE_URL: url },
+    env: { ...process.env, DATABASE_URL: url, ...env },
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -161,11 +183,18 @@ insert into "device_events" ("device_id","phone","event","created_at") values
   ('10000000-0000-0000-0000-000000000016','09150000017','REGISTER', now() - interval '5 days');
 `
 
+/** یک مسدودیِ خودکارِ «جدید» (با منطق stage-70+ ساخته‌شده) */
+const NEW_AUTO_BLOCK_SQL = (suffix: string) => `
+insert into "devices" ("id","fingerprint_hash","canvas_hash","webgl_hash","audio_hash","fonts_hash","is_blocked","blocked_reason","blocked_at","risk_score") values
+  ('20000000-0000-0000-0000-0000000000${suffix}','f-new${suffix}','cn${suffix}','wn${suffix}','an${suffix}','fon${suffix}',true,'auto: crowded-cluster,canvas-drift',now(),95);
+`
+
 /** بازگرداندن دیتابیسِ تازه به حالتِ «۰۰۰۴ + دیتای کثیف» (شبیه‌سازی پروداکشن) */
 async function buildLegacyAt0004(url: string): Promise<void> {
   const res = await runRealMigrate(url)
   if (res.code !== 0) throw new Error('migrate اولیه برای ساخت legacy ناموفق بود')
   await q(url, `
+    drop table if exists "backfill_runs";
     drop index if exists "devices_client_id_uidx";
     drop index if exists "devices_type_idx";
     alter table "devices"
@@ -190,6 +219,11 @@ async function typeBrand(url: string, suffix: string): Promise<[string | null, s
   const s = String(v ?? '∅|∅')
   const [type = '', brand = ''] = s.split('|')
   return [type === '∅' || type === '' ? null : type, brand === '∅' || brand === '' ? null : brand]
+}
+
+/** حذف مارکرِ پاک‌سازی نسخه‌دار (شبیه‌سازیِ دیتابیسِ بدون backfill_runs قبلی) */
+async function clearVersionedMarker(url: string): Promise<void> {
+  await q(url, `delete from "backfill_runs"`)
 }
 
 // ── سناریو A — خطای کارفرما + شفا ────────────────────────────────
@@ -235,7 +269,9 @@ await withScratch('a', async (url) => {
   const uidx = await scalar(url, `select count(*)::int as n from pg_indexes where indexname = 'devices_client_id_uidx'`)
   ok('A2: ایندکس یکتای ۰۰۰۵ ساخته شد', uidx === 1)
   const journalRows = await scalar(url, `select count(*)::int as n from "drizzle"."__drizzle_migrations"`)
-  ok('A2: زنجیره‌ی journal (۶ ورودی) اعمال شد', journalRows === 6)
+  ok(`A2: زنجیره‌ی journal (${CHAIN_COUNT} ورودی) اعمال شد`, journalRows === CHAIN_COUNT)
+  const runsTable = await scalar(url, `select to_regclass('public.backfill_runs') is not null as v`)
+  ok('A2: جدول backfill_runs (DDL خالص ۰۰۰۶) ساخته شد', String(runsTable) === 'true')
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)
   const expects: Array<[string, string | null, string | null]> = [
@@ -259,22 +295,26 @@ await withScratch('a', async (url) => {
   const owner15 = await scalar(url, `select "registered_owner_phone" as v from "devices" where "id" = '10000000-0000-0000-0000-000000000015'`)
   ok('A4: دستگاهِ فقط-LOGIN مالک نگرفت (بدون بلاکِ گذشته‌نگر)', owner15 === null)
 
-  // A5 — آزادسازی مسدودی‌های خودکار
+  // A5 — آزادسازی مسدودی‌های خودکار (نسخه‌دار — اجرای نخست)
   const unblocked = await scalar(url, `select count(*)::int as n from "devices" where "is_blocked" = false and "blocked_reason" = 'auto-cleared:backfill'`)
-  ok('A5: دو مسدودیِ auto:% آزاد شدند', unblocked === 2)
+  ok('A5: دو مسدودیِ auto:% آزاد شدند (پاک‌سازیِ یک‌باره‌ی v1)', unblocked === 2)
   const manual = await scalar(url, `select "is_blocked" as v from "devices" where "id" = '10000000-0000-0000-0000-000000000014'`)
   ok('A5: مسدودی دستیِ ادمین دست‌نخورده ماند', String(manual) === 'true')
   const events = await scalar(url, `select count(*)::int as n from "device_events" where "event" = 'AUTO_UNBLOCK'`)
   ok('A5: رویداد AUTO_UNBLOCK برای هر آزادسازی ثبت شد', events === 2)
+  const marker = await scalar(url, `select count(*)::int as n from "backfill_runs" where "name" = 'device-auto-unblock'`)
+  ok('A5: مارکرِ نسخه‌دار در backfill_runs ثبت شد', marker === 1)
 
-  // A6 — ایدمپوتنت: اجرای دوباره = صفر تغییر
+  // A6 — ایدمپوتنت: اجرای دوباره = صفر تغییر + مسدودیِ «جدید» زنده می‌ماند
+  await q(url, NEW_AUTO_BLOCK_SQL('21'))
   const before = await scalar(url, `select md5(jsonb_agg(to_jsonb(d) order by d.id)::text) as v from "devices" d`)
   const res2 = await runRealMigrate(url)
   ok('A6: اجرای دوباره موفق', res2.code === 0)
+  ok('A6: اجرای دوباره = رد شدِ پاک‌سازی (مارکر)', /قبلاً اعمال شده/.test(res2.out))
   const after = await scalar(url, `select md5(jsonb_agg(to_jsonb(d) order by d.id)::text) as v from "devices" d`)
-  ok('A6: ردیف‌های devices بی‌تغییر ماندند', before === after)
-  const events2 = await scalar(url, `select count(*)::int as n from "device_events" where "event" = 'AUTO_UNBLOCK'`)
-  ok('A6: رویداد تازه‌ای ثبت نشد', events2 === 2)
+  ok('A6: ردیف‌های devices (شامل مسدودیِ جدید) بی‌تغییر ماندند', before === after)
+  const newBlock = await scalar(url, `select "is_blocked" as v from "devices" where "id" = '20000000-0000-0000-0000-000000000021'`)
+  ok('A6: مسدودیِ خودکارِ «بعد از اجرای اول» آزاد «نشد» (باگ اصلی بسته شد)', String(newBlock) === 'true')
 })
 
 // ── سناریو B — دیتابیس فریش ──────────────────────────────────────
@@ -283,9 +323,11 @@ await withScratch('b', async (url) => {
   const res = await runRealMigrate(url)
   ok('B1: زنجیره‌ی کامل روی DB فریش اعمال شد', res.code === 0)
   const journalRows = await scalar(url, `select count(*)::int as n from "drizzle"."__drizzle_migrations"`)
-  ok('B1: journal = ۶ ورودی', journalRows === 6)
+  ok(`B1: journal = ${CHAIN_COUNT} ورودی`, journalRows === CHAIN_COUNT)
   const devices = await scalar(url, `select count(*)::int as n from "devices"`)
   ok('B1: بک‌فیل‌ها روی جدولِ خالی no-op بودند', devices === 0)
+  const marker = await scalar(url, `select count(*)::int as n from "backfill_runs"`)
+  ok('B1: مارکر نسخه‌دار روی DB فریش ثبت شد', marker === 1)
   const res2 = await runRealMigrate(url)
   ok('B2: اجرای دوباره no-op موفق', res2.code === 0 && /بک‌فیل جدیدی لازم نبود/.test(res2.out))
 })
@@ -314,10 +356,11 @@ await withScratch('d', async (url) => {
   const res = await runRealMigrate(url)
   if (res.code !== 0) throw new Error('migrate اولیه D ناموفق')
   // شبیه‌سازی: کارفرما ۰۰۰۶ِ قدیمیِ دستی را قبلاً اعمال کرده (timestamp
-  // بزرگ‌تر از آخرین ورودی زنجیره‌ی جدید) و دیتایش بک‌فیل شده
+  // بزرگ‌تر از آخرین ورودی زنجیره) و دیتایش بک‌فیل شده
+  const maxTs = await scalar(url, `select max(created_at)::bigint as v from "drizzle"."__drizzle_migrations"`)
   await q(url, `
     insert into "drizzle"."__drizzle_migrations" ("hash", "created_at")
-    values ('legacy-0006-hash', 1792108549564);
+    values ('legacy-0006-hash', ${Number(maxTs) + 1});
   `)
   await q(url, LEGACY_SQL)
   await q(url, `
@@ -327,7 +370,114 @@ await withScratch('d', async (url) => {
   const res2 = await runRealMigrate(url)
   ok('D1: روی DBِ با journal جلوتر، db:migrate بدون خطا رد شد', res2.code === 0)
   const journalRows = await scalar(url, `select count(*)::int as n from "drizzle"."__drizzle_migrations"`)
-  ok('D2: زنجیره دوباره اعمال نشد (۷ ردیف می‌ماند)', journalRows === 7)
+  ok(`D2: زنجیره دوباره اعمال نشد (${CHAIN_COUNT + 1} ردیف می‌ماند)`, journalRows === CHAIN_COUNT + 1)
+})
+
+// ── سناریو E — stage-73: پاک‌سازی auto:% نسخه‌دار (یافته‌ی ۲) ──────
+
+// E1 — دیتابیسِ کاریِ کارفرما: شواهدِ اجرای stage-72 + مسدودیِ جدید
+await withScratch('e1', async (url) => {
+  const res = await runRealMigrate(url)
+  if (res.code !== 0) throw new Error('migrate اولیه E1 ناموفق')
+  // شبیه‌سازی: بک‌فیل stage-72 «قبلاً» اجرا شده (رویداد AUTO_UNBLOCK موجود
+  // — دیتابیسِ کاریِ کارفرما جدول backfill_runs نداشت → مارکر هم نیست)
+  await clearVersionedMarker(url)
+  await q(url, `insert into "devices" ("id","fingerprint_hash","canvas_hash","webgl_hash","audio_hash","fonts_hash") values ('10000000-0000-0000-0000-000000000012','f-b12','cb','wb','ab','fob')`)
+  await q(url, `insert into "device_events" ("device_id","phone","event") values ('10000000-0000-0000-0000-000000000012', null, 'AUTO_UNBLOCK')`)
+  await q(url, `update "devices" set "is_blocked" = false, "blocked_reason" = 'auto-cleared:backfill' where "id" = '10000000-0000-0000-0000-000000000012'`)
+  await q(url, NEW_AUTO_BLOCK_SQL('31'))
+  const res2 = await runRealMigrate(url)
+  ok('E1: db:migrate بعد از stage-72 موفق', res2.code === 0)
+  ok(
+    'E1: شواهدِ اجرای قبلی تشخیص شد — فقط مارکر (بدون اجرای پاک‌سازی)',
+    /اجرای قبلیِ stage-72 شناسایی شد/.test(res2.out),
+    res2.out.split('\n').find((l) => l.includes('stage-72')) ?? '(no match)',
+  )
+  const newBlock = await scalar(url, `select "is_blocked" as v from "devices" where "id" = '20000000-0000-0000-0000-000000000031'`)
+  ok('E1: مسدودیِ خودکارِ جدید (post-stage-72) زنده ماند — باگِ کارفرما بسته شد', String(newBlock) === 'true')
+  const marker = await scalar(url, `select count(*)::int as n from "backfill_runs" where "name" = 'device-auto-unblock'`)
+  ok('E1: مارکر از روی شواهد ثبت شد (از این به بعد همیشه رد)', marker === 1)
+  // سومین اجرا: already-applied
+  const res3 = await runRealMigrate(url)
+  ok('E1: اجرای سوم = already-applied', res3.code === 0 && /قبلاً اعمال شده/.test(res3.out))
+})
+
+// E2 — ضمانتِ یک‌باره: دیتابیسِ بدون-execution (بازگردانی از بکاپ)
+await withScratch('e2', async (url) => {
+  const res = await runRealMigrate(url)
+  if (res.code !== 0) throw new Error('migrate اولیه E2 ناموفق')
+  // شبیه‌سازیِ restore از بکاپِ قبل از stage-72: مارکر نیست، شواهد نیست،
+  // مسدودی‌های خودکارِ قدیمی هست
+  await clearVersionedMarker(url)
+  await q(url, LEGACY_SQL) // شامل دو مسدودیِ auto:% قدیمی (f-b12/f-b13)
+  const res2 = await runRealMigrate(url)
+  ok('E2: db:migrate روی DBِ بازگردانده‌شده موفق', res2.code === 0)
+  const unblocked = await scalar(url, `select count(*)::int as n from "devices" where "is_blocked" = false and "blocked_reason" = 'auto-cleared:backfill'`)
+  ok('E2: پاک‌سازیِ v1 مسدودی‌های «قدیمی» را آزاد کرد (دقیقاً یک‌بار)', unblocked === 2)
+  const marker = await scalar(url, `select count(*)::int as n from "backfill_runs" where "name" = 'device-auto-unblock'`)
+  ok('E2: مارکر ثبت شد', marker === 1)
+  // مسدودیِ «جدید» بعد از پاک‌سازی — باید در deploy بعدی زنده بماند
+  await q(url, NEW_AUTO_BLOCK_SQL('41'))
+  const res3 = await runRealMigrate(url)
+  ok('E3: اجرای بعدی موفق', res3.code === 0)
+  const newBlock = await scalar(url, `select "is_blocked" as v from "devices" where "id" = '20000000-0000-0000-0000-000000000041'`)
+  ok('E2: مسدودیِ ساخته‌شده بعد از پاک‌سازی، در deploy بعدی آزاد «نشد»', String(newBlock) === 'true')
+})
+
+// E3 — پرچم اپراتور: DEVICE_BACKFILL_SKIP_AUTO_UNBLOCK=1
+await withScratch('e3', async (url) => {
+  const res = await runRealMigrate(url)
+  if (res.code !== 0) throw new Error('migrate اولیه E3 ناموفق')
+  await clearVersionedMarker(url)
+  await q(url, LEGACY_SQL)
+  const res2 = await runRealMigrate(url, { DEVICE_BACKFILL_SKIP_AUTO_UNBLOCK: '1' })
+  ok('E3: db:migrate با پرچم skip موفق', res2.code === 0)
+  ok('E3: پیامِ رد شدنِ آزادسازی لاگ شد', /پرچم DEVICE_BACKFILL_SKIP_AUTO_UNBLOCK رد شد/.test(res2.out))
+  const stillBlocked = await scalar(url, `select count(*)::int as n from "devices" where "is_blocked" = true and "blocked_reason" like 'auto:%'`)
+  ok('E3: هر دو مسدودی auto:% حفظ شدند', stillBlocked === 2)
+  const marker = await scalar(url, `select count(*)::int as n from "backfill_runs"`)
+  ok('E3: مارکر ثبت شد (برای همیشه «اجراشده»)', marker === 1)
+  const [t, b] = await typeBrand(url, '05')
+  ok('E3: بندهای بی‌ضرر (①/②) با پرچم هم اجرا شدند', t === 'mobile' && b === 'samsung')
+})
+
+// E4 — جدول backfill_runs نباشد (db:generate اجرا نشده)
+await withScratch('e4', async (url) => {
+  // زنجیره را موقتاً به حالتِ «بدون ۰۰۰۶» برگردان (فایل‌ها + journal)
+  const journalPath = join(DRIZZLE_DIR, 'meta', '_journal.json')
+  const backupDir = `/tmp/sinshin-e4-chain-${process.pid}`
+  mkdirSync(backupDir, { recursive: true })
+  const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
+    entries: Array<{ tag: string }>
+  }
+  const lastIdx = journal.entries.length - 1
+  const lastTag = journal.entries[lastIdx]?.tag ?? ''
+  const sqlFile = join(DRIZZLE_DIR, `${lastTag}.sql`)
+  const snapPath = join(DRIZZLE_DIR, 'meta', `${String(lastIdx).padStart(4, '0')}_snapshot.json`)
+  try {
+    copyFileSync(journalPath, join(backupDir, '_journal.json'))
+    copyFileSync(sqlFile, join(backupDir, `${lastTag}.sql`))
+    copyFileSync(snapPath, join(backupDir, 'snapshot.json'))
+    writeFileSync(journalPath, JSON.stringify({ ...journal, entries: journal.entries.slice(0, -1) }, null, 2))
+    rmSync(sqlFile)
+    rmSync(snapPath)
+
+    const res = await runRealMigrate(url)
+    ok('E4: db:migrate بدون ۰۰۰۶ (جدول backfill_runs نیست) بدون خطا', res.code === 0)
+    ok(
+      'E4: راهنمای db:generate لاگ شد',
+      /جدول backfill_runs هنوز ساخته نشده/.test(res.out),
+      res.out.split('\n').find((l) => l.includes('backfill_runs')) ?? '(no match)',
+    )
+    const runsTable = await scalar(url, `select to_regclass('public.backfill_runs') is not null as v`)
+    ok('E4: جدول backfill_runs ساخته نشد (زنجیره‌ای نبود)', String(runsTable) === 'false')
+  } finally {
+    // بازگرداندن زنجیره — قبل از هر چیز دیگری
+    copyFileSync(join(backupDir, '_journal.json'), journalPath)
+    copyFileSync(join(backupDir, `${lastTag}.sql`), sqlFile)
+    copyFileSync(join(backupDir, 'snapshot.json'), snapPath)
+    rmSync(backupDir, { recursive: true, force: true })
+  }
 })
 
 // ── جمع‌بندی ──────────────────────────────────────────────────────
