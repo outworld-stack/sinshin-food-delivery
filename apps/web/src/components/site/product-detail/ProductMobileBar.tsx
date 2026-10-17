@@ -14,9 +14,9 @@
 
 // src/components/site/product-detail/ProductMobileBar.tsx
 import { memo, useState } from 'react'
-import { Cart, BoxRemove } from 'reicon-react'
-import { useI18n } from '#/i18n'
+import { BoxRemove, Cart } from 'reicon-react'
 import { CountdownTimer } from '#/components/shared/CountdownTimer'
+import { useI18n } from '#/i18n'
 
 interface ProductMobileBarProps {
 	totalPrice: number
@@ -29,6 +29,8 @@ interface ProductMobileBarProps {
 	onCountdownEnd?: () => void
 	/** stage-48 — موجودی فروش (false = قفل + هشدار) */
 	isAvailable?: boolean
+	/** stage-86 — امکان خرید زنجیره‌ی دسته (false = قفل + هشدارِ مخصوص) */
+	purchasable?: boolean
 	onIncrement: () => void
 	onDecrement: () => void
 	onAddToCart: () => void
@@ -43,6 +45,7 @@ export const ProductMobileBar = memo(function ProductMobileBar({
 	discountEndsAt,
 	onCountdownEnd,
 	isAvailable = true,
+	purchasable = true,
 	onIncrement,
 	onDecrement,
 	onAddToCart,
@@ -50,9 +53,11 @@ export const ProductMobileBar = memo(function ProductMobileBar({
 	const { t, fmt } = useI18n()
 	// stage-55 — bump لمسی دکمه‌ی افزودن به سبد (CSS-only — animate-cart-bump)
 	const [bump, setBump] = useState(false)
+	// stage-86 — قفلِ نهایی: ناموجودی یا دسته‌ی خریدِغیرفعال
+	const buyLocked = !isAvailable || purchasable === false
 
 	// stage-55 — ارتفاع ناحیه‌ی امن آیفون (home indicator)
-return (
+	return (
 		<div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 pt-4 px-4 pb-safe bg-white dark:bg-[#1a0a0e] border-t border-gray-200 dark:border-[#3a151c] shadow-[0_-4px_15px_rgba(0,0,0,0.05)]">
 			<div className="flex items-center justify-between gap-3">
 				<div className="flex flex-col min-w-0">
@@ -108,17 +113,19 @@ return (
 							onAddToCart()
 							setBump(true)
 						}}
-						disabled={!isAvailable}
+						disabled={buyLocked}
 						onAnimationEnd={() => setBump(false)}
 						aria-label={
 							isAvailable
-								? t['pdetail.addToCart']
+								? purchasable
+									? t['pdetail.addToCart']
+									: t['common.purchaseDisabledBadge']
 								: t['common.temporarilyUnavailable']
 						}
 						className={`flex items-center justify-center p-3 rounded-xl transition ${
-							isAvailable
-								? 'bg-primary dark:bg-dark-primary text-white shadow-sm cursor-pointer'
-								: 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+							buyLocked
+								? 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+								: 'bg-primary dark:bg-dark-primary text-white shadow-sm cursor-pointer'
 						}${bump ? ' animate-cart-bump' : ''}`}
 					>
 						<Cart size={24} />
@@ -126,12 +133,15 @@ return (
 				</div>
 			</div>
 
-			{/* stage-48 — هشدار نارنجی ناموجودی در نوار موبایل */}
-			{!isAvailable && (
+			{/* stage-48 — هشدار نارنجی ناموجودی در نوار موبایل
+                            stage-86 — دسته‌ی خریدِغیرفعال: همان قالب با متنِ مخصوص */}
+			{buyLocked && (
 				<div className="flex items-center gap-2 mt-2 p-2 rounded-xl bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20">
 					<BoxRemove size={16} className="text-orange-500 shrink-0" />
 					<p className="text-[11px] text-orange-600 dark:text-orange-400 font-DanaMedium leading-relaxed">
-						{t['pdetail.unavailableNotice']}
+						{isAvailable
+							? t['pdetail.categoryDisabledNotice']
+							: t['pdetail.unavailableNotice']}
 					</p>
 				</div>
 			)}

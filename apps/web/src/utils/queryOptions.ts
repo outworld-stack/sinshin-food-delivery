@@ -79,6 +79,7 @@ import {
 	getAdminMainCategories,
 	getAdminProductDetails,
 	getAdminProducts,
+	getAdminPurchaseState,
 	getCartDetails,
 	getCategories,
 	getCategoriesByMain,
@@ -408,6 +409,13 @@ export const adminMainCategoriesOptions = queryOptions({
 	queryKey: qk.adminMainCategories,
 	queryFn: () => getAdminMainCategories(),
 	staleTime: 60_000,
+})
+
+// stage-86 — وضعیت خریدِ دسته‌ها (کارت «فعال/غیرفعال خرید» پنل محصولات).
+// staleTime 0: سوئیچِ ادمین دیگری (مثلاً ادمین۲ روی دستگاه دیگر) فوری دیده شود.
+export const adminPurchaseStateOptions = queryOptions({
+	queryKey: qk.adminPurchaseState,
+	queryFn: () => getAdminPurchaseState(),
 })
 
 // جزئیات محصول برای فرم ویرایش — بعد از ذخیره نامعتبرسازی می‌شه

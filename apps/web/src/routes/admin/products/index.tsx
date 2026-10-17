@@ -5,6 +5,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { Plus } from 'reicon-react'
 import { AdminProductCard } from '#/components/admin/products/AdminProductCard'
 import { CategoryManager } from '#/components/admin/products/CategoryManager'
+import { CategoryPurchaseManager } from '#/components/admin/products/CategoryPurchaseManager'
 import { MainCategoryManager } from '#/components/admin/products/MainCategoryManager'
 import { PackagingItemsManager } from '#/components/admin/products/PackagingItemsManager'
 import { ProductsFilterBox } from '#/components/admin/products/ProductsFilterBox'
@@ -164,6 +165,16 @@ function AdminProductsPage() {
 						/>
 					)}
 				</div>
+
+				{/* stage-86 — فعال/غیرفعال کردنِ خریدِ دسته‌ها (والد + زیردسته).
+                                  گارد productsRead (نمایش)؛ سوئیچ = productsWrite — پس ادمین۲
+                                  با «دسترسی و ویرایش محصولات» هم می‌تواند (درخواستِ کارفرما). */}
+				<PermissionGate
+					hasAccess={page.permissions.productsRead}
+					pageName="فعال‌سازی خرید دسته‌بندی‌ها"
+				>
+					<CategoryPurchaseManager canWrite={page.permissions.productsWrite} />
+				</PermissionGate>
 
 				{/* مدیریت دسته‌های اصلی — گارد read + پراپ write */}
 				<PermissionGate

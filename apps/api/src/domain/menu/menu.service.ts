@@ -78,7 +78,8 @@ import { isUniqueViolation, likePattern } from '#/domain/shared/pg'
 import { UUID_RE } from '#/domain/shared/ids'
 // stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
 import { faNum } from '#/domain/report/format'
-import type { Product } from '@sinshin/shared'
+// stage-86 — DTO وضعیت خرید دسته‌ها (پاسخ GET /admin/menu/purchase-state)
+import type { Product, PurchaseStateDto } from '@sinshin/shared'
 
 const CACHE_TTL_SECONDS = 30
 const VERSION_KEY = 'menu:ver'
@@ -251,6 +252,50 @@ export async function loadCategoryModes(
       courier: r.courierEnabled,
       takeaway: r.takeawayEnabled,
       dineIn: r.dineInEnabled,
+    })
+  }
+  return out
+}
+
+/**
+ * stage-86 — وضعیت خریدِ هر دسته از زنجیره‌ی اولیه: purchaseEnabled خودِ
+ * دسته AND والدِ اولیه‌اش (categories.mainCategoryId). نام‌ها هم برای
+ * پیام‌های خطای سبد/چک‌اوت برمی‌گردند. الگوی loadCategoryModes (یک
+ * کوئری با join؛ idهای تکراری یک‌بار). غایب = همه روشن (fail-open
+ * نمایشی — گارد واقعی پولی در سبد/چک‌اوت سخت‌گیر است).
+ */
+export interface CategoryPurchaseState {
+  categoryPurchase: boolean
+  mainPurchase: boolean
+  categoryName: string
+  mainName: string
+}
+
+export async function loadCategoryPurchaseStates(
+  db: DbOrTx,
+  ids: readonly string[],
+): Promise<Map<CategoryId, CategoryPurchaseState>> {
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return new Map()
+  const rows = await db
+    .select({
+      id: categories.id,
+      categoryPurchase: categories.purchaseEnabled,
+      categoryName: categories.name,
+      mainPurchase: mainCategories.purchaseEnabled,
+      mainName: mainCategories.name,
+    })
+    .from(categories)
+    // والدِ اولیه — زنجیره‌ی مؤثرِ خرید (مسیر پول همیشه primary است)
+    .innerJoin(mainCategories, eq(mainCategories.id, categories.mainCategoryId))
+    .where(inArray(categories.id, unique as CategoryId[]))
+  const out = new Map<CategoryId, CategoryPurchaseState>()
+  for (const r of rows) {
+    out.set(r.id, {
+      categoryPurchase: r.categoryPurchase,
+      mainPurchase: r.mainPurchase,
+      categoryName: r.categoryName,
+      mainName: r.mainName,
     })
   }
   return out
@@ -521,8 +566,13 @@ export class MenuService {
       const catModes = new Map(
         catRows.map((c) => [c.id, categoryModesOf(c)] as const),
       )
+      // stage-86 — وضعیت خرید زنجیره‌ی اولیه برای purchasable هر محصول
+      const catPurchase = await loadCategoryPurchaseStates(
+        this.deps.db,
+        catRows.map((c) => c.id),
+      )
       return {
-        products: await this.withSizes(rows, catMap, lang, { catModes, categoryIdsMap }),
+        products: await this.withSizes(rows, catMap, lang, { catModes, categoryIdsMap, catPurchase }),
         categories: cats.map((c) => categoryView(c, lang)),
       }
     })
@@ -556,7 +606,12 @@ export class MenuService {
         new Map([[row.categoryId, pickAr(lang, cat?.nameAr, cat?.name ?? '')]]),
         lang,
         // stage-48 — حالت مؤثر = دسته AND محصول
-        { catModes: new Map([[row.categoryId, categoryModesOf(cat)]]), categoryIdsMap },
+        {
+          catModes: new Map([[row.categoryId, categoryModesOf(cat)]]),
+          categoryIdsMap,
+          // stage-86 — امکان خرید زنجیره‌ی اولیه (دکمه‌ی سبد صفحه‌ی محصول)
+          catPurchase: await loadCategoryPurchaseStates(this.deps.db, [row.categoryId]),
+        },
       )
       return list[0] ?? null
     }
@@ -679,6 +734,82 @@ export class MenuService {
     }
     await this.deps.db.delete(mainCategories).where(eq(mainCategories.id, mcId))
     await this.cache.invalidate()
+    return { success: true }
+  }
+
+  // ═══ stage-86 — ادمین: غیرفعال‌سازی خریدِ دسته‌ها (والد + زیردسته) ═══
+  // جدا از isActive (نمایش تب): خریدِ زنجیره‌ی اولیه قفل می‌شود؛ محصولات
+  // می‌مانند و فقط «افزودن به سبد خرید» غیرقابل کلیک می‌شود. گارد روت:
+  // productsWrite (ادمین اصلی همیشه؛ ادمین۲ با «ویرایش محصولات»).
+
+  /** وضعیت خریدِ همه‌ی والدها + زیردسته‌ها برای پنل محصولات (بدون کش) */
+  async adminPurchaseState(): Promise<PurchaseStateDto> {
+    const mains = await this.deps.db
+      .select({
+        id: mainCategories.id,
+        name: mainCategories.name,
+        slug: mainCategories.slug,
+        isActive: mainCategories.isActive,
+        purchaseEnabled: mainCategories.purchaseEnabled,
+      })
+      .from(mainCategories)
+      .orderBy(asc(mainCategories.sortOrder))
+    const cats = await this.deps.db
+      .select({
+        id: categories.id,
+        name: categories.name,
+        mainCategoryId: categories.mainCategoryId,
+        mainName: mainCategories.name,
+        purchaseEnabled: categories.purchaseEnabled,
+      })
+      .from(categories)
+      .innerJoin(mainCategories, eq(mainCategories.id, categories.mainCategoryId))
+      .orderBy(asc(mainCategories.sortOrder), asc(categories.name))
+    return { mains, categories: cats }
+  }
+
+  /** خریدِ همه‌ی محصولاتِ این والد را خاموش/روشن می‌کند */
+  async setMainPurchase(
+    id: string,
+    enabled: boolean,
+  ): Promise<{ success: boolean; message?: string }> {
+    const mcId = asMainCategoryId(id)
+    const row = await this.deps.db.query.mainCategories.findFirst({
+      where: eq(mainCategories.id, mcId),
+    })
+    if (!row) return { success: false, message: 'دسته اصلی پیدا نشد' }
+    if (row.purchaseEnabled === enabled) {
+      return { success: true, message: enabled ? 'خرید از قبل فعال است' : 'خرید از قبل غیرفعال است' }
+    }
+    await this.deps.db
+      .update(mainCategories)
+      .set({ purchaseEnabled: enabled })
+      .where(eq(mainCategories.id, mcId))
+    await this.cache.invalidate()
+    // سبد/چک‌اوتِ باز همان لحظه رفرش شوند (مصرف‌کننده‌های menu:live)
+    await this.publishMenuLive({ productId: null, reason: 'category' })
+    return { success: true }
+  }
+
+  /** خریدِ محصولاتِ این زیردسته را خاموش/روشن می‌کند */
+  async setCategoryPurchase(
+    id: string,
+    enabled: boolean,
+  ): Promise<{ success: boolean; message?: string }> {
+    const catId = asCategoryId(id)
+    const row = await this.deps.db.query.categories.findFirst({
+      where: eq(categories.id, catId),
+    })
+    if (!row) return { success: false, message: 'دسته‌بندی پیدا نشد' }
+    if (row.purchaseEnabled === enabled) {
+      return { success: true, message: enabled ? 'خرید از قبل فعال است' : 'خرید از قبل غیرفعال است' }
+    }
+    await this.deps.db
+      .update(categories)
+      .set({ purchaseEnabled: enabled })
+      .where(eq(categories.id, catId))
+    await this.cache.invalidate()
+    await this.publishMenuLive({ productId: null, reason: 'category' })
     return { success: true }
   }
 
@@ -943,7 +1074,15 @@ export class MenuService {
       rows.map((r) => [r.id, [r.categoryId, ...(extraByProduct.get(r.id) ?? [])]]),
     )
 
-    return { products: await this.withSizes(rows, catMap, undefined, { catModes, categoryIdsMap }), total }
+    return {
+      products: await this.withSizes(rows, catMap, undefined, {
+        catModes,
+        categoryIdsMap,
+        // stage-86 — خریدِ زنجیره‌ی دسته برای بج قفل روی کارت لیست ادمین
+        catPurchase: await loadCategoryPurchaseStates(this.deps.db, catIds),
+      }),
+      total,
+    }
   }
 
   async adminProductDetails(id: string): Promise<ProductDto | null> {
@@ -975,6 +1114,8 @@ export class MenuService {
       // stage-48 — حالت مؤثر = دسته AND محصول (فرم ادمین برای قفل سوئیچ‌ها)
       catModes: new Map([[row.categoryId, categoryModesOf(cat)]]),
       categoryIdsMap,
+      // stage-86 — خریدِ زنجیره‌ی دسته (بج قفل فرم/کارت ادمین)
+      catPurchase: await loadCategoryPurchaseStates(this.deps.db, [row.categoryId]),
     })
     const dto = list[0] ?? null
     if (dto) {
@@ -1516,6 +1657,8 @@ export class MenuService {
       catModes?: Map<CategoryId, OrderModes>
       /** stage-60 — دسته‌های هر محصول (دسته‌ی اولیه اول)؛ نیامد = فقط اولیه */
       categoryIdsMap?: Map<ProductId, CategoryId[]>
+      /** stage-86 — وضعیت خرید زنجیره‌ی اولیه (دسته AND والد)؛ نیامد = همه روشن */
+      catPurchase?: Map<CategoryId, CategoryPurchaseState>
     },
   ): Promise<ProductDto[]> {
     const sizedIds = rows.filter((r) => r.sizesEnabled).map((r) => r.id)
@@ -1580,6 +1723,11 @@ export class MenuService {
       status: r.status,
       // ── stage-48 — موجودی + حالت‌های مؤثر سفارش (دسته AND محصول) ──
       isAvailable: r.isAvailable,
+      // ── stage-86 — امکان خرید از زنجیره‌ی دسته‌ی اولیه (دسته AND والد) ──
+      // جداست از isAvailable (موجودی خودِ محصول): false = دکمه‌ی سبد قفل
+      purchasable:
+        (opts?.catPurchase?.get(r.categoryId)?.categoryPurchase ?? true) &&
+        (opts?.catPurchase?.get(r.categoryId)?.mainPurchase ?? true),
       courierAllowed: (opts?.catModes?.get(r.categoryId)?.courier ?? true) && r.courierAllowed,
       takeawayAllowed: (opts?.catModes?.get(r.categoryId)?.takeaway ?? true) && r.takeawayAllowed,
       dineInAllowed: (opts?.catModes?.get(r.categoryId)?.dineIn ?? true) && r.dineInAllowed,

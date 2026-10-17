@@ -32,6 +32,16 @@
 //        هرچه باشد (UI فرانت پس‌زمینه Aurora می‌گیرد).
 // ═════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// stage-86 — sinshin-food-delivery
+// مسیر مقصد: apps/api/src/infra/db/schema/menu.ts
+// تغییر: «غیرفعال‌سازی خرید» دسته‌بندی‌ها — ستون purchase_enabled روی
+//        main_categories و categories (پیش‌فرض true). غیرفعال = محصولاتِ
+//        زنجیره‌ی اولیه (دسته + والدِ دسته) دیده می‌شوند ولی «افزودن به
+//        سبد خرید»شان قفل است (کارت/صفحه‌ی محصول + گارد سبد/چک‌اوت).
+//        جدا از main_categories.is_active است (آن = نمایش/پنهان‌شدن تب).
+// ═══════════════════════════════════════════════════════════════
+
 //src/infra/db/schema/menu.ts
 import {
   boolean,
@@ -63,6 +73,12 @@ export const mainCategories = pgTable(
     isDefault: boolean('is_default').notNull().default(false),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * stage-86 — امکان خریدِ محصولاتِ این والد (پیش‌فرض روشن). خاموش = تب و
+     * محصولات می‌مانند ولی دکمه‌ی سبد قفل + سبد/چک‌اوت خطا می‌گیرند.
+     * جدا از isActive (نمایش تب) — مستقل از هم کار می‌کنند.
+     */
+    purchaseEnabled: boolean('purchase_enabled').notNull().default(true),
   },
   (t) => [
     uniqueIndex('main_categories_slug_key').on(t.slug),
@@ -99,6 +115,12 @@ export const categories = pgTable(
     takeawayEnabled: boolean('takeaway_enabled').notNull().default(true),
     /** تحویل در محل با سرو (DINE_IN) */
     dineInEnabled: boolean('dine_in_enabled').notNull().default(true),
+    /**
+     * stage-86 — امکان خریدِ محصولاتِ این دسته (پیش‌فرض روشن). خاموش = محصولات
+     * در منو می‌مانند ولی دکمه‌ی «افزودن به سبد خرید» (کارت + صفحه‌ی محصول)
+     * قفل + سبد/چک‌اوت گارد خطا. مؤثر = این پرچم AND پرچمِ والدِ اولیه.
+     */
+    purchaseEnabled: boolean('purchase_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

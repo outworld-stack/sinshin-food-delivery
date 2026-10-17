@@ -15,6 +15,7 @@ import { asProductId, asSizeId, type ProductId } from '#/domain/shared/brand'
 import {
   finalPriceOf,
   loadCategoryModes,
+  loadCategoryPurchaseStates,
   loadPricingBases,
   sizeFinalPriceOf,
 } from '#/domain/menu/menu.service'
@@ -49,6 +50,8 @@ export class CartService {
     // stage-48 — حالت‌های دسته‌ی همه‌ی محصولات سبد (یک کوئری)
     const categoryIds = [...new Set([...productMap.values()].map((p) => p.categoryId))]
     const catModes = await loadCategoryModes(this.deps.db, categoryIds)
+    // stage-86 — وضعیت خرید زنجیره‌ی اولیه (دسته AND والد) — یک کوئری
+    const catPurchase = await loadCategoryPurchaseStates(this.deps.db, categoryIds)
 
     const out: CartDetails['items'] = []
     let total = 0
@@ -62,7 +65,13 @@ export class CartService {
       const takeawayAllowed = (modes?.takeaway ?? true) && product.takeawayAllowed
       const dineInAllowed = (modes?.dineIn ?? true) && product.dineInAllowed
       // stage-48 — «فعلاً ناموجود»: فعال در منو ولی فروشش قفل است
-      const available = product.status === 'ACTIVE' && product.isAvailable
+      // stage-86 — دسته/والدِ غیرفعال هم دقیقاً همین برخورد را می‌گیرد
+      // (قفل + خارج از جمع) — blockedReason پیامِ درست را به سبد می‌دهد.
+      const purchaseState = catPurchase.get(product.categoryId)
+      const purchaseBlocked =
+        !(purchaseState?.categoryPurchase ?? true) || !(purchaseState?.mainPurchase ?? true)
+      const unavailable = product.status !== 'ACTIVE' || !product.isAvailable
+      const available = !unavailable && !purchaseBlocked
 
       // سیاستِ آسان‌گیرِ سبد (عین effectivePrice سابق): سایزِ انتخابی یا
       // اولین سایز — چک‌اوت سخت‌گیر است و سایزِ حذف‌شده را خطا می‌دهد
@@ -104,6 +113,8 @@ export class CartService {
         quantity: item.quantity,
         lineTotal,
         available,
+        // stage-86 — دلیلِ قفل برای متنِ هشدار سبد (غایب = ناموجودی)
+        ...(available ? {} : { blockedReason: unavailable ? ('unavailable' as const) : ('category' as const) }),
         courierAllowed,
         takeawayAllowed,
         dineInAllowed,

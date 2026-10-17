@@ -76,6 +76,7 @@ import { lockWalletAccounts, signedWalletAmount } from "#/domain/shared/wallet-s
 import {
         finalPriceOf,
         loadCategoryModes,
+        loadCategoryPurchaseStates,
         loadPricingBases,
         sizeFinalPriceOf,
 } from "#/domain/menu/menu.service";
@@ -244,6 +245,8 @@ export class OrderService {
                         // ناموجود → خطای صریح (نه skip بی‌صدا): کاربر باید هشدار نارنجی
                         // سبد/چک‌اوت را ببیند، نه اینکه آیتم‌ها بی‌سروصدا حذف شوند.
                         const unavailableNames: string[] = [];
+                        // stage-86 — آیتم‌هایِ دسته/والدِ خریدِغیرفعال (پیام مخصوص)
+                        const categoryBlockedNames: string[] = [];
                         const courierBlockedNames: string[] = [];
                         const takeawayBlockedNames: string[] = [];
                         const dineInBlockedNames: string[] = [];
@@ -266,6 +269,12 @@ export class OrderService {
                                 tx,
                                 [...new Set([...productMap.values()].map((p) => p.categoryId))],
                         );
+                        // stage-86 — وضعیت خرید زنجیره‌ی اولیه (دسته AND والد) —
+                        // گارد پولی: آیتمِ دسته/والدِ غیرفعال، سفارش را قفل می‌کند
+                        const catPurchase = await loadCategoryPurchaseStates(
+                                tx,
+                                [...new Set([...productMap.values()].map((p) => p.categoryId))],
+                        );
                         for (const item of input.items) {
                                 const product = productMap.get(asProductId(item.productId));
                                 if (!product) throw Err.validation("یکی از محصولات سبد دیگر موجود نیست — سبد خرید را به‌روز کنید.");
@@ -273,6 +282,20 @@ export class OrderService {
                                 // stage-48 — ناموجود: فعال در منو ولی فروش قفل → سفارش قابل ثبت نیست
                                 if (product.status !== "ACTIVE" || !product.isAvailable) {
                                         unavailableNames.push(product.name);
+                                        continue;
+                                }
+                                // stage-86 — دسته/والدِ غیرفعال: خرید قفل — پیامِ
+                                // مشخص تا کاربر بداند مشکل از دسته‌بندی است
+                                const purchaseState = catPurchase.get(product.categoryId);
+                                if (
+                                        !(purchaseState?.categoryPurchase ?? true) ||
+                                        !(purchaseState?.mainPurchase ?? true)
+                                ) {
+                                        categoryBlockedNames.push(
+                                                purchaseState?.categoryPurchase === false
+                                                        ? purchaseState.categoryName
+                                                        : purchaseState?.mainName ?? product.name,
+                                        );
                                         continue;
                                 }
                                 // stage-48 — حالت مؤثر سفارش این آیتم (برای گزینه‌ی تحویلِ انتخابی)
@@ -331,14 +354,22 @@ export class OrderService {
                                         packagingCost: packagingCostOf(product.id, product.packagingCost),
                                 });
                         }
-                        if (itemRows.length === 0)
+                        if (itemRows.length === 0 && unavailableNames.length === 0 && categoryBlockedNames.length === 0)
                                 throw Err.validation("هیچ آیتم معتبری در سبد نیست.");
 
                         // ── stage-48 — گارد ناموجودی و حالت تحویل ──
                         // ناموجود → خطا (پرداخت قفل؛ فرانت هشدار نارنجی داده)
+                        // (ترتیب: ناموجودی/دسته‌ی غیرفعال مقدم بر «هیچ آیتم معتبری» —
+                        // پیامِ مشخص‌تر برای سبدِ تک‌آیتمیِ تماماً قفل‌شده)
                         if (unavailableNames.length > 0) {
                                 throw Err.validation(
                                         `محصول «${unavailableNames[0]}» فعلاً ناموجود است — سبد خرید را به‌روز کنید.`,
+                                );
+                        }
+                        // stage-86 — دسته/والدِ غیرفعال → خطا با ذکرِ نامِ دسته
+                        if (categoryBlockedNames.length > 0) {
+                                throw Err.validation(
+                                        `خرید «${categoryBlockedNames[0]}» فعلاً غیرفعال شده است — این محصول را از سبد حذف کنید.`,
                                 );
                         }
                         // یک آیتم محدود ⇒ کل سفارش در آن حالت ارسال نمی‌شود
@@ -677,6 +708,7 @@ export class OrderService {
                         unitPrice: number;
                         quantity: number;
                         available: boolean;
+                        blockedReason?: "unavailable" | "category";
                         courierAllowed: boolean;
                         takeawayAllowed: boolean;
                         dineInAllowed: boolean;
@@ -698,6 +730,12 @@ export class OrderService {
                         db,
                         [...new Set([...productMap.values()].map((p) => p.categoryId))],
                 );
+                // stage-86 — وضعیت خرید زنجیره‌ی اولیه (دسته AND والد) —
+                // آیتمِ قفل‌شده با هشدار نارنجیِ مخصوص برمی‌گردد
+                const catPurchase = await loadCategoryPurchaseStates(
+                        db,
+                        [...new Set([...productMap.values()].map((p) => p.categoryId))],
+                );
                 for (const item of input.items) {
                         const product = productMap.get(asProductId(item.productId));
                         if (!product) throw Err.validation("یکی از محصولات سبد دیگر موجود نیست — سبد خرید را به‌روز کنید.");
@@ -710,7 +748,13 @@ export class OrderService {
                         const dineInAllowed =
                                 (modes?.dineIn ?? true) && product.dineInAllowed;
                         // stage-48 — ناموجود: نمایش با هشدار نارنجی، بدون محاسبه
-                        const available = product.status === "ACTIVE" && product.isAvailable;
+                        // stage-86 — دسته/والدِ غیرفعال: همان برخورد + دلیل مخصوص
+                        const purchaseState = catPurchase.get(product.categoryId);
+                        const purchaseBlocked =
+                                !(purchaseState?.categoryPurchase ?? true) ||
+                                !(purchaseState?.mainPurchase ?? true);
+                        const unavailable = product.status !== "ACTIVE" || !product.isAvailable;
+                        const available = !unavailable && !purchaseBlocked;
 
                         let unitPrice = finalPriceOf(product);
                         let sizeName: string | null = null;
@@ -745,6 +789,9 @@ export class OrderService {
                                 unitPrice: available ? unitPrice : 0,
                                 quantity: item.quantity,
                                 available,
+                                ...(available
+                                        ? {}
+                                        : { blockedReason: unavailable ? ("unavailable" as const) : ("category" as const) }),
                                 courierAllowed,
                                 takeawayAllowed,
                                 dineInAllowed,

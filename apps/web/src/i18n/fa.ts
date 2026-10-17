@@ -621,6 +621,8 @@ export const fa = {
 
 	// ── stage-48 — موجودی و حالت‌های سفارش ──
 	'common.temporarilyUnavailable': 'فعلاً ناموجود است',
+	// stage-86 — دسته/والدِ خریدِغیرفعال (بج کارت + a11y دکمه‌ی سبد)
+	'common.purchaseDisabledBadge': 'امکان خرید غیرفعال است',
 	'common.courierBadge': 'پیک',
 	'common.takeawayBadge': 'بیرون‌بر',
 	'common.dineInBadge': 'سرو در محل',
@@ -628,6 +630,10 @@ export const fa = {
 	'common.modeUnavailable': 'امکان ندارد',
 	'pdetail.unavailableNotice':
 		'این محصول فعلاً ناموجود است — به‌محض موجود شدن دوباره قابل سفارش خواهد بود.',
+	// stage-86 — دسته‌ی خریدِغیرفعال (هشدار صفحه‌ی محصول + توست)
+	'pdetail.categoryDisabledNotice':
+		'خرید این محصول موقتاً غیرفعال شده است — دسته‌بندی آن توسط مدیریت غیرفعال شده.',
+	'pdetail.categoryDisabledToast': 'امکان خرید این محصول غیرفعال است',
 	'pdetail.orderModesTitle': 'حالت‌های سفارش این محصول',
 	'pdetail.courierDesc': 'ارسال با پیک به آدرس شما (با هزینه ارسال ناحیه).',
 	'pdetail.takeawayDesc': 'سفارش را حضوری از سین‌شین تحویل بگیرید.',
@@ -639,6 +645,9 @@ export const fa = {
 	// ── stage-48 — سبد: هشدارهای نارنجی ──
 	'cart.unavailableItem':
 		'این محصول فعلاً ناموجود است — می‌توانید آن را از سبد حذف کنید یا برای موجود شدن صبر کنید.',
+	// stage-86 — آیتمِ دسته/والدِ خریدِغیرفعال (همان قالب نارنجی)
+	'cart.purchaseBlockedItem':
+		'خرید این محصول توسط مدیریت غیرفعال شده است — لطفاً آن را از سبد حذف کنید.',
 	'cart.noCourier': 'ارسال با پیک',
 	'cart.noTakeaway': 'بیرون‌بر',
 	'cart.noDineIn': 'سرو در محل',

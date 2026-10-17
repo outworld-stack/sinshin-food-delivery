@@ -71,6 +71,8 @@ const CHAIN_HAS_0008 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0008')
 const CHAIN_HAS_0009 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0009'))
 /** stage-84 — همان الگو برای ۰۰۱۳ (اقلام بسته‌بندی + مجوز شلوغی) */
 const CHAIN_HAS_0013 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0013'))
+/** stage-86 — همان الگو برای ۰۰۱۴ (امکان خریدِ دسته‌بندی‌ها) */
+const CHAIN_HAS_0014 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0014'))
 
 const scratches: string[] = []
 let pass = 0
@@ -227,6 +229,9 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     drop table if exists "product_packaging_items";
     drop table if exists "packaging_items";
     alter table "admin2_profiles" drop column if exists "can_announce_busy";
+    -- stage-86 — اشیاءِ ۰۰۱۴: امکان خریدِ دسته‌بندی‌ها (والد + زیردسته)
+    alter table "main_categories" drop column if exists "purchase_enabled";
+    alter table "categories" drop column if exists "purchase_enabled";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
@@ -382,6 +387,29 @@ await withScratch('a', async (url) => {
     busyCol === 0 && !CHAIN_HAS_0013
       ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۳ ندارد — اول: bun run db:generate'
       : `count=${busyCol}`,
+  )
+  // A2 — stage-86: اشیاءِ ۰۰۱۴ (امکان خریدِ دسته‌ها: والد + زیردسته)
+  const purchaseCols = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.columns where column_name='purchase_enabled' and table_name in ('main_categories','categories')`,
+  )
+  ok(
+    'A2: ستون‌های purchase_enabled دسته‌ها (۰۰۱۴ stage-86) ساخته شدند',
+    purchaseCols === 2,
+    Number(purchaseCols) < 2 && !CHAIN_HAS_0014
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۴ ندارد — اول: bun run db:generate'
+      : `count=${purchaseCols}`,
+  )
+  const purchaseDefault = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.columns where column_name='purchase_enabled' and table_name in ('main_categories','categories') and column_default = 'true'`,
+  )
+  ok(
+    'A2: پیش‌فرضِ purchase_enabled = true (رفتارِ قبلِ stage-86 حفظ شد)',
+    purchaseDefault === 2,
+    Number(purchaseDefault) < 2 && !CHAIN_HAS_0014
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۴ ندارد — اول: bun run db:generate'
+      : `count=${purchaseDefault}`,
   )
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)

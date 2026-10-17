@@ -259,6 +259,13 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .get('/packaging-items', () => deps.packaging.adminList(), {
       detail: { summary: 'Packaging items (global list incl. inactive)' },
     })
+    // stage-86 — وضعیت خریدِ دسته‌ها (والد + زیردسته) برای پنل محصولات.
+    // productsRead کافی است (مشاهده‌ی وضعیت)؛ تغییر = productsWrite.
+    .get('/purchase-state', () => deps.menu.adminPurchaseState(), {
+      detail: {
+        summary: 'Category purchase state (mains + categories) for products panel',
+      },
+    })
 
   const productsWrite = new Elysia({ prefix: '/admin/menu', tags: ['Admin / Menu'] })
     .use(requireAdmin2Permission(admin2, 'productsWrite'))
@@ -545,6 +552,62 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       },
     )
 
+  // ── stage-86 — غیرفعال‌سازی خریدِ دسته‌ها ──
+  // گارد عمدی: productsWrite (نه mainCategoriesWrite) — درخواستِ صریحِ کارفرما:
+  // «ادمین سطح ۲ هم با مجوز دسترسی و ویرایش محصولات بتونه این کارو انجام بده».
+  // ادمین اصلی همیشه رد می‌شود؛ خواندن با productsRead (بالای فایل).
+  const purchaseWrite = new Elysia({ prefix: '/admin/menu', tags: ['Admin / Menu'] })
+    .use(requireAdmin2Permission(admin2, 'productsWrite'))
+    .post(
+      '/mains/:id/purchase',
+      async ({ params, body, user }) => {
+        const res = await deps.menu.setMainPurchase(params.id, body.purchaseEnabled)
+        if (res.success && user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: body.purchaseEnabled ? 'MAIN_PURCHASE_ON' : 'MAIN_PURCHASE_OFF',
+            entity: 'main_category',
+            entityId: params.id,
+          })
+        }
+        return res
+      },
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        body: t.Object({ purchaseEnabled: t.Boolean() }),
+        detail: {
+          summary: 'Enable/disable purchase of a main category (productsWrite)',
+          description:
+            'stage-86: خاموش = تب و محصولات می‌مانند ولی «افزودن به سبد خرید» قفل می‌شود ' +
+            '(کارت/صفحه‌ی محصول + گارد سبد/چک‌اوت). جداست از isActive (نمایش تب).',
+        },
+      },
+    )
+    .post(
+      '/categories/:id/purchase',
+      async ({ params, body, user }) => {
+        const res = await deps.menu.setCategoryPurchase(params.id, body.purchaseEnabled)
+        if (res.success && user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: body.purchaseEnabled ? 'CATEGORY_PURCHASE_ON' : 'CATEGORY_PURCHASE_OFF',
+            entity: 'category',
+            entityId: params.id,
+          })
+        }
+        return res
+      },
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        body: t.Object({ purchaseEnabled: t.Boolean() }),
+        detail: {
+          summary: 'Enable/disable purchase of a category (productsWrite)',
+          description:
+            'stage-86: مؤثر = این پرچم AND پرچمِ والدِ اولیه — خریدِ زنجیره‌ی اولیه قفل می‌شود.',
+        },
+      },
+    )
+
   // ── stage-48 — موجود/ناموجود سریع ──
   // گارد: ادمین اصلی همیشه؛ ادمین۲ فقط با productsAvailability
   // (requireAdmin2Permission نقش admin را بدون چک مجوز رد می‌کند).
@@ -585,6 +648,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .use(structureWrite)
     .use(productsRead)
     .use(productsWrite)
+    .use(purchaseWrite)
     .use(packagingWrite)
     .use(availabilityWrite)
 }

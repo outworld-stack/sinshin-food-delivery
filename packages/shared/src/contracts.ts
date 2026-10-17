@@ -102,6 +102,12 @@ export interface MainCategory {
   isActive: boolean
   isDefault: boolean
   sortOrder: number
+  /**
+   * stage-86 — امکان خریدِ محصولاتِ این والد (پیش‌فرض true). خاموش = تب و
+   * محصولات می‌مانند ولی «افزودن به سبد خرید» قفل می‌شود (کارت + صفحه‌ی
+   * محصول + گارد سبد/چک‌اوت). جداست از isActive (نمایش/پنهان‌شدن تب).
+   */
+  purchaseEnabled?: boolean
 }
 
 export interface Category {
@@ -127,6 +133,12 @@ export interface Category {
   courierEnabled: boolean
   takeawayEnabled: boolean
   dineInEnabled: boolean
+  /**
+   * stage-86 — امکان خریدِ محصولاتِ این دسته (پیش‌فرض true). مؤثر = این
+   * پرچم AND purchaseEnabled والدِ اولیه — سرور در Product.purchasable
+   * حساب‌شده می‌دهد. خاموش = دکمه‌ی سبد قفل (کارت + صفحه‌ی محصول).
+   */
+  purchaseEnabled?: boolean
 }
 
 export interface ProductSize {
@@ -210,6 +222,13 @@ export interface Product {
    */
   isAvailable: boolean
   /**
+   * stage-86 — «امکان خرید» مؤثر از زنجیره‌ی دسته: purchaseEnabled دسته‌ی
+   * اولیه AND والدِ اولیه (سرور روی هر پاسخ عمومی/ادمین پرش می‌کند؛
+   * false = دکمه‌ی «افزودن به سبد خرید» قفل — کارت و صفحه‌ی محصول).
+   * جداست از isAvailable (موجودی خودِ محصول).
+   */
+  purchasable?: boolean
+  /**
    * stage-60 — پرچم «ویژه/سنجاق»: آیتم علامت‌دار فارغ از فیلتر/دسته/مرتب‌سازی
    * همیشه جزو ۴ آیتم اول لیست فرانت است + پس‌زمینه Aurora. گذر سروری صرف.
    */
@@ -255,6 +274,40 @@ export interface PackagingItemDto {
   sortOrder: number
 }
 
+// ═══════════ stage-86 — وضعیت خریدِ دسته‌بندی‌ها (پنل محصولات) ═══════════
+
+/** والد (تب) — ردیفِ GET /admin/menu/purchase-state */
+export interface MainPurchaseStateDto {
+  id: string
+  name: string
+  slug: string
+  /** نمایش تب در سایت (isActive جدا از امکان خرید) */
+  isActive: boolean
+  /** امکان خرید محصولات این والد */
+  purchaseEnabled: boolean
+}
+
+/**
+ * زیردسته — گروه‌بندی با mainCategoryId (والدِ اولیه؛ زنجیره‌ی مؤثرِ خرید).
+ * GET /admin/menu/purchase-state این‌ها را کنار mains برمی‌گرداند.
+ */
+export interface CategoryPurchaseStateDto {
+  id: string
+  name: string
+  /** والدِ اولیه (گروه‌بندی پنل) */
+  mainCategoryId: string
+  /** نام والدِ اولیه (نمایش بدون join سمت فرانت) */
+  mainName: string
+  /** امکان خرید محصولات این دسته (مؤثر = AND با والد) */
+  purchaseEnabled: boolean
+}
+
+/** پاسخ GET /admin/menu/purchase-state — گارد productsRead */
+export interface PurchaseStateDto {
+  mains: MainPurchaseStateDto[]
+  categories: CategoryPurchaseStateDto[]
+}
+
 // ═══════════ سبد ═══════════
 
 /** رارد ۴۷ — شکل خام سیم (شناسه‌های رشته‌ای) — هم‌شکل اسکیمای روت و
@@ -277,6 +330,12 @@ export interface CartItemDto {
   lineTotal: number
   /** stage-48 — ناموجود: false ⇒ هشدار نارنجی + خارج از جمع + قفل پرداخت */
   available: boolean
+  /**
+   * stage-86 — دلیل قفل بودن آیتم (فقط وقتی available=false پر می‌شود):
+   * 'category' = دسته/والدِ غیرفعال (پیام مخصوص)؛ غایب/'unavailable' =
+   * ناموجودی محصول. سبد بر اساس همین، متنِ هشدار را انتخاب می‌کند.
+   */
+  blockedReason?: 'unavailable' | 'category'
   /** stage-48 — حالت‌های مؤثر سفارش (دسته AND محصول) */
   courierAllowed: boolean
   takeawayAllowed: boolean
@@ -375,6 +434,11 @@ export interface CheckoutPreviewItem {
   quantity: number
   /** stage-48 — ناموجود: هشدار نارنجی در چک‌اوت + قفل ثبت */
   available: boolean
+  /**
+   * stage-86 — دلیل قفل ('category' = دسته/والدِ غیرفعال — پیام مخصوص؛
+   * غایب = ناموجودی محصول). چک‌اوت متنِ هشدار را با این انتخاب می‌کند.
+   */
+  blockedReason?: 'unavailable' | 'category'
   /** stage-48 — حالت‌های مؤثر سفارش (دسته AND محصول) */
   courierAllowed: boolean
   takeawayAllowed: boolean

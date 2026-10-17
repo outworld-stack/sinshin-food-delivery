@@ -48,6 +48,8 @@ interface AdminProductCardProps {
 		categoryId: string
 		/** stage-48 — موجودی فروش (نیامد = موجود) */
 		isAvailable?: boolean
+		/** stage-86 — امکان خرید زنجیره‌ی دسته (نیامد = روشن) */
+		purchasable?: boolean
 	}
 	categoryName: string | undefined
 	canWrite: boolean
@@ -96,14 +98,15 @@ export const AdminProductCard = memo(function AdminProductCard({
 			// stage-54 — available (آرگومان دوم onSuccess) = همان مقداری که خودِ
 			// میوتیشن فرستاده — نه پراپِ کهنه؛ پیام سرور (نو-آپ) هم بر توست مقدم است.
 			showToast(
-				res.message ??
-					(available ? 'محصول موجود شد' : 'محصول فعلاً ناموجود شد'),
+				res.message ?? (available ? 'محصول موجود شد' : 'محصول فعلاً ناموجود شد'),
 			)
 		},
 		onError: () => showToast('تغییر موجودی ناموفق بود', 'error'),
 	})
 
 	const unavailable = product.isAvailable === false
+	// stage-86 — خریدِ دسته‌ی این محصول توسط مدیریت غیرفعال است (بج اطلاعی)
+	const categoryLocked = product.purchasable === false
 
 	// stage-63 — حذف کامل محصول + نامعتبرسازی کش‌های وابسته
 	// (لیست ادمین/منوی عمومی/جزئیات/سبد/چک‌اوت — عین availabilityMut)
@@ -172,6 +175,14 @@ export const AdminProductCard = memo(function AdminProductCard({
 		</span>
 	)
 
+	// stage-86 — بجِ «خریدِ دسته غیرفعال»: خریدِ دسته/والدِ این محصول قفل است
+	// (در کارتِ «فعال‌سازی خرید دسته‌بندی‌ها» همین صفحه فعال/غیرفعال می‌شود)
+	const purchaseLockBadge = categoryLocked ? (
+		<span className="text-[10px] font-DanaDemiBold px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">
+			خریدِ دسته غیرفعال
+		</span>
+	) : null
+
 	return (
 		<div className="border border-gray-300 dark:border-white/10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] p-4">
 			{/* موبایل */}
@@ -188,6 +199,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 							{formatPrice(product.finalPrice)} ت
 						</span>
 						{availabilityBadge}
+						{purchaseLockBadge}
 					</div>
 				</div>
 				<div className="flex flex-col gap-2">
@@ -237,6 +249,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 						{product.status === 'ACTIVE' ? 'فعال' : 'غیرفعال'}
 					</span>
 					{availabilityBadge}
+					{purchaseLockBadge}
 				</div>
 				<div className="flex items-center justify-end gap-2">
 					<Can allowed={canWrite}>

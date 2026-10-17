@@ -36,7 +36,8 @@
     "test:otp": "bun scripts/test-otp-core.ts",
     "test:otp-limit": "bun scripts/test-otp-distinct-limit.ts",
     "db:test:blocks": "bun scripts/test-article-blocks.ts",
-    "db:test:articles": "bun scripts/test-articles.ts"
+    "db:test:articles": "bun scripts/test-articles.ts",
+    "db:test:purchase": "bun scripts/test-category-purchase.ts"
   },
   "dependencies": {
     "@elysia/html": "^1.4.1",

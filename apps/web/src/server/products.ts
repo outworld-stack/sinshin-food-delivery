@@ -25,6 +25,7 @@ import type {
 	Product,
 	ProductId,
 	ProductSize,
+	PurchaseStateDto,
 } from '@sinshin/shared'
 import { authJson, getJson, postJson } from '#/lib/api-fetch'
 import type { ProductFormData } from '#/types/forms'
@@ -453,6 +454,38 @@ export async function removePackagingItem(input: {
 	return authJson<{ success: boolean }>(
 		`/admin/menu/packaging-items/${input.id}`,
 		'DELETE',
+	)
+}
+
+// ═══ stage-86 — غیرفعال‌سازی خریدِ دسته‌ها (والد + زیردسته) ═══
+// گارد سرور: خواندن productsRead؛ تغییر productsWrite (ادمین۲ با «ویرایش
+// محصولات» هم می‌تواند — درخواستِ صریحِ کارفرما). جداست از toggle روشن/خاموشِ
+// نمایش تب (isActive) — اینجا خرید قفل می‌شود و محصولات می‌مانند.
+
+/** لیست وضعیت خرید همه‌ی والدها + زیردسته‌ها (پنل محصولات) */
+export async function getAdminPurchaseState(): Promise<PurchaseStateDto> {
+	return authJson<PurchaseStateDto>('/admin/menu/purchase-state', 'GET')
+}
+
+/** خریدِ همه‌ی محصولاتِ این والد را فعال/غیرفعال می‌کند */
+export async function setMainPurchaseState(input: {
+	data: { id: string; purchaseEnabled: boolean }
+}): Promise<{ success: boolean; message?: string }> {
+	return authJson<{ success: boolean; message?: string }>(
+		`/admin/menu/mains/${input.data.id}/purchase`,
+		'POST',
+		{ purchaseEnabled: input.data.purchaseEnabled },
+	)
+}
+
+/** خریدِ محصولاتِ این زیردسته را فعال/غیرفعال می‌کند */
+export async function setCategoryPurchaseState(input: {
+	data: { id: string; purchaseEnabled: boolean }
+}): Promise<{ success: boolean; message?: string }> {
+	return authJson<{ success: boolean; message?: string }>(
+		`/admin/menu/categories/${input.data.id}/purchase`,
+		'POST',
+		{ purchaseEnabled: input.data.purchaseEnabled },
 	)
 }
 

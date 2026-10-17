@@ -1535,3 +1535,118 @@ stage-84: **۷۳ فایل (۱۰ جدید + ۶۳ جایگزینی)**.
   نسخهٔ ۲: پیش‌نمایش + پرینترِ پیش‌فرض + وضعیتِ سرویس + toasts دقیق.
 - `apps/web/src/routes/index.tsx` — دکمهٔ نوتیفیکیشنِ «تک‌حالته» (گرنتed
   → هیچ).
+
+---
+
+## ۲-۱۰-۱۷ — stage-86: غیرفعال‌سازی خرید دسته‌بندی‌ها (والد + زیردسته)
+
+> خواستهٔ کارفرما: «هر دسته‌بندی والد و هر دسته‌بندی زیر اش رو غیر فعال
+> کنم؛ بعدِ غیرفعال‌کردن، گزینهٔ اضافه‌به‌سبد در کارت محصول و صفحهٔ
+> مخصوصِ محصول غیرقابل‌کلیک بشه. این امکان در صفحهٔ محصولاتِ پنل ادمین
+> اصلی باشه و ادمین سطح ۲ هم با مجوز (دسترسی و ویرایش محصولات) بتونه
+> این کار رو انجام بده.»
+
+### ۱) مدل داده — مایگریشن ۰۰۱۴ (`0014_sticky_mimic.sql`)
+
+- `categories.purchase_enabled` + `main_categories.purchase_enabled`
+  (هر دو `boolean NOT NULL DEFAULT true`) — «امکان خریدِ محصولاتِ
+  این دسته/والد». پیش‌فرضِ true یعنی رفتارِ همهٔ استیج‌های قبل دست‌نخورده.
+- **جدا از `main_categories.is_active` است** (آن = نمایش/پنهان‌شدنِ تب در
+  سایت). غیرفعال‌سازیِ خرید = محصولات می‌مانند و فقط خرید قفل می‌شود —
+  دقیقاً همان چیزی که کارفرما توصیف کرد.
+- «مؤثرِ» هر محصول = `purchase_enabled` دستهٔ **اولیه** AND والدِ **اولیه**
+  (زنجیرهٔ مسیر پول — `p.category_id` خام؛ سازگار با M2M های stage-60).
+
+### ۲) بک — menu.service + روت‌ها
+
+- `loadCategoryPurchaseStates(db, ids)` — هلپرِ صادرشده (الگوی
+  `loadCategoryModes`): join دسته→والدِ اولیه؛ نقشهٔ
+  `{categoryPurchase, mainPurchase, categoryName, mainName}` (نام‌ها برای
+  پیام‌های خطا).
+- `withSizes` → فیلد تازهٔ `purchasable` روی **هر** ProductDto (منوی عمومی،
+  جزئیات محصول، لیست ادمین، فرم ویرایش) — محاسبهٔ سروری زنجیرهٔ دسته.
+- `setMainPurchase(id, enabled)` / `setCategoryPurchase(id, enabled)` —
+  ایدمپوتنت (پیامِ «از قبل») + `cache.invalidate()` + رویداد `menu:live`
+  با `reason: 'category'` → سبد/چک‌اوتِ باز همان لحظه رفرش می‌شوند.
+- `adminPurchaseState()` — لیستِ کاملِ والد+زیردسته برای پنل (بدون کش).
+- روت‌ها (گاردِ عمدی = **`productsWrite`** — طبقِ خواستهٔ کارفرما، نه
+  mainCategoriesWrite):
+  - `GET /admin/menu/purchase-state` (productsRead)
+  - `POST /admin/menu/mains/:id/purchase` و
+    `POST /admin/menu/categories/:id/purchase` (productsWrite؛ ممیزی
+    MAIN/CATEGORY_PURCHASE_ON/OFF برای ادمین اصلی)
+  - **ادمین۲ با «مشاهده+ویرایش محصولات»** کامل می‌تواند (ادمین اصلی همیشه).
+
+### ۳) گارد پولی — سبد و چک‌اوت
+
+- `cart.service`: `available = ACTIVE && isAvailable && دسته && والد`؛
+  آیتمِ قفل‌شده = `available:false` + **`blockedReason:'category'`** +
+  خارج از جمع (رفتارِ stage-48 برای ناموجودی، با پیامِ مخصوص).
+- `order.service` (ثبت + پیش‌نمایش): آیتمِ دسته/والدِ غیرفعال → خطای
+  صریح «خرید «نامِ دسته/والد» فعلاً غیرفعال شده است — این محصول را از
+  سبد حذف کنید.» + همان فیلد در آیتم‌های preview.
+- ترمیمِ ریزِ همراه: گاردِ ناموجودی/دسته حالا **مقدم بر** «هیچ آیتم
+  معتبری در سبد نیست» است (پیامِ مشخص‌تر برای سبدِ تک‌آیتمیِ تماماً-قفل).
+
+### ۴) فرانت — پنل + سایت
+
+- **`CategoryPurchaseManager` (جدید)** در صفحهٔ محصولات: کارتِ «فعال‌سازی
+  خرید دسته‌بندی‌ها» — والد‌ها (با سوئیچ + بج قفل/باز + شمارِ زیردسته‌ها)
+  و زیردسته‌های هر والد (سوئیچ + بجِ «خرید غیرفعال»). سوئیچ = productsWrite
+  (ادمین۲ بدونِ آن فقط می‌بیند)؛ نامعتبرسازیِ کامل (منو/جزئیات/سبد/چک‌اوت).
+- بج‌های اطلاعیِ غیرفعال در `MainCategoryManager`/`CategoryManager` (بدون
+  اکشن — فقط نمایش) + بجِ «خریدِ دسته غیرفعال» روی کارتِ محصولِ ادمین.
+- **کارت محصول سایت**: `purchasable=false` → دکمهٔ سبد قفل (خاکستری +
+  cursor-not-allowed + aria/title مخصوص) + برچسبِ نارنجیِ روی تصویر
+  **بدون تاری** (محصول موجود است — جدا از حالتِ «ناموجود» که تار می‌کند).
+- **صفحهٔ محصول**: `purchasable` به‌عنوان prop جدیدِ PriceBox/MobileBar →
+  دکمهٔ سبد قفل + هشدار نارنجی با متنِ مخصوصِ «دسته‌بندی غیرفعال»
+  (دسکتاپ + نوارِ موبایل) + گارد/توست در هوک صفحه.
+- **ردیفِ سبد**: پیام بر اساس `blockedReason` — «خرید این محصول توسط
+  مدیریت غیرفعال شده است…» (جدا از «ناموجود»).
+- i18n: ۴ کلیدِ جدید fa/ar (`common.purchaseDisabledBadge`،
+  `pdetail.categoryDisabledNotice/Toast`، `cart.purchaseBlockedItem`) —
+  پاریتی ۵۱۲/۵۱۲ دست‌خورده.
+
+### ۵) تست‌ها (روی PostgreSQL 18.4 واقعی)
+
+- `db:test:purchase` (جدید — `scripts/test-category-purchase.ts`): ۷ بند —
+  پیش‌فرض‌ها · قفلِ زیردسته در جزئیات/لیست/ادمین · ایدمپوتنسی · سبد
+  (blockedReason + خارج از جمع) · preview + ردِ سفارش با نامِ دسته ·
+  قفلِ والد با نامِ والد در پیام · برگشتِ لحظه‌ای + سفارشِ موفق.
+- `db:test:migrations` = **۶۹/۰** (+۲ بندِ ۰۰۱۴: ستون‌ها + پیش‌فرضِ true؛
+  rewind هم `drop column if exists` های ۰۰۱۴ را برمی‌گرداند — درسِ استیج-۸۱).
+- **ترمیمِ میراثِ ۸۴**: `db:test:order` (test-order-safety) از stage-84
+  قرمز مانده بود (استابِ `isBusy`/`enabledGateways` به‌روز نشده بود و در
+  دروازه‌ها اجرا نمی‌شد) — الان **۱۶/۱۶ سبز** و دوباره بخشِ دروازه.
+- بقیه: device **۵۱/۰** · permit **۳۸/۰** · intel **۲۸/۰** · blocks **۸۲/۰**
+  = ۲۹۱ بندِ سبز.
+
+### ۶) دروازه‌ها
+
+- tsc api/web/shared = **۰** · biome web = **۵۸۸/۱۰/۷** (از ۶۰۳/۱۰/۷ِ
+  کامیتِ eighty-five — هر فایلِ دست‌خورده صفر خطای تازه؛ ۱۵ خطای فرمتِ
+  پیش‌existingِ همان فایل‌ها هم با biome format بسته شد) · lint پنل = ۰.
+
+### ۷) اعمال
+
+1. جای‌گذاری فایل‌ها → `bun run db:migrate` (مایگریشن ۰۰۱۴)
+2. `docker compose up -d --build api web`
+3. (اختیاری) `bun run db:test:purchase` و `db:test:migrations`
+
+### فایل‌ها (۳۰: ۴ جدید + ۲۶ جایگزینی)
+
+- **جدید**: `drizzle/0014_sticky_mimic.sql` + `meta/0014_snapshot.json`
+  (+`_journal.json`) · `scripts/test-category-purchase.ts` ·
+  `components/admin/products/CategoryPurchaseManager.tsx`
+- **بک**: `schema/menu.ts` · `menu.service.ts` · `admin-menu.routes.ts` ·
+  `cart.service.ts` · `order.service.ts` · (`test-migrations.ts` +
+  `test-order-safety.ts` + `package.json` — تست/اسکریپت)
+- **مشترک**: `packages/shared/src/contracts.ts` (MainCategory/Category
+  `purchaseEnabled` · `Product.purchasable` · `CartItemDto/
+  CheckoutPreviewItem.blockedReason` · `PurchaseStateDto` + دو DTO)
+- **فرانت**: `ProductCard` · `ui.ts` · `useProductPage` · `$productId` ·
+  `ProductPriceBox`/`ProductMobileBar` · `CartItemRow` ·
+  `server/products.ts` · `queryKeys`/`queryOptions` · صفحهٔ products ادمین ·
+  `AdminProductCard`/`CategoryManager`/`MainCategoryManager` (بج‌های اطلاعی)
+  · `i18n/fa+ar`

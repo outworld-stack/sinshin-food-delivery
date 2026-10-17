@@ -140,6 +140,9 @@ export const qk = {
 	// دسته‌های اصلی — مدیر دسته‌ها + سلکت والد در فرم دسته‌بندی
 	adminMainCategories: ['admin-main-categories'] as const,
 
+	// stage-86 — وضعیت خریدِ دسته‌ها (کارت فعال/غیرفعال خرید در پنل محصولات)
+	adminPurchaseState: ['admin-purchase-state'] as const,
+
 	// جزئیات محصول برای فرم ویرایش (new/edit)
 	adminProductDetails: (productId: string) =>
 		['admin-product-details', productId] as const,

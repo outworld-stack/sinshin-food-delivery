@@ -15,9 +15,9 @@
 
 // src/components/site/product-detail/ProductPriceBox.tsx
 import { memo, useState } from 'react'
-import { Cart, BoxRemove } from 'reicon-react'
-import { useI18n } from '#/i18n'
+import { BoxRemove, Cart } from 'reicon-react'
 import { CountdownTimer } from '#/components/shared/CountdownTimer'
+import { useI18n } from '#/i18n'
 
 interface ProductPriceBoxProps {
 	totalPrice: number
@@ -30,6 +30,8 @@ interface ProductPriceBoxProps {
 	onCountdownEnd?: () => void
 	/** stage-48 — موجودی فروش (false = قفل + هشدار) */
 	isAvailable?: boolean
+	/** stage-86 — امکان خرید زنجیره‌ی دسته (false = قفل + هشدارِ مخصوص) */
+	purchasable?: boolean
 	onIncrement: () => void
 	onDecrement: () => void
 	onAddToCart: () => void
@@ -43,6 +45,7 @@ export const ProductPriceBox = memo(function ProductPriceBox({
 	discountEndsAt,
 	onCountdownEnd,
 	isAvailable = true,
+	purchasable = true,
 	onIncrement,
 	onDecrement,
 	onAddToCart,
@@ -50,6 +53,8 @@ export const ProductPriceBox = memo(function ProductPriceBox({
 	const { t, fmt } = useI18n()
 	// stage-55 — bump لمسی دکمه‌ی افزودن به سبد (CSS-only — animate-cart-bump)
 	const [bump, setBump] = useState(false)
+	// stage-86 — قفلِ نهایی: ناموجودی یا دسته‌ی خریدِغیرفعال
+	const buyLocked = !isAvailable || purchasable === false
 
 	return (
 		<div className="hidden lg:flex mt-auto p-6 bg-white dark:bg-[#2a1015] rounded-2xl border border-gray-300 dark:border-[#3a151c] shadow-sm flex-col gap-4">
@@ -110,24 +115,27 @@ export const ProductPriceBox = memo(function ProductPriceBox({
 					onAddToCart()
 					setBump(true)
 				}}
-				disabled={!isAvailable}
+				disabled={buyLocked}
 				onAnimationEnd={() => setBump(false)}
 				className={`w-full py-4 rounded-xl font-DanaDemiBold text-lg transition flex items-center justify-center gap-2 ${
-					isAvailable
-						? 'bg-primary dark:bg-dark-primary text-white hover:opacity-90 shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30 cursor-pointer'
-						: 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+					buyLocked
+						? 'bg-gray-200 dark:bg-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+						: 'bg-primary dark:bg-dark-primary text-white hover:opacity-90 shadow-sm hover:shadow-lg hover:shadow-primary/30 dark:hover:shadow-dark-primary/30 cursor-pointer'
 				}${bump ? ' animate-cart-bump' : ''}`}
 			>
 				<Cart size={24} />
 				{t['pdetail.addToCart']}
 			</button>
 
-			{/* stage-48 — هشدار نارنجی ناموجودی (زیر دکمه) */}
-			{!isAvailable && (
+			{/* stage-48 — هشدار نارنجی ناموجودی (زیر دکمه)
+                            stage-86 — دسته‌ی خریدِغیرفعال: همان قالب با متنِ مخصوص */}
+			{buyLocked && (
 				<div className="flex items-center gap-2 p-3 rounded-xl bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20">
 					<BoxRemove size={18} className="text-orange-500 shrink-0" />
 					<p className="text-xs text-orange-600 dark:text-orange-400 font-DanaMedium leading-relaxed">
-						{t['pdetail.unavailableNotice']}
+						{isAvailable
+							? t['pdetail.categoryDisabledNotice']
+							: t['pdetail.unavailableNotice']}
 					</p>
 				</div>
 			)}

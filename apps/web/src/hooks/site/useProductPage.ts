@@ -9,154 +9,202 @@
 
 // src/hooks/site/useProductPage.ts
 import { useCallback, useReducer } from 'react'
+import { tpl, useI18n } from '#/i18n'
+import type { Product, ProductSize } from '#/server/products'
 import { useCartStore } from '#/stores/cartStore'
 import { useToastStore } from '#/stores/toastStore'
-import type { Product, ProductSize } from '#/server/products'
-import { useI18n, tpl } from '#/i18n'
 
 interface ProductPageState {
-  quantity: number
-  selectedSizeId: string | null      // ⬅ سایز انتخابی
+	quantity: number
+	selectedSizeId: string | null // ⬅ سایز انتخابی
 }
 
 type ProductPageAction =
-  | { type: 'INCREMENT' }
-  | { type: 'DECREMENT' }
-  | { type: 'RESET' }
-  | { type: 'SELECT_SIZE'; payload: string }
+	| { type: 'INCREMENT' }
+	| { type: 'DECREMENT' }
+	| { type: 'RESET' }
+	| { type: 'SELECT_SIZE'; payload: string }
 
 const initialState: ProductPageState = {
-  quantity: 1,
-  selectedSizeId: null,
+	quantity: 1,
+	selectedSizeId: null,
 }
 
-function productPageReducer(state: ProductPageState, action: ProductPageAction): ProductPageState {
-  switch (action.type) {
-    case 'INCREMENT': return { ...state, quantity: state.quantity + 1 }
-    case 'DECREMENT': return { ...state, quantity: Math.max(1, state.quantity - 1) };
-    case 'RESET': return initialState
-    case 'SELECT_SIZE': return { ...state, selectedSizeId: action.payload }
-    default: return state
-  }
+function productPageReducer(
+	state: ProductPageState,
+	action: ProductPageAction,
+): ProductPageState {
+	switch (action.type) {
+		case 'INCREMENT':
+			return { ...state, quantity: state.quantity + 1 }
+		case 'DECREMENT':
+			return { ...state, quantity: Math.max(1, state.quantity - 1) }
+		case 'RESET':
+			return initialState
+		case 'SELECT_SIZE':
+			return { ...state, selectedSizeId: action.payload }
+		default:
+			return state
+	}
 }
 
 /** stage-47 — پنجره‌ی تخفیف همین لحظه فعال است؟ (نمایش؛ قیمت واقعی سروری) */
-function windowActiveNow(startsAt?: string | null, endsAt?: string | null): boolean {
-  const now = Date.now()
-  if (startsAt) {
-    const t = new Date(startsAt).getTime()
-    if (Number.isFinite(t) && now < t) return false
-  }
-  if (endsAt) {
-    const t = new Date(endsAt).getTime()
-    if (Number.isFinite(t) && now > t) return false
-  }
-  return true
+function windowActiveNow(
+	startsAt?: string | null,
+	endsAt?: string | null,
+): boolean {
+	const now = Date.now()
+	if (startsAt) {
+		const t = new Date(startsAt).getTime()
+		if (Number.isFinite(t) && now < t) return false
+	}
+	if (endsAt) {
+		const t = new Date(endsAt).getTime()
+		if (Number.isFinite(t) && now > t) return false
+	}
+	return true
 }
 
 /** stage-47 — تخفیف فعال و قیمت مؤثر یک سایز (سرور فلگ داده؛ وگرنه محلی) */
-function sizeDiscount(size: ProductSize): { active: boolean; pct: number; price: number; endsAt: string | null } {
-  const pct = size.discountPercentage ?? 0
-  const active =
-    pct > 0 &&
-    (size.discountActive !== undefined
-      ? size.discountActive
-      : windowActiveNow(size.discountStartsAt, size.discountEndsAt))
-  return {
-    active,
-    pct,
-    price: active
-      ? (size.finalPrice ?? Math.round(size.price * (1 - pct / 100)))
-      : size.price,
-    endsAt: active ? (size.discountEndsAt ?? null) : null,
-  }
+function sizeDiscount(size: ProductSize): {
+	active: boolean
+	pct: number
+	price: number
+	endsAt: string | null
+} {
+	const pct = size.discountPercentage ?? 0
+	const active =
+		pct > 0 &&
+		(size.discountActive !== undefined
+			? size.discountActive
+			: windowActiveNow(size.discountStartsAt, size.discountEndsAt))
+	return {
+		active,
+		pct,
+		price: active
+			? (size.finalPrice ?? Math.round(size.price * (1 - pct / 100)))
+			: size.price,
+		endsAt: active ? (size.discountEndsAt ?? null) : null,
+	}
 }
 
 export function useProductPage(product: Product) {
-  const [state, dispatch] = useReducer(productPageReducer, initialState)
-  // stage-47 — تیک انقضا: شمارنده صفر شد → قیمت/بج تازه شود
-  const [, tick] = useReducer((x: number) => x + 1, 0)
-  const addItem = useCartStore((s) => s.addItem)
-  const showToast = useToastStore((s) => s.showToast)
-  const { t } = useI18n()
+	const [state, dispatch] = useReducer(productPageReducer, initialState)
+	// stage-47 — تیک انقضا: شمارنده صفر شد → قیمت/بج تازه شود
+	const [, tick] = useReducer((x: number) => x + 1, 0)
+	const addItem = useCartStore((s) => s.addItem)
+	const showToast = useToastStore((s) => s.showToast)
+	const { t } = useI18n()
 
-  // ── stage-48 — موجودی فروش (سروری؛ جداست از وضعیت منو) ──
-  // stage-54 — کالای «غیرفعال» (status≠ACTIVE) هم دقیقاً مثل «ناموجود»
-  // رفتار می‌کند: دکمه‌ی خرید قفل + هشدار نارنجی (همان برخورد سبد/چک‌اوت
-  // سروری از stage-48). صفحه‌ی جزئیات با لینکِ ردیف سبد قابل دسترس است —
-  // بدون این گارد، کالای غیرفعالِ داخل سبد در صفحه‌اش هنوز «قابل خرید»
-  // دیده می‌شد و کاربر دوباره آن را اضافه می‌کرد تا در سبد خطا بگیرد.
-  const isAvailable = product.isAvailable !== false && product.status === 'ACTIVE'
+	// ── stage-48 — موجودی فروش (سروری؛ جداست از وضعیت منو) ──
+	// stage-54 — کالای «غیرفعال» (status≠ACTIVE) هم دقیقاً مثل «ناموجود»
+	// رفتار می‌کند: دکمه‌ی خرید قفل + هشدار نارنجی (همان برخورد سبد/چک‌اوت
+	// سروری از stage-48). صفحه‌ی جزئیات با لینکِ ردیف سبد قابل دسترس است —
+	// بدون این گارد، کالای غیرفعالِ داخل سبد در صفحه‌اش هنوز «قابل خرید»
+	// دیده می‌شد و کاربر دوباره آن را اضافه می‌کرد تا در سبد خطا بگیرد.
+	const isAvailable =
+		product.isAvailable !== false && product.status === 'ACTIVE'
 
-  // --- سایزبندی ---
-  const hasSizes = product.sizesEnabled && product.sizes.length > 0
-  // انتخاب مؤثر: انتخابِ کاربر، وگرنه سایز اول
-  const selectedSize: ProductSize | null = hasSizes
-    ? (product.sizes.find(s => s.id === state.selectedSizeId) ?? product.sizes[0])
-    : null
-  const selectedSizeId = hasSizes ? (state.selectedSizeId ?? product.sizes[0].id) : null
+	// ── stage-86 — امکان خرید از زنجیره‌ی دسته (دسته‌ی اولیه AND والدِ اولیه).
+	// سروری محاسبه و در Product.purchasable آمده؛ جداست از موجودی: false =
+	// دکمه‌ی «افزودن به سبد خرید» قفل + هشدارِ مخصوص (دسته توسط مدیریت غیرفعال). ──
+	const purchasable = product.purchasable !== false
 
-  // --- قیمت واحد ---
-  // stage-47 — سایز انتخاب‌شده: قیمت مؤثر با تخفیف مستقلِ همان سایز.
-  // بدون سایز: finalPrice سرور (خودش با «درصدِ فعال» محاسبه شده).
-  const sizeEff = selectedSize ? sizeDiscount(selectedSize) : null
-  const productActive =
-    product.discountPercentage > 0 &&
-    (product.discountActive !== undefined
-      ? product.discountActive
-      : windowActiveNow(product.discountStartsAt, product.discountEndsAt))
+	// --- سایزبندی ---
+	const hasSizes = product.sizesEnabled && product.sizes.length > 0
+	// انتخاب مؤثر: انتخابِ کاربر، وگرنه سایز اول
+	const selectedSize: ProductSize | null = hasSizes
+		? (product.sizes.find((s) => s.id === state.selectedSizeId) ??
+			product.sizes[0])
+		: null
+	const selectedSizeId = hasSizes
+		? (state.selectedSizeId ?? product.sizes[0].id)
+		: null
 
-  const unitPrice = sizeEff ? sizeEff.price : product.finalPrice
-  // stage-47 — قیمت خامِ سطح فعال (سایز یا محصول) برای خط‌خوردگی
-  const unitOriginal = selectedSize ? selectedSize.price : product.originalPrice
+	// --- قیمت واحد ---
+	// stage-47 — سایز انتخاب‌شده: قیمت مؤثر با تخفیف مستقلِ همان سایز.
+	// بدون سایز: finalPrice سرور (خودش با «درصدِ فعال» محاسبه شده).
+	const sizeEff = selectedSize ? sizeDiscount(selectedSize) : null
+	const productActive =
+		product.discountPercentage > 0 &&
+		(product.discountActive !== undefined
+			? product.discountActive
+			: windowActiveNow(product.discountStartsAt, product.discountEndsAt))
 
-  const totalPrice = unitPrice * state.quantity
-  const originalTotal = unitOriginal * state.quantity
-  // stage-47 — تخفیف فعال در هر سطح (سایز یا محصول) → بج/خط‌خوردگی
-  const hasDiscount = sizeEff ? sizeEff.active : productActive
+	const unitPrice = sizeEff ? sizeEff.price : product.finalPrice
+	// stage-47 — قیمت خامِ سطح فعال (سایز یا محصول) برای خط‌خوردگی
+	const unitOriginal = selectedSize ? selectedSize.price : product.originalPrice
 
-  // stage-47 — پایان پنجره‌ی سطح فعال → شمارنده‌ی صفحه‌ی محصول
-  const discountEndsAt = sizeEff
-    ? sizeEff.endsAt
-    : productActive
-      ? (product.discountEndsAt ?? null)
-      : null
+	const totalPrice = unitPrice * state.quantity
+	const originalTotal = unitOriginal * state.quantity
+	// stage-47 — تخفیف فعال در هر سطح (سایز یا محصول) → بج/خط‌خوردگی
+	const hasDiscount = sizeEff ? sizeEff.active : productActive
 
-  // --- هندلرها ---
-  const handleIncrement = useCallback(() => dispatch({ type: 'INCREMENT' }), [])
-  const handleDecrement = useCallback(() => dispatch({ type: 'DECREMENT' }), [])
-  const handleSelectSize = useCallback((sizeId: string) => dispatch({ type: 'SELECT_SIZE', payload: sizeId }), [])
-  const handleCountdownEnd = useCallback(() => tick(), [])
+	// stage-47 — پایان پنجره‌ی سطح فعال → شمارنده‌ی صفحه‌ی محصول
+	const discountEndsAt = sizeEff
+		? sizeEff.endsAt
+		: productActive
+			? (product.discountEndsAt ?? null)
+			: null
 
-  const handleAddToCart = useCallback(() => {
-    // stage-48 — ناموجود: دکمه قفل است؛ این گارد عمقی برای حالت‌های مرزی
-    if (!isAvailable) {
-      showToast(t['common.temporarilyUnavailable'], 'error')
-      return
-    }
-    addItem(product.id, state.quantity, selectedSizeId)
-    showToast(tpl(t['pdetail.addedToast'], {
-      n: `${product.name}${selectedSize ? ` (${selectedSize.name})` : ''}`,
-    }))
-  }, [addItem, showToast, product.id, product.name, state.quantity, selectedSizeId, selectedSize, isAvailable, t])
+	// --- هندلرها ---
+	const handleIncrement = useCallback(() => dispatch({ type: 'INCREMENT' }), [])
+	const handleDecrement = useCallback(() => dispatch({ type: 'DECREMENT' }), [])
+	const handleSelectSize = useCallback(
+		(sizeId: string) => dispatch({ type: 'SELECT_SIZE', payload: sizeId }),
+		[],
+	)
+	const handleCountdownEnd = useCallback(() => tick(), [])
 
-  return {
-    quantity: state.quantity,
-    selectedSizeId,
-    selectedSize,
-    hasSizes,
-    totalPrice,
-    originalTotal,
-    hasDiscount,
-    /** stage-47 — ISO پایان پنجره‌ی تخفیف فعال (null = بدون شمارنده) */
-    discountEndsAt,
-    /** stage-48 — موجودی فروش (قفل دکمه + هشدار نارنجی) */
-    isAvailable,
-    handleIncrement,
-    handleDecrement,
-    handleSelectSize,
-    /** stage-47 — انقضای شمارنده → بازمحاسبه */
-    handleCountdownEnd,
-    handleAddToCart,
-  }
+	const handleAddToCart = useCallback(() => {
+		// stage-48 — ناموجود: دکمه قفل است؛ این گارد عمقی برای حالت‌های مرزی
+		if (!isAvailable) {
+			showToast(t['common.temporarilyUnavailable'], 'error')
+			return
+		}
+		// stage-86 — دسته/والدِ غیرفعال: خرید قفل — پیامِ مخصوص
+		if (!purchasable) {
+			showToast(t['pdetail.categoryDisabledToast'], 'error')
+			return
+		}
+		addItem(product.id, state.quantity, selectedSizeId)
+		showToast(
+			tpl(t['pdetail.addedToast'], {
+				n: `${product.name}${selectedSize ? ` (${selectedSize.name})` : ''}`,
+			}),
+		)
+	}, [
+		addItem,
+		showToast,
+		product.id,
+		product.name,
+		state.quantity,
+		selectedSizeId,
+		selectedSize,
+		isAvailable,
+		purchasable,
+		t,
+	])
+
+	return {
+		quantity: state.quantity,
+		selectedSizeId,
+		selectedSize,
+		hasSizes,
+		totalPrice,
+		originalTotal,
+		hasDiscount,
+		/** stage-47 — ISO پایان پنجره‌ی تخفیف فعال (null = بدون شمارنده) */
+		discountEndsAt,
+		/** stage-48 — موجودی فروش (قفل دکمه + هشدار نارنجی) */
+		isAvailable,
+		/** stage-86 — امکان خرید زنجیره‌ی دسته (false = قفل دکمه + هشدار مخصوص) */
+		purchasable,
+		handleIncrement,
+		handleDecrement,
+		handleSelectSize,
+		/** stage-47 — انقضای شمارنده → بازمحاسبه */
+		handleCountdownEnd,
+		handleAddToCart,
+	}
 }

@@ -612,6 +612,8 @@ export const ar: Dict = {
 
 	// ── stage-48 — التوفر وأوضاع الطلب ──
 	'common.temporarilyUnavailable': 'غير متوفر حاليًا',
+	// stage-86 — الفئة/الأب الذي أوقف شراؤه (شارة البطاقة + a11y زر السلة)
+	'common.purchaseDisabledBadge': 'إمكانية الشراء معطّلة',
 	'common.courierBadge': 'توصيل',
 	'common.takeawayBadge': 'استلام',
 	'common.dineInBadge': 'تقديم في المطعم',
@@ -619,6 +621,10 @@ export const ar: Dict = {
 	'common.modeUnavailable': 'غير متاح',
 	'pdetail.unavailableNotice':
 		'هذا المنتج غير متوفر حاليًا — سيكون قابلاً للطلب فور توفره مرة أخرى.',
+	// stage-86 — الفئة التي أوقف شراؤها (تنبيه صفحة المنتج + التوست)
+	'pdetail.categoryDisabledNotice':
+		'تم تعطيل شراء هذا المنتج مؤقتًا — أوقف المدير فئته.',
+	'pdetail.categoryDisabledToast': 'إمكانية شراء هذا المنتج معطّلة',
 	'pdetail.orderModesTitle': 'أوضاع طلب هذا المنتج',
 	'pdetail.courierDesc': 'التوصيل بالدراج إلى عنوانك (مع أجر توصيل المنطقة).',
 	'pdetail.takeawayDesc': 'استلم طلبك حضوريًا من سين شين.',
@@ -630,6 +636,9 @@ export const ar: Dict = {
 	// ── stage-48 — السلة: تنبيهات برتقالية ──
 	'cart.unavailableItem':
 		'هذا المنتج غير متوفر حاليًا — يمكنك حذفه من السلة أو انتظار توفره.',
+	// stage-86 — عنصرُ فئةٍ أوقف المدير شراءها (نفس التنسيق البرتقالي)
+	'cart.purchaseBlockedItem':
+		'أوقف المدير شراء هذا المنتج — يرجى حذفه من السلة.',
 	'cart.noCourier': 'التوصيل بالدراج',
 	'cart.noTakeaway': 'الاستلام الحضوري',
 	'cart.noDineIn': 'التقديم في المطعم',

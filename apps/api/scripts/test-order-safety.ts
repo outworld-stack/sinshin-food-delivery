@@ -52,7 +52,15 @@ try {
   let trackingHook = async () => false
   const orderService = new OrderService({
     db, config, coupons: couponService,
-    settings: { liveTrackingEnabled: () => trackingHook(), restaurantStatus: async () => ({ anyClosed: false }) } as never,
+    // ترمیم استیج-۸۶ (میراثِ ۸۴): isBusy/enabledGateways از stage-84 به
+    // order.service آمده بود ولی استابِ این تست به‌روز نشده بود (تست از
+    // آن موقع در دروازه‌ها اجرا نمی‌شد) — حالا دوباره سبز و بخشِ دروازه.
+    settings: {
+      liveTrackingEnabled: () => trackingHook(),
+      restaurantStatus: async () => ({ anyClosed: false }),
+      isBusy: async () => false,
+      enabledGateways: async () => ({ mellat: false, zarinpal: true, sep: false }),
+    } as never,
     zones: { feeFor: async () => 10_000 } as never,
     notifications: { notifyUser: async () => undefined } as never,
   })
