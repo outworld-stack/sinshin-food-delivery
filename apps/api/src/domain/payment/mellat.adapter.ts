@@ -1,6 +1,7 @@
 //src/domain/payment/mellat.adapter.ts
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { amountInRial } from './http-util'
 import type {
   GatewayInitInput,
   GatewayInitResult,
@@ -62,18 +63,17 @@ const tehranParts = (d: Date): Map<string, string> => {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   }).formatToParts(d)
   const map = new Map<string, string>()
   for (const p of parts) map.set(p.type, p.value)
   return map
 }
 
-/** تاریخ تهران شش‌رقمی (yymmdd) */
+/** Gregorian Tehran date required by bpPayRequest (yyyyMMdd). */
 const localDate = (d: Date): string => {
   const p = tehranParts(d)
-  const yy = (p.get('year') ?? '0000').slice(2)
-  return `${yy}${p.get('month') ?? '01'}${p.get('day') ?? '01'}`
+  return `${p.get('year') ?? '0000'}${p.get('month') ?? '01'}${p.get('day') ?? '01'}`
 }
 
 /** ساعت تهران شش‌رقمی (hhmmss) */
@@ -165,7 +165,7 @@ export class MellatAdapter implements PaymentGateway {
       { name: 'userName', value: userName, type: 'string' },
       { name: 'userPassword', value: userPassword, type: 'string' },
       { name: 'orderId', value: orderId, type: 'long' },
-      { name: 'amount', value: String(input.amount * 10), type: 'long' }, // تومان → ریال
+      { name: 'amount', value: String(amountInRial(input.amount)), type: 'long' },
       { name: 'localDate', value: localDate(now), type: 'string' },
       { name: 'localTime', value: localTime(now), type: 'string' },
       { name: 'additionalData', value: '', type: 'string' },
@@ -177,7 +177,7 @@ export class MellatAdapter implements PaymentGateway {
     }
 
     const { code, refId } = parsePayResult(raw)
-    if (code !== '0' || !refId) {
+    if (code !== '0' || !/^[A-Za-z0-9]{1,100}$/.test(refId)) {
       throw Err.conflict(`ایجاد پرداخت ملت ناموفق بود (کد ${code}).`)
     }
     return {
@@ -187,42 +187,39 @@ export class MellatAdapter implements PaymentGateway {
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
-    // کدگذاری gatewayRef را بالای فایل ببینید؛ بدون آن نه orderId
-    // داریم نه مرجع تراکنش — داده‌ی ناشناخته = شکست قطعی (هم‌تراز سامان)
+    // Without a valid stored order/receipt association, nonpayment cannot
+    // be established. Preserve the hold for reconciliation.
     const m = /^(\d{1,15}):([ts]):([A-Za-z0-9]+)$/.exec(input.gatewayRef ?? '')
-    if (!m) return { success: false, gatewayRef: input.gatewayRef ?? null }
+    if (!m) return { success: false, gatewayRef: input.gatewayRef ?? null, indeterminate: true }
     const [, orderId = '', kind = '', storedRef = ''] = m
+    if (input.paymentId && orderId !== this.numericOrderId(input.paymentId)) {
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+    }
 
     if (kind !== 't') {
       // مرجع ماندگار از callback قبلی — مسیر ری-وریفای کارِ تایم‌اوت
       return this.verifyAndSettle(orderId, storedRef)
     }
 
-    const resCode = qget(input.query, 'ResCode')
-    if (resCode === undefined) {
+    const saleReferenceId = qget(input.query, 'SaleReferenceId')
+    if (!saleReferenceId) {
       // رارد H6 — کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback:
       // کاربر ممکن است در بانک پرداخته و callback نرسیده باشد → پول در PSP
       // گرفته شده → indeterminate (پنجره‌ی ۲۴h در reconcilePending)، نه fail
       // خودکار که یعنی بازگشت وجهِ اشتباه.
       return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
-    if (resCode !== '0') {
-      // خود بانک شکست را اعلام کرده (۱۷ = انصراف مشتری) — قطعی
-      return { success: false, gatewayRef: input.gatewayRef }
-    }
-
     // توکن فرم باید با توکن init یکی باشد — جعلِ پیوند تراکنش ممنوع
     const formRef = qget(input.query, 'RefId')
     if (formRef !== undefined && formRef !== storedRef) {
       console.warn(
-        `[mellat] callback: RefId فرم (${formRef}) با توکن init (${storedRef}) نمی‌خواند — پیوند جعلی، شکست قطعی.`,
+        `[mellat] callback RefId mismatch — leaving payment pending for a valid bank verification.`,
       )
-      return { success: false, gatewayRef: input.gatewayRef }
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
 
-    const saleReferenceId = qget(input.query, 'SaleReferenceId')
-    if (!saleReferenceId) {
-      // ResCode=0 بدون مرجع — پاسخ ناقص بانک؛ قطعی نیست
+    const saleOrderId = qget(input.query, 'SaleOrderId')
+    if (saleOrderId !== undefined && saleOrderId !== orderId) {
       return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
     return this.verifyAndSettle(orderId, saleReferenceId)
@@ -241,6 +238,9 @@ export class MellatAdapter implements PaymentGateway {
    *   ۰ موفق · ۴۳ قبلاً وریفای شده · ۴۵ قبلاً تسویه شده · ۴۸ برگشت خورده
    */
   private async verifyAndSettle(orderId: string, saleReferenceId: string): Promise<GatewayVerifyResult> {
+    if (!/^[1-9]\d{0,18}$/.test(saleReferenceId) || BigInt(saleReferenceId) > 9223372036854775807n) {
+      return { success: false, gatewayRef: null, indeterminate: true }
+    }
     const { terminalId, userName, userPassword } = this.creds
     const common: BpParam[] = [
       { name: 'terminalId', value: terminalId, type: 'long' },
@@ -267,11 +267,12 @@ export class MellatAdapter implements PaymentGateway {
       )
       return { success: false, gatewayRef: composite }
     }
+    if (verified === '45') return { success: true, gatewayRef: composite }
     if (verified !== '0' && verified !== '43') {
       // بقیه‌ی کدها قطعی نیستند — failPayment بدون اطمینان یعنی
       // بازگشت وجه اشتباه (هم‌تراز زرین‌پال/سامان). stage-76: کدِ درگاه
-      // لاگ می‌شود تا در تست‌های عملی، کدهای «قطعاً پرداخت‌نشده» به این
-      // جدول اضافه شوند (الگوی -9/-10/-11 زرین‌پال).
+      // لاگ می‌شود تا پس از تایید مستندات درگاه، کدهای «قطعاً پرداخت‌نشده»
+      // به این جدول اضافه شوند.
       console.warn(
         `[mellat] verify کد ناشناخته ${verified} — indeterminate: orderId=${orderId} saleRef=${saleReferenceId}`,
       )
@@ -320,6 +321,7 @@ export class MellatAdapter implements PaymentGateway {
         // رارد ۴۵ — مهلت از کانفیگ (PAYMENT_TIMEOUT_MS)؛ قبلاً ۱۵ ثانیه‌ی ثابت
         signal: AbortSignal.timeout(this.config.gateway.timeoutMs),
       })
+      if (!res.ok) return null
       const xml = await res.text()
       if (/<(?:[A-Za-z][\w-]*:)?Fault[\s>]/.test(xml)) return null
       // stage-76 — <return> با پیشوندِ namespace هم پذیرفته می‌شود

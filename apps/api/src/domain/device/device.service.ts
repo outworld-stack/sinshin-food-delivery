@@ -113,7 +113,10 @@ export class DeviceService {
    * تلاشِ ردشده‌ی ثبت‌نام دیگر گراف دستگاه را آلوده نمی‌کند.
    */
   async peek(signals: DeviceSignals, phone: string): Promise<DevicePeek> {
-    const { db } = this.deps
+    return this.peekOn(this.deps.db, signals, phone)
+  }
+
+  async peekOn(db: DbOrTx, signals: DeviceSignals, phone: string): Promise<DevicePeek> {
     const composite = compositeFingerprintHash(signals, signals.userAgent ?? null, phone)
 
     let device: DeviceRow | undefined
@@ -136,7 +139,7 @@ export class DeviceService {
     }
 
     // امتیاز ریسک — فقط محاسبه (ذخیره در finalize)
-    const clusterIds = device ? await this.clusterDeviceIds(device.id) : []
+    const clusterIds = device ? await this.clusterDeviceIds(device.id, db) : []
     const clusterPhones = device
       ? await db
           .selectDistinct({ phone: deviceIdentities.phone })
@@ -196,25 +199,69 @@ export class DeviceService {
     let autoBlockOutcome: 'fired' | 'deferred-weak-flags' | 'no' = 'no'
 
     // ── ۱) ردیف دستگاه: به‌روزرسانیِ قفل‌شده یا درجِ race-safe ──
-    let device: DeviceRow | undefined
-
-    if (peek.device) {
-      // قفل ردیف — رقابتِ هم‌زمان روی همین دستگاه اینجا سریال می‌شود
-      const rows = await db
-        .select()
-        .from(devices)
-        .where(eq(devices.id, peek.device.id))
-        .for('update')
-      device = rows[0]
+    let matchedBy: DevicePeek['matchedBy'] = 'none'
+    const lockExisting = async (): Promise<DeviceRow | undefined> => {
+      // Resolve again after taking the transaction's phone lock: peek can be
+      // stale, and clientId must retain precedence over a fingerprint match.
+      if (signals.clientId) {
+        const [byClient] = await db.select().from(devices)
+          .where(eq(devices.clientId, signals.clientId)).for('update')
+        if (byClient) {
+          matchedBy = 'client-id'
+          return byClient
+        }
+      }
+      const [byFingerprint] = await db.select().from(devices)
+        .where(eq(devices.fingerprintHash, composite)).for('update')
+      if (byFingerprint) matchedBy = 'fingerprint'
+      return byFingerprint
+    }
+    let device = await lockExisting()
+    let isNewDevice = false
+    if (!device) {
+      const [inserted] = await db.insert(devices).values({
+        clientId: signals.clientId || null,
+        fingerprintHash: composite,
+        canvasHash: signals.canvasHash,
+        webglHash: signals.webglHash,
+        audioHash: signals.audioHash,
+        fontsHash: signals.fontsHash,
+        screen: signals.screen ?? null,
+        platform: signals.platform ?? null,
+        timezone: signals.timezone ?? null,
+        language: signals.language ?? null,
+        hardwareConcurrency: signals.hardwareConcurrency ?? null,
+        deviceMemory: signals.deviceMemory ?? null,
+        touch: signals.touch ?? false,
+        networkType: signals.networkType ?? null,
+        userAgent: signals.userAgent ?? null,
+        label: signals.label ?? null,
+        deviceType: signals.deviceType ?? null,
+        deviceBrand: signals.deviceBrand ?? null,
+        deviceModel: signals.deviceModel ?? null,
+      }).onConflictDoNothing().returning()
+      isNewDevice = Boolean(inserted)
+      device = inserted ?? await lockExisting()
+    }
+    if (!device) throw Err.internal('ذخیره‌سازی دستگاه ناموفق بود.')
+    if (device.isBlocked && !(event === 'REGISTER' && input.permitOverride)) {
+      throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
+    }
+    if (event === 'REGISTER' && input.permitOverride) {
+      await this.logEventOn(db, device.id, phone, 'PERMIT_BYPASS', ip, signals.userAgent, {
+        permitId: input.permitId ?? null,
+        deviceBlocked: device.isBlocked,
+        ownerConflict: device.registeredOwnerPhone !== null && device.registeredOwnerPhone !== phone,
+      })
     }
 
-    if (device) {
+    if (!isNewDevice) {
       // drift دو-مرحله‌ای: prev = canvasِ ذخیره‌شده‌ی فعلی، سپس به‌روزرسانی
       const drift = DeviceService.driftDetected(device, signals)
       const { score, flags } = computeRiskScore({
         signals,
         userAgent: signals.userAgent ?? null,
-        clusterPhoneCount: peek.clusterPhoneCount + 1,
+        clusterPhoneCount: (await this.referralBlockedForDeviceOn(db, device.id, phone)) + 1,
         canvasDrift: drift,
       })
 
@@ -228,7 +275,7 @@ export class DeviceService {
       const patch: Partial<typeof devices.$inferInsert> = {
         // clientId فقط وقتی خالی است پر می‌شود — بازنویسی ممنوع (D6)؛
         // با ایندکس یکتا، بازنویسیِ هم‌زمان two-row خطای خام می‌داد.
-        clientId: device.clientId ?? signals.clientId ?? null,
+        clientId: device.clientId ?? (signals.clientId || null),
         fingerprintHash: composite,
         canvasHash: signals.canvasHash,
         webglHash: signals.webglHash,
@@ -255,8 +302,12 @@ export class DeviceService {
       let updated: DeviceRow | undefined
       // قفل مقدار برای closure — TS و رِیسِ مقدار
       const target: DeviceRow = device
+      // A failed statement aborts PostgreSQL's transaction. A savepoint must
+      // roll it back before the audit write and the next update can run.
       const runUpdate = async (p: Partial<typeof devices.$inferInsert>) =>
-        (await db.update(devices).set(p).where(eq(devices.id, target.id)).returning())[0]
+        db.transaction(async (savepoint) =>
+          (await savepoint.update(devices).set(p).where(eq(devices.id, target.id)).returning())[0],
+        )
       try {
         updated = await runUpdate(patch)
       } catch (error) {
@@ -287,44 +338,6 @@ export class DeviceService {
         })
       }
     } else {
-      // درج race-safe (D5/P2-۷): ON CONFLICT DO NOTHING → اگر رقابت برنده
-      // بود، ردیفِ موجود دوباره پیدا می‌شود — خطای خام دیتابیس به کاربر نمی‌رسد.
-      const inserted = await db
-        .insert(devices)
-        .values({
-          clientId: signals.clientId ?? null,
-          fingerprintHash: composite,
-          canvasHash: signals.canvasHash,
-          webglHash: signals.webglHash,
-          audioHash: signals.audioHash,
-          fontsHash: signals.fontsHash,
-          screen: signals.screen ?? null,
-          platform: signals.platform ?? null,
-          timezone: signals.timezone ?? null,
-          language: signals.language ?? null,
-          hardwareConcurrency: signals.hardwareConcurrency ?? null,
-          deviceMemory: signals.deviceMemory ?? null,
-          touch: signals.touch ?? false,
-          networkType: signals.networkType ?? null,
-          userAgent: signals.userAgent ?? null,
-          label: signals.label ?? null,
-          deviceType: signals.deviceType ?? null,
-          deviceBrand: signals.deviceBrand ?? null,
-          deviceModel: signals.deviceModel ?? null,
-        })
-        .onConflictDoNothing()
-        .returning()
-
-      device = inserted[0]
-      if (!device) {
-        device =
-          (await db.query.devices.findFirst({ where: eq(devices.fingerprintHash, composite) })) ??
-          (signals.clientId
-            ? await db.query.devices.findFirst({ where: eq(devices.clientId, signals.clientId) })
-            : undefined)
-      }
-      if (!device) throw Err.internal('ذخیره‌سازی دستگاه ناموفق بود.')
-
       // ── ۲) شباهت + لینک — فقط کیفیت کافی (P1-۱) و مرتب‌سازی صریح (P2-۶) ──
       // دقت: خودِ ردیفِ تازه از کاندیدها حذف می‌شود — درج + جست‌وجوی بعدی،
       // خودش را با شباهت ۱.۰ «لینک به خود» می‌ساخت (کشف E2E استیج ۷۰).
@@ -394,7 +407,7 @@ export class DeviceService {
       const { score, flags } = computeRiskScore({
         signals,
         userAgent: signals.userAgent ?? null,
-        clusterPhoneCount: peek.clusterPhoneCount + 1,
+        clusterPhoneCount: (await this.referralBlockedForDeviceOn(db, device.id, phone)) + 1,
         canvasDrift: false,
       })
       if (score > 0) {
@@ -561,7 +574,7 @@ export class DeviceService {
     // تصمیم‌های سخت چه شدند — یک رویداد برای پاسخِ «چرا؟» در بازبینیِ ادمین.
     await this.logEventOn(db, device.id, phone, 'DEVICE_DECISION', ip, signals.userAgent ?? null, {
       event,
-      matchedBy: peek.matchedBy,
+      matchedBy,
       riskScore: device.riskScore,
       riskFlags: device.riskFlags,
       links: linkedTo.length,
@@ -597,16 +610,15 @@ export class DeviceService {
     if (role === 'admin') return
 
     const current = currentDeviceId ? asDeviceId(currentDeviceId) : null
-    const others = await db
+    const known = await db
       .selectDistinct({ deviceId: deviceIdentities.deviceId })
       .from(deviceIdentities)
-      .where(
-        current
-          ? and(eq(deviceIdentities.phone, phone), ne(deviceIdentities.deviceId, current))
-          : eq(deviceIdentities.phone, phone),
-      )
+      .where(eq(deviceIdentities.phone, phone))
 
-    if (others.length >= config.maxDevicesPerUser) {
+    // Lowering the configured quota must still allow existing devices to log
+    // in and remove old devices. Only a new identity consumes quota.
+    if (current && known.some((row) => row.deviceId === current)) return
+    if (known.length >= config.maxDevicesPerUser) {
       throw Err.deviceLimit(config.maxDevicesPerUser)
     }
   }
@@ -621,18 +633,25 @@ export class DeviceService {
     const { db } = this.deps
     const id = asDeviceId(deviceId)
 
-    const removed = await db
-      .delete(deviceIdentities)
-      .where(and(eq(deviceIdentities.deviceId, id), eq(deviceIdentities.phone, phone)))
-      .returning({ id: deviceIdentities.id })
-    if (removed.length === 0) return false
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+      const removed = await tx
+        .delete(deviceIdentities)
+        .where(and(eq(deviceIdentities.deviceId, id), eq(deviceIdentities.phone, phone)))
+        .returning({ id: deviceIdentities.id })
+      if (removed.length === 0) return false
 
-    await db
-      .update(sessions)
-      .set({ revokedAt: new Date(), revokedReason: 'device-revoked' })
-      .where(and(eq(sessions.deviceId, id), eq(sessions.userId, asUserId(userId))))
-    await this.logEvent(deviceId, phone, 'IDENTITY_REMOVED', null, null, {})
-    return true
+      await tx
+        .update(sessions)
+        .set({ revokedAt: new Date(), revokedReason: 'device-revoked' })
+        .where(and(
+          eq(sessions.deviceId, id),
+          eq(sessions.userId, asUserId(userId)),
+          sql`${sessions.revokedAt} is null`,
+        ))
+      await this.logEventOn(tx, deviceId, phone, 'IDENTITY_REMOVED', null, null, {})
+      return true
+    })
   }
 
   /** رویداد عمومی — از AuthService برای PHONE_LIMIT_BLOCKED هم صدا زده می‌شود */
@@ -784,23 +803,25 @@ export class DeviceService {
     const { db } = this.deps
     const id = asDeviceId(rawId)
 
-    const [updated] = await db
-      .update(devices)
-      .set({
-        isBlocked: blocked,
-        blockedAt: blocked ? new Date() : null,
-        blockedReason: blocked ? (reason ?? 'admin') : null,
-      })
-      .where(eq(devices.id, id))
-      .returning()
-    if (!updated) throw Err.notFound('دستگاهی پیدا نشد.')
+    return db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(devices)
+        .set({
+          isBlocked: blocked,
+          blockedAt: blocked ? new Date() : null,
+          blockedReason: blocked ? (reason ?? 'admin') : null,
+        })
+        .where(eq(devices.id, id))
+        .returning()
+      if (!updated) throw Err.notFound('دستگاهی پیدا نشد.')
 
-    await this.logEvent(rawId, null, blocked ? 'BLOCK' : 'UNBLOCK', null, null, {
-      reason,
-      actor: actorPhone,
+      await this.logEventOn(tx, rawId, null, blocked ? 'BLOCK' : 'UNBLOCK', null, null, {
+        reason,
+        actor: actorPhone,
+      })
+      if (blocked) await this.revokeDeviceSessionsOn(tx, rawId, 'device-blocked')
+      return updated
     })
-    if (blocked) await this.revokeDeviceSessions(rawId, 'device-blocked')
-    return updated
   }
 
   /**
@@ -809,8 +830,12 @@ export class DeviceService {
    * وصل شده، معرفیِ شمارهٔ تازه فقط از همین خوشه پاداش نمی‌گیرد (ضد فارم).
    */
   async referralBlockedForDevice(deviceId: string, phone: string): Promise<number> {
-    const clusterIds = await this.clusterDeviceIds(asDeviceId(deviceId))
-    const rows = await this.deps.db
+    return this.referralBlockedForDeviceOn(this.deps.db, deviceId, phone)
+  }
+
+  async referralBlockedForDeviceOn(db: DbOrTx, deviceId: string, phone: string): Promise<number> {
+    const clusterIds = await this.clusterDeviceIds(asDeviceId(deviceId), db)
+    const rows = await db
       .selectDistinct({ phone: deviceIdentities.phone })
       .from(deviceIdentities)
       .where(
@@ -866,7 +891,7 @@ export class DeviceService {
       device.webglHash === signals.webglHash &&
       device.audioHash === signals.audioHash
     if (!changedNow) return false
-    return device.prevCanvasHash !== null && device.prevCanvasHash !== device.canvasHash
+    return !isMissingHash(device.prevCanvasHash) && device.prevCanvasHash !== device.canvasHash
   }
 
   private async attachIdentityOn(
@@ -907,14 +932,14 @@ export class DeviceService {
     await this.logEventOn(db, deviceId, phone, event, ip, userAgent, {})
   }
 
-  private async clusterDeviceIds(root: DeviceId): Promise<DeviceId[]> {
+  private async clusterDeviceIds(root: DeviceId, db: DbOrTx = this.deps.db): Promise<DeviceId[]> {
     // رارد M4 — قبلاً یک کوئری به‌ازای هر دستگاه (خوشه‌ی ۵۰تایی = تا ۵۰
     // کوئری متوالی). حالا هر «سطح» از BFS با یک inArray خوانده می‌شود —
     // عمق معمول ۲-۳ یعنی ~۳ کوئری با همان نتیجه‌ی دقیق و همان سقف.
     const visited = new Set<DeviceId>([root])
     let frontier: DeviceId[] = [root]
     while (frontier.length > 0 && visited.size < CLUSTER_CAP) {
-      const rows = await this.deps.db
+      const rows = await db
         .select()
         .from(deviceLinks)
         .where(
@@ -926,7 +951,7 @@ export class DeviceService {
       const next: DeviceId[] = []
       for (const r of rows) {
         for (const other of [r.deviceA, r.deviceB]) {
-          if (!visited.has(other)) {
+          if (visited.size < CLUSTER_CAP && !visited.has(other)) {
             visited.add(other)
             next.push(other)
           }
@@ -969,9 +994,5 @@ export class DeviceService {
       .update(sessions)
       .set({ revokedAt: new Date(), revokedReason: reason })
       .where(and(eq(sessions.deviceId, asDeviceId(deviceId)), sql`${sessions.revokedAt} is null`))
-  }
-
-  private async revokeDeviceSessions(deviceId: string, reason: string): Promise<void> {
-    await this.revokeDeviceSessionsOn(this.deps.db, deviceId, reason)
   }
 }

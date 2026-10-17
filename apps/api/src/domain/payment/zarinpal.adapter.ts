@@ -1,7 +1,7 @@
 //src/domain/payment/zarinpal.adapter.ts
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
-import { postGatewayJson } from './http-util'
+import { amountInRial, postGatewayJson } from './http-util'
 import type {
   GatewayInitInput,
   GatewayInitResult,
@@ -44,13 +44,13 @@ export class ZarinpalAdapter implements PaymentGateway {
     // callback غیرسفید). قبلاً جزئیات دور ریخته می‌شد ⇒ «پرداخت گاهی خطا
     // می‌دهد» بدون هیچ سرنخی. حالا هم لاگ می‌شود هم کد به پیام می‌رسد.
     const json = await postGatewayJson<{
-      data?: { authority?: string }
+      data?: { authority?: string; code?: number }
       errors?: Array<{ code?: number; message?: string }>
     }>(
       this.requestUrl,
       {
         merchant_id: this.merchantId,
-        amount: input.amount * 10, // تومان → ریال
+        amount: amountInRial(input.amount),
         callback_url: input.callbackUrl,
         description: input.description,
         metadata: input.mobile ? { mobile: input.mobile } : undefined,
@@ -58,7 +58,7 @@ export class ZarinpalAdapter implements PaymentGateway {
       this.config.gateway.timeoutMs,
     )
     const authority = json?.data?.authority
-    if (!authority) {
+    if (json?.data?.code !== 100 || typeof authority !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/.test(authority)) {
       const firstError = json?.errors?.[0]
       if (json?.errors?.length) {
         console.error('[zarinpal] init errors:', JSON.stringify(json.errors))
@@ -71,38 +71,26 @@ export class ZarinpalAdapter implements PaymentGateway {
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
-    // phase-fix: مرجع ذخیره‌شده در DB مقدم است؛ کوئری فقط پشتیبان است.
-    const authority = input.gatewayRef ?? input.query.authority ?? ''
+    // Verify only the authority persisted during initialization.
+    const authority = input.gatewayRef
+    if (!authority || !/^[A-Za-z0-9_-]{1,120}$/.test(authority)) {
+      return { success: false, gatewayRef: authority ?? null, indeterminate: true }
+    }
 
-    // stage-74 — Status برگشتی درگاه (فقط در callback می‌رسد؛ در استعلامِ
-    // job تایم‌اوت/رِتری کوئری خالی است). زرین‌پال برای «پرداخت لغوشده یا
-    // ناموفق» Status=NOK می‌فرستد و طبق مستنداتش فقط برای Status=OK باید
-    // Verify زده شود.
-    //
-    // چرا NOK «به‌تنهایی» مسیر را نهایی نمی‌کند؟ پارامترِ کوئری قابلِ
-    // جعل توسط کاربر است (state در URL پرداختِ خودِ اوست) — اگر مشتری
-    // پرداخت را «انجام داده» باشد و بعد callbackِ جعلیِ NOK بزند، نهایی
-    // کردن به FAILED یعنی شکستِ سفارشِ پول‌گرفته. منبعِ حقیقت فقط پاسخِ
-    // سرور-به-سرورِ Verify است: درِ قطعی‌شدنِ شکست همان کدهای -9/-10/-11
-    // پاسخِ Verify است که باز می‌شود — برای پرداختِ لغوشده، زرین‌پال این
-    // کدها را (در v4 اغلب در آرایه/شیءِ errors نه در data.code — ریشه‌ی
-    // باگِ «سفارش تا ابد PENDING می‌ماند») برمی‌گرداند. Status فقط لاگ
-    // می‌شود تا در تست‌های عملی کارفرما دیده شود.
+    // Browser Status is unsigned, so NOK alone cannot release money.
+    // Server verification is authoritative; log the browser status only
+    // to help diagnose contradictory callbacks.
     const cbStatus = (input.query.Status ?? input.query.status ?? '').trim().toUpperCase()
 
     const json = await postGatewayJson<{
       data?: { code?: number }
-      // stage-74 — v4 خطاها را در دو شکل می‌فرستد: آرایه یا شیءی تکی.
-      // قبلاً فقط data.code خوانده می‌شد؛ برای پرداختِ لغوشده (شایع‌ترین
-      // شکل: errors:[{code:-11,…}] با data خالی) کد undefined می‌شد و
-      // نتیجه indeterminate → سفارش تا ۲۴ ساعت در PENDING_PAYMENT +
-      // «مجموع پرداخت‌ها» آلوده (گزارش کارفرما — stage-74).
+      // v4 errors may be an array or a single object.
       errors?: Array<{ code?: number; message?: string }> | { code?: number; message?: string }
     }>(
       this.verifyUrl,
       {
         merchant_id: this.merchantId,
-        amount: input.amount * 10,
+        amount: amountInRial(input.amount),
         authority,
       },
       this.config.gateway.timeoutMs,
@@ -123,15 +111,10 @@ export class ZarinpalAdapter implements PaymentGateway {
       }
       return { success: true, gatewayRef: authority }
     }
-    // phase-fix: فقط کدهای «قطعاً پرداخت‌نشده» به شکست می‌روند؛
-    // بقیه (خطای بانک/سرویس/نامشخص) = indeterminate — پول ممکن است گرفته
-    // شده باشد؛ قطعی‌سازی به‌عنوان FAILED یعنی بازگشت وجه اشتباه.
-    //   -9  ورودی نامعتبر (پولی گرفته نشده)
-    //   -10 پذیرنده/IP نامعتبر
-    //   -11 authority پیدا نشد (پرداختی در کار نیست — حالتِ پرداختِ لغوشده)
-    // stage-74: کدها از هر دو شکلِ پاسخ (data.code یا errors[].code)
-    // خوانده می‌شوند.
-    const DEFINITELY_NOT_PAID = new Set([-9, -10, -11])
+    // Validation, merchant configuration and authorization errors cannot
+    // establish whether an earlier payment captured money (-9/-10/-11).
+    // Only explicit unsuccessful transaction code -51 may release the hold.
+    const DEFINITELY_NOT_PAID = new Set([-51])
     if (
       DEFINITELY_NOT_PAID.has(dataCode ?? Number.NaN) ||
       DEFINITELY_NOT_PAID.has(errCode ?? Number.NaN)

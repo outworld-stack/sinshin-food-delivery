@@ -118,13 +118,13 @@ export function appleModelName(identifier: string): string | null {
 // پرچمداران S/Note/Z قطری‌اند و جدول می‌خواهند.
 const SAMSUNG_FLAGSHIP: Record<string, string> = {
 	'SM-S911': 'S23',
-	'SM-S916': 'S23 Ultra',
+	'SM-S916': 'S23+',
 	'SM-S918': 'S23 Ultra',
 	'SM-S921': 'S24',
-	'SM-S926': 'S24 Ultra',
+	'SM-S926': 'S24+',
 	'SM-S928': 'S24 Ultra',
 	'SM-S931': 'S25',
-	'SM-S936': 'S25 Ultra',
+	'SM-S936': 'S25+',
 	'SM-S938': 'S25 Ultra',
 	'SM-F711': 'Z Flip 3',
 	'SM-F721': 'Z Flip 4',
@@ -133,9 +133,9 @@ const SAMSUNG_FLAGSHIP: Record<string, string> = {
 }
 
 function normalizeSamsungModel(code: string): string {
-	const prefix = SAMSUNG_FLAGSHIP[code.replace(/B$/i, '')]
+	const prefix = SAMSUNG_FLAGSHIP[/^SM-[A-Z]\d{3}/i.exec(code)?.[0].toUpperCase() ?? '']
 	if (prefix) return prefix
-	const m = /^SM-([A-Z])(\d{2})\d/.exec(code)
+	const m = /^SM-([AM])(\d{2})\d/i.exec(code)
 	if (m) return `${m[1]}${m[2]}`
 	return code.replace(/^(SM-|GT-|SC-)/i, '')
 }

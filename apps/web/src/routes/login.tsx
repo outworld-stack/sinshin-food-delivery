@@ -8,7 +8,7 @@
 // src/routes/login.tsx
 
 import { useForm } from '@tanstack/react-form'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate, useRouter } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronRight, Gift } from 'reicon-react'
@@ -22,7 +22,7 @@ import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { collectDeviceSignals } from '#/utils/deviceFingerprint'
 import { isValidIranPhone, sanitizePhone } from '#/utils/phone'
-import { clearStoredRef, getStoredRef } from '#/utils/referralCapture'
+import { captureRefFromUrl, clearStoredRef, getStoredRef } from '#/utils/referralCapture'
 
 export const Route = createFileRoute('/login')({
 	validateSearch: z.object({ redirect: z.string().optional() }),
@@ -46,6 +46,7 @@ function LoginRoute() {
 
 function LoginPage() {
 	const navigate = useNavigate()
+	const queryClient = useQueryClient()
 	const router = useRouter()
 	const search = Route.useSearch()
 	const login = useAuthStore((s) => s.login)
@@ -68,7 +69,7 @@ function LoginPage() {
 	const [resendIn, setResendIn] = useState(0)
 
 	useEffect(() => {
-		setRefCode(getStoredRef())
+		setRefCode(captureRefFromUrl() ?? getStoredRef())
 	}, [])
 
 	useEffect(() => {
@@ -130,6 +131,10 @@ function LoginPage() {
 
 	const phoneInputRef = useRef<HTMLInputElement>(null)
 	const codeInputRef = useRef<HTMLInputElement>(null)
+	const autoSubmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+	useEffect(() => () => {
+		if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
+	}, [])
 
 	const handleGoBack = useCallback(() => {
 		if (window.history.length > 1) {
@@ -165,6 +170,8 @@ function LoginPage() {
 	const otpForm = useForm({
 		defaultValues: { code: '' },
 		onSubmit: async ({ value }) => {
+			if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
+			if (loading || step !== 'otp') return
 			resetMutationErrors()
 			try {
 				const result = await verifyLoginMutation.mutateAsync({
@@ -172,6 +179,9 @@ function LoginPage() {
 					code: value.code,
 				})
 				const role = result.user.role
+				// A fresh login can follow passive expiry without an explicit
+				// logout. Discard the previous account's profile/orders/inbox.
+				queryClient.clear()
 
 				if (role === 'admin') {
 					login(true, 'admin')
@@ -187,7 +197,7 @@ function LoginPage() {
 					if (search.redirect) router.history.push(search.redirect)
 					else navigate({ to: '/admin/admin2/live-orders', replace: true })
 				} else {
-					login(true, 'user')
+					login(false, 'user')
 					if (result.isNewUser) {
 						clearStoredRef()
 						showToast(t['login.welcomeToast'])
@@ -202,8 +212,9 @@ function LoginPage() {
 	})
 
 	const handleResend = useCallback(async () => {
-		if (loading || !phone) return
-		sendOtpMutation.reset()
+		if (loading || !phone || resendIn > 0) return
+		if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
+		resetMutationErrors()
 		try {
 			await sendOtpMutation.mutateAsync(phone)
 			otpForm.setFieldValue('code', '')
@@ -212,7 +223,7 @@ function LoginPage() {
 		} catch {
 			// serverError
 		}
-	}, [loading, phone, otpForm, showToast, sendOtpMutation, t])
+	}, [loading, phone, resendIn, otpForm, showToast, sendOtpMutation, resetMutationErrors, t])
 
 	useEffect(() => {
 		if (step === 'phone') phoneInputRef.current?.focus()
@@ -222,16 +233,20 @@ function LoginPage() {
 	const handlePhoneInput = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
 			phoneForm.setFieldValue('phone', sanitizePhone(e.target.value))
+			setIsNewUser(false)
+			setNeedsTerms(false)
+			setTermsAccepted(false)
 		},
 		[phoneForm],
 	)
 
 	const handleCodeChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
+			if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
 			const value = sanitizePhone(e.target.value)
 			otpForm.setFieldValue('code', value)
 			if (value.length === 6) {
-				setTimeout(() => otpForm.handleSubmit(), 150)
+				autoSubmitTimer.current = setTimeout(() => otpForm.handleSubmit(), 150)
 			}
 		},
 		[otpForm],
@@ -296,6 +311,7 @@ function LoginPage() {
 												className="w-full text-center p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border-2 border-gray-200 dark:border-[#3a151c] focus:border-primary dark:focus:border-dark-primary outline-none transition text-gray-900 dark:text-[#f5e0e6]"
 												placeholder="0912 345 6789"
 												value={field.state.value}
+												disabled={loading}
 												onChange={handlePhoneInput}
 											/>
 											<p className="text-xs text-gray-400 text-center mt-3 font-DanaRegular">
@@ -332,6 +348,7 @@ function LoginPage() {
 												<input
 													type="checkbox"
 													checked={termsAccepted}
+													disabled={loading}
 													onChange={(e) => {
 														setTermsAccepted(e.target.checked)
 														if (e.target.checked) setNeedsTerms(false)
@@ -431,6 +448,7 @@ function LoginPage() {
 												className="w-full text-center text-2xl tracking-[0.5em] p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border-2 border-gray-200 dark:border-[#3a151c] focus:border-primary dark:focus:border-dark-primary outline-none transition text-gray-900 dark:text-[#f5e0e6]"
 												placeholder="• • • • • •"
 												value={field.state.value}
+												disabled={loading}
 												onChange={handleCodeChange}
 												onKeyDown={handleCodeKeyDown}
 											/>
@@ -480,8 +498,11 @@ function LoginPage() {
 
 								<button
 									type="button"
+									disabled={loading}
 									onClick={() => {
+										if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
 										setStep('phone')
+										otpForm.reset()
 										resetMutationErrors()
 									}}
 									className="w-full text-gray-500 dark:text-gray-400 text-sm hover:text-primary dark:hover:text-dark-primary transition cursor-pointer"

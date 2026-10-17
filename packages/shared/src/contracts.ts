@@ -464,6 +464,8 @@ export interface UserProfileDto {
   referralLink: string
   referrerCode: string | null
   totalReferralProfit: number
+  /** All referred accounts; myReferrals contains at most the 200 most recent. */
+  totalReferrals: number
   joinedAt: Date
   devices: DeviceDto[]
   recentOrders: UserOrder[]
@@ -530,6 +532,8 @@ export interface CouponRule {
 
 // ═══════════ Articles (ادغام دو بخش تکراری — نسخه‌ی کامل) ═══════════
 
+import type { ArticleBlocksDoc } from './blocks'
+
 export interface ArticleSubCategoryDto {
   id: string
   name: string
@@ -577,6 +581,12 @@ export interface ArticleDto {
   arAuto?: boolean
   /** stage-60 — پرچم «ویژه/سنجاق» مقاله (۴ آیتم اول لیست + Aurora) */
   isFeatured?: boolean
+  /**
+   * stage-82 — سندِ بلوکیِ صفحه‌ساز (ستون jsonb). فقط «جزئیات» پر می‌کند؛
+   * در نمای عمومی فقط برای زبان فارسی (زبانِ صفحه‌ساز) می‌آید — عربی
+   * همان مسیرِ متنی contentAr را نگه می‌دارد (پشتیبانِ فارسی).
+   */
+  blocks?: ArticleBlocksDoc | null
 }
 
 /**
@@ -586,7 +596,7 @@ export interface ArticleDto {
  */
 export type ArticleSummaryDto = Omit<
   ArticleDto,
-  'content' | 'processes' | 'galleryImages'
+  'content' | 'processes' | 'galleryImages' | 'blocks'
 >
 
 // ═══════════ تنظیمات / رستوران ═══════════
@@ -903,6 +913,10 @@ export interface SubAdminPermissionsDto {
   notificationsSend: boolean
   /** stage-48 — موجود/ناموجود کردن محصولات (پیش‌فرضِ افزودن: true) */
   productsAvailability: boolean
+  /** stage-82 — مشاهده پنل مقالات (پیش‌فرضِ افزودن: true) */
+  articlesRead: boolean
+  /** stage-82 — ایجاد/ویرایش مقاله با صفحه‌ساز (پیش‌فرضِ افزودن: false — فقط با مجوز صریح ادمین اصلی) */
+  articlesWrite: boolean
 }
 
 /** رارد ۴۷ — بدنه‌ی PATCH دسترسی‌ها — به‌روزرسانی جزئی: همه‌ی کلیدها اختیاری.

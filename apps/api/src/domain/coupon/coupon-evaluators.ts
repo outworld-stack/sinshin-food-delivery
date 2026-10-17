@@ -9,6 +9,7 @@ import { sql, type SQL } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import { UUID_RE } from '#/domain/shared/ids'
+import { validCouponRule } from './coupon-validation'
 
 /**
  * ۹ ارزیاب شرط کوپن — SQL خالص ایندکس‌دار.
@@ -73,6 +74,8 @@ export function evaluateCondition(
   type: ConditionType,
   params: ConditionParams,
 ): EvaluatorResult {
+  // Legacy malformed parameters must never silently become an easier rule.
+  if (!validCouponRule(type, params)) return { satisfied: sql`false`, current: sql`0` }
   switch (type) {
     case 'MIN_ORDERS_COUNT': {
       const count = num(params.count, 1)
@@ -141,7 +144,7 @@ export function evaluateCondition(
       const days = num(params.days, 1)
       return {
         satisfied: sql`(extract(epoch from (${ctx.now.toISOString()}::timestamptz - u.created_at)) / 86400) >= ${days}`,
-        current: sql`(extract(epoch from (${ctx.now.toISOString()}::timestamptz - u.created_at)) / 86400)::int`,
+        current: sql`floor(extract(epoch from (${ctx.now.toISOString()}::timestamptz - u.created_at)) / 86400)::int`,
       }
     }
 

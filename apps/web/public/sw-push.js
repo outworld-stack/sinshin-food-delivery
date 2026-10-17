@@ -37,9 +37,10 @@ self.addEventListener('push', (event) => {
   } catch {
     payload = { title: 'سین‌شین', body: 'اطلاعیه‌ی جدید دارید.' }
   }
-  const title = payload.title || 'سین‌شین'
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = {}
+  const title = typeof payload.title === 'string' && payload.title ? payload.title : 'سین‌شین'
   const options = {
-    body: payload.body || '',
+    body: typeof payload.body === 'string' ? payload.body : '',
     // tag = جایگزینی نوتیفیکیشن قبلی هم‌برچسب (مثل یادآورهای کوپن)
     tag: payload.tag || 'sinshin',
     // renotify با tag — نوتیف جدید هم‌برچسب دوباره با صدا می‌آید
@@ -48,7 +49,7 @@ self.addEventListener('push', (event) => {
     badge: '/icons/icon-192-v1.png',
     dir: 'rtl',
     lang: 'fa',
-    data: { url: payload.url || '/products', ...(payload.data || {}) },
+    data: { ...(payload.data && typeof payload.data === 'object' ? payload.data : {}), url: payload.url || '/products' },
   }
   // stage-50 — مقاوم‌سازی: هر موتوری لزوماً همه‌ی آپشن‌ها را نمی‌پذیرد
   // (مثلاً renotify/badge روی بعضی نسخه‌ها TypeError می‌دهد)؛ در آن
@@ -86,19 +87,22 @@ self.addEventListener('notificationclick', (event) => {
   let url = '/products'
   try {
     const resolved = new URL(rawUrl, self.location.origin)
-    if (resolved.origin === self.location.origin) url = resolved.pathname + resolved.search
+    if (resolved.origin === self.location.origin) url = resolved.pathname + resolved.search + resolved.hash
   } catch { /* بی‌شکل — همان پیش‌فرض */ }
   event.waitUntil(
     (async () => {
-      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      // تب باز؟ فوکوس + ناوبری به مقصد
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true }).catch(() => [])
+      const target = new URL(url, self.location.origin).href
+      // Prefer a tab already at the destination, so an unrelated form stays open.
+      clientList.sort((a, b) => Number(b.url === target) - Number(a.url === target))
       for (const client of clientList) {
-        if (client.url.includes(self.location.origin)) {
-          if ('focus' in client) await client.focus()
-          if ('navigate' in client) {
-            try { await client.navigate(url) } catch { /* تب در حال ناوبری است */ }
-          }
+        try {
+          if (new URL(client.url).origin !== self.location.origin) continue
+          if (client.url !== target && (!client.navigate || !(await client.navigate(url)))) continue
+          await client.focus()
           return
+        } catch {
+          // A closed/navigating tab must not swallow the notification click.
         }
       }
       // تب باز نیست؟ پنجره‌ی جدید

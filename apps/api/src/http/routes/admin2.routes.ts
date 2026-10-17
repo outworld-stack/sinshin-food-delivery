@@ -130,6 +130,9 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
           notificationsRead: t.Optional(t.Boolean()),
           notificationsSend: t.Optional(t.Boolean()),
           productsAvailability: t.Optional(t.Boolean()),
+          /** stage-82 — پنل مقالات + صفحه‌ساز */
+          articlesRead: t.Optional(t.Boolean()),
+          articlesWrite: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Update scopes and permissions' },
       },

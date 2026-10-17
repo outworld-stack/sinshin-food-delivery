@@ -39,7 +39,7 @@ export const qk = {
   myOrdersPrefix: ['my-orders'] as const,
 
   // stage-67 — صندوق اعلان‌های من (پروفایل): ۳۰ اعلانِ ۷ روز اخیر + بج.
-  // کلید ثابت (بدون پارامتر) — نامعتبرسازی از SSE/بعد از markRead
+  // Prefix for invalidation; query options append the authenticated user ID.
   myNotifications: ['my-notifications'] as const,
 
   // --- منو / محصولات ---

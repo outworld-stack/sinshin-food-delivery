@@ -76,27 +76,12 @@ import {
   type ConditionType,
 } from './coupon-evaluators'
 import { UUID_RE } from '#/domain/shared/ids'
+import { normalizeCouponCode } from '@sinshin/shared'
+import { assertFutureCouponExpiry, validateCouponNumbers } from './coupon-validation'
 
-/**
- * stage-72 (P2-۲۰) — انقضای کوپن باید «امروزِ تهران به بعد» باشد؛ کوپنِ
- * منقضی-به-دنیا-آمده هیچ‌وقت قابل استفاده نمی‌شود (create و update هر دو).
- * مقایسه در سطح «روز» انجام می‌شود — تاریخِ خودِ امروز مجاز است.
- */
-function assertExpiryNotPast(expiryDate: string | null | undefined): void {
-  if (!expiryDate) return
-  const expiry = new Date(expiryDate)
-  if (Number.isNaN(expiry.getTime())) return // NaN جداگانه ۴۲۲ می‌گیرد
-  const todayTehran = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Tehran',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date())
-  const startOfToday = new Date(`${todayTehran}T00:00:00Z`).getTime()
-  if (expiry.getTime() < startOfToday) {
-    throw Err.validation('تاریخ انقضا نمی‌تواند در گذشته باشد — امروز یا آینده را انتخاب کنید')
-  }
-}
+// Include legacy spellings when resolving and reserving the code namespace.
+const couponCodeMatches = (code: string): SQL =>
+  sql`upper(translate(btrim(${coupons.code}), '۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789')) = ${code}`
 
 /**
  * stage-66 (سیاست ۳ کارفرما) — حداکثر تعداد یادآور برای هر (کوپن، کاربر).
@@ -277,9 +262,16 @@ export class CouponService {
     tx: DbOrTx,
     userId: string,
     code: string,
+    options: { forUpdate?: boolean } = {},
   ): Promise<UsableCouponOutcome> {
-    const clean = code.trim().toUpperCase().slice(0, 32)
-    const coupon = (await tx.select().from(coupons).where(eq(coupons.code, clean)))[0]
+    const clean = normalizeCouponCode(code)
+    if (clean.length > 32) return { ok: false, reason: 'invalid' }
+    // Even an exact ASCII match can conflict with a historical digit alias.
+    // Reject ambiguity instead of silently choosing different campaign rules.
+    const query = tx.select().from(coupons).where(couponCodeMatches(clean))
+      .orderBy(coupons.id).limit(2)
+    const matches = await (options.forUpdate ? query.for('update') : query)
+    const coupon = matches.length === 1 ? matches[0] : undefined
     if (!coupon) return { ok: false, reason: 'invalid' }
 
     const now = Date.now()
@@ -402,6 +394,7 @@ export class CouponService {
       .select()
       .from(couponConditions)
       .where(eq(couponConditions.couponId, couponId))
+      .orderBy(couponConditions.createdAt, couponConditions.id)
     if (conds.length === 0) return []
 
     const ctx = { db: this.deps.db, userId: '', now: new Date() }
@@ -550,6 +543,7 @@ export class CouponService {
     /** stage-65 — ممنوعیت اعلان انتشار ساخت (پیش‌فرض خاموش = اعلان می‌رود) */
     announceSuppressed?: boolean
   }): Promise<{ success: boolean; id?: string }> {
+    validateCouponNumbers(input)
     // stage-66 (①/②) — قرارداد ساخت، در سرویس (نه فقط روت — هر فراخوان‌کننده‌ای):
     // عمومی ⇔ بدون شرط / خصوصی ⇔ حداقل یک شرط. قبلاً کوپن خصوصیِ بی‌شرط
     // (هیچ موتوری اعطایش نمی‌کرد — کوپن مرده) و کوپن عمومیِ همراه‌شرط
@@ -568,7 +562,7 @@ export class CouponService {
     // روی فارسی بی‌اثر و بی‌ضرر است) + خطاها به‌جای success:false با 200،
     // Err.validation می‌شوند تا فرانت پیام واقعی را ببیند (باگ «اضافه شد
     // ولی اضافه نشد» برای کد فارسی دقیقاً از همین‌جا می‌آمد).
-    const code = input.code.trim().toUpperCase().slice(0, 16)
+    const code = normalizeCouponCode(input.code)
     if (!/^[A-Z0-9\u0600-\u06FF_-]{3,16}$/.test(code)) {
       throw Err.validation('کد تخفیف باید ۳ تا ۱۶ نویسه باشد: حروف لاتین یا فارسی، رقم و خط تیره')
     }
@@ -582,9 +576,10 @@ export class CouponService {
     }
     // stage-72 (P2-۲۰) — انقضای گذشته دیگر قابل ذخیره نیست (کلاینت+سرور):
     // کوپنِ منقضی-به-دنیا-آمده هیچ‌وقت قابل استفاده نمی‌شود.
-    assertExpiryNotPast(input.expiryDate)
+    assertFutureCouponExpiry(input.expiryDate)
     try {
       return await this.deps.db.transaction(async (tx) => {
+        await this.assertCodeAvailable(tx, code)
         // stage-55 — کل فرایند اتمی: قبلاً بین insert کوپن و insert شرط‌ها
         // پنجره‌ای بود که کوپنِ بی‌شرط (کمپین عمومی!) قابل استفاده می‌شد.
         // onConflictDoNothing روی کد یکتا → مسیر race-safe بدون 500.
@@ -649,6 +644,8 @@ export class CouponService {
       announceSuppressed?: boolean
     },
   ): Promise<{ success: boolean }> {
+    if (!UUID_RE.test(id)) throw Err.validation('شناسه معتبر نیست')
+    validateCouponNumbers(input)
     // stage-66 (①/②) — همان قرارداد create؛ ویرایش هم نمی‌تواند کوپن معیوب بسازد.
     // «عمومی‌کردنِ کوپنِ شرط‌دار» باید با rules خالی بیاید (فرم همین کار را
     // می‌کند) — وگرنه ۴۲۲ روشن می‌گیرد، نه رفتارِ کورِ قبلی.
@@ -664,7 +661,7 @@ export class CouponService {
     }
     const { db } = this.deps
     // phase-9: هم‌الگوی create — کد فارسی مجاز + خطاها Err (۴۲۲/۴۰۹) نه success:false با 200
-    const code = input.code.trim().toUpperCase().slice(0, 16)
+    const code = normalizeCouponCode(input.code)
     if (!/^[A-Z0-9\u0600-\u06FF_-]{3,16}$/.test(code)) {
       throw Err.validation('کد تخفیف باید ۳ تا ۱۶ نویسه باشد: حروف لاتین یا فارسی، رقم و خط تیره')
     }
@@ -676,17 +673,20 @@ export class CouponService {
       throw Err.validation('تاریخ انقضا معتبر نیست')
     }
     // stage-72 (P2-۲۰) — هم‌الگوی create: انقضای گذشته رد می‌شود
-    assertExpiryNotPast(input.expiryDate)
-    const clash = await db.query.coupons.findFirst({ where: eq(coupons.code, code) })
-    if (clash && clash.id !== id) {
-      throw Err.conflict('این کد قبلاً ثبت شده است')
-    }
-
+    assertFutureCouponExpiry(input.expiryDate)
     const cid = asCampaignId(id)
     // stage-55 — پنجره‌ی delete-then-reinsert بسته شد؛ کرشِ وسط کار دیگر
     // کوپنِ بی‌شرط نمی‌سازد (کل ویرایش + جایگزینی شرط‌ها یکجا اتمیک است).
     try {
       return await db.transaction(async (tx) => {
+        await this.assertCodeAvailable(tx, code, cid)
+        const [current] = await tx.select().from(coupons).where(eq(coupons.id, cid)).for('update')
+        if (!current) throw Err.notFound('کوپن پیدا نشد')
+        // A pending or redeemed order must keep the same grant semantics
+        // through settlement, failure and refund.
+        if (current.isPublic !== input.isPublic && current.usedCount > 0) {
+          throw Err.conflict('نوع عمومی یا خصوصی کوپنِ رزروشده یا مصرف‌شده قابل تغییر نیست')
+        }
         const [updated] = await tx
           .update(coupons)
           .set({
@@ -733,9 +733,8 @@ export class CouponService {
    *
    *  • conditions / grants / redemptions / nudges با FK cascade حذف
    *    می‌شوند (= پاک شدن تاریخچه‌ی مصرف از دیتابیس).
-   *  • orders.coupon_id از فاز-۵ FK ندارد — برای پاک‌سازی کامل مرجع،
-   *    در همان tx روی سفارش‌ها null می‌شود؛ ردیف سفارش و breakdown
-   *    (دفتر پول) دست‌نخورده می‌ماند.
+   *  • orders.coupon_id uses ON DELETE SET NULL; orders and their money
+   *    snapshots survive deletion, including a concurrent checkout.
    *  • سفارش‌های PENDING_PAYMENTِ در جریان گیر نمی‌کنند: مسیرهای
    *    settle/fail/refund همه «کوپن نبود» را دفاعی هندل می‌کنند —
    *    settle فقط warn می‌زند و redemption نمی‌سازد (کد موجود)،
@@ -747,16 +746,12 @@ export class CouponService {
     if (!UUID_RE.test(id)) throw Err.validation('شناسه معتبر نیست')
     const couponId = asCampaignId(id)
     return this.deps.db.transaction(async (tx) => {
-      const [existing] = await tx
-        .select({ id: coupons.id })
-        .from(coupons)
+      // ON DELETE SET NULL also covers orders inserted by concurrent checkouts
+      // while this deletion waits for their coupon lock.
+      const [removed] = await tx.delete(coupons)
         .where(eq(coupons.id, couponId))
-      if (!existing) throw Err.notFound('کوپن پیدا نشد')
-
-      // ۱) قطع پیوند سفارش‌ها — پول و breakdown می‌مانند، مرجع آویزان نه
-      await tx.update(orders).set({ couponId: null }).where(eq(orders.couponId, couponId))
-      // ۲) حذف ردیف — بقیه‌ی تاریخچه با cascade می‌روند
-      await tx.delete(coupons).where(eq(coupons.id, couponId))
+        .returning({ id: coupons.id })
+      if (!removed) throw Err.notFound('کوپن پیدا نشد')
       return { success: true, message: 'کوپن و تاریخچه‌ی مصرف آن حذف شد' }
     })
   }
@@ -824,24 +819,32 @@ export class CouponService {
   async setActive(id: string, active: boolean): Promise<{ success: boolean; message: string }> {
     if (!UUID_RE.test(id)) throw Err.validation('شناسه معتبر نیست')
     const couponId = asCampaignId(id)
-    const row = (await this.deps.db.select().from(coupons).where(eq(coupons.id, couponId)))[0]
-    if (!row) throw Err.notFound('کوپن پیدا نشد')
+    return this.deps.db.transaction(async (tx) => {
+      const row = (await tx.select().from(coupons).where(eq(coupons.id, couponId)).for('update'))[0]
+      if (!row) throw Err.notFound('کوپن پیدا نشد')
 
-    if (active && row.endsAt !== null && row.endsAt.getTime() <= Date.now()) {
-      throw Err.conflict('تاریخ انقضای این کوپن گذشته است — ابتدا انقضا را ویرایش کنید')
-    }
-    if (row.isActive === active) {
-      return { success: true, message: active ? 'کوپن از قبل فعال است' : 'کوپن از قبل غیرفعال است' }
-    }
+      if (active && row.endsAt !== null && row.endsAt.getTime() <= Date.now()) {
+        throw Err.conflict('تاریخ انقضای این کوپن گذشته است — ابتدا انقضا را ویرایش کنید')
+      }
+      if (row.isActive === active) {
+        return { success: true, message: active ? 'کوپن از قبل فعال است' : 'کوپن از قبل غیرفعال است' }
+      }
 
-    await this.deps.db
-      .update(coupons)
-      .set({ isActive: active })
-      .where(eq(coupons.id, couponId))
-    return { success: true, message: active ? 'کوپن فعال شد' : 'کوپن غیرفعال شد' }
+      await tx.update(coupons).set({ isActive: active }).where(eq(coupons.id, couponId))
+      return { success: true, message: active ? 'کوپن فعال شد' : 'کوپن غیرفعال شد' }
+    })
   }
 
   // ══ داخلی ══
+
+  private async assertCodeAvailable(tx: DbOrTx, code: string, ownId?: CampaignId): Promise<void> {
+    // Serialize the normalized namespace before taking any coupon row lock.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`coupon-code:${code}`}, 0))`)
+    const [clash] = await tx.select({ id: coupons.id }).from(coupons)
+      .where(and(couponCodeMatches(code), ownId ? sql`${coupons.id} <> ${ownId}` : undefined))
+      .limit(1)
+    if (clash) throw Err.conflict('این کد قبلاً ثبت شده است')
+  }
 
   /** رارد ۴۸ — نسخه‌ی دسته‌ای conditionsOf برای لیست‌ها (یک کوئری، گروه‌بندی در Map) */
   private async conditionsOfMany(couponIds: Array<CampaignId>) {

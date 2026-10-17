@@ -1,7 +1,7 @@
 //src/domain/delivery/delivery-zone.service.ts
 import { asc, eq } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
+import type { Db, DbOrTx } from '#/infra/db/client'
 import { deliveryZones } from '#/infra/db/schema'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { DeliveryZone } from '@sinshin/shared'
@@ -44,18 +44,18 @@ export class DeliveryZoneService {
     this.listCache = null
   }
 
-  async list(): Promise<DeliveryZone[]> {
+  async list(db?: DbOrTx): Promise<DeliveryZone[]> {
     if (
-      this.listCache &&
+      !db && this.listCache &&
       Date.now() - this.listCache.at < DeliveryZoneService.LIST_TTL_MS
     ) {
       return this.listCache.rows
     }
-    const rows = await this.deps.db
+    const rows = await (db ?? this.deps.db)
       .select({ radiusKm: deliveryZones.radiusKm, fee: deliveryZones.fee })
       .from(deliveryZones)
       .orderBy(asc(deliveryZones.radiusKm))
-    this.listCache = { at: Date.now(), rows }
+    if (!db) this.listCache = { at: Date.now(), rows }
     return rows
   }
 
@@ -110,12 +110,12 @@ export class DeliveryZoneService {
   }
 
   /** هزینه‌ی ارسال برای آدرس — منطق واحد */
-  async feeFor(address: { lat: number; lng: number } | null): Promise<number> {
-    const zones = await this.list()
+  async feeFor(address: { lat: number; lng: number } | null, db?: DbOrTx): Promise<number> {
+    const zones = await this.list(db)
     if (zones.length === 0) return 0
     if (!address) return zones[0]!.fee
 
-    const origin = await this.deps.settings.restaurantLocation()
+    const origin = await this.deps.settings.restaurantLocation(db)
     const distance = haversineKm(origin, address)
     const zone = zones.find((z) => distance <= z.radiusKm) ?? zones[zones.length - 1]!
     return zone.fee

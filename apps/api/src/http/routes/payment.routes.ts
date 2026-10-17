@@ -171,8 +171,7 @@ export const paymentRoutes = (deps: PaymentRoutesDeps) => {
           description:
             'stage-58 — makes the checkout error message “پرداخت را از صفحه‌ی سفارش ادامه دهید” actually true. ' +
             'Creates a fresh payment row for the order (audit: هر تلاش یک ردیف), verifies/supersedes previous PENDING attempts safely ' +
-            '(money-safety: a possibly-paid old attempt is first re-verified against the PSP; indeterminate old rows are superseded with ' +
-            'retry-superseded metadata → R11 daily spot-check), then initiates a new gateway session. ' +
+            '(money-safety: an unresolved old attempt remains pending until the PSP returns a definitive result), then initiates a new gateway session. ' +
             'gatewayId defaults to the last attempt’s gateway. Rate-limited 6/min/IP.',
         },
       },

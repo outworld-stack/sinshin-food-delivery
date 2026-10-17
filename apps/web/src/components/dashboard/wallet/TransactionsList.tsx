@@ -12,6 +12,7 @@ interface TransactionsListProps {
   currentSort: TransactionSort
   currentPage: number
   totalPages: number
+  totalItems: number
   itemsPerPage: number
   onSortChange: (sort: TransactionSort) => void
   onPageChange: (page: number) => void
@@ -19,7 +20,7 @@ interface TransactionsListProps {
 }
 
 export const TransactionsList = memo(function TransactionsList({
-  transactions, currentSort, currentPage, totalPages, itemsPerPage,
+  transactions, currentSort, currentPage, totalPages, totalItems, itemsPerPage,
   onSortChange, onPageChange, onItemsPerPageChange,
 }: TransactionsListProps) {
   const { t } = useI18n()
@@ -63,13 +64,13 @@ export const TransactionsList = memo(function TransactionsList({
         </div>
       )}
 
-      {totalPages > 1 && (
+      {totalItems > 0 && (
         <div className="mt-4">
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
             itemsPerPage={itemsPerPage}
-            totalItems={transactions.length}
+            totalItems={totalItems}
             onPageChange={onPageChange}
             onItemsPerPageChange={onItemsPerPageChange}
             pageSizeOptions={[5, 10]}

@@ -47,6 +47,10 @@ export const admin2Profiles = pgTable(
     notificationsSend: boolean('notifications_send').notNull().default(false),
     /** stage-48 — موجود/ناموجود کردن محصولات (پیش‌فرضِ افزودن = true) */
     productsAvailability: boolean('products_availability').notNull().default(false),
+    /** stage-82 — مشاهده پنل مقالات (پیش‌فرضِ افزودن = true) */
+    articlesRead: boolean('articles_read').notNull().default(false),
+    /** stage-82 — ایجاد/ویرایش مقاله با صفحه‌ساز — فقط با مجوزِ صریحِ ادمین اصلی */
+    articlesWrite: boolean('articles_write').notNull().default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

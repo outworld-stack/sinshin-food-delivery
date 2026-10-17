@@ -1,6 +1,6 @@
 // src/server/auth.ts — کلاینت‌محور
 import { authApi } from '#/lib/api-client'
-import { publicApi } from '#/lib/api'
+import { postJson } from '#/lib/api-fetch'
 import { setAccessToken, onUnauthorized } from '#/lib/auth-session'
 import type { DeviceSignalsPayload } from '#/utils/deviceFingerprint'
 import type {
@@ -17,16 +17,12 @@ function toError(error: unknown): Error {
 
 /** چکِ سبک — کاربر جدید؟ نقش؟ (بدون پیامک) */
 export async function checkIsNewUser(phone: string): Promise<CheckPhoneResponse> {
-  const { data, error } = await publicApi.auth.check.post({ phone })
-  if (error) throw toError(error)
-  return data as CheckPhoneResponse
+  return postJson<CheckPhoneResponse>('/auth/check', { phone })
 }
 
 /** درخواست کد OTP */
 export async function requestOtp(phone: string) {
-  const { data, error } = await publicApi.auth['otp'].request.post({ phone })
-  if (error) throw toError(error)
-  const r = data as RequestOtpResponse
+  const r = await postJson<RequestOtpResponse>('/auth/otp/request', { phone })
   return {
     success: true as const,
     message: 'کد ۶ رقمی ارسال شد.',
@@ -44,7 +40,7 @@ export async function verifyOtp(input: {
   termsAccepted?: boolean
   termsVersion?: string | null
 }): Promise<VerifyOtpResponse> {
-  const { data, error } = await publicApi.auth['otp'].verify.post({
+  const result = await postJson<VerifyOtpResponse>('/auth/otp/verify', {
     phone: input.phone,
     code: input.code,
     device: input.device,
@@ -52,9 +48,6 @@ export async function verifyOtp(input: {
     termsAccepted: input.termsAccepted ?? false,
     termsVersion: input.termsVersion ?? null,
   })
-  if (error) throw toError(error)
-
-  const result = data as VerifyOtpResponse
   setAccessToken(result.accessToken)
   return result
 }
@@ -63,7 +56,6 @@ export async function verifyOtp(input: {
 export async function getAccount() {
   const { data, error } = await authApi.auth.me.get()
   if (error) {
-    if ((error as { status?: number }).status === 401) onUnauthorized()
     throw toError(error)
   }
   return data

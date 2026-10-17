@@ -151,11 +151,12 @@ async function main(): Promise<void> {
     .returning()
   const uid = user!.id
   const breakdown = {
-    itemsTotal: 100_000,
+    foodTotal: 100_000,
     deliveryFee: 0,
     discount: 0,
-    walletUsed: 0,
-    online: 100_000,
+    walletDeduction: 0,
+    packagingFee: 0,
+    amountPaidOnline: 100_000,
     totalAmount: 100_000,
   } as unknown as typeof orders.$inferInsert.breakdown
 
@@ -169,7 +170,7 @@ async function main(): Promise<void> {
         paymentStatus,
         deliveryType: 'PICKUP',
         totalAmount: amount,
-        breakdown,
+        breakdown: { ...breakdown, foodTotal: amount, totalAmount: amount, amountPaidOnline: amount },
       })
       .returning()
     return row
@@ -215,6 +216,7 @@ async function main(): Promise<void> {
 
   // ردیف پرداخت + state امضاشده
   const mkPayment = async (orderId: string, gwRef: string) => {
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId as never))
     const [row] = await db
       .insert(payments)
       .values({
@@ -222,7 +224,7 @@ async function main(): Promise<void> {
         userId: uid,
         gateway: 'STUBGW',
         mode: 'direct',
-        amount: 100_000,
+        amount: order!.breakdown.amountPaidOnline,
         status: 'PENDING',
         gatewayRef: gwRef,
       })
@@ -406,14 +408,14 @@ async function main(): Promise<void> {
   const d2o = await refreshOrder(d2.order.id)
   const d2p = await refreshPayment(d2.payment.id)
   ok(
-    'D2: SEP لغو → CANCELED فوری (نه ۲۴h معلق — درسِ زرین‌پالِ stage-74)',
-    d2o.status === 'CANCELED' && d2p.status === 'FAILED',
+    'D2: unsigned SEP cancellation preserves the pending order and hold',
+    d2o.status === 'PENDING_PAYMENT' && d2p.status === 'PENDING',
     `order=${d2o.status} payment=${d2p.status}`,
   )
   const d2fail = (d2p.metadata as { fail?: { source?: string; gateway?: string } } | null)?.fail
   ok(
-    'D2: SEP منبع شکست در metadata (امن-۸)',
-    d2fail?.source === 'callback' && d2fail?.gateway === 'SEP',
+    'D2: unsigned cancellation is not recorded as a confirmed failure',
+    d2fail === undefined,
     JSON.stringify(d2fail),
   )
 
@@ -460,7 +462,7 @@ async function main(): Promise<void> {
     state: state(d4.payment.id),
     ResCode: '0',
     RefId: '555401',
-    SaleOrderId: 'ignored',
+    SaleOrderId: String(d4pMid.gatewayRef).split(':')[0]!,
     SaleReferenceId: '555402',
   })
   ok('D4: MELLAT callback (ResCode=0 + verify+settle ۰/۰) → PAID', (await refreshOrder(d4.order.id)).status === 'PAID')
@@ -483,8 +485,8 @@ async function main(): Promise<void> {
     RefId: '555501',
   })
   ok(
-    'D5: MELLAT لغو (ResCode=17) → CANCELED فوری — نه ۲۴h معلق',
-    (await refreshOrder(d5.order.id)).status === 'CANCELED' && (await refreshPayment(d5.payment.id)).status === 'FAILED',
+    'D5: unsigned Mellat cancellation preserves the pending order and hold',
+    (await refreshOrder(d5.order.id)).status === 'PENDING_PAYMENT' && (await refreshPayment(d5.payment.id)).status === 'PENDING',
   )
 
 
@@ -542,11 +544,8 @@ async function main(): Promise<void> {
   )
 
   // ── D7 (stage-77/N4): شکستِ قطعیِ پرداخت ⇒ اعلانِ مشتری ──
-  // قبلاً سفارش CANCELED می‌شد و مشتری «هیچ» خبری نمی‌گرفت؛ حالا ردیفِ
-  // صندوق type=system + url صفحه‌ی سفارش (پوش فایر-اند-فورگت — اینجا فقط
-  // ردیف). دقیقاً سه شکستِ قطعی در این تست هست: B1 (NOK زرین‌پال)،
-  // D2 (SEP لغو) و D5 (MELLAT لغو) — موفق‌ها (A1/B4/D1/D4/D6) و
-  // نامشخص‌ها (B2/B3) اعلان نمی‌گیرند.
+  // Only the server-verified failure B1 may announce a refund. Unsigned
+  // cancellations and indeterminate attempts must not emit failure notices.
   {
     const { notifications: notifRows } = await import('../src/infra/db/schema')
     const notifs = await db
@@ -557,17 +556,17 @@ async function main(): Promise<void> {
       (n) => n.type === 'system' && (n.data as { source?: string })?.source === 'payment-failed',
     )
     ok(
-      'D7: هر سه شکستِ قطعی (B1+D2+D5) اعلانِ payment-failed ساختند — نه بیشتر',
-      payFails.length === 3,
+      'D7: only verified failure B1 emits a payment-failed notification',
+      payFails.length === 1,
       `count=${payFails.length}`,
     )
     ok(
-      'D7: اعلانِ D5 به صفحه‌ی همان سفارش اشاره می‌کند (url)',
-      payFails.some((n) => (n.url ?? '').includes(d5.order.displayId)),
+      'D7: unverified Mellat cancellation does not announce a refund',
+      !payFails.some((n) => (n.url ?? '').includes(d5.order.displayId)),
     )
     ok(
-      'D7: اعلانِ D2 به صفحه‌ی همان سفارش اشاره می‌کند (url)',
-      payFails.some((n) => (n.url ?? '').includes(d2.order.displayId)),
+      'D7: unverified SEP cancellation does not announce a refund',
+      !payFails.some((n) => (n.url ?? '').includes(d2.order.displayId)),
     )
   }
 

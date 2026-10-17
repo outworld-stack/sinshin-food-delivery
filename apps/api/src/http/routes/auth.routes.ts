@@ -107,15 +107,14 @@ export const authRoutes = (deps: AuthRoutesDeps) => {
         const MAX_DISTINCT_PHONES_PER_IP = 80
         const ip = clientIp(headers['x-forwarded-for']) ?? 'unknown'
         const phonesKey = `rl:otp-phones:${ip}`
-        const isNewPhone = await deps.redis.sAdd(phonesKey, phone, 3600)
-        if (isNewPhone) {
-          const distinct = await deps.redis.sCard(phonesKey)
-          if (distinct !== null && distinct > MAX_DISTINCT_PHONES_PER_IP) {
-            throw Err.rateLimited(
-              'تعداد شماره‌های درخواست‌شده از این شبکه بیش از حد مجاز است — کمی بعد دوباره تلاش کنید.',
-              3600,
-            )
-          }
+        const allowed = await deps.redis.sAddWithinLimit(
+          phonesKey, phone, MAX_DISTINCT_PHONES_PER_IP, 3600,
+        )
+        if (allowed === false) {
+          throw Err.rateLimited(
+            'تعداد شماره‌های درخواست‌شده از این شبکه بیش از حد مجاز است — کمی بعد دوباره تلاش کنید.',
+            3600,
+          )
         }
 
         const r = await deps.auth.requestOtp(phone)

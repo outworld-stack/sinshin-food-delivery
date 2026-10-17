@@ -64,8 +64,8 @@ export function DashboardLayout() {
   // صفحه‌ی صندوق (myNotifications)؛ select فقط شمارش را برمی‌دارد. SSE صفحه‌ی
   // صندوق همین کلید را invalidate می‌کند ⇒ بجِ لایوت هم خودکار تازه می‌شود.
   const { data: inboxUnread } = useQuery({
-    ...myNotificationsOptions,
-    enabled: isAuthenticated,
+    ...myNotificationsOptions(user?.id),
+    enabled: isAuthenticated && Boolean(user?.id),
     select: (d) => d.unread,
   })
   const unreadBadge = inboxUnread ?? 0

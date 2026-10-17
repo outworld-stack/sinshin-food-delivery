@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ALTER COLUMN "device_memory" SET DATA TYPE double precision;

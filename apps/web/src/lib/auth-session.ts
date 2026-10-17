@@ -2,16 +2,30 @@
 import { useAuthStore } from '#/stores/authStore'
 
 let accessToken: string | null = null
+let sessionVersion = 0
+let refreshPromise: Promise<boolean> | null = null
+let refreshController: AbortController | null = null
+
+function invalidateRefresh(): void {
+	++sessionVersion
+	refreshPromise = null
+	// Cancel pending headers too, so an obsolete refresh cannot overwrite
+	// the cookie issued for the new login when the browser supports abort.
+	refreshController?.abort()
+	refreshController = null
+}
 
 export function getAccessToken(): string | null {
 	return accessToken
 }
 
 export function setAccessToken(token: string): void {
+	invalidateRefresh()
 	accessToken = token
 }
 
 export function clearAccessToken(): void {
+	invalidateRefresh()
 	accessToken = null
 }
 
@@ -19,8 +33,6 @@ export function onUnauthorized(): void {
 	clearAccessToken()
 	useAuthStore.getState().logout()
 }
-
-let refreshPromise: Promise<boolean> | null = null
 
 /** پیامِ 401 نرمِ «رقابتِ چرخش» — همان رشته‌ی session.service (apps/api) */
 const RACE_RETRY_MESSAGE = 'نشست هم‌زمان چرخیده است؛ دوباره تلاش کنید.'
@@ -44,6 +56,11 @@ interface RefreshOutcome {
 	body: unknown | null
 }
 
+function isRotationRace(r: RefreshOutcome): boolean {
+	const body = r.body as { error?: { message?: string } } | null
+	return r.status === 401 && body?.error?.message === RACE_RETRY_MESSAGE
+}
+
 /**
  * stage-74 — تایمرِ abort تا «پایان خواندن بدنه» زنده می‌ماند:
  * قبلاً در finally بعد از fetch پاک می‌شد؛ res.json() بی‌مرز بود و
@@ -57,6 +74,7 @@ interface RefreshOutcome {
  */
 async function refreshFetch(): Promise<RefreshOutcome> {
 	const controller = new AbortController()
+	refreshController = controller
 	const timeoutErr = () =>
 		new DOMException('مهلت نوسازی نشست به پایان رسید.', 'TimeoutError')
 	const timer = setTimeout(
@@ -83,23 +101,24 @@ async function refreshFetch(): Promise<RefreshOutcome> {
 		return { status: res.status, body }
 	} finally {
 		clearTimeout(timer)
+		if (refreshController === controller) refreshController = null
 	}
 }
 
 /** چرخه‌ی کامل نوسازی — همان منطقِ قبلی؛ فقط با deadline سرتاسری */
-async function refreshCycle(): Promise<boolean> {
+async function refreshCycle(isCurrent: () => boolean): Promise<boolean> {
 	try {
 		let r = await refreshFetch()
+		if (!isCurrent()) return false
 		if (r.status === 401) {
-			const body = (r.body ?? null) as {
-				error?: { code?: string; message?: string }
-			} | null
-			if (body?.error?.message === RACE_RETRY_MESSAGE) {
+			if (isRotationRace(r)) {
 				// stage-60 — رقابتِ چرخش: دو کانتکست هم‌کوکی پشت‌سرهم refresh
 				// زدند؛ سرور 401 نرم با پیامِ «retry» می‌دهد. یک مکث کوتاه (کوکیِ
 				// تازه از چرخندهٔ برنده در jar می‌نشیند) و یک تلاش دیگر.
 				await new Promise((res) => setTimeout(res, 500))
+				if (!isCurrent()) return false
 				r = await refreshFetch()
+				if (!isCurrent() || isRotationRace(r)) return false
 			} else {
 				// 401 قطعی (نشست مرده/باطل) — تنها حالتِ مجازِ خروج
 				onUnauthorized()
@@ -119,7 +138,7 @@ async function refreshCycle(): Promise<boolean> {
 		const data = (r.body ?? null) as { accessToken?: string } | null
 		// stage-74 — توکن غایب = شکستِ نرم (قبلاً undefined در setAccessToken
 		// می‌نشست و hasSession() بی‌توکن هم true می‌شد)
-		if (!data?.accessToken) return false
+		if (typeof data?.accessToken !== 'string' || !data.accessToken.trim()) return false
 		setAccessToken(data.accessToken)
 		return true
 	} catch {
@@ -149,14 +168,24 @@ export async function tryRefresh(): Promise<boolean> {
  * پاک می‌شود.
  */
 async function doRefresh(): Promise<boolean> {
+	const version = sessionVersion
+	let active = true
+	const isCurrent = () => active && sessionVersion === version
 	const watchdogMs = refreshTimeoutMs * 2 + 5_000
 	let watchdogTimer: ReturnType<typeof setTimeout> | undefined
 	const watchdog = new Promise<boolean>((resolve) => {
 		watchdogTimer = setTimeout(() => resolve(false), watchdogMs)
 	})
 	try {
-		return await Promise.race([refreshCycle(), watchdog])
+		return await Promise.race([refreshCycle(isCurrent), watchdog])
 	} finally {
+		// A response arriving after logout, a new login, or this deadline
+		// belongs to an obsolete session and must never change current state.
+		active = false
+		if (sessionVersion === version) {
+			refreshController?.abort()
+			refreshController = null
+		}
 		if (watchdogTimer) clearTimeout(watchdogTimer)
 	}
 }

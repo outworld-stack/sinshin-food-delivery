@@ -145,9 +145,9 @@ export class ReportQueryService {
             this.deps.db
                 .select({
                     count: sql<number>`count(*)::int`,
-                    total: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.status} <> 'CANCELED'), 0)::bigint`,
-                    online: sql<number>`coalesce(sum((${orders.breakdown} ->> 'amountPaidOnline')::bigint) filter (where ${orders.status} <> 'CANCELED'), 0)::bigint`,
-                    discount: sql<number>`coalesce(sum((${orders.breakdown} ->> 'discount')::bigint) filter (where ${orders.status} <> 'CANCELED'), 0)::bigint`,
+                    total: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::bigint`,
+                    online: sql<number>`coalesce(sum((${orders.breakdown} ->> 'amountPaidOnline')::bigint) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::bigint`,
+                    discount: sql<number>`coalesce(sum((${orders.breakdown} ->> 'discount')::bigint) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::bigint`,
                 })
                 .from(orders)
                 .innerJoin(users, eq(users.id, orders.userId))

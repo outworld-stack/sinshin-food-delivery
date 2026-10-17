@@ -8,7 +8,7 @@ import type {
   GatewayVerifyResult,
   PaymentGateway,
 } from './gateway.types'
-import { postGatewayJson, amountMatches } from './http-util'
+import { postGatewayJson, amountMatches, amountInRial } from './http-util'
 
 const INIT_URL = 'https://sep.shaparak.ir/api/v1/Payment/InitPayment'
 const PAYMENT_PAGE = 'https://sep.shaparak.ir/api/v1/Payment/PaymentPage'
@@ -44,9 +44,8 @@ const sepCellNumber = (mobile: string | null | undefined): string | undefined =>
  *   • callback قطعی → RefNum با finalize ذخیره می‌شود؛
  *   • callback نامشخص (خطای گذرای بانک) → سرویس RefNum را همان‌جا
  *     ذخیره می‌کند تا کارِ تایم‌اوت بدون کوئری هم بتواند دوباره تایید کند؛
- *   • هیچ callback ای نرسید → gatewayRef=null می‌ماند و کارِ تایم‌اوت
- *     مسیرِ بدون gatewayRef را قطعاً شکست می‌دهد — همان رفتار
- *     پذیرفته‌شده برای پرداختِ رهاشده (هم‌تراز ریسک زرین‌پال).
+ *   • هیچ callback ای نرسید → gatewayRef=null می‌ماند؛ نبود مرجع
+ *     به‌تنهایی عدم برداشت وجه را ثابت نمی‌کند و بررسی دستی لازم است.
  */
 export class SepAdapter implements PaymentGateway {
   readonly id = 'SEP'
@@ -73,7 +72,7 @@ export class SepAdapter implements PaymentGateway {
       {
         Action: 'Token',
         TerminalId: this.terminalId,
-        Amount: input.amount * 10, // تومان → ریال
+        Amount: amountInRial(input.amount),
         ResNum: input.paymentId, // یکتا — همان شناسه‌ی پرداخت داخلی
         RedirectUrl: input.callbackUrl,
         CellNumber: sepCellNumber(input.mobile),
@@ -83,7 +82,7 @@ export class SepAdapter implements PaymentGateway {
 
     const token = json?.Token ?? json?.token
     const ok = (json?.IsSuccess ?? json?.isSuccess) === true
-    if (!ok || !token) {
+    if (!ok || typeof token !== 'string' || !/^[A-Za-z0-9_+/=-]{1,200}$/.test(token)) {
       const code = json?.ResultCode
       // stage-76 — هم‌تراز زرین‌پال: شکلِ واقعی پاسخِ ردشده لاگ می‌شود تا
       // در تست‌های عملی، کدِ ترمینالِ واقعی دیده شود (null = غیر-JSON).
@@ -112,19 +111,18 @@ export class SepAdapter implements PaymentGateway {
       input.query.refnum ??
       null
 
-    // نه RefNum ذخیره‌شده داریم نه در کوئری رسیده:
-    //   • کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback — رارد H6:
-    //     کاربر ممکن است در بانک پرداخته و تب را بسته باشد → پول در PSP
-    //     گرفته شده → indeterminate، نه شکست قطعی (پنجره‌ی ۲۴h در
-    //     payment.service.reconcilePending) — fail یعنی بازگشت وجه اشتباه.
-    //   • callback رسیده با State=لغو/خطا و بدون RefNum («Canceled By User»،
-    //     NOK) = لغوی اعلام‌شده‌ی خود بانک → شکست قطعی.
-    const isTimeoutProbe = Object.keys(input.query).length === 0
+    // No receipt, including an unsigned browser cancellation, cannot prove
+    // nonpayment. Preserve the hold until server verification or review.
     if (!refNum) {
-      if (isTimeoutProbe) {
-        return { success: false, gatewayRef: null, indeterminate: true }
-      }
-      return { success: false, gatewayRef: null }
+      // Browser callback fields, including cancellation, are unsigned input.
+      return { success: false, gatewayRef: null, indeterminate: true }
+    }
+    if (!/^[A-Za-z0-9_+/=-]{1,120}$/.test(refNum)) {
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+    }
+    const reservation = input.query.ResNum ?? input.query.resNum ?? input.query.resnum
+    if (input.paymentId && reservation !== undefined && reservation !== input.paymentId) {
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
 
     try {
@@ -133,11 +131,19 @@ export class SepAdapter implements PaymentGateway {
       // می‌کوشد (هم‌تراز indeterminate زرین‌پال/پی‌ایر) — failPayment
       // بدون اطلاع یعنی بازگشت وجه اشتباه.
       const json = await postGatewayJson<{
-        IsSuccess?: boolean
-        isSuccess?: boolean
-        Amount?: number
-        amount?: number
+        IsSuccess?: unknown
+        isSuccess?: unknown
+        Success?: unknown
+        Amount?: unknown
+        amount?: unknown
         ResultCode?: string | number
+        ResNum?: unknown
+        resNum?: unknown
+        RefNum?: unknown
+        refNum?: unknown
+        TerminalId?: unknown
+        terminalId?: unknown
+        TransactionDetail?: unknown
       }>(
         VERIFY_URL,
         {
@@ -146,7 +152,10 @@ export class SepAdapter implements PaymentGateway {
         },
         this.config.gateway.timeoutMs,
       )
-      if (json === null || (json.IsSuccess ?? json.isSuccess) === undefined) {
+      const flags = [json?.IsSuccess, json?.isSuccess, json?.Success]
+        .filter((value) => value !== undefined)
+      if (json === null || flags.length === 0 ||
+        flags.some((value) => typeof value !== 'boolean' || value !== flags[0])) {
         // stage-76 — هم‌تراز زرین‌پال: شکلِ واقعی پاسخِ نامشخص لاگ می‌شود
         // تا کدهای واقعیِ ترمینال در تست‌های عملی دیده و مستند شوند.
         console.warn(
@@ -155,19 +164,46 @@ export class SepAdapter implements PaymentGateway {
         return { success: false, gatewayRef: refNum, indeterminate: true }
       }
 
-      // چک مبلغ — پاسخ تایید سامان شامل Amount (ریال) است؛ تطابق اجباری
-      const ok = (json.IsSuccess ?? json.isSuccess) === true
-      const amountOk = amountMatches({
-        gatewayAmount: json.Amount ?? json.amount,
-        expectedRial: input.amount * 10,
+      // Support both the flat VerifyPayment response and SEP's nested
+      // Success + TransactionDetail response. Every supplied money/identity
+      // field must agree; an alias must not conceal contradictory details.
+      const rawDetail = json.TransactionDetail
+      if (rawDetail !== undefined &&
+        (rawDetail === null || typeof rawDetail !== 'object' || Array.isArray(rawDetail))) {
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+      }
+      const detail = rawDetail as Record<string, unknown> | undefined
+      const ok = flags[0] === true
+      const reservations = [json.ResNum, json.resNum, detail?.ResNum]
+        .filter((value) => value !== undefined)
+      if (input.paymentId && reservations.some((value) => value !== input.paymentId)) {
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+      }
+      const terminals = [json.TerminalId, json.terminalId, detail?.TerminalNumber]
+        .filter((value) => value !== undefined)
+      if (terminals.some((value) =>
+        (typeof value !== 'string' && !(typeof value === 'number' && Number.isSafeInteger(value))) ||
+        String(value) !== this.terminalId)) {
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+      }
+      const references = [json.RefNum, json.refNum, detail?.RefNum]
+        .filter((value) => value !== undefined)
+      if (references.some((value) => value !== refNum)) {
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+      }
+      const amounts = [json.Amount, json.amount, detail?.OrginalAmount, detail?.AffectiveAmount]
+        .filter((value) => value !== undefined)
+      const amountOk = amounts.length > 0 && amounts.every((gatewayAmount) => amountMatches({
+        gatewayAmount,
+        expectedRial: amountInRial(input.amount),
         successReported: ok,
         tag: 'sep',
-      })
+      }))
       // stage-58 — پول‌ایمنی: «موفق اعلام شده + مبلغ ناهم‌خوان» وضعیت قطعی
       // نیست — fail قطعی یعنی failPayment/بازگشت کیف پول در حالی که پولِ
       // مشتری در PSP گرفته شده (مبلغ واقعاً کم/زیاد واریز شده). indeterminate
       // می‌ماند تا کارِ تایم‌اوت/R12 پنل PSP قطعی‌اش کند. شکستِ قطعی فقط
-      // وقتی خود بانک IsSuccess=false داده.
+      // وقتی خود بانک پرچم موفقیت را false داده.
       if (ok && !amountOk) {
         return { success: false, gatewayRef: refNum, indeterminate: true }
       }

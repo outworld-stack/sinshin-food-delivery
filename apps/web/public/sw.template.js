@@ -20,7 +20,7 @@
 
 // round-14 — v2: فیکس fallback آفلاین + retry ناوبری + پاک‌سازی کش‌های v1
 // stage-58 — v3: وابستگی‌زدایی کامل (باندل لازم ندارد)
-const VERSION = 'v3'
+const VERSION = 'v4'
 const ASSET_CACHE = `assets-${VERSION}`
 const UPLOADS_CACHE = `uploads-${VERSION}`
 const PRECACHE = `precache-${VERSION}`
@@ -54,14 +54,14 @@ self.addEventListener('install', (event) => {
           try {
             const res = await fetchWithTimeout(req, ASSET_FETCH_TIMEOUT_MS)
             if (!res || !res.ok) return // ① فقط پاسخِ سالم کش می‌شود
-            if (new URL(key, self.location.origin).pathname === '/offline.html') offlineOk = true
             await cache.put(req, res)
+            if (new URL(key, self.location.origin).pathname === '/offline.html') offlineOk = true
           } catch {
             /* به‌ترین تلاش — آفلاینِ لحظه‌ی نصب یک فایل را نمی‌کشد */
           }
         }),
       )
-      if (!offlineOk && PRECACHE_MANIFEST.length > 0) {
+      if (!offlineOk) {
         throw new Error('[sw] install failed: offline.html not precached — will retry on next navigation')
       }
     })(),
@@ -88,6 +88,10 @@ self.addEventListener('activate', (event) => {
           )
           .map((n) => caches.delete(n)),
       )
+      // Prune old revisions only on activation, after the old worker retires.
+      const cache = await caches.open(PRECACHE)
+      const expected = new Set([...precacheMap.values()].map((key) => new URL(key, self.location.origin).href))
+      await Promise.all((await cache.keys()).filter((req) => !expected.has(req.url)).map((req) => cache.delete(req)))
       await self.clients.claim()
     })(),
   )
@@ -98,10 +102,9 @@ self.addEventListener('activate', (event) => {
 // کوئری ریویژن دارد؛ ignoreSearch کلید ریویژن را نادیده می‌گیرد و صفحهٔ
 // فارسی «اتصال اینترنت قطع است» با دکمهٔ تلاش مجدد سرو می‌شود.
 async function offlineResponse() {
-  return (
-    (await caches.match('/offline.html', { ignoreSearch: true })) ??
-    Response.error()
-  )
+  const key = precacheMap.get('/offline.html')
+  const cache = await caches.open(PRECACHE)
+  return (key && (await cache.match(key))) || Response.error()
 }
 
 /**
@@ -180,7 +183,8 @@ async function handleCacheFirst(request, cacheName, maxEntries) {
   try {
     // stage-77 (P3-4) — پرکردنِ کش هم سقف دارد (فچِ بی‌سقف = اسپینرِ بی‌پایانِ تصویر)
     const res = await fetchWithTimeout(request, ASSET_FETCH_TIMEOUT_MS)
-    if (res && res.ok && res.type === 'basic') {
+    if (res && res.ok && res.type === 'basic' &&
+        !/\b(no-store|no-cache|private)\b/i.test(res.headers.get('cache-control') || '')) {
       try {
         await cache.put(request, res.clone())
         await trimCache(cacheName, maxEntries)
@@ -231,7 +235,7 @@ self.addEventListener('fetch', (event) => {
   const precacheKey = precacheMap.get(url.pathname)
   if (precacheKey) {
     event.respondWith(
-      (async () => (await caches.match(precacheKey)) ?? (await fetchWithTimeout(request, ASSET_FETCH_TIMEOUT_MS)))(),
+      (async () => (await (await caches.open(PRECACHE)).match(precacheKey)) ?? (await fetchWithTimeout(request, ASSET_FETCH_TIMEOUT_MS)))(),
     )
     return
   }
@@ -249,8 +253,11 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // ⑤ assetهای same-origin دیگر — cache-first
-  event.respondWith(handleCacheFirst(request, ASSET_CACHE, 100))
+  // Fetch/XHR can carry authenticated server-function results shared across
+  // accounts. Only public static resources may enter the runtime cache.
+  if (['script', 'style', 'image', 'font'].includes(request.destination)) {
+    event.respondWith(handleCacheFirst(request, ASSET_CACHE, 100))
+  }
 })
 
 // ── فاز-۲ — Web Push (سیستم پوش نوتیفیکیشن کاستوم) ──
@@ -263,9 +270,10 @@ self.addEventListener('push', (event) => {
   } catch {
     payload = { title: 'سین‌شین', body: 'اطلاعیه‌ی جدید دارید.' }
   }
-  const title = payload.title || 'سین‌شین'
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = {}
+  const title = typeof payload.title === 'string' && payload.title ? payload.title : 'سین‌شین'
   const options = {
-    body: payload.body || '',
+    body: typeof payload.body === 'string' ? payload.body : '',
     // tag = جایگزینی نوتیفیکیشن قبلی هم‌برچسب (مثل یادآورهای کوپن)
     tag: payload.tag || 'sinshin',
     // renotify با tag — نوتیف جدید هم‌برچسب دوباره با صدا می‌آید
@@ -274,7 +282,7 @@ self.addEventListener('push', (event) => {
     badge: '/icons/icon-192-v1.png',
     dir: 'rtl',
     lang: 'fa',
-    data: { url: payload.url || '/products', ...(payload.data || {}) },
+    data: { ...(payload.data && typeof payload.data === 'object' ? payload.data : {}), url: payload.url || '/products' },
   }
   // stage-51 — مقاوم‌سازی: هر موتوری لزوماً همه‌ی آپشن‌ها را نمی‌پذیرد
   // (مثلاً renotify/badge روی بعضی نسخه‌ها TypeError می‌دهد)؛ در آن
@@ -313,19 +321,22 @@ self.addEventListener('notificationclick', (event) => {
   let url = '/products'
   try {
     const resolved = new URL(rawUrl, self.location.origin)
-    if (resolved.origin === self.location.origin) url = resolved.pathname + resolved.search
+    if (resolved.origin === self.location.origin) url = resolved.pathname + resolved.search + resolved.hash
   } catch { /* بی‌شکل — همان پیش‌فرض */ }
   event.waitUntil(
     (async () => {
-      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      // تب باز؟ فوکوس + ناوبری به مقصد
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true }).catch(() => [])
+      const target = new URL(url, self.location.origin).href
+      // Prefer a tab already at the destination, so an unrelated form stays open.
+      clientList.sort((a, b) => Number(b.url === target) - Number(a.url === target))
       for (const client of clientList) {
-        if (client.url.includes(self.location.origin)) {
-          if ('focus' in client) await client.focus()
-          if ('navigate' in client) {
-            try { await client.navigate(url) } catch { /* تب در حال ناوبری است */ }
-          }
+        try {
+          if (new URL(client.url).origin !== self.location.origin) continue
+          if (client.url !== target && (!client.navigate || !(await client.navigate(url)))) continue
+          await client.focus()
           return
+        } catch {
+          // A closed/navigating tab must not swallow the notification click.
         }
       }
       // تب باز نیست؟ پنجره‌ی جدید

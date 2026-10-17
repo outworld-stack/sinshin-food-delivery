@@ -1,10 +1,9 @@
 //src/domain/auth/registration-permit.service.ts
 import { and, desc, eq, gt, sql } from 'drizzle-orm'
 
-import type { Db, DbOrTx } from '#/infra/db/client'
+import type { Db, DbOrTx, Tx } from '#/infra/db/client'
 import { registrationPermits, users, type RegistrationPermitRow } from '#/infra/db/schema'
 import { Err } from '#/domain/shared/errors'
-import { isUniqueViolation } from '#/domain/shared/pg'
 import { normalizePhone } from '#/domain/shared/phone'
 
 /**
@@ -16,7 +15,7 @@ import { normalizePhone } from '#/domain/shared/phone'
  *
  * اصولِ طراحی (خروجیِ تحقیقِ عمیقِ stage-79):
  *  ۱) تک‌مصرفیِ اتمیک — claim با UPDATE شرطی (status='pending' و
- *     expires_at > now()) «داخل تراکنشِ ثبت‌نام»؛ پنجره‌ی TOCTOU وجود
+ *     expires_at > clock_timestamp()) «داخل تراکنشِ ثبت‌نام»؛ پنجره‌ی TOCTOU وجود
  *     ندارد (CWE-367). rollback تراکنش، claim را هم برمی‌گرداند.
  *  ۲) قواعد دست‌نخورده — غیابِ مجوز یعنی رفتارِ قبلیِ سیستم بایت‌به‌بایت
  *     همان است؛ مجوز یک «استثنای قابل‌ممیزی» است نه تغییرِ رول.
@@ -88,48 +87,38 @@ export class RegistrationPermitService {
       throw Err.validation('شماره موبایل معتبر نیست — الگوی درست: ۰۹۱۲۳۴۵۶۷۸۹')
     }
 
-    const existingUser = await db.query.users.findFirst({ where: eq(users.phone, phone) })
-    if (existingUser) {
-      throw Err.conflict(
-        'این شماره قبلاً ثبت‌نام کرده است — مجوز ثبت‌نام فقط برای شماره‌های تازه معنا دارد.',
-      )
+    if (input.ttlHours !== undefined && !Number.isFinite(input.ttlHours)) {
+      throw Err.validation('مدت اعتبار مجوز معتبر نیست.')
     }
-
     const ttl = Math.min(
       Math.max(Math.trunc(input.ttlHours ?? PERMIT_DEFAULT_TTL_HOURS), 1),
       PERMIT_MAX_TTL_HOURS,
     )
-    const expiresAt = new Date(Date.now() + ttl * 3_600_000)
     const note = input.note?.trim() ? input.note.trim().slice(0, 500) : null
 
-    // تازه‌سازیِ pending موجود (اتمیک — رقابتِ صدورِ هم‌زمان یک برنده دارد
-    // و رندیشنِ pending expired هم همین‌جا به ردیفِ زنده تبدیل می‌شود)
-    const refreshed = await db
-      .update(registrationPermits)
-      .set({ note, expiresAt, createdBy: input.adminId, createdAt: new Date() })
-      .where(and(eq(registrationPermits.phone, phone), eq(registrationPermits.status, 'pending')))
-      .returning()
-    if (refreshed[0]) return toView(refreshed[0])
-
-    try {
-      const [created] = await db
+    return db.transaction(async (tx) => {
+      // Share registration's phone lock: issuance must not leave a fresh
+      // pending permit after a concurrent signup has already completed.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+      const existingUser = await tx.query.users.findFirst({ where: eq(users.phone, phone) })
+      if (existingUser) {
+        throw Err.conflict(
+          'این شماره قبلاً ثبت‌نام کرده است — مجوز ثبت‌نام فقط برای شماره‌های تازه معنا دارد.',
+        )
+      }
+      const expiresAt = sql`clock_timestamp() + ${ttl} * interval '1 hour'`
+      const [created] = await tx
         .insert(registrationPermits)
         .values({ phone, note, createdBy: input.adminId, expiresAt })
+        .onConflictDoUpdate({
+          target: registrationPermits.phone,
+          targetWhere: sql`${registrationPermits.status} = 'pending'`,
+          set: { note, expiresAt, createdBy: input.adminId, createdAt: sql`clock_timestamp()` },
+        })
         .returning()
       if (!created) throw Err.internal('صدور مجوز ناموفق بود؛ دوباره تلاش کنید.')
       return toView(created)
-    } catch (error) {
-      // رقابتِ صدورِ هم‌زمان: ردیفِ pending در فاصله‌ی update→insert ساخته
-      // شد — همان ردیف را تازه کن (ایندکس یکتای جزئی برنده را تعیین کرد)
-      if (!isUniqueViolation(error)) throw error
-      const [created] = await db
-        .update(registrationPermits)
-        .set({ note, expiresAt, createdBy: input.adminId, createdAt: new Date() })
-        .where(and(eq(registrationPermits.phone, phone), eq(registrationPermits.status, 'pending')))
-        .returning()
-      if (!created) throw Err.conflict('صدور مجوز برای این شماره همین لحظه انجام شد؛ دوباره تلاش کنید.')
-      return toView(created)
-    }
+    })
   }
 
   /** لغو مجوزِ در انتظار — اتمیک؛ ردیفِ غیر-pending قابل لغو نیست. */
@@ -170,7 +159,7 @@ export class RegistrationPermitService {
 
   /**
    * claim اتمیک — فقط داخل تراکنشِ ثبت‌نام (auth.service):
-   * UPDATE شرطی تک‌عبارتی؛ ردیف برگشته یعنی مجوز همین‌جا مصرف شد.
+   * قفل ردیف سپس UPDATE شرطی؛ ردیف برگشته یعنی مجوز همین‌جا مصرف شد.
    * null یعنی «مجوزی نبود/مست погло شد/منقضی شد» — فراخوان باید به
    * مسیرِ سختِ عادی برگردد (رفتارِ پیش از stage-79).
    *
@@ -178,14 +167,22 @@ export class RegistrationPermitService {
    * «نخورده» برمی‌گرداند — ثبت‌نامِ شکست‌خورده مجوز را هدر نمی‌دهد.
    */
   async consumeForRegistration(
-    db: DbOrTx,
+    db: Tx,
     phone: string,
     deviceId: string | null,
   ): Promise<RegistrationPermitRow | null> {
+    // Lock before checking wall-clock expiry. now() is fixed at transaction
+    // start, and even a clock_timestamp() UPDATE can wait on a row lock after
+    // evaluating its predicate. A permit must still be alive after that wait.
+    const [pending] = await db.select({ id: registrationPermits.id })
+      .from(registrationPermits)
+      .where(and(eq(registrationPermits.phone, phone), eq(registrationPermits.status, 'pending')))
+      .for('update')
+    if (!pending) return null
     const claimed = await db
       .update(registrationPermits)
-      .set({ status: 'used', usedAt: new Date(), usedDeviceId: deviceId })
-      .where(activePermitCondition(phone))
+      .set({ status: 'used', usedAt: sql`clock_timestamp()`, usedDeviceId: deviceId })
+      .where(and(eq(registrationPermits.id, pending.id), activePermitCondition(phone)))
       .returning()
     return claimed[0] ?? null
   }
@@ -204,6 +201,6 @@ function activePermitCondition(phone: string) {
   return and(
     eq(registrationPermits.phone, phone),
     eq(registrationPermits.status, 'pending'),
-    gt(registrationPermits.expiresAt, sql`now()`),
+    gt(registrationPermits.expiresAt, sql`clock_timestamp()`),
   )
 }

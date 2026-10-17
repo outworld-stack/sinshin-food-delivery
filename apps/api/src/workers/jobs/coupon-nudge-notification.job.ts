@@ -122,18 +122,20 @@ export class CouponNudgeJob implements DailyJob {
       config: AppConfig
       db: Db
       notifications: NotificationService
+      now?: () => Date
     },
   ) {
     this.time = deps.config.couponNudgeTime
   }
 
   async run(): Promise<void> {
+    const now = this.deps.now ?? (() => new Date())
     const hour = Number.parseInt(
       new Intl.DateTimeFormat('en-US', {
         timeZone: 'Asia/Tehran',
         hour: '2-digit',
         hour12: false,
-      }).format(new Date()),
+      }).format(now()),
       10,
     )
     if (hour >= DEADLINE_HOUR) {
@@ -147,7 +149,7 @@ export class CouponNudgeJob implements DailyJob {
     const scanDateStr = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran',
       year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date())
+    }).format(now())
 
     // stage-66 (④/③) + stage-67 (M3) — re-check کامل در لحظه‌ی ارسال.
     // بین اسکن (۰۲:۰۰) و ارسال (۱۱:۰۰) هرکدام از این‌ها رخ داده باشد،
@@ -180,6 +182,8 @@ export class CouponNudgeJob implements DailyJob {
           isNull(couponNudges.smsSentAt),
           eq(coupons.isActive, true),
           eq(coupons.cronEnabled, true),
+          eq(coupons.isPublic, false),
+          sql`${coupons.startsAt} <= now()`,
           sql`(${coupons.endsAt} is null or ${coupons.endsAt} > now())`,
           sql`(${coupons.maxUses} = 0 or ${coupons.usedCount} < ${coupons.maxUses})`,
           // stage-67 (M3) — کاربر بن‌شده: یادآورِ بن‌شده نخرید
@@ -208,7 +212,7 @@ export class CouponNudgeJob implements DailyJob {
     // stage-77 (N12) — بازبینیِ مهلت «قبل از ۱۳:۰۰» داخل حلقه: فهرستِ
     // نامزدها بدون سقف ردیف خوانده می‌شود و هر notifyUser (درج + فان‌اوت
     // پوش با تایم‌اوت‌های ۱۰ ثانیه‌ای) زمان می‌برد — با انباشتگیِ زیاد،
-    // یادآورِ «قبل از ناهار» می‌توانست بعد از ساعت ۱۳ هم برود. هر ۲۵ ردیف
+    // یادآورِ «قبل از ناهار» می‌توانست بعد از ساعت ۱۳ هم برود. قبل از هر ردیف
     // یک‌بار ساعت تهران دوباره خوانده می‌شود؛ عبور از مهلت = توقفِ ارسال
     // (ردیف‌ها pending می‌مانند و سهم سقف ۲ نمی‌سوزند — قراردادِ claim).
     const tehranHour = (): number =>
@@ -217,7 +221,7 @@ export class CouponNudgeJob implements DailyJob {
           timeZone: 'Asia/Tehran',
           hour: '2-digit',
           hour12: false,
-        }).format(new Date()),
+        }).format(now()),
         10,
       )
     let deadlineHit = false
@@ -226,7 +230,7 @@ export class CouponNudgeJob implements DailyJob {
         skipped++
         continue
       }
-      if ((sent + skipped) % 25 === 24 && tehranHour() >= DEADLINE_HOUR) {
+      if (tehranHour() >= DEADLINE_HOUR) {
         deadlineHit = true
         console.warn(
           `[cron:coupon-nudge] deadline hit mid-run at ${tehranHour()}:00 Tehran — ${pending.length - sent - skipped} row(s) left pending`,
@@ -245,6 +249,8 @@ export class CouponNudgeJob implements DailyJob {
       // نمی‌کند؛ id=null یعنی درج صندوق/پوش نشد. ردیف همان‌طور pending
       // می‌ماند (smsSentAt=null) — سهمِ سقف ۲ نمی‌سوزد و اجرای مجددِ
       // همان روز (دستی/اصلاح‌شده) دوباره تلاش می‌کند.
+      // The nudge UUID makes the inbox insert idempotent across concurrent jobs.
+      // Only the first insert dispatches SSE/push; failed inserts remain pending.
       const res = await this.deps.notifications.notifyUser(row.userId, {
         type: 'coupon_nudge',
         title: `🎁 ${gap} تا کوپن تخفیف!`,
@@ -257,7 +263,7 @@ export class CouponNudgeJob implements DailyJob {
           missingCount: row.missingCount,
           remainingCount: row.remainingCount,
         },
-      })
+      }, { notificationId: row.nudgeId })
       if (res.id === null) {
         skipped++
         console.warn(
@@ -270,7 +276,7 @@ export class CouponNudgeJob implements DailyJob {
       // موفق. گارد isNull(smsSentAt) در برابر اجرای موازی دومی است.
       const claimed = await db
         .update(couponNudges)
-        .set({ smsSentAt: new Date() })
+        .set({ smsSentAt: now() })
         .where(
           and(
             eq(couponNudges.id, row.nudgeId),

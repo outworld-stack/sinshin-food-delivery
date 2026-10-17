@@ -35,6 +35,9 @@ const PERMISSION_LABELS: {
         { key: 'canEditPackagingFee', label: 'ویرایش هزینه بسته‌بندی' },
         { key: 'notificationsRead', label: 'مشاهده تاریخچه نوتیفیکیشن‌ها' },
         { key: 'notificationsSend', label: 'ارسال نوتیفیکیشن' },
+        // stage-82 — پنل مقالات + صفحه‌ساز بلوکی
+        { key: 'articlesRead', label: 'مشاهده مقالات' },
+        { key: 'articlesWrite', label: 'ایجاد/ویرایش مقاله (صفحه‌ساز بلوکی)' },
 ]
 // ویرایش دسترسی‌های ادمین۲ — توسط ادمین اصلی
 export const PermissionsEditor = memo(function PermissionsEditor({

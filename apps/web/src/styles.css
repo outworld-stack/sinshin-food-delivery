@@ -473,3 +473,71 @@ html.lang-switching body {
     color: #1a0a0e !important;
   }
 }
+/* ═══════════════════════════════════════════════════════════════
+   stage-82 — صفحه‌ساز بلوکی مقالات
+   · عرض پله‌ای (الگوی Ghost) با container-query — به «کانتینر» واکنش
+     نشان می‌دهد (پیش‌نمایش موبایلِ ادیتور هم صادق است)
+   · full = خروجِ امن از حاشیه‌ی متن (calc + margin منفی؛ هرگز 100vw —
+     درسِ overflowX موبایل)
+   · reveal-on-scroll: حالتِ مخفیت فقط با کلاسِ ab-js (بعد از mount) —
+     خروجیِ SSR برای کرالر/بدون-JS کاملاً مرئی است؛ once + stagger
+   ═══════════════════════════════════════════════════════════════ */
+
+.ab-viewport,
+.ab-canvas {
+  container-type: inline-size;
+}
+
+.ab-block { max-width: 100%; }
+
+/* عرض پله‌ای بلوک */
+.ab-w-sm  { width: 50%; }
+.ab-w-md  { width: 70%; }
+.ab-w-lg  { width: 100%; }
+.ab-w-full { width: calc(100% + 2rem); margin-inline: -1rem; }
+.ab-center { margin-inline: auto; }
+
+/* موبایل: عرض‌های باریک تمام‌عرض می‌شوند (سقفِ کانتینر) */
+@container (max-width: 640px) {
+  .ab-w-sm,
+  .ab-w-md { width: 100%; }
+}
+
+/* پدینگِ بلوکِ رنگی */
+.ab-pad-sm { padding: 0.5rem 0.75rem; }
+.ab-pad-md { padding: 1rem 1.25rem; }
+.ab-pad-lg { padding: 1.75rem 2rem; }
+
+/* نوارِ نمایشِ عرض در ادیتور */
+.ab-width-bar {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(237, 7, 65, 0.3);
+  margin-block: 2px 10px;
+  transition: width 0.3s ease;
+}
+
+/* ── reveal-on-scroll (صفحه‌ی عمومی) ── */
+@keyframes ab-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ab-fade-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+@keyframes ab-slide { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+@keyframes ab-slide-rtl { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes ab-zoom { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes ab-blur { from { opacity: 0; filter: blur(6px); } to { opacity: 1; filter: blur(0); } }
+
+/* مخفی‌سازیِ اولیه فقط وقتی JS نشسته (SSR مرئی) */
+.ab-js [data-anim]:not(.ab-inview) { opacity: 0; }
+
+.ab-js [data-anim='fade'].ab-inview { animation: ab-fade 0.5s ease-out both; animation-delay: var(--ab-delay, 0ms); }
+.ab-js [data-anim='fade-up'].ab-inview { animation: ab-fade-up 0.55s ease-out both; animation-delay: var(--ab-delay, 0ms); }
+.ab-js [data-anim='slide'].ab-inview { animation: ab-slide 0.55s ease-out both; animation-delay: var(--ab-delay, 0ms); }
+html[dir='rtl'] .ab-js [data-anim='slide'].ab-inview { animation-name: ab-slide-rtl; }
+.ab-js [data-anim='zoom'].ab-inview { animation: ab-zoom 0.5s ease-out both; animation-delay: var(--ab-delay, 0ms); }
+.ab-js [data-anim='blur'].ab-inview { animation: ab-blur 0.55s ease-out both; animation-delay: var(--ab-delay, 0ms); }
+
+/* احترام به prefers-reduced-motion — همه‌چیز مرئی و بی‌حرکت */
+@media (prefers-reduced-motion: reduce) {
+  .ab-js [data-anim]:not(.ab-inview) { opacity: 1; }
+  .ab-js [data-anim].ab-inview { animation: none !important; }
+  .ab-width-bar { transition: none; }
+}

@@ -22,6 +22,11 @@ const DISMISS_KEY = 'sinshin-install-dismissed'
 const IOS_DISMISS_KEY = 'sinshin-ios-dismissed'
 const DISMISS_DAYS = 30
 
+interface InstallPromptEvent extends Event {
+  prompt(): Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
 /** آیا کاربر اخیراً (ظرف مهلت) این بنر را بسته است؟ */
 function dismissedWithin(key: string, days: number): boolean {
   try {
@@ -44,46 +49,29 @@ function markDismissed(key: string): void {
 export function PwaRegister() {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null)
   const [showUpdate, setShowUpdate] = useState(false)
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
+  const [deferredPrompt, setDeferredPrompt] = useState<InstallPromptEvent | null>(null)
   const [showInstall, setShowInstall] = useState(false)
   const [showIosGuide, setShowIosGuide] = useState(false)
   const [standalone, setStandalone] = useState(false)
 
   useEffect(() => {
-    // standalone؟ (نصب‌شده) → فقط «بنرها» خاموش می‌مانند.
-    //
-    // stage-58 — باگ 🔴 iOS: قبلاً `if (isStandalone) return` قبل از ثبتِ
-    // SW اجرا می‌شد؛ یعنی دقیقاً در «تنها» زمینه‌ای که iOS پوش پشتیبانی
-    // می‌کند (PWA نصب‌شده، 16.4+) سرویس‌ورکر ثبت نمی‌شد و پوشِ iOS برای
-    // همیشه مرده بود. حالا ثبت SW همیشه انجام می‌شود؛ رندرِ بنرها همان
-    // `if (standalone) return null` پایین کنترل می‌شود.
+    // Installed apps still need worker registration and the update banner;
+    // only installation prompts are hidden in standalone mode.
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
     setStandalone(isStandalone)
 
     // ── ثبت SW ──
     if (!('serviceWorker' in navigator)) return
+    let cancelled = false
+    let installTimer: ReturnType<typeof setTimeout> | undefined
 
-    // stage-49 — محیط توسعه: به‌جای پاک‌کردنِ همه‌ی ثبت‌ها،
-    // سرویس‌ورکرِ سبکِ «sw-push.js» (فایل استاتیک بدون workbox — فقط
-    // هندلرهای پوش) ثبت می‌شود تا Web Push در dev قابل آزمایش باشد
-    // (بازخورد ۶). ثبت‌های کهنه‌ی دیگر (مثل sw.js ساخته‌شده‌ی build
-    // قبلی که در dev «import outside a module» می‌دهد) همچنان پاک
-    // می‌شوند — فقط sw-push.js نگه داشته می‌شود.
-    // (اول ثبت، بعد پاک‌سازی — تا رقابتِ unregister/register پیش نیاید)
+    // Updating the root registration preserves push subscriptions. Leave
+    // other scopes on the same development origin alone.
     if (import.meta.env.DEV) {
       navigator.serviceWorker
         .register('/sw-push.js')
-        .then(() => navigator.serviceWorker.getRegistrations())
-        .then((regs) => {
-          for (const r of regs) {
-            const scripts = [r.active, r.installing, r.waiting]
-              .map((w) => (w ? w.scriptURL : ''))
-              .join(' ')
-            if (!scripts.includes('sw-push.js')) void r.unregister()
-          }
-        })
         .catch(() => {/* پوش در dev هم اختیاری است — اپ عادی */ })
       return
     }
@@ -95,10 +83,12 @@ export function PwaRegister() {
     // نباید با اولین رندرِ صفحه‌ی تازه‌وارد بر سرِ پهنای‌باند ۳G رقابت کند
     // (الگوی استاندارد registration). readyState کامل ⇒ همین حالا.
     let onWindowLoad: (() => void) | null = null
+    let hadController = Boolean(navigator.serviceWorker.controller)
     const registerProdSw = () => {
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
+        if (cancelled) return
         // نسخه‌ی waiting؟ → بنر آپدیت (بدون skipWaiting خودکار)
         if (reg.waiting) {
           setWaitingWorker(reg.waiting)
@@ -114,12 +104,18 @@ export function PwaRegister() {
             }
           }
           nw.addEventListener('statechange', onStateChange)
+          swCleanupFns.push(() => nw.removeEventListener('statechange', onStateChange))
         }
         reg.addEventListener('updatefound', onUpdateFound)
+        if (reg.installing) onUpdateFound()
 
         // بارگذاری مجددِ کنترل‌شده — فقط یک‌بار (فلگ ضد حلقه)
         let reloaded = false
         const onControllerChange = () => {
+          if (!hadController) {
+            hadController = true
+            return
+          }
           if (reloaded) return
           reloaded = true
           window.location.reload()
@@ -142,6 +138,7 @@ export function PwaRegister() {
         )
       })
       .catch((err) => {
+        if (cancelled) return
         // stage-58 — قبلاً اینجا کاملاً بی‌صدا قورت داده می‌شد؛ sw.js شکسته
         // یعنی «هیچ push handlerی در تولید نیست» — حالا: لاگ + fallback به
         // sw-push.js (استاتیک، فقط هندلر پوش) تا پوش هرگز بی‌سرویس‌ورکر
@@ -162,28 +159,36 @@ export function PwaRegister() {
     // ── install-prompt اندروید ──
     const onBeforeInstall = (e: Event) => {
       e.preventDefault() // پرامپت خودکار مرورگر نمی‌آید
-      setDeferredPrompt(e)
+      setDeferredPrompt(e as InstallPromptEvent)
       // فقط اگر قبلاً رد نکرده
       if (dismissedWithin(DISMISS_KEY, DISMISS_DAYS)) return
       // نشان نده فوراً — بعد از تعامل کاربر (اینجا: بعد از ۳ ثانیه اگر هنوز آنلاین است)
-      setTimeout(() => setShowInstall(true), 3000)
+      clearTimeout(installTimer)
+      installTimer = setTimeout(() => setShowInstall(true), 3000)
     }
     window.addEventListener('beforeinstallprompt', onBeforeInstall)
 
     // نصب شد → بسته‌شدن پاک شود (حذف/نصبِ مجدد → پرامپت برگردد)
     const onAppInstalled = () => {
+      clearTimeout(installTimer)
+      setStandalone(true)
+      setDeferredPrompt(null)
       setShowInstall(false)
+      setShowIosGuide(false)
       try { localStorage.removeItem(DISMISS_KEY) } catch { /* هیچ‌کاری نمی‌کند */ }
     }
     window.addEventListener('appinstalled', onAppInstalled)
 
     // ── iOS راهنما — فقط iOS + غیر standalone + پایدار بسته‌نشده (pwa-۲) ──
-    const isIos = /iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent)
-    if (isIos && !dismissedWithin(IOS_DISMISS_KEY, DISMISS_DAYS)) {
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    if (isIos && !isStandalone && !dismissedWithin(IOS_DISMISS_KEY, DISMISS_DAYS)) {
       setShowIosGuide(true)
     }
 
     return () => {
+      cancelled = true
+      clearTimeout(installTimer)
       window.removeEventListener('beforeinstallprompt', onBeforeInstall)
       window.removeEventListener('appinstalled', onAppInstalled)
       if (onWindowLoad) window.removeEventListener('load', onWindowLoad)
@@ -199,17 +204,17 @@ export function PwaRegister() {
   // ── نصب اندروید ──
   const doInstall = async () => {
     if (!deferredPrompt) return
-    deferredPrompt.prompt()
-    const { outcome } = await deferredPrompt.userChoice
-    if (outcome === 'dismissed') {
-      markDismissed(DISMISS_KEY)
-    }
+    const prompt = deferredPrompt
     setDeferredPrompt(null)
     setShowInstall(false)
+    try {
+      await prompt.prompt()
+      const { outcome } = await prompt.userChoice
+      if (outcome === 'dismissed') markDismissed(DISMISS_KEY)
+    } catch {
+      // A dismissed/expired browser prompt can no longer be reused.
+    }
   }
-
-  // هیچ‌کدام در SSR رندر نمی‌شود — این کامپوننت فقط بعد از سوار شدن محتوا دارد
-  if (standalone) return null
 
   return (
     <>
@@ -242,7 +247,7 @@ export function PwaRegister() {
       )}
 
       {/* install-prompt اندروید — stage-59: موبایل دو ردیف (متن بالا، دکمه‌ها کنار هم پایین) */}
-      {showInstall && !showIosGuide && !showUpdate && (
+      {!standalone && showInstall && !showIosGuide && !showUpdate && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
           <span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold text-center">
             سین شین را روی دستگاه خود نصب کنید
@@ -271,7 +276,7 @@ export function PwaRegister() {
 
       {/* راهنمای iOS — بستنش ۳۰ روز پایدار است (pwa-۲)
           stage-59: همان متن گرادیانی نصب + راهنمای Share در خط دوم */}
-      {showIosGuide && !showUpdate && (
+      {!standalone && showIosGuide && !showUpdate && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
           <div className="text-center">
             <span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold">

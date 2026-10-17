@@ -4,6 +4,7 @@
  * گاردِ زمانِ انتظار روی همه‌ی عملیات: قطعی ردیس = تنزل، نه بن‌بست.
  */
 import { RedisClient } from 'bun'
+import { CANCEL_OTP, CONSUME_OTP, ISSUE_OTP } from './otp-scripts'
 
 const OP_TIMEOUT_MS = 2_500
 // رارد M3 — نشانگر timeout برای تفکیک از null واقعی در Promise.race
@@ -146,6 +147,27 @@ export class RedisService {
     return this.t<number | null>(this.client.send('SCARD', [key]), null)
   }
 
+  /** Admit an existing member or reserve a new slot in a fixed-window set.
+   * Rejected members are never stored, so retrying cannot bypass the limit.
+   * null preserves the caller's existing Redis-unavailable policy.
+   */
+  async sAddWithinLimit(
+    key: string, member: string, limit: number, ttlSeconds: number,
+  ): Promise<boolean | null> {
+    const script = `
+      if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then return 1 end
+      local count = redis.call('SCARD', KEYS[1])
+      if count >= tonumber(ARGV[2]) then return 0 end
+      redis.call('SADD', KEYS[1], ARGV[1])
+      if count == 0 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+      return 1
+    `
+    const result = await this.t<number | null>(this.client.send('EVAL', [
+      script, '1', key, member, String(limit), String(ttlSeconds),
+    ]), null)
+    return result === null ? null : result === 1
+  }
+
   async getJson<T>(key: string): Promise<T | null> {
     const raw = await this.get(key)
     if (raw === null) return null
@@ -182,6 +204,36 @@ export class RedisService {
       null,
     )
     return Number(raw) === 1
+  }
+
+  async issueOtp(p: {
+    keys: string[]
+    value: string
+    ttlSeconds: number
+    cooldownSeconds: number
+    maxPerHour: number
+    maxPerDay?: number
+  }): Promise<[string, number] | null> {
+    return this.t(this.client.send('EVAL', [ISSUE_OTP, String(p.keys.length), ...p.keys,
+      p.value, String(p.ttlSeconds), String(p.cooldownSeconds), String(p.maxPerHour),
+      String(p.maxPerDay ?? Number.MAX_SAFE_INTEGER)]), null)
+  }
+
+  async consumeOtp(p: {
+    keys: string[]
+    hash: string
+    maxAttempts: number
+    ttlSeconds: number
+    failureCap?: number
+    failureWindowSeconds?: number
+  }): Promise<[string, number, number] | null> {
+    return this.t(this.client.send('EVAL', [CONSUME_OTP, String(p.keys.length), ...p.keys,
+      p.hash, String(p.maxAttempts), String(p.ttlSeconds), String(p.failureCap ?? 0),
+      String(p.failureWindowSeconds ?? 0)]), null)
+  }
+
+  async cancelOtp(keys: [string, string, string], value: string): Promise<void> {
+    await this.t(this.client.send('EVAL', [CANCEL_OTP, '3', ...keys, value]), null)
   }
 
   // ── انتشار/اشتراک ──

@@ -14,7 +14,7 @@
  *  گروه C — سرویس مجوز: صدور/تازه‌سازی/لغو/اتمی‌بودن/انقضا
  */
 import { SQL } from 'bun'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 interface UrlParts {
   admin: string
@@ -78,7 +78,8 @@ async function main(): Promise<void> {
   const { SessionService } = await import('../src/domain/auth/session.service')
   const { TokenService } = await import('../src/domain/auth/token.service')
   const { AppError } = await import('../src/domain/shared/errors')
-  const { users } = await import('../src/infra/db/schema')
+  const { asDeviceId, asUserId } = await import('../src/domain/shared/brand')
+  const { users, devices: deviceTable, deviceEvents, deviceLinks, deviceIdentities, sessions: sessionTable } = await import('../src/infra/db/schema')
 
   const config = new AppConfig({
     NODE_ENV: 'development',
@@ -91,10 +92,10 @@ async function main(): Promise<void> {
     DEVICE_SIMILARITY_WINDOW_DAYS: '7',
     MAX_DEVICES_PER_USER: '5',
   })
-  // max: 2 — داخل tx ثبت‌نام، generateUniqueReferralCode از pool بیرونِ tx
-  // کوئری می‌زند (رفتارِ موجود)؛ با max:1 استخر قفل می‌شود و ایونت‌لوپ
-  // خالی می‌شود (خروجِ خاموشِ bun) — مشکلِ محیطِ تست، نه کد.
-  const database = new Database(url.toString(), { max: 2 })
+  // A single connection detects accidental queries outside the active signup
+  // transaction: those would deadlock an exhausted production connection pool.
+  const database = new Database(url.toString(), { max: 1 })
+  const concurrentDatabase = new Database(url.toString(), { max: 3 })
   const db = database.db
   const devices = new DeviceService({ db, config })
   const permits = new RegistrationPermitService({ db })
@@ -264,12 +265,12 @@ async function main(): Promise<void> {
       'B3: رویدادهای PERMIT_BYPASS و PERMIT_BURN روی دستگاه ثبت شدند',
       Boolean(
         await db.query.deviceEvents.findFirst({
-          where: eq(sql`device_id`, sql`${devA}`) && eq(sql`event`, sql`'PERMIT_BYPASS'`),
+          where: and(eq(deviceEvents.deviceId, asDeviceId(devA!)), eq(deviceEvents.event, 'PERMIT_BYPASS')),
         }),
       ) &&
         Boolean(
           await db.query.deviceEvents.findFirst({
-            where: eq(sql`device_id`, sql`${devA}`) && eq(sql`event`, sql`'PERMIT_BURN'`),
+            where: and(eq(deviceEvents.deviceId, asDeviceId(devA!)), eq(deviceEvents.event, 'PERMIT_BURN')),
           }),
         ),
     )
@@ -406,9 +407,216 @@ async function main(): Promise<void> {
       badPhone = e instanceof AppError && e.code === 'VALIDATION_ERROR'
     }
     ok('C5: شماره‌ی نامعتبر → VALIDATION_ERROR', badPhone)
+
+    // A permit expiring while the transaction waits must not be accepted using
+    // PostgreSQL now(), which is frozen at the start of the transaction.
+    const expiryPhone = '09150000011'
+    const expiring = await permits.issue({ rawPhone: expiryPhone, adminId })
+    await db.execute(sql`update registration_permits set expires_at = clock_timestamp() + interval '100 milliseconds' where id = ${expiring.id}`)
+    const expiredClaim = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_sleep(0.15)`)
+      return permits.consumeForRegistration(tx, expiryPhone, null)
+    })
+    ok('C6: permit expiring after transaction start cannot be consumed', expiredClaim === null)
+
+    const lockedPhone = '09150000012'
+    const lockedPermit = await permits.issue({ rawPhone: lockedPhone, adminId })
+    await db.execute(sql`update registration_permits set expires_at = clock_timestamp() + interval '300 milliseconds' where id = ${lockedPermit.id}`)
+    let waitingClaim: Promise<unknown> | undefined
+    await concurrentDatabase.db.transaction(async (tx) => {
+      await tx.execute(sql`select id from registration_permits where id = ${lockedPermit.id} for update`)
+      waitingClaim = db.transaction((claimTx) => permits.consumeForRegistration(claimTx, lockedPhone, null))
+      await tx.execute(sql`select pg_sleep(0.35)`)
+    })
+    ok('C7: permit expiring while waiting for its row lock cannot be consumed', await waitingClaim === null)
+
+    const racePhone = '09150000013'
+    let issueDuringSignup: Promise<string> | undefined
+    await concurrentDatabase.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${racePhone}))`)
+      issueDuringSignup = permits.issue({ rawPhone: racePhone, adminId })
+        .then(() => '__ok__', (e: unknown) => e instanceof AppError ? e.code : '__throw__')
+      await tx.execute(sql`select pg_sleep(0.1)`)
+      await tx.insert(users).values({ phone: racePhone })
+    })
+    ok('C8: issuance racing completed signup rejects instead of leaving a pending permit', await issueDuringSignup === 'CONFLICT')
+
+    const singleUsePhone = '09150000014'
+    await permits.issue({ rawPhone: singleUsePhone, adminId })
+    const claims = await Promise.all([0, 1].map(() => concurrentDatabase.db.transaction(
+      (tx) => permits.consumeForRegistration(tx, singleUsePhone, null),
+    )))
+    ok('C9: concurrent claims have exactly one winner', claims.filter(Boolean).length === 1)
+
+    const refusedPhone = '09150000015'
+    const refusedPermit = await permits.issue({ rawPhone: refusedPhone, adminId })
+    const refused = await login(refusedPhone, 'client-A', { terms: false })
+    const refusedEvents = await db.query.deviceEvents.findMany({
+      where: and(eq(deviceEvents.phone, refusedPhone), eq(deviceEvents.event, 'PERMIT_BYPASS')),
+    })
+    ok('C10: rejected signup does not record a permit bypass', refused.code === 'VALIDATION_ERROR' && refusedEvents.length === 0)
+    await permits.revoke({ permitId: refusedPermit.id, adminId })
+
+    // Finalize discovers similarity links that did not exist at peek time.
+    // Model that discovery deterministically to exercise the auth boundary.
+    const referralPhone = '09150000016'
+    const finalizeBeforeReferral = devices.finalize.bind(devices)
+    devices.finalize = async (tx, input) => {
+      const result = await finalizeBeforeReferral(tx, input)
+      if (input.phone === referralPhone && devA) {
+        const [a, b] = [devA, result.device.id].sort()
+        await tx.insert(deviceLinks).values({ deviceA: asDeviceId(a!), deviceB: asDeviceId(b!), similarity: 0.9 }).onConflictDoNothing()
+      }
+      return result
+    }
+    try {
+      await auth.loginWithOtp(referralPhone, '123456', signals('client-referral'), '127.0.0.1', {
+        termsAccepted: true, refCode: adminUser!.referralCode!,
+      })
+    } finally {
+      devices.finalize = finalizeBeforeReferral
+    }
+    const referralUser = await db.query.users.findFirst({ where: eq(users.phone, referralPhone) })
+    ok('C11: newly linked crowded cluster cannot retain a signup referral', referralUser?.referredBy === null)
+
+    const quotaPhone = '09150000018'
+    for (let i = 0; i < config.maxDevicesPerUser; i++) {
+      const attached = await login(quotaPhone, `client-quota-${i}`)
+      ok(`C12: quota fixture device ${i + 1} admitted`, attached.code === '__ok__')
+    }
+    const peekBeforeQuota = devices.peek.bind(devices)
+    devices.peek = async (input, phone) => ({
+      ...await peekBeforeQuota(input, phone), device: null, matchedBy: 'none',
+    })
+    try {
+      const knownDevice = await login(quotaPhone, 'client-quota-0')
+      ok('C12: stale peek cannot reject a known device at quota', knownDevice.code === '__ok__')
+    } finally {
+      devices.peek = peekBeforeQuota
+    }
+    const overQuota = await login(quotaPhone, 'client-quota-extra')
+    const quotaIdentities = await db.query.deviceIdentities.findMany({ where: eq(deviceIdentities.phone, quotaPhone) })
+    ok('C12: genuinely new device over quota is rejected without attaching an identity',
+      overQuota.code === 'DEVICE_LIMIT_REACHED' && quotaIdentities.length === config.maxDevicesPerUser,
+      `code=${overQuota.code}`)
+
+    // Session creation rechecks authority after the registration/login work.
+    const sessionPhone = '09150000017'
+    const sessionLogin = await login(sessionPhone, 'client-session')
+    const sessionUser = sessionLogin.result?.user
+    const sessionDevice = sessionLogin.result?.device.id
+    ok('D1: session guard fixture signs in', Boolean(sessionUser && sessionDevice))
+    const rejectionOf = async (run: Promise<unknown>) => {
+      try {
+        await run
+        return { code: '__ok__', message: '' }
+      } catch (e) {
+        return { code: e instanceof AppError ? e.code : '__throw__', message: e instanceof Error ? e.message : String(e) }
+      }
+    }
+    if (sessionUser && sessionDevice && sessionLogin.result) {
+      const authenticated = await sessions.authenticate(sessionLogin.result.accessToken)
+      ok('D1: freshly issued access token authenticates its user and device',
+        authenticated.user.id === sessionUser.id && authenticated.ctx.deviceId === sessionDevice)
+      const wrongDeviceToken = await new TokenService(config).sign({
+        sub: sessionUser.id, dev: crypto.randomUUID(), ses: authenticated.ctx.sessionId, tv: sessionUser.tokenVersion,
+      })
+      ok('D1: signed token with a mismatched device claim is rejected',
+        (await rejectionOf(sessions.authenticate(wrongDeviceToken))).code === 'UNAUTHORIZED')
+      const createCode = async () => {
+        try {
+          await sessions.createSession(sessionUser, sessionDevice)
+          return '__ok__'
+        } catch (e) { return e instanceof AppError ? e.code : '__throw__' }
+      }
+      await db.update(deviceTable).set({ isBlocked: true }).where(eq(deviceTable.id, asDeviceId(sessionDevice)))
+      ok('D2: blocked device cannot obtain a new session', await createCode() === 'FORBIDDEN')
+      ok('D2: legacy session on a blocked device cannot authenticate',
+        (await rejectionOf(sessions.authenticate(sessionLogin.result.accessToken))).code === 'UNAUTHORIZED')
+      ok('D2: legacy session on a blocked device cannot rotate',
+        (await rejectionOf(sessions.rotateSession(sessionLogin.result.refreshToken))).code === 'UNAUTHORIZED')
+      await db.update(deviceTable).set({ isBlocked: false }).where(eq(deviceTable.id, asDeviceId(sessionDevice)))
+      await db.update(users).set({ bannedAt: new Date() }).where(eq(users.id, sessionUser.id))
+      ok('D3: user banned since login cannot obtain a new session', await createCode() === 'BANNED')
+      await db.update(users).set({ bannedAt: null, tokenVersion: sessionUser.tokenVersion + 1 }).where(eq(users.id, sessionUser.id))
+      ok('D4: stale user snapshot cannot restore a revoked session', await createCode() === 'UNAUTHORIZED')
+      await db.update(users).set({ tokenVersion: sessionUser.tokenVersion }).where(eq(users.id, sessionUser.id))
+      await db.delete(deviceIdentities).where(and(eq(deviceIdentities.phone, sessionPhone), eq(deviceIdentities.deviceId, asDeviceId(sessionDevice))))
+      ok('D5: removed device identity cannot obtain a new session', await createCode() === 'UNAUTHORIZED')
+      ok('D5: legacy session without a device identity cannot authenticate',
+        (await rejectionOf(sessions.authenticate(sessionLogin.result.accessToken))).code === 'UNAUTHORIZED')
+      ok('D5: legacy session without a device identity cannot rotate',
+        (await rejectionOf(sessions.rotateSession(sessionLogin.result.refreshToken))).code === 'UNAUTHORIZED')
+      const rows = await db.query.sessions.findMany({ where: eq(sessionTable.userId, asUserId(sessionUser.id)) })
+      ok('D6: denied session creation persists no extra sessions', rows.length === 1)
+    }
+
+    const rotationLogin = await login('09150000019', 'client-rotation')
+    ok('E1: rotation fixture signs in', rotationLogin.code === '__ok__')
+    if (rotationLogin.result) {
+      const original = rotationLogin.result
+      const rotated = await sessions.rotateSession(original.refreshToken)
+      const checked = await sessions.authenticate(rotated.accessToken)
+      ok('E1: valid refresh rotates and its access token authenticates',
+        checked.user.id === original.user.id && rotated.refreshToken !== original.refreshToken)
+
+      const concurrentSessions = new SessionService({ db: concurrentDatabase.db, config, tokens: new TokenService(config) })
+      const outcomes = await Promise.allSettled([0, 1].map(() =>
+        concurrentSessions.rotateSession(rotated.refreshToken)))
+      const winners = outcomes.filter((r) => r.status === 'fulfilled')
+      const losers = outcomes.filter((r) => r.status === 'rejected')
+      ok('E2: concurrent rotation has one winner and one soft race',
+        winners.length === 1 && losers.length === 1 &&
+        losers[0]?.reason instanceof AppError && losers[0].reason.code === 'UNAUTHORIZED' &&
+        losers[0].reason.message === 'نشست هم‌زمان چرخیده است؛ دوباره تلاش کنید.')
+      const winner = winners[0]?.value
+      if (winner) {
+        const afterRace = await sessions.rotateSession(winner.refreshToken)
+        const stillAuthenticated = await sessions.authenticate(afterRace.accessToken)
+        ok('E2: winning refresh token remains usable after the losing request', stillAuthenticated.user.id === original.user.id)
+
+        // Inject a real database write failure after revokeAll's user update.
+        // Both the token version and session revocations must roll back together.
+        await db.execute(sql`create function test_fail_logout_all() returns trigger language plpgsql as $$
+          begin raise exception 'simulated logout-all persistence failure'; end
+        $$`)
+        await db.execute(sql`create trigger test_fail_logout_all before update on sessions
+          for each row when (new.revoked_reason = 'logout-all') execute function test_fail_logout_all()`)
+        try {
+          const failedRevoke = await rejectionOf(sessions.revokeAllSessions(original.user.id))
+          const currentUser = await db.query.users.findFirst({ where: eq(users.id, original.user.id) })
+          const currentSessions = await db.query.sessions.findMany({ where: eq(sessionTable.userId, asUserId(original.user.id)) })
+          ok('E3: failed revoke-all rolls back token version and session changes',
+            failedRevoke.code === '__throw__' && currentUser?.tokenVersion === original.user.tokenVersion &&
+            currentSessions.every((row) => row.revokedAt === null))
+        } finally {
+          await db.execute(sql`drop trigger test_fail_logout_all on sessions`)
+          await db.execute(sql`drop function test_fail_logout_all()`)
+        }
+        ok('E3: access token still authenticates after revoke-all rollback',
+          (await rejectionOf(sessions.authenticate(afterRace.accessToken))).code === '__ok__')
+
+        const secondSession = await sessions.createSession(original.user, original.device.id)
+        await sessions.revokeAllSessions(original.user.id)
+        const revokedUser = await db.query.users.findFirst({ where: eq(users.id, original.user.id) })
+        const revokedRows = await db.query.sessions.findMany({ where: eq(sessionTable.userId, asUserId(original.user.id)) })
+        ok('E4: revoke-all bumps token version and revokes every session',
+          revokedUser?.tokenVersion === original.user.tokenVersion + 1 && revokedRows.length === 2 &&
+          revokedRows.every((row) => row.revokedAt !== null && row.revokedReason === 'logout-all'))
+        ok('E4: access tokens from both sessions are rejected after revoke-all',
+          (await rejectionOf(sessions.authenticate(afterRace.accessToken))).code === 'UNAUTHORIZED' &&
+          (await rejectionOf(sessions.authenticate(secondSession.accessToken))).code === 'UNAUTHORIZED')
+        ok('E4: refresh tokens from both sessions are rejected after revoke-all',
+          (await rejectionOf(sessions.rotateSession(afterRace.refreshToken))).code === 'UNAUTHORIZED' &&
+          (await rejectionOf(sessions.rotateSession(secondSession.refreshToken))).code === 'UNAUTHORIZED')
+        ok('E4: stale user snapshot cannot create a session after revoke-all',
+          (await rejectionOf(sessions.createSession(original.user, original.device.id))).code === 'UNAUTHORIZED')
+      }
+    }
   } finally {
     // ── پاک‌سازی ──
     await database.close?.()
+    await concurrentDatabase.close()
     const cleanup = new SQL(admin, { max: 1 })
     await cleanup.unsafe(`drop database if exists "${scratch}" with (force)`)
     await cleanup.close({ timeout: 5 })

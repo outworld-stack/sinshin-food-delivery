@@ -26,6 +26,8 @@ import { nullIfEmpty, pickAr, type Lang } from '#/domain/shared/lang'
 import type { RedisService } from '#/infra/redis/redis'
 import { VersionedCache } from '#/domain/shared/versioned-cache'
 import { UUID_RE } from '#/domain/shared/ids'
+import { normalizeBlocksDoc } from './blocks-normalize'
+import { blocksToPlainText, type ArticleBlocksDoc } from '@sinshin/shared'
 
 
 /** قرارداد ArticleDto از @sinshin/shared */
@@ -55,6 +57,11 @@ export interface ArticleView {
     arAuto?: boolean
     /** stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora در فرانت) */
     isFeatured?: boolean
+    /**
+     * stage-82 — سندِ بلوکی صفحه‌ساز. نمایِ عمومی فقط برای زبان فارسی
+     * می‌فرستد (ادیتور فارسی‌زبان است)؛ عربی همان مسیر متنی را می‌گیرد.
+     */
+    blocks?: ArticleBlocksDoc | null
 }
 
 /**
@@ -63,7 +70,7 @@ export interface ArticleView {
  */
 export type ArticleSummaryView = Omit<
     ArticleView,
-    'content' | 'processes' | 'galleryImages'
+    'content' | 'processes' | 'galleryImages' | 'blocks'
 >
 
 export interface ArticleCategoryView {
@@ -93,6 +100,8 @@ export interface ArticleInput {
     processesAr?: { title: string; items: string[] }[] | null
     /** stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora) */
     isFeatured?: boolean
+    /** stage-82 — سند بلوکی خام (پیش از نرمال‌سازی سرویس)؛ null = پاک‌کردن */
+    blocks?: unknown
 }
 
 type ArticleRow = typeof articles.$inferSelect
@@ -264,12 +273,19 @@ export class ArticleService {
         const { db } = this.deps
         await this.assertCategory(input.categoryId, input.subCategoryId ?? null)
 
+        // stage-82 — بلوک‌ها: نرمال‌سازی سخت‌گیر + مشتق‌سازیِ content از متنِ
+        // بلوک‌ها (لیست/سئو/ترجمه روی content سوارند — درسِ تحقیق: ول نکن)
+        const blocks = normalizeBlocksDoc(input.blocks)
+        const content = blocks ? blocksToPlainText(blocks) || input.content : input.content
+
         const [created] = await db
             .insert(articles)
             .values({
                 title: input.title.trim(),
                 excerpt: input.excerpt.trim(),
-                content: input.content,
+                content,
+                // stage-82 — سندِ بلوکی نرمال‌شده (null = مقاله‌ی متنی ساده)
+                blocks,
                 // round-34 — محتوای عربی: '' → NULL (پشتیبان فارسی)؛ ذخیره‌ی دستی = «دستی»
                 titleAr: nullIfEmpty(input.titleAr),
                 excerptAr: nullIfEmpty(input.excerptAr),
@@ -296,12 +312,18 @@ export class ArticleService {
         if (!UUID_RE.test(id)) throw Err.notFound('مقاله پیدا نشد.')
         await this.assertCategory(input.categoryId, input.subCategoryId ?? null)
 
+        // stage-82 — همان قاعده‌ی create: content از بلوک‌ها مشتق می‌شود
+        const blocks = normalizeBlocksDoc(input.blocks)
+        const content = blocks ? blocksToPlainText(blocks) || input.content : input.content
+
         const [updated] = await this.deps.db
             .update(articles)
             .set({
                 title: input.title.trim(),
                 excerpt: input.excerpt.trim(),
-                content: input.content,
+                content,
+                // stage-82 — null یعنی پاک‌شدن سند (بازگشت به مقاله‌ی متنی)
+                blocks,
                 // round-34 — محتوای عربی: '' → NULL؛ ذخیره‌ی دستی پرچم «خودکار» را برمی‌گرداند
                 titleAr: nullIfEmpty(input.titleAr),
                 excerptAr: nullIfEmpty(input.excerptAr),
@@ -593,6 +615,9 @@ export class ArticleService {
                 : {}),
             // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora)
             isFeatured: a.isFeatured ?? false,
+            // stage-82 — سندِ بلوکی فقط در زبانِ فارسی (ادیتور فارسی‌زبان است؛
+            // عربی همان مسیرِ متنیِ content/contentAr را می‌گیرد)
+            blocks: lang === 'ar' ? null : (a.blocks ?? null),
         }
     }
 

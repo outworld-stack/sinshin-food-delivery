@@ -23,6 +23,8 @@ export interface GatewayInitResult {
 }
 
 export interface GatewayVerifyInput {
+  /** Internal attempt used to validate any PSP reservation identifier. */
+  paymentId?: PaymentId
   gatewayRef: string | null
   amount: number
   /** کوئری خام بازگشت درگاه */

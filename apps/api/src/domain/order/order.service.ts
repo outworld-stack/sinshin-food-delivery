@@ -43,6 +43,7 @@ import { faNum } from "#/domain/report/format";
 import type { Db, DbOrTx } from "#/infra/db/client";
 import {
         addresses,
+        checkoutIdempotency,
         couponRedemptions,
         couponGrants,
         coupons,
@@ -71,7 +72,7 @@ import {
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
 import { maskPhone } from "#/domain/shared/pg";
-import { signedWalletAmount } from "#/domain/shared/wallet-sql";
+import { lockWalletAccounts, signedWalletAmount } from "#/domain/shared/wallet-sql";
 import {
         finalPriceOf,
         loadCategoryModes,
@@ -91,6 +92,7 @@ import type {
         UserOrdersData,
 } from "@sinshin/shared";
 import { requireOrder, requireOwnedOrder, findOrder } from './order-lookup'
+import type { CheckoutClaim } from './checkout-idempotency.service'
 
 
 function newDisplayId(): string {
@@ -103,6 +105,12 @@ function newDisplayId(): string {
 /** شرط رزرو کوپن: نامحدود (۰) یا زیر سقف */
 function underMaxUses(maxUses: number) {
         return maxUses === 0 ? sql`true` : sql`${coupons.usedCount} < ${maxUses}`;
+}
+
+function assertMoneyAmounts(...amounts: number[]): void {
+        if (amounts.some((amount) => !Number.isSafeInteger(amount) || amount < 0 || amount > 2_147_483_647)) {
+                throw Err.validation("مبلغ سفارش معتبر نیست یا از سقف مجاز بیشتر است.");
+        }
 }
 
 // رارد ۴۷ — ورودی چک‌اوت (DeliveryType و کل شکل) از قرارداد مشترک
@@ -153,18 +161,42 @@ export class OrderService {
         async checkout(
                 userId: string,
                 input: CheckoutInput,
+                claim?: CheckoutClaim,
         ): Promise<CheckoutServiceResult> {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
 
                 // رارد M9 — نتیجه‌ی tx گرفته می‌شود تا اعطای کوپن بعد از commit اجرا شود
                 const result = await db.transaction(async (tx) => {
+                        if (claim) {
+                                const [owned] = await tx.select().from(checkoutIdempotency)
+                                        .where(and(eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, claim.key)))
+                                        .for("update");
+                                if (!owned || owned.claimToken !== claim.token || owned.response !== null) {
+                                        throw Err.conflict("درخواست قبلی پردازش شده یا در حال پردازش است.");
+                                }
+                        }
+                        const persistResult = async (result: CheckoutServiceResult): Promise<CheckoutServiceResult> => {
+                                if (claim) {
+                                        await tx.update(checkoutIdempotency).set({
+                                                response: {
+                                                        orderCompleted: !result.requiresPayment,
+                                                        orderId: result.displayId,
+                                                        requiresPayment: result.requiresPayment,
+                                                        breakdown: result.breakdown,
+                                                },
+                                                updatedAt: new Date(),
+                                        }).where(and(eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, claim.key)));
+                                }
+                                return result;
+                        };
                         // ── قفل کاربر — سریالی‌کردنِ برداشت‌های کیف پول ──
+                        await lockWalletAccounts(tx, [userId]);
                         const [user] = await tx
                                 .select()
                                 .from(users)
                                 .where(eq(users.id, userId))
-                                .for("update");
+                                .for("no key update");
                         if (!user) throw Err.unauthorized();
                         if (user.bannedAt) throw Err.banned();
 
@@ -218,7 +250,7 @@ export class OrderService {
                         );
                         for (const item of input.items) {
                                 const product = productMap.get(asProductId(item.productId));
-                                if (!product) continue; // حذف‌شده از DB — skip (قرارداد فرانت)
+                                if (!product) throw Err.validation("یکی از محصولات سبد دیگر موجود نیست — سبد خرید را به‌روز کنید.");
 
                                 // stage-48 — ناموجود: فعال در منو ولی فروش قفل → سفارش قابل ثبت نیست
                                 if (product.status !== "ACTIVE" || !product.isAvailable) {
@@ -240,8 +272,12 @@ export class OrderService {
                                 let unitPrice = finalPriceOf(product);
                                 let sizeId: SizeId | null = null;
                                 let sizeName: string | null = null;
+                                if (item.sizeId && !product.sizesEnabled) {
+                                        throw Err.validation(`سایز انتخابی «${product.name}» دیگر موجود نیست — سبد خرید را به‌روز کنید.`);
+                                }
                                 if (product.sizesEnabled) {
                                         const sizes = sizesByProduct.get(product.id) ?? [];
+                                        if (sizes.length === 0) throw Err.validation(`سایزهای «${product.name}» در دسترس نیست — سبد خرید را به‌روز کنید.`);
                                         if (sizes.length > 0) {
                                                 // phase-2: تعویض بی‌صدای سایز ممنوع — اگر سایزِ سبد حذف/تغییر کرده،
                                                 // مشتری باید خطا ببیند، نه اینکه بی‌سروصدا اولین سایز قیمت شود
@@ -316,6 +352,7 @@ export class OrderService {
                                         tx,
                                         userId,
                                         input.couponCode,
+                                        { forUpdate: true },
                                 );
                                 if (!outcome.ok) {
                                         throw Err.conflict(
@@ -356,7 +393,7 @@ export class OrderService {
                         const payableFood = foodTotal - discount;
                         const balance = await this.walletBalance(tx, userId);
                         const walletDeduction = input.useWallet
-                                ? Math.min(balance, payableFood)
+                                ? Math.min(Math.max(0, balance), payableFood)
                                 : 0;
 
                         // ── هزینه ارسال/بسته‌بندی — ناحیه‌ای برای DELIVERY؛ بسته‌بندیِ هر محصول ──
@@ -366,6 +403,7 @@ export class OrderService {
                                 input.deliveryType === "DELIVERY"
                                         ? await this.deps.zones.feeFor(
                                                         addressRow ? { lat: addressRow.lat, lng: addressRow.lng } : null,
+                                                        tx,
                                                 )
                                         : 0;
                         const packagingFee =
@@ -374,6 +412,7 @@ export class OrderService {
                         const totalAmount = payableFood + deliveryFee + packagingFee;
                         const amountPaidOnline =
                                 payableFood - walletDeduction + deliveryFee + packagingFee;
+                        assertMoneyAmounts(foodTotal, discount, walletDeduction, deliveryFee, packagingFee, totalAmount, amountPaidOnline);
                         const paymentMethod =
                                 amountPaidOnline === 0
                                         ? "WALLET"
@@ -391,7 +430,7 @@ export class OrderService {
                         };
 
                         // ── تصویر لحظه‌ایِ ردیابی — لحظه‌ی ثبت ──
-                        const trackingEnabled = await this.deps.settings.liveTrackingEnabled();
+                        const trackingEnabled = await this.deps.settings.liveTrackingEnabled(tx);
 
                         // ── سفارش ──
                         // امن-۶: برخورد displayId با onConflictDoNothing حل می‌شود —
@@ -462,12 +501,12 @@ export class OrderService {
                         // ── تمام-کیف‌پول → تسویه فوری ──
                         if (amountPaidOnline === 0) {
                                 await this.settlePayment(tx, orderRow);
-                                return {
+                                return persistResult({
                                         displayId: orderRow.displayId,
                                         requiresPayment: false,
                                         amountPaidOnline: 0,
                                         breakdown,
-                                };
+                                });
                         }
 
                         // ── ردیف پرداخت — initiate بیرون tx (شبکه) ──
@@ -505,13 +544,13 @@ export class OrderService {
                         )[0];
                         if (!paymentRow) throw Err.internal("ساخت ردیف پرداخت ناموفق بود.");
 
-                        return {
+                        return persistResult({
                                 displayId: orderRow.displayId,
                                 requiresPayment: true,
                                 paymentId: paymentRow.id,
                                 amountPaidOnline,
                                 breakdown,
-                        };
+                        });
                 });
 
                 // رارد M9 — اعطای کوپنِ «بعد از commit»: بیرون از tx و بدون قفل کاربر.
@@ -626,7 +665,7 @@ export class OrderService {
                 );
                 for (const item of input.items) {
                         const product = productMap.get(asProductId(item.productId));
-                        if (!product) continue;
+                        if (!product) throw Err.validation("یکی از محصولات سبد دیگر موجود نیست — سبد خرید را به‌روز کنید.");
 
                         const modes = catModes.get(product.categoryId);
                         const courierAllowed =
@@ -640,8 +679,12 @@ export class OrderService {
 
                         let unitPrice = finalPriceOf(product);
                         let sizeName: string | null = null;
+                        if (item.sizeId && !product.sizesEnabled) {
+                                throw Err.validation(`سایز انتخابی «${product.name}» دیگر موجود نیست — سبد خرید را به‌روز کنید.`);
+                        }
                         if (product.sizesEnabled) {
                                 const sizes = sizesByProduct.get(product.id) ?? [];
+                                if (sizes.length === 0) throw Err.validation(`سایزهای «${product.name}» در دسترس نیست — سبد خرید را به‌روز کنید.`);
                                 if (sizes.length > 0) {
                                         if (item.sizeId) {
                                                 const size = sizes.find((s) => s.id === item.sizeId);
@@ -717,7 +760,7 @@ export class OrderService {
                 const payableFood = foodTotal - discount;
                 const balance = await this.walletBalance(db, userId);
                 const walletDeduction = input.useWallet
-                        ? Math.min(balance, payableFood)
+                        ? Math.min(Math.max(0, balance), payableFood)
                         : 0;
 
                 const deliveryFee =
@@ -732,6 +775,7 @@ export class OrderService {
                 const totalAmount = payableFood + deliveryFee + packagingFee;
                 const amountPaidOnline =
                         payableFood - walletDeduction + deliveryFee + packagingFee;
+                assertMoneyAmounts(foodTotal, discount, walletDeduction, deliveryFee, packagingFee, totalAmount, amountPaidOnline);
 
                 return {
                         breakdown: {
@@ -757,12 +801,19 @@ export class OrderService {
                 tx: DbOrTx,
                 orderRow: OrderRow,
         ): Promise<{ displayId: string }> {
+                await lockWalletAccounts(tx, [orderRow.userId]);
                 const [user] = await tx
                         .select()
                         .from(users)
                         .where(eq(users.id, orderRow.userId))
-                        .for("update");
+                        .for("no key update");
                 if (!user) throw Err.internal("کاربر سفارش پیدا نشد.");
+
+                // Coupon deletion locks coupon -> order through ON DELETE SET NULL.
+                // Keep that order here too, before changing the order row.
+                if (orderRow.couponId) {
+                        await tx.select({ id: coupons.id }).from(coupons).where(eq(coupons.id, orderRow.couponId)).for("update");
+                }
 
                 const b = orderRow.breakdown;
 
@@ -781,7 +832,7 @@ export class OrderService {
                         0,
                         b.amountPaidOnline - b.deliveryFee - b.packagingFee,
                 );
-                if (user.referredBy && referralBase > 0) {
+                if (user.referredBy && user.referredBy !== orderRow.userId && referralBase > 0) {
                         const percent = this.deps.config.referralPercent;
                         const amount = Math.round((referralBase * percent) / 100);
                         if (amount > 0) {
@@ -815,7 +866,7 @@ export class OrderService {
                 // درج redemption با FK نمی‌شکند و پولِ گرفته‌شده گیر نمی‌کند.
                 if (orderRow.couponId) {
                         const coupon = (
-                                await tx.select().from(coupons).where(eq(coupons.id, orderRow.couponId))
+                                await tx.select().from(coupons).where(eq(coupons.id, orderRow.couponId)).for("key share")
                         )[0];
                         if (coupon) {
                                 if (!coupon.isPublic) {
@@ -849,7 +900,7 @@ export class OrderService {
                 // فراخوانی بعد از commit: order.routes / payment.service / reconcile.
 
                 // گزارشی: «در زمان بسته (هر نوع) ثبت شد» — بدون سد؛ ادمین۲ می‌تواند بلافاصله تایید کند
-                const status = await this.deps.settings.restaurantStatus();
+                const status = await this.deps.settings.restaurantStatus('fa', tx);
                 if (status.anyClosed) {
                         await tx
                                 .update(orders)
@@ -862,6 +913,12 @@ export class OrderService {
 
         /** پرداخت ناموفق — سفارش ثبت می‌ماند (قرارداد فرانت) + آزادسازی رزرو کوپن */
         async failPayment(tx: DbOrTx, orderRow: OrderRow): Promise<void> {
+                // Match checkout's wallet lock before releasing its hold.
+                await lockWalletAccounts(tx, [orderRow.userId]);
+                await tx.select({ id: users.id }).from(users).where(eq(users.id, orderRow.userId)).for("no key update");
+                if (orderRow.couponId) {
+                        await tx.select({ id: coupons.id }).from(coupons).where(eq(coupons.id, orderRow.couponId)).for("update");
+                }
                 // phase-fix: مثل settlePayment گارد گذاشتیم — اگر این سفارش قبلاً
                 // نهایی شده، برگشت وجه/کوپن دوباره اجرا نمی‌شود (ضدِ بازگشت دوبل).
                 const [updated] = await tx
@@ -913,7 +970,21 @@ export class OrderService {
                 reason: string,
         ): Promise<{ displayId: string; refundedAmount: number }> {
                 return this.deps.db.transaction(async (tx) => {
-                        // رارد ۴۸ — گارد الگو و واکشی از order-lookup مشترک (با قفل سطر)
+                        const candidate = await findOrder(tx, displayId);
+                        if (!candidate) throw Err.notFound("سفارش پیدا نشد.");
+                        // A successful settlement commits all its reward rows. Read them
+                        // before locking accounts so reversals and spending share one order.
+                        if (candidate.paymentStatus !== "SUCCESS") {
+                                throw Err.conflict("فقط سفارش‌های پرداخت‌شده قابل بازگشت وجه هستند.");
+                        }
+                        const profits = await tx.select().from(referralProfits)
+                                .where(eq(referralProfits.orderId, candidate.id));
+                        await lockWalletAccounts(tx, [candidate.userId, ...profits.map(p => p.referrerId)]);
+                        await tx.select({ id: users.id }).from(users).where(eq(users.id, candidate.userId)).for("no key update");
+                        if (candidate.couponId) {
+                                await tx.select({ id: coupons.id }).from(coupons).where(eq(coupons.id, candidate.couponId)).for("update");
+                        }
+                        // Reload after locks: concurrent coupon deletion may have cleared its ID.
                         const row = await findOrder(tx, displayId, { forUpdate: true });
                         if (!row) throw Err.notFound("سفارش پیدا نشد.");
                         if (row.status === "CANCELED")
@@ -932,7 +1003,8 @@ export class OrderService {
                                 })
                                 .where(eq(orders.id, row.id));
 
-                        // ۱) بازگشت کل مبلغ به کیف پول مشتری — onConflictDoNothing = تکرارناپذر
+                        // The locked order makes this idempotent. An unexpected ledger
+                        // conflict must roll back the refund, never silently omit credit.
                         const refundedAmount = row.breakdown.totalAmount;
                         if (refundedAmount > 0) {
                                 await tx
@@ -943,18 +1015,13 @@ export class OrderService {
                                                 amount: refundedAmount,
                                                 description: `بازگشت وجه سفارش ${row.displayId}`,
                                                 orderId: row.id,
-                                        })
-                                        .onConflictDoNothing();
+                                        });
                         }
 
                         // ۲) فسخ سود معرف — ردیف profit می‌ماند (FK سالم)، ردیف معکوس می‌نشیند
                         // phase-fix: orderId عمداً null است — ایندکس یونیک رزرو (WITHDRAW+
                         // orderId) نباید فسخِ سود را قالب کند؛ تکرارناپذیری با ایندکس یونیک
                         // جدید روی referralProfitId تضمین می‌شود.
-                        const profits = await tx
-                                .select()
-                                .from(referralProfits)
-                                .where(eq(referralProfits.orderId, row.id));
                         for (const p of profits) {
                                 await tx
                                         .insert(walletTransactions)
@@ -1343,7 +1410,7 @@ export class OrderService {
                         })),
                         courierLocation: row.courierLocation,
                         customerLocation: row.customerLocation,
-                        referralProfit,
+                        referralProfit: row.paymentStatus === "REFUNDED" ? 0 : referralProfit,
                         userFeedback: null, // فاز ۵ (نظرات)
                         customerNote: row.customerNote,
                         paymentStatus: row.paymentStatus,

@@ -57,7 +57,7 @@ export const devices = pgTable(
     timezone: varchar('timezone', { length: 60 }),
     language: varchar('language', { length: 20 }),
     hardwareConcurrency: integer('hardware_concurrency'),
-    deviceMemory: integer('device_memory'),
+    deviceMemory: doublePrecision('device_memory'),
     touch: boolean('touch').notNull().default(false),
     networkType: varchar('network_type', { length: 20 }),
     userAgent: text('user_agent'),

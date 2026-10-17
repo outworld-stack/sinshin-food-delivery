@@ -1,6 +1,7 @@
 //src/infra/db/schema/coupons.ts
 import { sql } from 'drizzle-orm'
 import {
+  bigint,
   boolean,
   date,
   index,
@@ -180,7 +181,7 @@ export const couponNudges = pgTable(
      * در اسکنِ شبانه = سقف شرط منهای مقدار فعلی کاربر (بالا گرد شده).
      * null = ردیف‌های قدیمی پیش از مهاجرت → متن جایگزین «یک قدم».
      */
-    remainingCount: integer('remaining_count'),
+    remainingCount: bigint('remaining_count', { mode: 'number' }),
     scanDate: date('scan_date').notNull(),
     smsSentAt: timestamp('sms_sent_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

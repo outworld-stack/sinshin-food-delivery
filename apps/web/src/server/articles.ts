@@ -7,7 +7,7 @@
 
 // src/server/articles.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
-import type { ArticleCategoryDto, ArticleDto, ArticleSummaryDto } from '@sinshin/shared'
+import type { ArticleBlocksDoc, ArticleCategoryDto, ArticleDto, ArticleSummaryDto } from '@sinshin/shared'
 
 // ─── عمومی ───
 
@@ -55,6 +55,8 @@ export async function createArticle(input: {
   processes: { title: string; items: string[] }[]
   /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + Aurora) */
   isFeatured?: boolean
+  /** stage-82 — سند بلوکی (null = مقاله‌ی متنی ساده) */
+  blocks?: ArticleBlocksDoc | null
   /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null
@@ -82,6 +84,8 @@ export async function updateArticle(input: {
   processes: { title: string; items: string[] }[]
   /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + Aurora) */
   isFeatured?: boolean
+  /** stage-82 — سند بلوکی (null = پاک‌کردن → مقاله‌ی متنی) */
+  blocks?: ArticleBlocksDoc | null
   /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null

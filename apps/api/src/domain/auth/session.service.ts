@@ -1,8 +1,8 @@
 // src/domain/auth/session.service.ts
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, eq, gt, isNull, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
-import { sessions, users, type UserRow } from '#/infra/db/schema'
+import { deviceIdentities, devices, sessions, users, type UserRow } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
 import { randomToken, sha256 } from '#/domain/shared/crypto'
@@ -55,27 +55,44 @@ export class SessionService {
     const { db, config } = this.deps
 
     const refreshToken = randomToken(48)
-    const [session] = await db
-      .insert(sessions)
-      .values({
-        userId: asUserId(user.id),
-        deviceId: asDeviceId(deviceId),
-        refreshHash: sha256(refreshToken),
-        ip: ip ?? null,
-        userAgent: userAgent ?? null,
-        expiresAt: new Date(Date.now() + config.sessionTtlDays * 86_400_000),
+    const { session, currentUser } = await db.transaction(async (tx) => {
+      // Match login/revokeIdentity lock order, then serialize against bans,
+      // logout-all and device blocking before a new session can be inserted.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${user.phone}))`)
+      const [currentUser] = await tx.select().from(users)
+        .where(eq(users.id, user.id)).for('share')
+      if (!currentUser) throw Err.unauthorized()
+      if (currentUser.bannedAt) throw Err.banned()
+      if (currentUser.tokenVersion !== user.tokenVersion) throw Err.unauthorized()
+      const [device] = await tx.select().from(devices)
+        .where(eq(devices.id, asDeviceId(deviceId))).for('share')
+      if (!device || device.isBlocked) {
+        throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
+      }
+      const identity = await tx.query.deviceIdentities.findFirst({
+        where: and(eq(deviceIdentities.deviceId, device.id), eq(deviceIdentities.phone, currentUser.phone)),
       })
-      .returning()
-    if (!session) throw Err.internal('ساخت نشست ناموفق بود.')
-
-    const accessToken = await this.deps.tokens.sign({
-      sub: user.id,
-      dev: deviceId,
-      ses: session.id,
-      tv: user.tokenVersion,
+      if (!identity) throw Err.unauthorized('دسترسی این دستگاه لغو شده است؛ دوباره وارد شوید.')
+      const [session] = await tx.insert(sessions).values({
+          userId: asUserId(currentUser.id),
+          deviceId: device.id,
+          refreshHash: sha256(refreshToken),
+          ip: ip ?? null,
+          userAgent: userAgent ?? null,
+          expiresAt: new Date(Date.now() + config.sessionTtlDays * 86_400_000),
+        }).returning()
+      if (!session) throw Err.internal('ساخت نشست ناموفق بود.')
+      return { session, currentUser }
     })
 
-    return { user, accessToken, refreshToken, device: { id: deviceId } }
+    const accessToken = await this.deps.tokens.sign({
+      sub: currentUser.id,
+      dev: deviceId,
+      ses: session.id,
+      tv: currentUser.tokenVersion,
+    })
+
+    return { user: currentUser, accessToken, refreshToken, device: { id: deviceId } }
   }
 
   /** چرخش توکن نوسازی + تشخیص استفاده‌ی مجدد */
@@ -92,7 +109,7 @@ export class SessionService {
 
     if (current) {
       this.assertUsable(current)
-      const user = await this.mustGetUser(current.userId)
+      const user = await this.mustGetUser(current.userId, current.deviceId)
 
       const refreshToken = randomToken(48)
       // رارد L1 — UPDATE با شرطِ refreshHash + returning: چرخشِ موازیِ تب دوم
@@ -106,7 +123,8 @@ export class SessionService {
           lastUsedAt: new Date(),
           ip: ip ?? current.ip,
         })
-        .where(and(eq(sessions.id, current.id), eq(sessions.refreshHash, hash)))
+        .where(and(eq(sessions.id, current.id), eq(sessions.refreshHash, hash),
+          isNull(sessions.revokedAt), gt(sessions.expiresAt, new Date())))
         .returning({ id: sessions.id })
 
       if (rotated.length === 0) {
@@ -116,6 +134,8 @@ export class SessionService {
         const fresh = await db.query.sessions.findFirst({
           where: eq(sessions.id, current.id),
         })
+        if (!fresh) throw Err.unauthorized()
+        this.assertUsable(fresh)
         const recentRace =
           fresh?.previousRefreshHash === hash &&
           fresh?.rotatedAt !== null &&
@@ -144,6 +164,7 @@ export class SessionService {
       where: eq(sessions.previousRefreshHash, hash),
     })
     if (stale) {
+      this.assertUsable(stale)
       // stage-60 — باگ تولیدی «کیک‌اوتِ <۲۴ ساعته»: کانتکست دومِ هم‌کوکی
       // (PWA + تب) با توکنِ تازه‌چرخیده‌شده می‌رسد؛ اگر چرخش «همین حالا»
       // بوده → همان 401 نرمِ مسیرِ رقابت (کلاینت دوباره refresh می‌زند و
@@ -176,13 +197,16 @@ export class SessionService {
       .select({ user: users, session: sessions })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
+      .innerJoin(devices, and(eq(devices.id, sessions.deviceId), eq(devices.isBlocked, false)))
+      .innerJoin(deviceIdentities, and(eq(deviceIdentities.deviceId, devices.id),
+        eq(deviceIdentities.phone, users.phone)))
       .where(eq(sessions.id, asSessionId(claims.ses)))
       .limit(1)
     const found = rows[0]
     if (!found) throw Err.unauthorized()
     const { user, session } = found
     // توکن امضاشده است؛ این گارد فقط برای عمق دفاعی (عدم تطابق sub/ses):
-    if (user.id !== claims.sub) throw Err.unauthorized()
+    if (user.id !== claims.sub || session.deviceId !== claims.dev) throw Err.unauthorized()
     if (user.bannedAt) throw Err.banned()
     if (user.tokenVersion !== claims.tv) {
       throw Err.unauthorized('همه‌ی نشست‌های شما باطل شده‌اند؛ دوباره وارد شوید.')
@@ -226,14 +250,15 @@ export class SessionService {
 
   async revokeAllSessions(userId: string): Promise<void> {
     const { db } = this.deps
-    await db
-      .update(sessions)
-      .set({ revokedAt: new Date(), revokedReason: 'logout-all' })
-      .where(and(eq(sessions.userId, asUserId(userId)), isNull(sessions.revokedAt)))
-    await db
-      .update(users)
-      .set({ tokenVersion: sql`${users.tokenVersion} + 1` })
-      .where(eq(users.id, userId))
+    await db.transaction(async (tx) => {
+      // Lock the user before sessions, matching createSession's ordering.
+      await tx.update(users)
+        .set({ tokenVersion: sql`${users.tokenVersion} + 1` })
+        .where(eq(users.id, userId))
+      await tx.update(sessions)
+        .set({ revokedAt: new Date(), revokedReason: 'logout-all' })
+        .where(and(eq(sessions.userId, asUserId(userId)), isNull(sessions.revokedAt)))
+    })
   }
 
   // ── داخلی ──
@@ -245,8 +270,12 @@ export class SessionService {
     }
   }
 
-  private async mustGetUser(userId: string): Promise<UserRow> {
-    const user = await this.deps.db.query.users.findFirst({ where: eq(users.id, userId) })
+  private async mustGetUser(userId: string, deviceId: string): Promise<UserRow> {
+    const [row] = await this.deps.db.select({ user: users }).from(users)
+      .innerJoin(deviceIdentities, eq(deviceIdentities.phone, users.phone))
+      .innerJoin(devices, eq(devices.id, deviceIdentities.deviceId))
+      .where(and(eq(users.id, userId), eq(devices.id, asDeviceId(deviceId)), eq(devices.isBlocked, false)))
+    const user = row?.user
     if (!user) throw Err.unauthorized()
     if (user.bannedAt) throw Err.banned()
     return user

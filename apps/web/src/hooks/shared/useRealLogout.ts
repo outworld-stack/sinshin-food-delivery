@@ -4,6 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { logout as apiLogout } from '#/server/auth'
 import { useToastStore } from '#/stores/toastStore'
+import { disablePush, resumePushSynchronization } from '#/lib/push-subscription'
 
 /**
  * phase-3 — لاگ‌اوت «واقعی» (مرگ لاگ‌اوت دکوری):
@@ -21,7 +22,13 @@ export function useRealLogout(redirectTo: '/' | '/login' = '/') {
   return useCallback(async () => {
     // apiLogout هرگز throw نمی‌کند — حتی اگر سرور پایین بود،
     // مسیر catch داخلی‌اش onUnauthorized را صدا می‌زند (توکن + استور پاک)
-    await apiLogout()
+    // Invalidate pending push registration before the current identity is lost.
+    await disablePush()
+    try {
+      await apiLogout()
+    } finally {
+      resumePushSynchronization()
+    }
     // داده‌ی شخصی از کش نماند — کاربر بعدیِ همین تب چیزی نمی‌بیند
     queryClient.clear()
     showToast('با موفقیت خارج شدید')

@@ -35,8 +35,9 @@
  */
 import { SQL } from 'bun'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 
 // ── ابزار ─────────────────────────────────────────────────────────
 
@@ -64,10 +65,10 @@ const DISK_JOURNAL = JSON.parse(readFileSync(join(DRIZZLE_DIR, 'meta', '_journal
   entries: Array<{ tag: string }>
 }
 const CHAIN_COUNT = DISK_JOURNAL.entries.length
-/** stage-81 — آیا زنجیره‌ی روی دیسک ورودیِ ۰۰۰۸ را دارد؟ (کارفرما فایل‌های
- *  drizzle این‌جا کپی نمی‌شود و خودش db:generate می‌زند؛ این پرچم فقط پیامِ
- *  خطای بندِ A2 را از «count=0» مبهم به راهنمای دقیق تبدیل می‌کند) */
+/** stage-81 — آیا زنجیره‌ی روی دیسک ورودیِ ۰۰۰۸ را دارد؟ (کارفرما فایل‌های drizzle این‌جا کپی نمی‌کند و خودش db:generate می‌زند؛ این پرچم فقط پیامِ خطای بندِ A2 را راهنمایی می‌کند) */
 const CHAIN_HAS_0008 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0008'))
+/** stage-82 — همان الگو برای ۰۰۰۹ (blocks + مجوزهای مقالات ادمین۲) */
+const CHAIN_HAS_0009 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0009'))
 
 const scratches: string[] = []
 let pass = 0
@@ -116,9 +117,10 @@ async function withScratch(name: string, fn: (url: string) => Promise<void>): Pr
 async function runRealMigrate(
   url: string,
   env: Record<string, string> = {},
+  cwd = join(import.meta.dir, '..'),
 ): Promise<{ code: number; out: string }> {
-  const proc = Bun.spawn(['bun', 'src/infra/db/migrate.ts'], {
-    cwd: import.meta.dir + '/..',
+  const proc = Bun.spawn(['bun', join(import.meta.dir, '..', 'src', 'infra', 'db', 'migrate.ts')], {
+    cwd,
     env: { ...process.env, DATABASE_URL: url, ...env },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -213,16 +215,35 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     drop index if exists "devices_webgl_hash_idx";
     drop index if exists "devices_audio_hash_idx";
     drop index if exists "devices_fonts_hash_idx";
+    -- stage-82 — اشیاءِ ۰۰۰۹: ستونِ blocks مقاله + مجوزهای articlesRead/Write
+    -- ادمین۲ (درسِ استیج-۸۱: هر شیءِ تازه باید همین‌جا برگردد)
+    alter table "articles" drop column if exists "blocks";
+    alter table "admin2_profiles"
+      drop column if exists "articles_read",
+      drop column if exists "articles_write";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
       drop column if exists "device_model",
       drop column if exists "registered_owner_phone",
       drop column if exists "prev_canvas_hash";
+    alter table "devices" alter column "device_memory" type integer using "device_memory"::integer;
+    -- Restore 0011 objects before replaying the legacy chain.
+    alter table "checkout_idempotency"
+      drop column if exists "request_hash",
+      drop column if exists "claim_token";
+    alter table "orders" drop constraint if exists "orders_coupon_id_coupons_id_fk";
+    alter table "coupon_nudges" alter column "remaining_count" type integer using "remaining_count"::integer;
+    -- Restore 0012 ledger indexes before replaying the legacy chain.
+    drop index if exists "wallet_tx_referral_credit_once_key";
+    drop index if exists "wallet_tx_refund_once_key";
+    create unique index "wallet_tx_refund_once_key" on "wallet_transactions" ("order_id")
+      where type = 'DEPOSIT' and order_id is not null;
     delete from "drizzle"."__drizzle_migrations" where created_at >= 1792104230349;
   `)
   await q(url, DUP_SQL)
   await q(url, LEGACY_SQL)
+  await q(url, `update "devices" set "device_memory" = 8 where "fingerprint_hash" = 'f-ip'`)
 }
 
 /** مقادیر (device_type, device_brand) یک ردیف */
@@ -286,6 +307,14 @@ await withScratch('a', async (url) => {
   ok('A2: ایندکس یکتای ۰۰۰۵ ساخته شد', uidx === 1)
   const journalRows = await scalar(url, `select count(*)::int as n from "drizzle"."__drizzle_migrations"`)
   ok(`A2: زنجیره‌ی journal (${CHAIN_COUNT} ورودی) اعمال شد`, journalRows === CHAIN_COUNT)
+  const memoryType = await scalar(url, `select data_type from information_schema.columns
+    where table_schema = 'public' and table_name = 'devices' and column_name = 'device_memory'`)
+  ok('A2: device memory upgrades from integer to double precision', memoryType === 'double precision')
+  const legacyMemory = await scalar(url, `select device_memory from devices where fingerprint_hash = 'f-ip'`)
+  ok('A2: the memory upgrade preserves existing whole GB values', legacyMemory === 8)
+  await q(url, `update devices set device_memory = 0.25 where fingerprint_hash = 'f-sam'`)
+  const fractionalMemory = await scalar(url, `select device_memory from devices where fingerprint_hash = 'f-sam'`)
+  ok('A2: the upgraded device column accepts fractional GB values', fractionalMemory === 0.25)
   const runsTable = await scalar(url, `select to_regclass('public.backfill_runs') is not null as v`)
   ok('A2: جدول backfill_runs (DDL خالص ۰۰۰۶) ساخته شد', String(runsTable) === 'true')
   const permitsTable = await scalar(url, `select to_regclass('public.registration_permits') is not null as v`)
@@ -300,6 +329,30 @@ await withScratch('a', async (url) => {
     hashIdx === 0 && !CHAIN_HAS_0008
       ? 'زنجیره‌ی روی دیسک هنوز ۰۰۰۸ ندارد — اول: bun run db:generate'
       : `count=${hashIdx}`,
+  )
+
+  // A2 — stage-82: اشیاءِ ۰۰۰۹ (ستونِ بلوکیِ مقالات + مجوزهای ادمین۲)
+  const blocksCol = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.columns where table_name='articles' and column_name='blocks'`,
+  )
+  ok(
+    'A2: ستون blocks مقالات (۰۰۰۹ stage-82) ساخته شد',
+    blocksCol === 1,
+    blocksCol === 0 && !CHAIN_HAS_0009
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۰۹ ندارد — اول: bun run db:generate'
+      : `count=${blocksCol}`,
+  )
+  const articlePerms = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.columns where table_name='admin2_profiles' and column_name in ('articles_read','articles_write')`,
+  )
+  ok(
+    'A2: مجوزهای articlesRead/Write ادمین۲ (۰۰۰۹ stage-82) ساخته شدند',
+    articlePerms === 2,
+    (articlePerms === null || Number(articlePerms) < 2) && !CHAIN_HAS_0009
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۰۹ ندارد — اول: bun run db:generate'
+      : `count=${articlePerms}`,
   )
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)
@@ -342,6 +395,8 @@ await withScratch('a', async (url) => {
   ok('A6: اجرای دوباره = رد شدِ پاک‌سازی (مارکر)', /قبلاً اعمال شده/.test(res2.out))
   const after = await scalar(url, `select md5(jsonb_agg(to_jsonb(d) order by d.id)::text) as v from "devices" d`)
   ok('A6: ردیف‌های devices (شامل مسدودیِ جدید) بی‌تغییر ماندند', before === after)
+  const repeatedMemory = await scalar(url, `select device_memory from devices where fingerprint_hash = 'f-sam'`)
+  ok('A6: repeated migration preserves fractional device memory', repeatedMemory === 0.25)
   const newBlock = await scalar(url, `select "is_blocked" as v from "devices" where "id" = '20000000-0000-0000-0000-000000000021'`)
   ok('A6: مسدودیِ خودکارِ «بعد از اجرای اول» آزاد «نشد» (باگ اصلی بسته شد)', String(newBlock) === 'true')
 })
@@ -472,36 +527,27 @@ await withScratch('e3', async (url) => {
 
 // E4 — جدول backfill_runs نباشد (db:generate اجرا نشده)
 await withScratch('e4', async (url) => {
-  // زنجیره را موقتاً به حالتِ «قبل از ۰۰۰۶» برگردان (فایل‌ها + journal)
-  // stage-79 — زنجیره رشد کرده (۰۰۰۷)؛ برش دیگر «آخرین» نیست، معنایی است:
-  // همه‌ی ورودی‌های بعد از ۰۰۰۵ حذف می‌شوند تا backfill_runs در زنجیره نباشد.
+  // Run the pre-0006 chain from an isolated cwd. Rewriting the working tree's
+  // journal and removing migrations would race other tests and risk user edits.
   const journalPath = join(DRIZZLE_DIR, 'meta', '_journal.json')
-  const backupDir = `/tmp/sinshin-e4-chain-${process.pid}`
-  mkdirSync(backupDir, { recursive: true })
   const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
     entries: Array<{ tag: string; idx: number }>
   }
   const cutIdx = journal.entries.findIndex((e) => e.tag.startsWith('0006'))
   if (cutIdx < 1) throw new Error('ورودی ۰۰۰۶ در زنجیره پیدا نشد — E4 بی‌معنا')
-  const removed = journal.entries.slice(cutIdx)
-  const snapPathOf = (idx: number) =>
-    join(DRIZZLE_DIR, 'meta', `${String(idx).padStart(4, '0')}_snapshot.json`)
+  const workDir = mkdtempSync(join(tmpdir(), 'sinshin-e4-chain-'))
+  const partialChain = join(workDir, 'drizzle')
   try {
-    copyFileSync(journalPath, join(backupDir, '_journal.json'))
-    for (const e of removed) {
-      copyFileSync(join(DRIZZLE_DIR, `${e.tag}.sql`), join(backupDir, `${e.tag}.sql`))
-      copyFileSync(snapPathOf(e.idx), join(backupDir, `${String(e.idx).padStart(4, '0')}_snapshot.json`))
+    mkdirSync(join(partialChain, 'meta'), { recursive: true })
+    for (const e of journal.entries.slice(0, cutIdx)) {
+      copyFileSync(join(DRIZZLE_DIR, `${e.tag}.sql`), join(partialChain, `${e.tag}.sql`))
     }
     writeFileSync(
-      journalPath,
+      join(partialChain, 'meta', '_journal.json'),
       JSON.stringify({ ...journal, entries: journal.entries.slice(0, cutIdx) }, null, 2),
     )
-    for (const e of removed) {
-      rmSync(join(DRIZZLE_DIR, `${e.tag}.sql`))
-      rmSync(snapPathOf(e.idx))
-    }
 
-    const res = await runRealMigrate(url)
+    const res = await runRealMigrate(url, {}, workDir)
     ok('E4: db:migrate بدون ۰۰۰۶ (جدول backfill_runs نیست) بدون خطا', res.code === 0)
     ok(
       'E4: راهنمای db:generate لاگ شد',
@@ -511,13 +557,10 @@ await withScratch('e4', async (url) => {
     const runsTable = await scalar(url, `select to_regclass('public.backfill_runs') is not null as v`)
     ok('E4: جدول backfill_runs ساخته نشد (زنجیره‌ای نبود)', String(runsTable) === 'false')
   } finally {
-    // بازگرداندن زنجیره — قبل از هر چیز دیگری
-    copyFileSync(join(backupDir, '_journal.json'), journalPath)
-    for (const e of removed) {
-      copyFileSync(join(backupDir, `${e.tag}.sql`), join(DRIZZLE_DIR, `${e.tag}.sql`))
-      copyFileSync(join(backupDir, `${String(e.idx).padStart(4, '0')}_snapshot.json`), snapPathOf(e.idx))
+    if (dirname(resolve(workDir)) !== resolve(tmpdir()) || !basename(workDir).startsWith('sinshin-e4-chain-')) {
+      throw new Error('Refusing to remove a temporary migration folder outside the expected location')
     }
-    rmSync(backupDir, { recursive: true, force: true })
+    rmSync(workDir, { recursive: true, force: true })
   }
 })
 

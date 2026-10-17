@@ -56,6 +56,7 @@
  */
 
 import type { AppConfig } from '#/infra/config/env'
+import { decodePushKey, hasValidPushKeys, isAllowedPushEndpoint } from './subscription-validation'
 
 /** شکل JWK برای EC P-256 (بدون وابستگی به lib.dom) */
 interface EcJwk {
@@ -246,6 +247,10 @@ export async function encryptWebPushPayload(
   authSecret: Uint8Array<ArrayBuffer>,
   opts?: DeterministicPushInput,
 ): Promise<Uint8Array<ArrayBuffer>> {
+  const data = new TextEncoder().encode(payload)
+  // RFC 8291: a 4096-byte push body reserves 86 bytes for the header and 17
+  // for the record delimiter/authentication tag. This sender uses one record.
+  if (data.byteLength > 3993) throw new Error('payload-too-large')
   const salt: Uint8Array<ArrayBuffer> =
     opts?.salt ?? crypto.getRandomValues(new Uint8Array(16))
   const eph: CryptoKeyPair =
@@ -255,7 +260,6 @@ export async function encryptWebPushPayload(
     ]))
   const { cek, nonce, ephPub } = await deriveKeysRfc8291(uaPublic, authSecret, salt, eph)
 
-  const data = new TextEncoder().encode(payload)
   // رکورد تنها: data || 0x02 (padding delimiter آخر)
   const record = new Uint8Array(new ArrayBuffer(data.length + 1))
   record.set(data)
@@ -359,15 +363,19 @@ export async function sendWebPush(
   config: AppConfig,
   target: PushSubscriptionTarget,
   payload: PushPayload,
+  request: typeof Bun.fetch = Bun.fetch,
 ): Promise<PushOutcome> {
+  // Revalidate stored subscriptions too, including rows created before registration validation.
+  if (!isAllowedPushEndpoint(target.endpoint)) return { kind: 'fail', error: 'endpoint-invalid' }
+  if (!(await hasValidPushKeys(target.p256dh, target.auth))) return { kind: 'fail', error: 'keys-invalid' }
   const keys = await loadVapidKeys(config)
   if (!keys) return { kind: 'fail', error: 'vapid-keys-invalid' }
 
   try {
     const body = await encryptWebPushPayload(
       JSON.stringify(payload),
-      b64urlToBytes(target.p256dh),
-      b64urlToBytes(target.auth),
+      decodePushKey(target.p256dh),
+      decodePushKey(target.auth),
     )
     const authorization = await vapidAuthHeader(keys, target.endpoint, config.push.vapidSubject)
 
@@ -377,8 +385,10 @@ export async function sendWebPush(
       ? payload.tag.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 32)
       : null
 
-    const res = await Bun.fetch(target.endpoint, {
+    const res = await request(target.endpoint, {
       method: 'POST',
+      // Never follow a push provider redirect to an unvalidated host.
+      redirect: 'error',
       headers: {
         authorization,
         'content-type': 'application/octet-stream',
@@ -395,6 +405,8 @@ export async function sendWebPush(
       signal: AbortSignal.timeout(10_000),
     } as Parameters<typeof Bun.fetch>[1])
 
+    // Only response headers matter; cancel any body to release the connection promptly.
+    await res.body?.cancel().catch(() => {})
     if (res.status === 201 || res.status === 200) return { kind: 'ok' }
     // اشتراک مرده — RFC 8030: 404/410 یعنی دیگر تلاش نکن
     if (res.status === 404 || res.status === 410) return { kind: 'gone', status: res.status }

@@ -47,6 +47,23 @@ const MISSING_SIGNAL = 'sinshin-missing-v1'
  * داده شده (scripts/test-device-fingerprint.ts — بند T4).
  */
 const MISSING_HASH_HEX = 'f020fbda2d9a8b1bdf1f7016373e52ecb26742cddd3a32f7cd7ee8f1a66c9bb5'
+const SIGNAL_TIMEOUT_MS = 1_500
+let memoryClientId: string | null = null
+
+/** Optional browser probes must never hold the OTP submission open. */
+async function boundedHash(probe: Promise<string>): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      probe.catch(() => MISSING_HASH_HEX),
+      new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve(MISSING_HASH_HEX), SIGNAL_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
 
 /** خواندِ best-effort — خطای دسترسی = null، هرگز پرتاب (یافته‌ی ۵) */
 function safeGet(read: () => string | null): string | null {
@@ -89,11 +106,14 @@ function randomId(): string {
 export function getClientId(): string {
   // stage-73 — هر مخزن «جداگانه» best-effort: رد شدنِ یکی (SecurityError
   // مرورگرهای قفل‌شده) مسیر ورود را متوقف نمی‌کند
-  const id =
-    safeGet(() => localStorage.getItem(DID_KEY)) ??
-    readCookie(DID_KEY) ??
-    safeGet(() => sessionStorage.getItem(DID_KEY))
-  const finalId = !id || !/^[0-9a-f-]{16,64}$/i.test(id) ? randomId() : id
+  const id = [
+    safeGet(() => localStorage.getItem(DID_KEY)),
+    readCookie(DID_KEY),
+    safeGet(() => sessionStorage.getItem(DID_KEY)),
+    memoryClientId,
+  ].find((value) => typeof value === 'string' && /^[0-9a-f-]{16,64}$/i.test(value))
+  const finalId = id ?? randomId()
+  memoryClientId = finalId
   // هر بار همه‌ی مخزن‌ها را تازه کن — یکی پاک شه، بقیه زنده‌اند
   try { localStorage.setItem(DID_KEY, finalId) } catch { /* حالت خصوصی */ }
   try { sessionStorage.setItem(DID_KEY, finalId) } catch { /* هیچ‌کاری نمی‌کند */ }
@@ -261,19 +281,23 @@ function safeStr(read: () => string, fallback: string): string {
   }
 }
 
+function safeValue<T>(read: () => T, fallback: T): T {
+  try { return read() } catch { return fallback }
+}
+
 /** جمع‌آوری کامل — قبل از فراخوانیِ تایید
  * stage-73: این تابع دیگر «هرگز» پرتاب نمی‌کند — هر سیگنالِ شکست‌خورده
  * به missing/مقدار پیش‌فرض تنزل می‌کند تا مسیر تأیید OTP سالم بماند. */
 export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
   const [canvasHash, webglHash, audioHash, fontsHash, highEntropy] = await Promise.all([
-    sha256Hex(canvasSignal()),
-    sha256Hex(webglSignal()),
-    audioSignal().then(sha256Hex),
-    sha256Hex(fontSignal()),
+    boundedHash(sha256Hex(canvasSignal())),
+    boundedHash(sha256Hex(webglSignal())),
+    boundedHash(audioSignal().then(sha256Hex)),
+    boundedHash(sha256Hex(fontSignal())),
     readHighEntropy(),
   ])
 
-  const nav = navigator as Navigator & {
+  const nav = safeValue(() => navigator, {} as Navigator) as Navigator & {
     userAgentData?: { platform?: string }
     deviceMemory?: number
     connection?: { effectiveType?: string }
@@ -281,11 +305,13 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
   const platform = safeStr(() => nav.userAgentData?.platform ?? nav.platform ?? '', 'unknown')
   // رارد ۳۱ — «Windows · 1920x1080 · Chrome 141» به‌جای «Windows · 1920x1080»؛
   // ادمین در فهرست دستگاه‌های کاربر می‌بیند کاربر با چه مرورگری آمده
-  const browser = browserLabel(navigator.userAgent)
+  const userAgent = safeStr(() => nav.userAgent, '')
+  const maxTouchPoints = safeValue(() => nav.maxTouchPoints, 0)
+  const browser = browserLabel(userAgent)
 
   // stage-70 — برند/مدل/نوع دستگاه (فقط نمایشی)
   // stage-72 (P2-۲۳) — maxTouchPoints برای آیپدِ دسکتاپ‌مود (UA مک)
-  const identity = detectDeviceIdentity(navigator.userAgent, highEntropy, navigator.maxTouchPoints)
+  const identity = detectDeviceIdentity(userAgent, highEntropy, maxTouchPoints)
 
   const screenDesc = safeStr(
     () => `${screen.width}x${screen.height}x${screen.colorDepth}@${devicePixelRatio}`,
@@ -295,7 +321,9 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
     () => Intl.DateTimeFormat().resolvedOptions().timeZone,
     'unknown',
   )
-  const language = safeStr(() => navigator.language, 'unknown')
+  const language = safeStr(() => nav.language, 'unknown')
+  const cores = safeValue(() => nav.hardwareConcurrency, 0)
+  const memory = safeValue(() => nav.deviceMemory, undefined)
 
   return {
     clientId: getClientId(),
@@ -304,18 +332,18 @@ export async function collectDeviceSignals(): Promise<DeviceSignalsPayload> {
     audioHash,
     fontsHash,
     screen: screenDesc,
-    platform,
-    timezone,
-    language,
-    hardwareConcurrency: nav.hardwareConcurrency ?? null,
-    deviceMemory: nav.deviceMemory ?? null,
-    touch: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
-    networkType: nav.connection?.effectiveType ?? null,
-    label: browser
+    platform: platform.slice(0, 60),
+    timezone: timezone.slice(0, 60),
+    language: language.slice(0, 20),
+    hardwareConcurrency: Number.isInteger(cores) && cores >= 1 && cores <= 256 ? cores : null,
+    deviceMemory: typeof memory === 'number' && Number.isFinite(memory) && memory >= 0 && memory <= 64 ? memory : null,
+    touch: safeValue(() => 'ontouchstart' in window, false) || maxTouchPoints > 0,
+    networkType: safeValue(() => nav.connection?.effectiveType?.slice(0, 20) ?? null, null),
+    label: (browser
       ? `${platform} · ${safeStr(() => `${screen.width}x${screen.height}`, '?')} · ${browser}`
-      : `${platform} · ${safeStr(() => `${screen.width}x${screen.height}`, '?')}`,
+      : `${platform} · ${safeStr(() => `${screen.width}x${screen.height}`, '?')}`).slice(0, 100),
     deviceType: identity.type,
-    deviceBrand: identity.brand,
-    deviceModel: identity.model,
+    deviceBrand: identity.brand?.slice(0, 30) ?? null,
+    deviceModel: identity.model?.slice(0, 80) ?? null,
   }
 }

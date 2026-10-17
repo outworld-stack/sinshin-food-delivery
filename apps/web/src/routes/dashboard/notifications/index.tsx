@@ -79,7 +79,8 @@ export const Route = createFileRoute('/dashboard/notifications/')({
         // پری‌فچ — هاور روی «صندوق اعلان‌ها» در سایدبار ⇒ لیست در کش؛ ناوبری
         // بدون اسکلتون. گارد والد (لاگین/نشست واقعی) قبل از این loader اجرا شده.
         loader: async ({ context }) => {
-                await context.queryClient.query(myNotificationsOptions)
+                const user = await context.queryClient.query(userProfileLightClientOptions)
+                if (user?.id) await context.queryClient.query(myNotificationsOptions(user.id))
         },
 
         errorComponent: RouteError,

@@ -79,12 +79,13 @@
 // src/domain/notification/notification.service.ts
 import { and, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
-import { notificationLog, notifications, orderItems, orders, pushSubscriptions, users } from '#/infra/db/schema'
+import type { Db, Tx } from '#/infra/db/client'
+import { admin2Profiles, notificationLog, notifications, orderItems, orders, pushSubscriptions, users } from '#/infra/db/schema'
 import type { NotificationType } from '#/infra/db/schema/notifications'
 import type { AppConfig } from '#/infra/config/env'
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import { sendWebPush, type PushPayload } from '#/infra/push/web-push'
+import { hasValidPushKeys, isAllowedPushEndpoint } from '#/infra/push/subscription-validation'
 import { likePattern } from '#/domain/shared/pg'
 
 /**
@@ -247,6 +248,7 @@ export class NotificationService {
       db: Db
       config: AppConfig
       hub: SseHub
+      sendPush?: typeof sendWebPush
     },
   ) {}
 
@@ -258,7 +260,7 @@ export class NotificationService {
    * stage-64 — «pushed» → «pushAccepted»: پذیرشِ سرور پوش (201/200)،
    * نه ضمانتِ نمایش روی دستگاه (مصرف‌کننده‌ها فقط id را می‌خوانند).
    */
-  async notifyUser(userId: string, input: NotifyInput): Promise<{
+  async notifyUser(userId: string, input: NotifyInput, options?: { notificationId: string }): Promise<{
     id: string | null
     pushAccepted: number
     pushGone: number
@@ -268,6 +270,7 @@ export class NotificationService {
       const [row] = await this.deps.db
         .insert(notifications)
         .values({
+          ...(options ? { id: options.notificationId } : {}),
           userId,
           type: input.type,
           title: input.title.slice(0, 120),
@@ -275,8 +278,22 @@ export class NotificationService {
           url: input.url?.slice(0, 300) ?? null,
           data: input.data ?? {},
         })
+        .onConflictDoNothing({ target: notifications.id })
         .returning({ id: notifications.id })
       id = row?.id ?? null
+      if (!id && options) {
+        // A concurrent/retried worker may already have stored this event. Only the
+        // winning insert dispatches it; the durable inbox is the delivery record.
+        const [existing] = await this.deps.db.select({ id: notifications.id })
+          .from(notifications)
+          .where(and(
+            eq(notifications.id, options.notificationId),
+            eq(notifications.userId, userId),
+            eq(notifications.type, input.type),
+          ))
+        return { id: existing?.id ?? null, pushAccepted: 0, pushGone: 0 }
+      }
+      if (!id) return { id: null, pushAccepted: 0, pushGone: 0 }
     } catch (err) {
       console.error(`[notify] insert برای ${userId} ناموفق:`, err)
       return { id: null, pushAccepted: 0, pushGone: 0 }
@@ -312,26 +329,15 @@ export class NotificationService {
    */
   async broadcast(input: NotifyInput, sender?: NotifySender): Promise<{ targeted: number }> {
     let ids: string[] = []
-    // stage-67 — cutoff برشِ مخاطب صندوق (کامنت پایین‌تر — داخل try پر می‌شود)
-    let audienceCutoff: Date | null = null
     try {
       // فقط کاربر عادی — ادمین‌ها از پنل خودشان همه‌چیز را می‌بینند
-      // stage-67 — createdAt هم انتخاب می‌شود (برشِ cutoff مخاطب پوش)
       const rows = await this.deps.db
-        .select({ id: users.id, createdAt: users.createdAt })
+        .select({ id: users.id })
         .from(users)
         .where(and(eq(users.role, 'user'), isNull(users.bannedAt)))
-        .orderBy(desc(users.createdAt))
+        .orderBy(desc(users.createdAt), desc(users.id))
         .limit(BROADCAST_MAX_AUDIENCE)
       ids = rows.map((r) => r.id)
-      // stage-67 — cutoff مخاطب صندوق: createdAt آخرین ردیفِ سقف‌خورده
-      // (جدیدترین‌ها به‌ترتیب desc(users.createdAt)). فقط وقتی به سقف رسیده‌ایم
-      // معنا دارد؛ به پوش پاس می‌شود تا «مخاطبِ پوش» دقیقاً زیرمجموعه‌ی همین
-      // ۵۰k بماند — قبلاً پوش بی‌order بود و کاربران بیرون از برشِ صندوق هم
-      // پوش می‌گرفتند بدون ردیف صندوق (ناهماهنگی زیرمجموعه‌ی ۵۰k).
-      if (rows.length >= BROADCAST_MAX_AUDIENCE) {
-        audienceCutoff = rows[rows.length - 1]?.createdAt ?? null
-      }
     } catch (err) {
       console.error('[notify] broadcast: خواندن کاربران ناموفق:', err)
       return { targeted: 0 }
@@ -342,12 +348,9 @@ export class NotificationService {
       return { targeted: 0 }
     }
 
-    // stage-67 — cutoff مخاطب صندوق (محاسبه در try بالا) — برش ۵۰k مشترک
-    // بین صندوق و پوش
-    const cutoff = audienceCutoff
-
     // درج chunked — بدون تراکنش غول‌پیکر
     let inserted = 0
+    const recipientIds: string[] = []
     for (let i = 0; i < ids.length; i += INSERT_CHUNK) {
       const chunk = ids.slice(i, i + INSERT_CHUNK)
       try {
@@ -362,6 +365,7 @@ export class NotificationService {
           })),
         )
         inserted += chunk.length
+        recipientIds.push(...chunk)
       } catch (err) {
         console.error('[notify] broadcast: درج chunk ناموفق:', err)
       }
@@ -373,8 +377,8 @@ export class NotificationService {
 
     // stage-64 — پوش به مشترکانِ همان مخاطبانِ صندوق — فایر-اند-فورگت
     // (خطاها داخل pushToSubscribedUsers لاگ می‌شوند؛ پاسخ مسیر نمی‌ماند)
-    // stage-67 — cutoff برشِ مخاطب پاس می‌شود (کامنت بالا)
-    void this.pushToSubscribedUsers(input, logId, cutoff).catch(() => {})
+    // Exact successful inbox recipients: no timestamp ties, later signups, or failed chunks.
+    void this.pushToSubscribedUsers(input, recipientIds, logId).catch(() => {})
 
     // stage-77 (N2) — زنده‌سازی صندوقِ «باز»: پخش قبلاً هیچ SSE نداشت —
     // کاربرِ روی صفحه‌ی اعلان‌ها (یا داشبورد با بج) تا focus/navigation
@@ -430,9 +434,18 @@ export class NotificationService {
         })
         .from(pushSubscriptions)
         .innerJoin(users, eq(users.id, pushSubscriptions.userId))
+        .leftJoin(admin2Profiles, eq(admin2Profiles.userId, users.id))
         .where(
           and(
-            inArray(users.role, ['admin', 'admin2']),
+            or(
+              eq(users.role, 'admin'),
+              and(
+                eq(users.role, 'admin2'), eq(admin2Profiles.isActive, true),
+                summary
+                  ? eq(summary.deliveryType === 'DINE_IN' ? admin2Profiles.scopeHall : admin2Profiles.scopeTakeaway, true)
+                  : sql`false`,
+              ),
+            ),
             isNull(users.bannedAt),
             isNull(pushSubscriptions.disabledAt),
           ),
@@ -467,7 +480,7 @@ export class NotificationService {
         const results = await Promise.all(
           batch.map(async (sub) => ({
             sub,
-            outcome: await sendWebPush(this.deps.config, sub, pushPayload),
+            outcome: await (this.deps.sendPush ?? sendWebPush)(this.deps.config, sub, pushPayload),
           })),
         )
         outcomes.push(...results)
@@ -576,7 +589,10 @@ export class NotificationService {
     const rows = await this.deps.db
       .update(notifications)
       .set({ readAt: new Date() })
-      .where(and(eq(notifications.id, id), eq(notifications.userId, userId), isNull(notifications.readAt)))
+      .where(and(
+        eq(notifications.id, id), eq(notifications.userId, userId),
+        isNull(notifications.readAt), gte(notifications.createdAt, this.inboxCutoff()),
+      ))
       .returning({ id: notifications.id })
     return rows.length > 0
   }
@@ -619,43 +635,46 @@ export class NotificationService {
     userId: string,
     sub: { endpoint: string; p256dh: string; auth: string; userAgent?: string },
   ): Promise<{ ok: boolean; reason?: string }> {
-    if (!sub.endpoint.startsWith('https://') || sub.endpoint.length > 2048) {
+    if (!isAllowedPushEndpoint(sub.endpoint)) {
       return { ok: false, reason: 'endpoint-invalid' }
     }
-    if (sub.p256dh.length < 40 || sub.auth.length < 8) {
+    if (!(await hasValidPushKeys(sub.p256dh, sub.auth))) {
       return { ok: false, reason: 'keys-invalid' }
     }
+    // Host casing and an explicit :443 must not create a second ownership claim
+    // for the same provider endpoint.
+    const endpoint = new URL(sub.endpoint).href
     try {
-      // stage-67 — اتمیک:Returning خالی یعنی conflictِ مالِ دیگری بود
-      // (شرطِ setWhere رد شد). مسیر خوش‌بینانه (ردیف تازه یا مال خودم)
-      // دقیقاً یک ردیف برمی‌گرداند.
-      const rows = await this.deps.db
-        .insert(pushSubscriptions)
-        .values({
-          userId,
-          endpoint: sub.endpoint,
-          p256dh: sub.p256dh.slice(0, 255),
-          auth: sub.auth.slice(0, 255),
-          userAgent: sub.userAgent?.slice(0, 300) ?? null,
-        })
-        .onConflictDoUpdate({
-          target: pushSubscriptions.endpoint,
-          set: {
-            userId,
-            p256dh: sub.p256dh.slice(0, 255),
-            auth: sub.auth.slice(0, 255),
-            userAgent: sub.userAgent?.slice(0, 300) ?? null,
-            lastSeenAt: new Date(),
-            failures: 0,
-            // بازگشت کاربر (مثلاً پس از پاک‌شدن دستی) — دوباره فعال
-            disabledAt: null,
-          },
-          // stage-67 — قلبِ گارد اتمیک: آپدیتِ تسخیری فقط وقتی مجاز که
-          // ردیفِ موجود از قبل مالِ «همین درخواست‌دهنده» باشد
-          setWhere: eq(pushSubscriptions.userId, userId),
-        })
-        .returning({ userId: pushSubscriptions.userId })
-      if (rows.length === 0) return { ok: false, reason: 'owned-by-other' }
+      const registered = await this.deps.db.transaction(async (tx) => {
+        // Older rows kept host casing/:443. Serialize alias repair and removal
+        // by the canonical endpoint; endpoint's raw unique index alone cannot.
+        await this.lockSubscriptionEndpoint(tx, endpoint)
+        const aliases = await this.subscriptionAliases(tx, endpoint)
+        if (aliases.some((row) => row.userId !== userId)) return false
+        const retained = aliases.find((row) => row.endpoint === endpoint) ?? aliases[0]
+        if (retained) {
+          const redundant = aliases.filter((row) => row.id !== retained.id).map((row) => row.id)
+          if (redundant.length > 0) {
+            await tx.delete(pushSubscriptions)
+              .where(and(inArray(pushSubscriptions.id, redundant), eq(pushSubscriptions.userId, userId)))
+          }
+          await tx.update(pushSubscriptions).set({ endpoint })
+            .where(and(eq(pushSubscriptions.id, retained.id), eq(pushSubscriptions.userId, userId)))
+        }
+        const rows = await tx.insert(pushSubscriptions)
+          .values({ userId, endpoint, p256dh: sub.p256dh, auth: sub.auth, userAgent: sub.userAgent?.slice(0, 300) ?? null })
+          .onConflictDoUpdate({
+            target: pushSubscriptions.endpoint,
+            set: {
+              p256dh: sub.p256dh, auth: sub.auth, userAgent: sub.userAgent?.slice(0, 300) ?? null,
+              lastSeenAt: new Date(), failures: 0, disabledAt: null,
+            },
+            setWhere: eq(pushSubscriptions.userId, userId),
+          })
+          .returning({ userId: pushSubscriptions.userId })
+        return rows.length > 0
+      })
+      if (!registered) return { ok: false, reason: 'owned-by-other' }
       await this.capUserSubscriptions(userId)
       return { ok: true }
     } catch (err) {
@@ -666,11 +685,38 @@ export class NotificationService {
 
   /** حذف اشتراک (unsubscribe از مرورگر یا دکمه‌ی خاموش) */
   async removeSubscription(userId: string, endpoint: string): Promise<boolean> {
-    const rows = await this.deps.db
-      .delete(pushSubscriptions)
-      .where(and(eq(pushSubscriptions.endpoint, endpoint), eq(pushSubscriptions.userId, userId)))
-      .returning({ id: pushSubscriptions.id })
-    return rows.length > 0
+    let canonical = endpoint
+    try { canonical = new URL(endpoint).href } catch { /* Allow cleanup of an invalid legacy row. */ }
+    return this.deps.db.transaction(async (tx) => {
+      await this.lockSubscriptionEndpoint(tx, canonical)
+      const owned = (await this.subscriptionAliases(tx, canonical, endpoint))
+        .filter((row) => row.userId === userId).map((row) => row.id)
+      if (owned.length === 0) return false
+      const rows = await tx.delete(pushSubscriptions)
+        .where(and(inArray(pushSubscriptions.id, owned), eq(pushSubscriptions.userId, userId)))
+        .returning({ id: pushSubscriptions.id })
+      return rows.length > 0
+    })
+  }
+
+  private async lockSubscriptionEndpoint(tx: Tx, endpoint: string): Promise<void> {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`push-endpoint:${endpoint}`}, 0))`)
+  }
+
+  private async subscriptionAliases(tx: Tx, canonical: string, raw = canonical) {
+    const explicitPort = canonical.replace(/^(https:\/\/[^/]+)/, '$1:443')
+    const exactLike = (value: string) => value.replace(/[\\%_]/g, '\\$&')
+    const candidates = await tx.select({
+      id: pushSubscriptions.id, userId: pushSubscriptions.userId, endpoint: pushSubscriptions.endpoint,
+    }).from(pushSubscriptions).where(or(
+      eq(pushSubscriptions.endpoint, raw),
+      ilike(pushSubscriptions.endpoint, exactLike(canonical)),
+      ilike(pushSubscriptions.endpoint, exactLike(explicitPort)),
+    )).orderBy(pushSubscriptions.createdAt, pushSubscriptions.id)
+    return candidates.filter((row) => {
+      if (row.endpoint === raw) return true
+      try { return new URL(row.endpoint).href === canonical } catch { return false }
+    })
   }
 
   /** کلید عمومی VAPID برای pushManager.subscribe مرورگر */
@@ -825,7 +871,7 @@ export class NotificationService {
         const results = await Promise.all(
           batch.map(async (sub) => ({
             sub,
-            outcome: await sendWebPush(this.deps.config, sub, pushPayload),
+            outcome: await (this.deps.sendPush ?? sendWebPush)(this.deps.config, sub, pushPayload),
           })),
         )
         outcomes.push(...results)
@@ -878,40 +924,16 @@ export class NotificationService {
    * ادمین/کاربرِ بن‌شده — پوش می‌گرفتند در حالی که ردیف صندوق نداشتند؛
    * پیامِ نمایش‌داده‌شده بدون ردیف صندوق ناهماهنگی داده می‌ساخت).
    * tag یکتا = type-logId — اطلاعیه‌های متفاوت جای هم را نمی‌گیرند.
-   * stage-67 — هم‌راستاییِ کامل با برشِ صندوق: همان مرتب‌سازی
-   * desc(users.createdAt) + (در صورت سقفِ ۵۰k) فیلترِ cutoff که خودِ
-   * broadcast از آخرین ردیفِ مخاطب حساب کرد — قبلاً پوش بی‌order بود و
-   * زیرمجموعه‌ی کاربرانِ متفاوتی از صندوق می‌گرفت.
+   * Recipient IDs come from successful inbox inserts. Load them in chunks so
+   * all devices receive the message without exceeding SQL parameter limits.
    */
   private async pushToSubscribedUsers(
     input: NotifyInput,
+    recipientIds: string[],
     logId?: string | null,
-    audienceCutoff?: Date | null,
   ): Promise<void> {
     const startedAt = Date.now()
     try {
-      const subs = await this.deps.db
-        .select({
-          id: pushSubscriptions.id,
-          endpoint: pushSubscriptions.endpoint,
-          p256dh: pushSubscriptions.p256dh,
-          auth: pushSubscriptions.auth,
-        })
-        .from(pushSubscriptions)
-        .innerJoin(users, eq(users.id, pushSubscriptions.userId))
-        .where(
-          and(
-            isNull(pushSubscriptions.disabledAt),
-            eq(users.role, 'user'),
-            isNull(users.bannedAt),
-            // stage-67 — برشِ همان ۵۰k کاربرِ صندوق (فقط وقتی به سقف رسیدیم)
-            ...(audienceCutoff ? [gte(users.createdAt, audienceCutoff)] : []),
-          ),
-        )
-        // stage-67 — هم‌ترتیب با صندوق: desc(users.createdAt)
-        .orderBy(desc(users.createdAt))
-        .limit(BROADCAST_MAX_AUDIENCE)
-      if (subs.length === 0) return
       const pushPayload = {
         title: input.title.slice(0, 120),
         body: input.body.slice(0, 300),
@@ -919,37 +941,45 @@ export class NotificationService {
         tag: logId ? `${input.type}-${logId}` : input.type,
         data: input.data,
       }
-      const outcomes: PushOutcomeItem[] = []
-      const goneIds: string[] = []
-      for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
-        const batch = subs.slice(i, i + PUSH_CONCURRENCY)
-        const results = await Promise.all(
-          batch.map(async (sub) => ({
-            sub,
-            outcome: await sendWebPush(this.deps.config, sub, pushPayload),
-          })),
-        )
-        outcomes.push(...results)
-      }
+      let targeted = 0
       let accepted = 0
-      for (const { sub, outcome } of outcomes) {
-        if (outcome.kind === 'ok') accepted++
-        if (outcome.kind === 'gone') goneIds.push(sub.id)
+      let gone = 0
+      for (let start = 0; start < recipientIds.length; start += INSERT_CHUNK) {
+        const subs = await this.deps.db
+          .select({
+            id: pushSubscriptions.id,
+            endpoint: pushSubscriptions.endpoint,
+            p256dh: pushSubscriptions.p256dh,
+            auth: pushSubscriptions.auth,
+          })
+          .from(pushSubscriptions)
+          .innerJoin(users, eq(users.id, pushSubscriptions.userId))
+          .where(and(
+            inArray(pushSubscriptions.userId, recipientIds.slice(start, start + INSERT_CHUNK)),
+            isNull(pushSubscriptions.disabledAt), eq(users.role, 'user'), isNull(users.bannedAt),
+          ))
+        const outcomes: PushOutcomeItem[] = []
+        for (let i = 0; i < subs.length; i += PUSH_CONCURRENCY) {
+          outcomes.push(...await Promise.all(subs.slice(i, i + PUSH_CONCURRENCY).map(async (sub) => ({
+            sub, outcome: await (this.deps.sendPush ?? sendWebPush)(this.deps.config, sub, pushPayload),
+          }))))
+        }
+        const goneIds: string[] = []
+        for (const { sub, outcome } of outcomes) {
+          targeted++
+          if (outcome.kind === 'ok') accepted++
+          if (outcome.kind === 'gone') goneIds.push(sub.id)
+        }
+        gone += goneIds.length
+        await this.recordPushOutcomesBatch(outcomes)
+        await this.disableSubscriptionsBatch(goneIds)
+        const errors = summarizeOutcomeErrors(outcomes)
+        if (errors) console.warn(`[notify] broadcast push errors: ${errors}`)
       }
-      // stage-48 — همان آمار خطای پیاپی (تلاش مجدد دوره‌ای بعدی تصمیم می‌گیرد)
-      // stage-55 — آمار دسته‌ای + غیرفعال‌سازی مرده‌ها دسته‌ای (حداکثر ۳ کوئری)
-      await this.recordPushOutcomesBatch(outcomes)
-      await this.disableSubscriptionsBatch(goneIds)
-      // stage-64 — گزارش غنی: هدف/پذیرش/مرده/مدت + خطاها
-      const errors = summarizeOutcomeErrors(outcomes)
       console.log(
-        `[notify] broadcast push (${input.type}/${logId ?? 'no-id'}): هدف ${outcomes.length}، ` +
-          `پذیرش سرور پوش ${accepted}${goneIds.length > 0 ? `، مرده ${goneIds.length}` : ''}، ` +
-          `${Date.now() - startedAt}ms${errors ? `، خطاها: ${errors}` : ''}`,
+        `[notify] broadcast push (${input.type}/${logId ?? 'no-id'}): هدف ${targeted}، ` +
+          `پذیرش سرور پوش ${accepted}${gone > 0 ? `، مرده ${gone}` : ''}، ${Date.now() - startedAt}ms`,
       )
-      if (goneIds.length > 0) {
-        console.log(`[notify] broadcast: ${goneIds.length} اشتراک مرده غیرفعال شد`)
-      }
     } catch (err) {
       console.error('[notify] pushToSubscribedUsers ناموفق:', err)
     }
@@ -959,13 +989,9 @@ export class NotificationService {
    * stage-55 — آمار پوشِ دسته‌ای: قبلاً به‌ازای هر اشتراک یک UPDATE
    * مستقل (۲۰k اشتراک = ۲۰k کوئری)؛ حالا حداکثر ۳ کوئری.
    *  • ok ⇒ failures=0 + lastPushAt (سلامت اشتراک تأیید شد)
-   *  • fail قطعی (۴xx غیر از 429 — 400/401/403/413…) ⇒ failures+1؛ با
-   *    رسیدن به سقف، اشتراک غیرفعال می‌شود تا فان‌آوت‌های بعدی مسدود نمانند.
-   *  • stage-64 — fail «موقت» (شبکه/مهلت/429/5xx) دیگر شمرده نمی‌شود:
-   *    اختلالِ مسیر خروجی (ایران↔FCM) چند ساعت طول می‌کشید و ۵ پخشِ
-   *    ناموفق همه‌ی اشتراک‌ها را از کار می‌انداخت؛ بازیابی فقط با
-   *    باز شدن دوباره‌ی سایت (reconcile) بود. اشتراکِ واقعاً خراب بالاخره
-   *    404/410 (gone) یا 4xx قطعی می‌دهد و همان مسیرها او را می‌گیرند.
+   *  • Only locally invalid subscription endpoints/keys count toward failure
+   *    disabling. Provider 4xx errors can be server configuration/payload errors.
+   *  • Expired subscriptions (404/410) are disabled immediately by callers.
    */
   private async recordPushOutcomesBatch(outcomes: PushOutcomeItem[]): Promise<void> {
     if (outcomes.length === 0) return
@@ -1094,7 +1120,7 @@ export class NotificationService {
         const results = await Promise.all(
           batch.map(async (sub) => ({
             sub,
-            outcome: await sendWebPush(this.deps.config, sub, pushPayload),
+            outcome: await (this.deps.sendPush ?? sendWebPush)(this.deps.config, sub, pushPayload),
           })),
         )
         outcomes.push(...results)
@@ -1152,9 +1178,9 @@ export class NotificationService {
  * شمارنده‌ی failures را بالا نمی‌برند (توضیح کامل در recordPushOutcomesBatch).
  */
 function isPermanentPushFailure(outcome: { kind: 'fail'; status?: number; error?: string }): boolean {
-  if (outcome.status === undefined) return false // شبکه/مهلت — موقت
-  if (outcome.status === 429 || outcome.status >= 500) return false // شلوغی/سرور — موقت
-  return outcome.status >= 400 // ۴xx قطعی (به‌جز ۴۰۴/۴۱۰ که gone هستند)
+  // 400/401/403/413 can be caused by our payload or VAPID configuration;
+  // they do not prove the browser subscription is unusable. 404/410 are gone.
+  return outcome.error === 'endpoint-invalid' || outcome.error === 'keys-invalid'
 }
 
 /**

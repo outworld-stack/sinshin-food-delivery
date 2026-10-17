@@ -19,6 +19,14 @@ export const OrderStatusHeader = memo(function OrderStatusHeader({ order }: Orde
         </div>
         <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">{fmt.date(order.date)}</p>
 
+        {order.paymentStatus === 'REFUNDED' && (
+          <p className="text-sm text-green-600 dark:text-green-400 mt-3 font-DanaMedium">
+            {tpl(t['dash.orderDetail.refundedToWallet'], {
+              n: `${fmt.price(order.totalAmount)} ${t['common.toman']}`,
+            })}
+          </p>
+        )}
+
         {/* آیتم ۱۳: یادداشت مشتری */}
         {order.customerNote && (
           <div className="mt-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 max-w-md">

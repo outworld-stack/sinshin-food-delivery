@@ -1,6 +1,6 @@
 // src/stores/authStore.ts
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import type { Role } from '@sinshin/shared'
 
 // رارد ۴۷ — union نقش از قرارداد مشترک می‌آید (قبلاً کپی محلی بود)؛
@@ -10,6 +10,24 @@ export type UserRole = Role | null;
 
 /** نقش‌های مجاز انبار — هر چیز دیگر در زنده‌سازی بی‌اعتبار می‌شود */
 const KNOWN_ROLES: readonly Role[] = ['user', 'admin', 'admin2']
+
+// Storage is optional: privacy settings, quota errors and corrupt JSON must
+// not prevent login or leave route guards waiting for hydration forever.
+const authStorage = createJSONStorage<AuthState>(() => ({
+  getItem: (name: string) => {
+    try {
+      const value = localStorage.getItem(name)
+      if (value !== null) JSON.parse(value)
+      return value
+    } catch { return null }
+  },
+  setItem: (name: string, value: string) => {
+    try { localStorage.setItem(name, value) } catch { /* in-memory session */ }
+  },
+  removeItem: (name: string) => {
+    try { localStorage.removeItem(name) } catch { /* storage unavailable */ }
+  },
+}))
 
 interface AuthState {
   isAuthenticated: boolean
@@ -37,14 +55,22 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'sinshin-auth',
+      storage: authStorage,
       skipHydration: true,
       // رارد ۴۷ — پاکسازی هنگام خواندن از انبار: نقش ناشناخته → خروج
       merge: (persisted, current) => {
         const p = persisted as Partial<AuthState> | undefined
-        if (p?.role && !KNOWN_ROLES.includes(p.role)) {
-          return { ...current }
+        const authenticated = p?.isAuthenticated === true &&
+          typeof p.role === 'string' && KNOWN_ROLES.includes(p.role)
+        const role = authenticated ? p?.role ?? null : null
+        return {
+          ...current,
+          isAuthenticated: authenticated,
+          role,
+          isAdmin: role === 'admin' || role === 'admin2',
+          admin2Id: role === 'admin2' && typeof p?.admin2Id === 'string' ? p.admin2Id : null,
+          activeOrderId: authenticated && typeof p?.activeOrderId === 'string' ? p.activeOrderId : null,
         }
-        return { ...current, ...p }
       },
     }
   )

@@ -34,7 +34,7 @@ export const referralProfits = pgTable(
       .notNull()
       .$type<OrderId>()
       .references(() => orders.id, { onDelete: 'cascade' }),
-    /** مبنای محاسبه = amountPaidOnline - deliveryFee (>= 0) */
+    /** Online food only: amountPaidOnline - deliveryFee - packagingFee (>= 0). */
     baseAmount: integer('base_amount').notNull(),
     percent: integer('percent').notNull().default(10),
     amount: integer('amount').notNull(),
@@ -92,6 +92,9 @@ export const walletTransactions = pgTable(
     // دوبل‌برداخت را در سطح DB می‌بندد (onConflictDoNothing حالا واقعی کار می‌کند).
     uniqueIndex('wallet_tx_refund_once_key')
       .on(t.orderId)
-      .where(sql`type = 'DEPOSIT' and order_id is not null`),
+      .where(sql`type = 'DEPOSIT' and order_id is not null and referral_profit_id is null`),
+    uniqueIndex('wallet_tx_referral_credit_once_key')
+      .on(t.referralProfitId)
+      .where(sql`type = 'DEPOSIT' and referral_profit_id is not null`),
   ],
 )

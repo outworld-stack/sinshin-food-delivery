@@ -71,7 +71,8 @@ type BannerPhase = 'hidden' | 'prompt' | 'busy' | 'done' | 'denied' | 'failed'
 
 /** iOS مرورگرِ غیرنصب‌شده — پوش ممکن نیست؛ بنر بی‌معنا و گمراه‌کننده است */
 function isIosBrowserWithoutInstall(): boolean {
-        const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
+        const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
         const isStandalone =
                 window.matchMedia('(display-mode: standalone)').matches ||
                 (window.navigator as unknown as { standalone?: boolean }).standalone ===
@@ -249,6 +250,7 @@ export function PushAutoPrompt() {
                 setPhase('busy')
                 setFailureReason(null)
                 const state = await enablePush().catch(() => null)
+                if (suppressedRef.current) return
                 if (state === null) {
                         setPhase('failed')
                         return
@@ -279,7 +281,7 @@ export function PushAutoPrompt() {
                 setPhase('failed')
         }
 
-        if (phase === 'hidden') return null
+        if (phase === 'hidden' || suppressed) return null
 
         const busy = phase === 'busy'
 

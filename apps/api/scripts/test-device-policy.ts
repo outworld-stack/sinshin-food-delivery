@@ -23,6 +23,8 @@
  */
 import { SQL } from 'bun'
 import { sql } from 'drizzle-orm'
+import { devices as deviceTable, sessions, users } from '../src/infra/db/schema'
+import { sha256 } from '../src/domain/shared/crypto'
 
 interface UrlParts {
   admin: string
@@ -93,7 +95,7 @@ async function main(): Promise<void> {
     DEVICE_SIMILARITY_WINDOW_DAYS: '7',
     MAX_DEVICES_PER_USER: '5',
   })
-  const database = new Database(url.toString(), { max: 1 })
+  const database = new Database(url.toString(), { max: 4 })
   const devices = new DeviceService({ db: database.db, config })
 
   const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
@@ -395,6 +397,155 @@ async function main(): Promise<void> {
         metaF['autoBlock'] === 'no',
       JSON.stringify(metaF).slice(0, 160),
     )
+
+    // Regression: a duplicate fingerprint UPDATE must not poison the outer
+    // PostgreSQL transaction. The clientId row remains the resolved identity.
+    const collisionA = uniqueSignals('collision', 'collision-client-a')
+    const collisionB = uniqueSignals('collision', 'collision-client-b')
+    const phoneJ = '09150000010'
+    const phoneK = '09150000011'
+    const rowJ = await finalizeSignals(await devices.peek(collisionA, phoneJ), phoneJ, collisionA)
+    const rowK = await finalizeSignals(await devices.peek(collisionB, phoneK), phoneK, collisionB)
+    const collisionPeek = await devices.peek(collisionA, phoneK)
+    const collision = await database.db.transaction((tx) => devices.finalize(tx, {
+      signals: collisionA, phone: phoneK, peek: collisionPeek, event: 'LOGIN',
+    }))
+    ok('R1: fingerprint conflict recovers inside the transaction', collision.device.id === rowJ.device.id)
+    ok('R1: fingerprint conflict preserves both device keys',
+      collision.device.fingerprintHash === rowJ.device.fingerprintHash &&
+      collision.device.fingerprintHash !== rowK.device.fingerprintHash)
+    const retries = await database.db.query.deviceEvents.findMany({
+      where: sql`device_id = ${rowJ.device.id} and event = 'UNIQUE_RETRY'`,
+    })
+    ok('R1: savepoint recovery retains its audit events', retries.length === 2)
+
+    const quotaConfig = new AppConfig({
+      NODE_ENV: 'development', DATABASE_URL: url.toString(),
+      DEVICE_ENFORCEMENT: 'true', MAX_DEVICES_PER_USER: '1',
+    })
+    const quotaDevices = new DeviceService({ db: database.db, config: quotaConfig })
+    let knownQuotaError = ''
+    try { await quotaDevices.assertQuota(phoneK, 'user', rowJ.device.id) }
+    catch (error) { knownQuotaError = String(error) }
+    ok('R2: existing devices can log in after the quota is lowered', !knownQuotaError)
+    let newQuotaError = ''
+    try { await quotaDevices.assertQuota(phoneK, 'user') }
+    catch (error) { newQuotaError = (error as { code: string }).code }
+    ok('R2: lowered quota still rejects a new device', newQuotaError === 'DEVICE_LIMIT_REACHED')
+
+    // Both requests peek before either transaction inserts the shared client.
+    const concurrentSignals = uniqueSignals('race', 'race-client')
+    const racePhones = ['09150000012', '09150000013']
+    const racePeeks = await Promise.all(racePhones.map((phone) => devices.peek(concurrentSignals, phone)))
+    const raceResults = await Promise.allSettled(racePhones.map((phone, index) =>
+      finalizeSignals(racePeeks[index]!, phone, concurrentSignals),
+    ))
+    ok('R3: concurrent registrations claim a shared client exactly once',
+      raceResults.filter((r) => r.status === 'fulfilled').length === 1 &&
+      raceResults.some((r) => r.status === 'rejected' && r.reason?.code === 'DEVICE_PHONE_LIMIT'))
+    const raceRows = await database.db.query.devices.findMany({ where: sql`client_id = 'race-client'` })
+    ok('R3: concurrent registrations keep one device row', raceRows.length === 1)
+
+    // A stale fingerprint match must not defeat a clientId claimed afterwards.
+    const staleSignals = uniqueSignals('stale', 'stale-client')
+    const stalePhone = '09150000014'
+    const stalePeek = await devices.peek(staleSignals, stalePhone)
+    const [staleFingerprint] = await database.db.insert(deviceTable).values({
+      canvasHash: staleSignals.canvasHash, webglHash: staleSignals.webglHash,
+      audioHash: staleSignals.audioHash, fontsHash: staleSignals.fontsHash,
+      fingerprintHash: stalePeek.fingerprintHash,
+    }).returning()
+    const [staleClient] = await database.db.insert(deviceTable).values({
+      clientId: staleSignals.clientId,
+      canvasHash: staleSignals.canvasHash, webglHash: staleSignals.webglHash,
+      audioHash: staleSignals.audioHash, fontsHash: staleSignals.fontsHash,
+      fingerprintHash: 'stale-client-original', registeredOwnerPhone: '09150000015',
+    }).returning()
+    let staleCode = ''
+    try { await finalizeSignals(stalePeek, stalePhone, staleSignals) }
+    catch (error) { staleCode = (error as { code: string }).code }
+    ok('R4: stale peek resolves clientId before the conflicting fingerprint', staleCode === 'DEVICE_PHONE_LIMIT')
+    const untouchedStale = await database.db.query.deviceIdentities.findMany({
+      where: sql`device_id in (${staleClient!.id}, ${staleFingerprint!.id})`,
+    })
+    ok('R4: rejected stale registration attaches no identities', untouchedStale.length === 0)
+
+    const blockSignals = uniqueSignals('block', 'block-client')
+    const blockPhone = '09150000016'
+    const blockRow = await finalizeSignals(await devices.peek(blockSignals, blockPhone), blockPhone, blockSignals)
+    const unblockedPeek = await devices.peek(blockSignals, '09150000017')
+    await devices.setBlocked(blockRow.device.id, true, 'concurrent-admin-block', null)
+    let blockedCode = ''
+    try { await finalizeSignals(unblockedPeek, '09150000017', blockSignals) }
+    catch (error) { blockedCode = (error as { code: string }).code }
+    ok('R5: a block added after peek prevents registration', blockedCode === 'FORBIDDEN')
+    let blockedLoginCode = ''
+    try {
+      await database.db.transaction((tx) => devices.finalize(tx, {
+        signals: blockSignals, phone: blockPhone, peek: unblockedPeek, event: 'LOGIN',
+      }))
+    } catch (error) { blockedLoginCode = (error as { code: string }).code }
+    ok('R5: a block added after peek prevents login', blockedLoginCode === 'FORBIDDEN')
+
+    const [sessionUser] = await database.db.insert(users).values({ phone: phoneJ }).returning()
+    const [liveSession] = await database.db.insert(sessions).values({
+      userId: sessionUser!.id as typeof sessions.$inferInsert.userId,
+      deviceId: rowJ.device.id, refreshHash: 'device-revoke-session',
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning()
+    // Failure injection: an audit failure must roll back the identity deletion.
+    await database.db.execute(sql`alter table device_events add constraint test_identity_audit_failure
+      check (event <> 'IDENTITY_REMOVED') not valid`)
+    let revokeFailed = false
+    try { await devices.revokeIdentity(sessionUser!.id, phoneJ, rowJ.device.id) }
+    catch { revokeFailed = true }
+    await database.db.execute(sql`alter table device_events drop constraint test_identity_audit_failure`)
+    const retainedIdentity = await database.db.query.deviceIdentities.findFirst({
+      where: sql`device_id = ${rowJ.device.id} and phone = ${phoneJ}`,
+    })
+    const retainedSession = await database.db.query.sessions.findFirst({ where: sql`id = ${liveSession!.id}` })
+    ok('R6: identity removal rolls back completely when auditing fails',
+      revokeFailed && Boolean(retainedIdentity) && retainedSession?.revokedAt === null)
+    ok('R6: a subsequent removal succeeds', await devices.revokeIdentity(sessionUser!.id, phoneJ, rowJ.device.id))
+    const revokedSession = await database.db.query.sessions.findFirst({ where: sql`id = ${liveSession!.id}` })
+    ok('R6: identity removal revokes the matching live session', revokedSession?.revokedReason === 'device-revoked')
+
+    await database.db.execute(sql`alter table device_events add constraint test_block_audit_failure
+      check (event <> 'BLOCK') not valid`)
+    let blockFailed = false
+    try { await devices.setBlocked(rowJ.device.id, true, 'failed-block', null) }
+    catch { blockFailed = true }
+    await database.db.execute(sql`alter table device_events drop constraint test_block_audit_failure`)
+    const retainedDevice = await database.db.query.devices.findFirst({ where: sql`id = ${rowJ.device.id}` })
+    ok('R7: device blocking rolls back when its audit write fails', blockFailed && retainedDevice?.isBlocked === false)
+
+    const fractionalSignals = { ...uniqueSignals('fractional', 'fractional-client'), deviceMemory: 0.5 }
+    const fractionalPhone = '09150000018'
+    const fractional = await finalizeSignals(await devices.peek(fractionalSignals, fractionalPhone), fractionalPhone, fractionalSignals)
+    ok('R8: fractional navigator.deviceMemory is stored exactly', fractional.device.deviceMemory === 0.5)
+
+    const driftPhone = '09150000019'
+    const driftSignals = uniqueSignals('drift', 'drift-client')
+    const missingCanvas = { ...driftSignals, canvasHash: sha256('sinshin-missing-v1') }
+    await finalizeSignals(await devices.peek(missingCanvas, driftPhone), driftPhone, missingCanvas)
+    const loginSignals = async (signals: ReturnType<typeof strongSignals>, phone: string) => {
+      const peek = await devices.peek(signals, phone)
+      return database.db.transaction((tx) => devices.finalize(tx, { signals, phone, peek, event: 'LOGIN' }))
+    }
+    await loginSignals(driftSignals, driftPhone)
+    const changedCanvas = { ...driftSignals, canvasHash: sha256('drift-change-1') }
+    const firstDrift = await devices.peek(changedCanvas, driftPhone)
+    ok('R9: recovering a missing canvas does not count as a prior drift', !firstDrift.riskFlags.includes('canvas-drift'))
+    await loginSignals(changedCanvas, driftPhone)
+    const repeatedDrift = await devices.peek({ ...driftSignals, canvasHash: sha256('drift-change-2') }, driftPhone)
+    ok('R9: two consecutive real canvas changes still flag drift', repeatedDrift.riskFlags.includes('canvas-drift'))
+
+    const emptyClientA = uniqueSignals('empty-a', '')
+    const emptyClientB = uniqueSignals('empty-b', '')
+    const noClientA = await finalizeSignals(await devices.peek(emptyClientA, '09150000020'), '09150000020', emptyClientA)
+    const noClientB = await finalizeSignals(await devices.peek(emptyClientB, '09150000021'), '09150000021', emptyClientB)
+    ok('R10: empty client IDs behave as absent rather than a shared unique key',
+      noClientA.device.clientId === null && noClientB.device.clientId === null && noClientA.device.id !== noClientB.device.id)
   } finally {
     await database.close()
     const cleaner = new SQL(admin, { max: 1 })

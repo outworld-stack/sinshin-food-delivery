@@ -484,8 +484,11 @@ export const ar: Dict = {
         'dash.wallet.title': 'محفظتي',
         'dash.wallet.subtitle': 'إدارة الرصيد والمعاملات المالية',
         'dash.wallet.currentBalance': 'رصيدك الحالي',
+        'dash.home.copyFailed': 'تعذّر نسخ الرابط؛ حدّد الرابط أعلاه وانسخه.',
+        'dash.orderDetail.refundedToWallet': 'أُعيد مبلغ {n} إلى محفظتك.',
+        'dash.wallet.recentReferralsHint': 'تعرض هذه القائمة آخر {n} حساباً تمت إحالته.',
         'dash.wallet.chargeNote':
-                'تُشحن محفظة سين شين عبر أرباح دعوة الأصدقاء فقط، ولا يمكن زيادتها من بوابة الدفع.',
+                'تُضاف أرباح دعوة الأصدقاء والمبالغ المستردة إلى المحفظة. لا تتوفر تعبئة مباشرة عبر بوابة الدفع.',
         'dash.wallet.totalInviteProfit': 'إجمالي ربح الدعوات',
         'dash.wallet.referralsCount': 'عدد الإحالات',
         'dash.wallet.recentTxs': 'المعاملات الأخيرة',

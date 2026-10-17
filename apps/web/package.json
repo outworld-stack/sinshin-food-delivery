@@ -18,8 +18,18 @@
     "test:device": "bun scripts/test-device-fingerprint.ts",
     "test:fetch-timeout": "bun scripts/test-fetch-timeout.ts",
     "test:auth-session": "bun scripts/test-auth-session.ts",
+    "test:auth-store": "bun scripts/test-auth-store.ts",
+    "test:registration-client": "bun scripts/test-registration-client.ts",
     "test:sse-client": "bun scripts/test-sse-client.ts",
-    "test:push-json-timeout": "bun scripts/test-push-json-timeout.ts"
+    "test:push-json-timeout": "bun scripts/test-push-json-timeout.ts",
+    "test:push-lifecycle": "bun scripts/test-push-lifecycle.ts",
+    "test:pwa-worker": "bun scripts/test-pwa-worker.ts",
+    "test:notification-cache": "bun scripts/test-notification-cache.ts",
+    "test:checkout-client": "bun scripts/test-checkout-client.tsx",
+    "test:checkout-intent": "bun scripts/test-checkout-intent.ts",
+    "test:referral-client": "bun scripts/test-referral-client.ts",
+    "test:wallet-client": "bun scripts/test-wallet-client.tsx",
+    "test:order-money-cache": "bun scripts/test-order-money-cache.ts"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",

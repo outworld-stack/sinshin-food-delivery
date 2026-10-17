@@ -6,9 +6,8 @@
  *   bun scripts/test-sep-verify.ts   (از apps/api)
  *
  * سنجه — همان چک‌لیستی که باگ‌های زرین‌پال را گرفت (stage-74):
- *   ۱) لغو (معادلِ NOK زرین‌پال): callback بدون RefNum + کوئری غیرخالی ⇒
- *      شکستِ قطعیِ فوری — نه indeterminate ابدی (سفارش CANCELED می‌شود،
- *      «مجموع پرداخت‌ها» آلوده نمی‌شود، ۲۴ ساعت معلق نمی‌ماند).
+ *   ۱) callback لغو بدون RefNum امضا ندارد و عدم برداشت وجه را ثابت
+ *      نمی‌کند؛ وضعیت نامشخص و وجه رزروشده تا تایید سرور حفظ می‌شود.
  *   ۲) منبع حقیقت = VerifyPayment سرور-به-سرور؛ مرجعِ ذخیره‌شده مقدم بر
  *      کوئری (ضد-جعل)؛ چک مبلغ ریالی.
  *   ۳) نامشخصِ پول‌ایمن: خطای شبکه/پاسخ غیر-JSON/شکل ناشناخته ⇒
@@ -178,6 +177,53 @@ async function main(): Promise<void> {
   const vStr = await adapter.verify({ gatewayRef: REFNUM, amount, query: {} })
   ok('verify: Amount به شکل رشته هم تطبیق می‌خورد', vStr.success)
 
+  const nestedDetail = {
+    RRN: '123456789012',
+    RefNum: REFNUM,
+    TerminalNumber: 12345678,
+    OrginalAmount: amount * 10,
+    AffectiveAmount: amount * 10,
+    StraceDate: '20261017',
+    StraceNo: '777',
+  }
+  mockFetch(() => jsonResponse({ Success: true, ResultCode: 0, TransactionDetail: nestedDetail }))
+  const vNested = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: {} })
+  ok('nested SEP Success + TransactionDetail verifies its amount and receipt', vNested.success && !vNested.indeterminate)
+
+  for (const amountField of ['OrginalAmount', 'AffectiveAmount']) {
+    mockFetch(() => jsonResponse({ Success: true, TransactionDetail: {
+      RefNum: REFNUM, TerminalNumber: '12345678', ResNum: PAYMENT_ID,
+      [amountField]: String(amount * 10),
+    } }))
+    const result = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: {} })
+    ok(`nested SEP accepts an explicit matching ${amountField}`, result.success)
+  }
+
+  const invalidNestedDetails: [string, Record<string, unknown>][] = [
+    ['original amount mismatch', { ...nestedDetail, OrginalAmount: amount * 10 + 1 }],
+    ['effective amount mismatch', { ...nestedDetail, AffectiveAmount: amount * 10 - 1 }],
+    ['wrong terminal', { ...nestedDetail, TerminalNumber: 87654321 }],
+    ['wrong receipt', { ...nestedDetail, RefNum: 'OTHER-RECEIPT' }],
+    ['wrong reservation', { ...nestedDetail, ResNum: 'other-payment' }],
+    ['missing amounts', { RefNum: REFNUM, TerminalNumber: 12345678 }],
+    ['null amount', { ...nestedDetail, AffectiveAmount: null }],
+  ]
+  for (const [name, transactionDetail] of invalidNestedDetails) {
+    mockFetch(() => jsonResponse({ Success: true, TransactionDetail: transactionDetail }))
+    const result = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: {} })
+    ok(`nested SEP ${name} remains indeterminate`, !result.success && result.indeterminate === true)
+  }
+
+  for (const [name, payload] of [
+    ['conflicting success flags', { IsSuccess: false, Success: true, TransactionDetail: nestedDetail }],
+    ['conflicting flat amount', { Success: true, Amount: amount * 10 - 1, TransactionDetail: nestedDetail }],
+    ['malformed transaction details', { Success: true, Amount: amount * 10, TransactionDetail: [] }],
+  ] as const) {
+    mockFetch(() => jsonResponse(payload))
+    const result = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: {} })
+    ok(`SEP ${name} remains indeterminate`, !result.success && result.indeterminate === true)
+  }
+
   // موفق اعلام‌شده + مبلغ ناهم‌خوان → indeterminate (پول‌ایمنی stage-58)
   mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10 + 500 }))
   const vAmt = await adapter.verify({ gatewayRef: REFNUM, amount, query: {} })
@@ -219,8 +265,8 @@ async function main(): Promise<void> {
     query: { State: 'Canceled By User', ResNum: String(PAYMENT_ID), TraceNo: '778' },
   })
   ok(
-    'verify: لغو (کوئری غیرخالی بدون RefNum) → شکست قطعیِ فوری — نه ۲۴h معلق',
-    !vCancel.success && !vCancel.indeterminate,
+    'unsigned cancellation without a receipt cannot release money',
+    !vCancel.success && vCancel.indeterminate === true,
   )
 
   // RefNum از کوئری وقتی مرجع ذخیره‌شده نیست (هر سه صورت حروف)

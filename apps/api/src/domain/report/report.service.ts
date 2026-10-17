@@ -18,7 +18,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/report/report.service.ts
-import { and, desc, eq, gte, lte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import { orders, users, walletTransactions } from '#/infra/db/schema'
@@ -88,7 +88,7 @@ export class ReportService {
       reconcile: reconcileSection,
       csvUrl: `/api/reports/csv/${token}`,
       stats: [
-        { label: 'تعداد سفارش', value: faNum(agg.count) },
+        { label: 'تعداد سفارش پرداخت‌شده', value: faNum(agg.count) },
         { label: 'مبلغ کل (تومان)', value: faNum(agg.amount) },
         { label: 'میانگین سفارش (تومان)', value: faNum(agg.avg) },
       ],
@@ -264,7 +264,7 @@ export class ReportService {
     const rows = await this.deps.db
       .select()
       .from(users)
-      .where(and(gte(users.createdAt, from), lte(users.createdAt, to)))
+      .where(and(gte(users.createdAt, from), lt(users.createdAt, to)))
       .orderBy(desc(users.createdAt))
       .limit(MAX_CSV_ROWS)
 
@@ -299,7 +299,7 @@ export class ReportService {
       `بازه: ${fromFa} تا ${toFa}`,
       `تولید: ${new Date().toISOString()}`,
       '',
-      `تعداد سفارش: ${faNum(agg.count)}`,
+      `تعداد سفارش پرداخت‌شده: ${faNum(agg.count)}`,
       `مبلغ کل (تومان): ${faNum(agg.amount)}`,
       `میانگین سفارش (تومان): ${faNum(agg.avg)}`,
       '',
@@ -318,7 +318,7 @@ export class ReportService {
         .select({ o: orders, u: users })
         .from(orders)
         .innerJoin(users, eq(users.id, orders.userId))
-        .where(and(gte(orders.createdAt, from), lte(orders.createdAt, to)))
+        .where(and(gte(orders.createdAt, from), lt(orders.createdAt, to)))
         .orderBy(desc(orders.createdAt)),
       this.deps.db
         .select({ w: walletTransactions })
@@ -326,7 +326,7 @@ export class ReportService {
         .where(
           and(
             gte(walletTransactions.createdAt, from),
-            lte(walletTransactions.createdAt, to),
+            lt(walletTransactions.createdAt, to),
           ),
         ),
     ])
@@ -344,8 +344,9 @@ export class ReportService {
       .where(
         and(
           gte(orders.createdAt, from),
-          lte(orders.createdAt, to),
+          lt(orders.createdAt, to),
           sql`${orders.status} <> 'CANCELED'`,
+          eq(orders.paymentStatus, 'SUCCESS'),
         ),
       )
     const count = r[0]?.count ?? 0

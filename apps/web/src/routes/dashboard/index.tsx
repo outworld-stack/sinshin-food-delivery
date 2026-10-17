@@ -69,7 +69,7 @@ function DashboardHome() {
         const displayName = user.name || user.phone
 
         // لینک معرف — روت واقعی /referral است؛ /r/CODE هیچ روتی ندارد و ۴۰۴ می‌داد
-        const referralLink = `${window.location.origin}/referral/${user.referralCode}`
+        const referralLink = `${window.location.origin}/referral/${encodeURIComponent(user.referralCode ?? '')}`
 
         // round-12 — لیبل تحویل بر اساس deliveryType (قبلاً «آدرس null؟» چک می‌شد
         // و PICKUP هم «سرو در سالن» می‌گرفت)
@@ -352,9 +352,13 @@ function DashboardHome() {
                                                         {referralLink}
                                                 </div>
                                                 <button
-                                                        onClick={() => {
-                                                                navigator.clipboard.writeText(referralLink)
-                                                                showToast(t['dash.home.linkCopied'])
+                                                        onClick={async () => {
+                                                                try {
+                                                                        await navigator.clipboard.writeText(referralLink)
+                                                                        showToast(t['dash.home.linkCopied'])
+                                                                } catch {
+                                                                        showToast(t['dash.home.copyFailed'], 'error')
+                                                                }
                                                         }}
                                                         className="w-full px-4 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer"
                                                 >

@@ -14,6 +14,7 @@
 
 //src/infra/db/schema/articles.ts
 import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar, integer } from 'drizzle-orm/pg-core'
+import type { ArticleBlocksDoc } from '@sinshin/shared'
 
 /** دسته‌ی مقاله — با/بدون ساب‌دسته */
 export const articleCategories = pgTable(
@@ -74,6 +75,12 @@ export const articles = pgTable(
     processes: jsonb('processes').$type<{ title: string; items: string[] }[]>().default([]),
     /** round-34 — روندها به عربی (موازی با processes) */
     processesAr: jsonb('processes_ar').$type<{ title: string; items: string[] }[]>(),
+    /**
+     * stage-82 — سندِ بلوکیِ صفحه‌ساز { version, blocks[] } — الگوی processes
+     * (jsonb). NULL = مقاله‌ی متنیِ ساده (مسیر رندرِ قدیمی content).
+     * بلوک ناشناخته/خراب در نرمال‌سازی سرویس حذف می‌شود، نه کل سند.
+     */
+    blocks: jsonb('blocks').$type<ArticleBlocksDoc>(),
     views: integer('views').notNull().default(0),
     status: varchar('status', { length: 20 }).notNull().default('ACTIVE'), // ACTIVE | INACTIVE
     /**

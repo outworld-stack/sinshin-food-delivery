@@ -9,7 +9,7 @@
  * آورد (همان درسِ stage-74 برای http-util) — تا این تست ممکن شود.
  *
  * سنجه — همان چک‌لیستِ زرین‌پال (stage-74):
- *   ۱) لغو (معادلِ NOK): ResCode=17 (انصراف مشتری) ⇒ شکستِ قطعیِ فوری.
+ *   ۱) ResCode=17 امضا ندارد و به‌تنهایی عدم برداشت وجه را ثابت نمی‌کند.
  *   ۲) ضد-جعلِ پیوند: RefId فرم باید با توکنِ init یکی باشد.
  *   ۳) منبع حقیقت = bpVerifyRequest/bpSettleRequest سرور-به-سرور با
  *      کدهای رسمی: ۰/۴۳/۴۵ موفق، ۴۸ برگشت‌خورده (قطعی)، بقیه indeterminate.
@@ -17,7 +17,7 @@
  *      (orderId:s:SaleReferenceId) برگردانده می‌شود تا کارِ تایم‌اوت
  *      ری-وریفای کند.
  *   ۵) رگرسیون stage-58: bpPayRequest «X,0» ≠ موفق — فقط «0,X».
- *   ۶) پارامترها: مبلغ ×۱۰ ریال، تاریخ/ساعت تهران ۶رقمی، گریز XML،
+ *   ۶) پارامترها: مبلغ ×۱۰ ریال، تاریخ ۸رقمی و ساعت تهران ۶رقمی، گریز XML،
  *      پیشوندِ namespace در <return> (stage-76).
  */
 import type { AppConfig } from '#/infra/config/env'
@@ -154,7 +154,7 @@ async function main(): Promise<void> {
   })
   ok('init: مبلغ به ریال (×۱۰) در پاکت', lastEnvelope.includes(`>2000000</amount>`))
   ok('init: گریز XML در اعتبارنامه (&amp; &lt; &gt; &quot;)', lastEnvelope.includes('shop&amp;&lt;&gt;&quot;&#x27;user') || lastEnvelope.includes('shop&amp;&lt;&gt;&quot;&apos;user'))
-  ok('init: تاریخ/ساعت تهران ۶رقمی', /<localDate[^>]*>\d{6}</.test(lastEnvelope) && /<localTime[^>]*>\d{6}</.test(lastEnvelope))
+  ok('init: Gregorian yyyyMMdd date and HHmmss Tehran time', /<localDate[^>]*>\d{8}</.test(lastEnvelope) && /<localTime[^>]*>\d{6}</.test(lastEnvelope))
   ok('init: orderId عددی ≤۱۵ رقم (هش پایدار)', /<orderId[^>]*>\d{1,15}</.test(lastEnvelope))
 
   // orderId پایدار برای همان paymentId
@@ -189,11 +189,11 @@ async function main(): Promise<void> {
 
   // لغو — ResCode=17 (انصراف مشتری) — معادلِ NOK زرین‌پال
   const vCancel = await adapter.verify({ gatewayRef: gwRef, amount, query: { ResCode: '17', RefId: storedRef } })
-  ok('verify: لغو (ResCode=17) → شکست قطعیِ فوری — نه ۲۴h معلق', !vCancel.success && !vCancel.indeterminate)
+  ok('unsigned ResCode=17 does not prove nonpayment', !vCancel.success && vCancel.indeterminate === true)
 
   // شکست اعلام‌شده‌ی بانک — هر ResCode≠0
   const vErr = await adapter.verify({ gatewayRef: gwRef, amount, query: { ResCode: '12', RefId: storedRef } })
-  ok('verify: ResCode=12 (شکست اعلام‌شده) → قطعی', !vErr.success && !vErr.indeterminate)
+  ok('unsigned ResCode=12 does not prove nonpayment', !vErr.success && vErr.indeterminate === true)
 
   // ضد-جعل — RefId فرم ≠ توکن init
   const vForge = await adapter.verify({
@@ -201,15 +201,15 @@ async function main(): Promise<void> {
     amount,
     query: { ResCode: '0', RefId: '999888777', SaleReferenceId: saleRef },
   })
-  ok('verify: RefId فرم ≠ توکن init → شکست قطعی (پیوند جعلی)', !vForge.success && !vForge.indeterminate)
+  ok('mismatched browser RefId cannot release money', !vForge.success && vForge.indeterminate === true)
 
   // ResCode=0 بدون SaleReferenceId → indeterminate (پاسخ ناقص)
   const vNoRef = await adapter.verify({ gatewayRef: gwRef, amount, query: { ResCode: '0', RefId: storedRef } })
   ok('verify: ResCode=0 بدون SaleReferenceId → indeterminate (ناقص)', !vNoRef.success && vNoRef.indeterminate === true)
 
-  // gatewayRef بی‌شکل → قطعی
+  // A malformed reference needs reconciliation.
   const vGarbage = await adapter.verify({ gatewayRef: 'garbage-ref', amount, query: { ResCode: '0' } })
-  ok('verify: gatewayRef بی‌شکل → شکست قطعی (داده‌ی ناشناخته)', !vGarbage.success && !vGarbage.indeterminate)
+  ok('malformed persisted reference requires review', !vGarbage.success && vGarbage.indeterminate === true)
 
   // مسیر موفق کامل — verify 0 + settle 0
   verifyResult = '0'
@@ -246,6 +246,16 @@ async function main(): Promise<void> {
     query: { ResCode: '0', RefId: storedRef, SaleReferenceId: saleRef },
   })
   ok('verify+settle: ۰/۴۵ (قبلاً تسویه) → موفق', v45.success)
+
+  verifyResult = '45'
+  settleResult = 'FAULT'
+  const vAlreadySettled = await adapter.verify({
+    gatewayRef: gwRef,
+    amount,
+    query: { ResCode: '0', RefId: storedRef, SaleReferenceId: saleRef },
+  })
+  ok('verify=45 already settled succeeds without requiring another settle',
+    vAlreadySettled.success && !vAlreadySettled.indeterminate && lastOp === 'bpVerifyRequest')
 
   // verify=48 (برگشت خورده) → قطعی
   verifyResult = '48'

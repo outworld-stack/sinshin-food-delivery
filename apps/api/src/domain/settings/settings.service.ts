@@ -9,7 +9,7 @@
 
 import { eq } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
+import type { Db, DbOrTx } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
 import type { RestaurantStatusDto } from '@sinshin/shared'
@@ -50,7 +50,13 @@ export class SettingsService {
   // یعنی ده‌ها کوئری موازی برای همان کلید؛ اولین صاحب پرواز است، بقیه می‌پیوندند.
   private readonly inflight = new Map<string, Promise<unknown>>()
 
-  async get<T>(key: string, fallback: T): Promise<T> {
+  async get<T>(key: string, fallback: T, db?: DbOrTx): Promise<T> {
+    // Money transactions must not wait for a second pool connection or share
+    // an outside in-flight read. Do not publish transactional values to cache.
+    if (db) {
+      const [row] = await db.select({ value: settings.value }).from(settings).where(eq(settings.key, key))
+      return row ? row.value as T : fallback
+    }
     const hit = this.cache.get(key)
     if (hit && Date.now() - hit.at < SETTINGS_CACHE_TTL_MS) {
       return hit.value as T
@@ -86,14 +92,14 @@ export class SettingsService {
   /** وضعیت کامل رستوران — دو نوع بسته‌بودن
    *  round-34 — lang='ar': علت بسته‌بودن موقت از کلید موازی عربی
    *  (temporary_close_reason_ar) می‌آید؛ خالی = همان فارسی (fallback). */
-  async restaurantStatus(lang: Lang = 'fa'): Promise<RestaurantStatusDto> {
+  async restaurantStatus(lang: Lang = 'fa', db?: DbOrTx): Promise<RestaurantStatusDto> {
     const [open, tempClosed, reason, reasonAr, tempReopen, nextOpenTime] = await Promise.all([
-      this.get<boolean>(SETTING_KEYS.restaurantOpen, true),
-      this.get<boolean>(SETTING_KEYS.temporarilyClosed, false),
-      this.get<string>(SETTING_KEYS.temporaryCloseReason, ''),
-      this.get<string>(SETTING_KEYS.temporaryCloseReasonAr, ''),
-      this.get<string>(SETTING_KEYS.temporaryReopenTime, ''),
-      this.get<string>(SETTING_KEYS.nextOpenTime, '۱۱:۰۰ صبح'),
+      this.get<boolean>(SETTING_KEYS.restaurantOpen, true, db),
+      this.get<boolean>(SETTING_KEYS.temporarilyClosed, false, db),
+      this.get<string>(SETTING_KEYS.temporaryCloseReason, '', db),
+      this.get<string>(SETTING_KEYS.temporaryCloseReasonAr, '', db),
+      this.get<string>(SETTING_KEYS.temporaryReopenTime, '', db),
+      this.get<string>(SETTING_KEYS.nextOpenTime, '۱۱:۰۰ صبح', db),
     ])
     // round-34 — COALESCE: عربی خالی → همان فارسی (بدون ترجمه‌ی برچسب‌های زمانی —
     // ساعت‌ها عددی‌اند و فرانت با فرمتر خودش ارقام را عربی می‌کند)
@@ -120,8 +126,8 @@ export class SettingsService {
     return this.get<boolean>(SETTING_KEYS.restaurantOpen, true)
   }
 
-  async liveTrackingEnabled(): Promise<boolean> {
-    return this.get<boolean>(SETTING_KEYS.liveTrackingEnabled, false)
+  async liveTrackingEnabled(db?: DbOrTx): Promise<boolean> {
+    return this.get<boolean>(SETTING_KEYS.liveTrackingEnabled, false, db)
   }
 
   /**
@@ -130,13 +136,13 @@ export class SettingsService {
    * تنظیمات DB، بعد پیش‌فرض تهران. env «منبع حقیقت» عملیاتاتی است — بدون
    * ری‌استارت عوض نمی‌شود (مثل GEO_BYPASS_IPS).
    */
-  async restaurantLocation(): Promise<RestaurantLocation> {
+  async restaurantLocation(db?: DbOrTx): Promise<RestaurantLocation> {
     if (this.deps.config?.restaurantLocation) {
       return this.deps.config.restaurantLocation
     }
     return this.get<RestaurantLocation>(SETTING_KEYS.restaurantLocation, {
       lat: 37.4822056,
       lng: 49.4418273,
-    })
+    }, db)
   }
 }

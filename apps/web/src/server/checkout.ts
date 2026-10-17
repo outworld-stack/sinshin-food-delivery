@@ -112,7 +112,7 @@ export async function processCheckout(
 
 	return {
 		orderCompleted: false,
-		paymentStatus: 'FAILED',
+		paymentStatus: res.orderId ? 'PENDING' : 'FAILED',
 		orderId: res.orderId,
 	}
 }

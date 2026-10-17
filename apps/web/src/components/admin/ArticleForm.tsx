@@ -6,16 +6,23 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/ArticleForm.tsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { articleCategoriesOptions } from '#/utils/queryOptions'
 import { ImageField } from '#/components/shared/ImageField'
 import { Toggle } from '#/components/shared/Toggle'
-import { Star } from 'reicon-react'
+import { Brush, Star } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
 import { Link } from '@tanstack/react-router'
 import { useToastStore } from '#/stores/toastStore'
 import type { ArticleFormProps, ArticleFormData } from '#/types/forms'
+import { ArticlePageBuilder } from '#/components/admin/articles/builder/ArticlePageBuilder'
+import {
+  blocksToPlainText,
+  emptyDoc,
+  plainTextToDoc,
+} from '#/components/admin/articles/builder/blockModel'
+import type { ArticleBlocksDoc } from '@sinshin/shared'
 
 export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleFormProps) {
   const showToast = useToastStore((state) => state.showToast)
@@ -34,6 +41,8 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     processes: [],
     // stage-60 — پرچم «ویژه/سنجاق‌شده»
     isFeatured: false,
+    // stage-82 — سند بلوکی صفحه‌ساز (null = حالت متن ساده)
+    blocks: null,
     // round-34 — فیلدهای عربی (خالی = پشتیبان فارسی)
     titleAr: '',
     excerptAr: '',
@@ -41,6 +50,12 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     processesAr: [],
   })
   const [processInput, setProcessInput] = useState({ title: '', item: '' })
+
+  // stage-82 — حالتِ ویرایش: مقاله‌ی بلوکی → صفحه‌ساز؛ متنی → متن ساده
+  // (مقاله‌ی تازه از صفحه‌ساز شروع می‌شود — تجربه‌ی اصلی این استیج)
+  const [builderMode, setBuilderMode] = useState<'builder' | 'plain'>(
+    () => (initialData ? (initialData.blocks != null ? 'builder' : 'plain') : 'builder'),
+  )
 
 
   useEffect(() => {
@@ -57,6 +72,8 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         // stage-60 — پرچم «ویژه» (نیامد = خاموش)
         isFeatured: initialData.isFeatured ?? false,
         processes: initialData.processes?.map((p) => ({ title: p.title, items: p.items || [] })) || [],
+        // stage-82 — سند بلوکی ذخیره‌شده (null = مقاله‌ی متنی قدیمی)
+        blocks: initialData.blocks ?? null,
         // round-34 — مقادیر عربی ذخیره‌شده (روندها: موازی با ایندکس processes)
         titleAr: initialData.titleAr || '',
         excerptAr: initialData.excerptAr || '',
@@ -69,6 +86,32 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
+  }
+
+  // stage-82 — جابجاییِ حالت ویرایش (بلوکی ⇄ متنی):
+  //  · متنی → بلوکی: پاراگراف‌های content به بلوک تبدیل می‌شوند (پلِ مهاجرت)
+  //  · بلوکی → متنی: بلوک‌ها حفظ می‌شوند تا اگر برگشتیدی از دست نروند؛
+  //    اما ذخیره در حالتِ متنی یعنی سند پاک شود (null) — ادمینِ تصمیم‌گیر
+  const switchMode = (to: 'builder' | 'plain') => {
+    if (to === builderMode) return
+    if (to === 'builder') {
+      setFormData(prev => ({
+        ...prev,
+        blocks: prev.blocks ?? plainTextToDoc(prev.content),
+      }))
+    }
+    setBuilderMode(to)
+  }
+
+  // متنِ زنده — در حالتِ بلوکی از سند مشتق می‌شود (منبع واحد؛
+  // لیست/سئو/ترجمه روی content سوارند)
+  const liveContent = useMemo(
+    () => (builderMode && formData.blocks ? blocksToPlainText(formData.blocks) : formData.content),
+    [builderMode, formData.blocks, formData.content],
+  )
+
+  const setBlocks = (blocks: ArticleBlocksDoc) => {
+    setFormData(prev => ({ ...prev, blocks }))
   }
 
   const addProcess = () => {
@@ -120,7 +163,24 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formData.title?.trim() || !formData.content?.trim()) {
+
+    // stage-82 — در حالتِ بلوکی، content از بلوک‌ها مشتق می‌شود؛
+    // سندِ بدونِ بلوکِ متنی = مقاله‌ای بدون متن (ردِ صریح با پیام)
+    let content = formData.content
+    let blocks = formData.blocks
+    if (builderMode) {
+      const derived = blocksToPlainText(formData.blocks)
+      if (!derived.trim()) {
+        showToast('در حالت صفحه‌ساز، حداقل یک بلوک متنی (پاراگراف/تیتر/فهرست/نقل‌قول) لازم است', 'error')
+        return
+      }
+      content = derived
+    } else {
+      // حالتِ متنی: ذخیره یعنی تصمیمِ ادمین — سندِ بلوکی پاک می‌شود
+      blocks = null
+    }
+
+    if (!formData.title?.trim() || !content.trim()) {
       showToast('عنوان و متن مقاله الزامی است', 'error')
       return
     }
@@ -128,6 +188,8 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     // اگر نام نویسنده خالی بود، پیش‌فرض "سین شین" براش ثبت میشه
     const finalData = {
       ...formData,
+      content,
+      blocks,
       author: formData.author?.trim() || 'سین شین'
     }
 
@@ -216,9 +278,61 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         />
       </div>
 
-      <div>
-        <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن کامل مقاله</label>
-        <textarea name="content" value={formData.content} onChange={handleChange} rows={6} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none resize-none"></textarea>
+      {/* ═══ stage-82 — بدنه‌ی مقاله: صفحه‌سازِ بلوکی ⇄ متن ساده ═══ */}
+      <div className="rounded-2xl border border-gray-200 dark:border-[#3a151c] overflow-hidden">
+        {/* سوییچِ حالت */}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-gray-50 dark:bg-[#1a0a0e] border-b border-gray-200 dark:border-[#3a151c]">
+          <span className="flex items-center gap-1.5 text-sm font-DanaDemiBold text-gray-700 dark:text-gray-200">
+            <Brush size={16} className="text-primary dark:text-dark-primary" />
+            بدنه‌ی مقاله
+          </span>
+          <span className="flex-1" />
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c]">
+            <button
+              type="button"
+              aria-pressed={builderMode === 'builder'}
+              onClick={() => switchMode('builder')}
+              className={`px-3 py-1.5 rounded-md text-xs font-DanaDemiBold cursor-pointer transition ${builderMode ? 'bg-primary dark:bg-dark-primary text-white' : 'text-gray-500 dark:text-gray-400'}`}
+            >
+              صفحه‌ساز بلوکی
+            </button>
+            <button
+              type="button"
+              aria-pressed={builderMode === 'plain'}
+              onClick={() => switchMode('plain')}
+              className={`px-3 py-1.5 rounded-md text-xs font-DanaDemiBold cursor-pointer transition ${!builderMode ? 'bg-primary dark:bg-dark-primary text-white' : 'text-gray-500 dark:text-gray-400'}`}
+            >
+              متن ساده
+            </button>
+          </div>
+        </div>
+
+        {/* بدنه */}
+        <div className="p-4">
+          {builderMode ? (
+            <>
+              <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                بلوک‌ها را از «افزودن بلوک» انتخاب کنید، با دسته‌ی ⠿ یا ↑/↓ جابجا کنید و برای هر بلوک
+                رنگ، عرض (۵۰٪/۷۰٪/پهن/تمام‌عرض)، انیمیشن ورود و فاصله تعیین کنید. متنِ مقاله به‌صورت
+                خودکار از بلوک‌های متنی ساخته می‌شود (لیست/سئو/ترجمه همیشه هم‌گام می‌مانند).
+              </p>
+              <ArticlePageBuilder
+                doc={formData.blocks ?? emptyDoc()}
+                onChange={setBlocks}
+              />
+            </>
+          ) : (
+            <>
+              <textarea name="content" value={formData.content} onChange={handleChange} rows={8} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none resize-y" />
+              {formData.blocks && (
+                <p className="mt-2 text-[11px] text-amber-500 leading-relaxed">
+                  این مقاله سندِ بلوکی دارد — ذخیره در حالتِ «متن ساده» آن را پاک می‌کند (صفحه‌ی عمومی
+                  همان متن ساده را نشان می‌دهد). با «صفحه‌ساز بلوکی» برگردید تا بلوک‌ها حفظ شوند.
+                </p>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* round-34 — متن کامل عربی (پشتیبان: خالی = همان فارسی در حالت عربی) */}
@@ -227,8 +341,8 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         value={formData.contentAr}
         onChange={(v) => setFormData(prev => ({ ...prev, contentAr: v }))}
         arAuto={initialData?.arAuto}
-        faReference={formData.content.slice(0, 160) + (formData.content.length > 160 ? '…' : '')}
-        faSource={formData.content}
+        faReference={liveContent.slice(0, 160) + (liveContent.length > 160 ? '…' : '')}
+        faSource={liveContent}
         multiline
         rows={6}
       />

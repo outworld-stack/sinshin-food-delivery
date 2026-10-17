@@ -10,7 +10,7 @@
 // فیلدهای الزامی — فرم‌ها همیشه مقدار اولیه‌ی کامل می‌سازن؛
 // اختیاری بودن تاریخی بود و مانع تایپ‌شدن میوتیشن‌ها (data: any) می‌شد.
 // نتیجه: createArticle/createAdminProduct الان ورودی کاملاً تایپ‌دار می‌گیرن.
-import type { Product } from '@sinshin/shared'
+import type { ArticleBlocksDoc, Product } from '@sinshin/shared'
 
 export interface ArticleFormData {
   title: string;
@@ -26,6 +26,11 @@ export interface ArticleFormData {
   processes: { title: string, items: string[] }[];
   /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + پس‌زمینه Aurora) */
   isFeatured: boolean;
+  /**
+   * stage-82 — سندِ بلوکیِ صفحه‌ساز؛ null = حالتِ «متن ساده»
+   * (در فرم: content از بلوک‌ها مشتق می‌شود — منبع واحد)
+   */
+  blocks: ArticleBlocksDoc | null;
   // ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
   titleAr: string;
   excerptAr: string;

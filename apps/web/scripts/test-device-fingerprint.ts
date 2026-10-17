@@ -246,6 +246,92 @@ if (payload2) {
   )
 }
 
+console.log('\n══ Storage recovery and stalled browser probes ══')
+
+installHostileGlobals()
+ok('T6: blocked storage keeps a stable ID within the page', getClientId() === getClientId())
+
+installSharedGlobals()
+const cookieId = '12345678-1234-4234-abcd-123456789abc'
+let localValue = 'corrupt-device-id'
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem: () => localValue,
+    setItem: (_key: string, value: string) => { localValue = value },
+  },
+})
+workingDocument.cookie = `sinshin_did=${cookieId}`
+ok('T6: invalid localStorage falls through to a valid cookie', getClientId() === cookieId)
+ok('T6: the recovered device ID repairs localStorage', localValue === cookieId)
+
+// Actual WebCrypto keeps working probes distinguishable from a stalled audio
+// renderer. This reproduces browsers that suspend OfflineAudioContext.
+Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {
+  subtle: { digest: async (_algorithm: string, data: Uint8Array) => nodeCrypto.createHash('sha256').update(data).digest() },
+} })
+class SuspendedAudioContext {
+  destination = {}
+  createOscillator() {
+    return { type: '', frequency: { value: 0 }, connect() {}, start() {} }
+  }
+  createDynamicsCompressor() {
+    return {
+      threshold: { value: 0 }, knee: { value: 0 }, ratio: { value: 0 },
+      attack: { value: 0 }, release: { value: 0 }, connect() {},
+    }
+  }
+  startRendering() { return new Promise(() => {}) }
+}
+Object.defineProperty(window, 'OfflineAudioContext', { configurable: true, value: SuspendedAudioContext })
+const started = Date.now()
+const stalledAudio = await collectDeviceSignals()
+ok('T7: suspended audio cannot hang OTP verification', Date.now() - started < 3_000)
+ok('T7: only the stalled audio is replaced with missing data',
+  stalledAudio.audioHash === realMissing && stalledAudio.canvasHash !== realMissing)
+
+installSharedGlobals()
+Object.defineProperty(globalThis, 'crypto', {
+  configurable: true,
+  value: { subtle: { digest: () => new Promise(() => {}) } },
+})
+const hashStarted = Date.now()
+const stalledHash = await collectDeviceSignals()
+ok('T8: stalled hashing cannot hang OTP verification', Date.now() - hashStarted < 3_000)
+ok('T8: stalled hashes follow the server missing-signal protocol',
+  [stalledHash.canvasHash, stalledHash.webglHash, stalledHash.audioHash, stalledHash.fontsHash]
+    .every((hash) => hash === realMissing))
+
+installSharedGlobals()
+Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {} })
+for (const key of ['userAgent', 'platform', 'language', 'hardwareConcurrency', 'deviceMemory', 'maxTouchPoints', 'connection', 'userAgentData']) {
+  Object.defineProperty(navigator, key, { configurable: true, get() { throwOnAccess(key) } })
+}
+const privateBrowser = await collectDeviceSignals()
+ok('T9: denied navigator properties do not prevent verification',
+  privateBrowser.platform === 'unknown' && privateBrowser.language === 'unknown' &&
+  privateBrowser.hardwareConcurrency === null && privateBrowser.deviceMemory === null && privateBrowser.networkType === null)
+
+installSharedGlobals()
+Object.defineProperty(navigator, 'hardwareConcurrency', { value: 512 })
+Object.defineProperty(navigator, 'deviceMemory', { value: 128 })
+Object.defineProperty(navigator, 'userAgentData', { value: {
+  getHighEntropyValues: async () => ({ model: 'Samsung '.repeat(30), platform: 'Android' }),
+} })
+const unusualBrowser = await collectDeviceSignals()
+ok('T10: optional browser data stays within verification API limits',
+  unusualBrowser.hardwareConcurrency === null && unusualBrowser.deviceMemory === null &&
+  (unusualBrowser.deviceModel?.length ?? 0) <= 80 && unusualBrowser.label.length <= 100)
+
+const { detectDeviceIdentity } = await import('../src/utils/deviceIdentity')
+for (const [model, expected] of [
+  ['SM-S916B', 'S23+'], ['SM-S926U1', 'S24+'], ['SM-S936W', 'S25+'],
+  ['SM-S918U', 'S23 Ultra'], ['SM-A556B', 'A55'], ['SM-T970', 'T970'],
+]) {
+  ok(`T11: device model ${model} is displayed as ${expected}`,
+    detectDeviceIdentity('Android Mobile', { model }).model === expected)
+}
+
 console.log(`\n══ نتیجه: ${pass} پاس / ${fail} خطا ══`)
 if (fail > 0) process.exitCode = 1
 

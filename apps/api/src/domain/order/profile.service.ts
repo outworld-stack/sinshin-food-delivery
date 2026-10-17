@@ -5,6 +5,7 @@ import type { Db } from '#/infra/db/client'
 import {
   addresses,
   devices,
+  deviceEvents,
   deviceIdentities,
   orders,
   referralProfits,
@@ -13,6 +14,8 @@ import {
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { asDeviceId } from '#/domain/shared/brand'
+import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import type { DeviceService } from '#/domain/device/device.service'
 import type { OrderService } from './order.service'
 
@@ -38,54 +41,65 @@ export class ProfileService {
     rawCode: string,
   ): Promise<{ referrerCode: string }> {
     const { db, config } = this.deps
-    const code = rawCode.trim().toUpperCase().slice(0, 32)
+    const code = rawCode.trim().toUpperCase()
     if (!code) throw Err.validation('کد معرف را وارد کنید.')
+    if (!/^[A-Z0-9_-]{3,16}$/.test(code)) throw Err.validation('کد معرف معتبر نیست.')
 
-    const user = (await db.select().from(users).where(eq(users.id, userId)))[0]
-    if (!user) throw Err.unauthorized()
-    if (user.referredBy) throw Err.conflict('قبلاً معرف برای حساب شما ثبت شده است.')
+    const result = await db.transaction(async (tx) => {
+      // Serializing bindings makes the ancestry check safe for reciprocal and
+      // longer concurrent cycles. Signup only adds a new leaf to this graph.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('referral-graph-binding'))`)
+      const [user] = await tx.select().from(users).where(eq(users.id, userId)).for('no key update')
+      if (!user) throw Err.unauthorized()
+      if (user.referredBy) throw Err.conflict('قبلاً معرف برای حساب شما ثبت شده است.')
 
-    const referrer = (await db.select().from(users).where(eq(users.referralCode, code)))[0]
-    if (!referrer) throw Err.notFound('کد معرف معتبر نیست.')
-    if (referrer.id === user.id) {
-      throw Err.validation('کد معرف خودتان قابل استفاده نیست.')
-    }
+      // Old custom codes may contain lowercase. Ambiguous legacy codes must
+      // never silently attribute rewards to a different account.
+      const matches = await tx.select().from(users)
+        .where(sql`upper(${users.referralCode}) = ${code}`).limit(2)
+      const referrer = matches.length === 1 ? matches[0] : undefined
+      if (!referrer) throw Err.notFound('کد معرف معتبر نیست.')
+      if (referrer.id === user.id) {
+        throw Err.validation('کد معرف خودتان قابل استفاده نیست.')
+      }
+      const ancestry = await tx.execute(sql`
+        with recursive chain as (
+          select id, referred_by from users where id = ${referrer.id}
+          union
+          select parent.id, parent.referred_by from users parent
+          join chain on parent.id = chain.referred_by
+        )
+        select exists(select 1 from chain where id = ${user.id})
+          or not exists(select 1 from chain where referred_by is null) as cyclic
+      `)
+      if ((ancestry[0] as { cyclic: boolean } | undefined)?.cyclic) {
+        throw Err.validation('این کد باعث معرفی حلقه‌ای می‌شود و قابل استفاده نیست.')
+      }
 
-    // REFERRAL_BLOCK — همان آستانهٔ ثبت‌نام؛ خوشهٔ دستگاهِ فعلی کاربر
-    const clusterPhones = await this.deps.devices.referralBlockedForDevice(
-      deviceId,
-      user.phone,
-    )
-    if (clusterPhones >= config.device.referralBlockAfter) {
-      await this.deps.devices.logEvent(
-        deviceId,
-        user.phone,
-        'REFERRAL_BLOCKED',
-        null,
-        null,
-        { refCode: code, clusterPhones, via: 'profile-apply' },
+      const clusterPhones = await this.deps.devices.referralBlockedForDeviceOn(
+        tx, deviceId, user.phone,
       )
+      if (clusterPhones >= config.device.referralBlockAfter) {
+        await tx.insert(deviceEvents).values({
+          deviceId: asDeviceId(deviceId), phone: user.phone, event: 'REFERRAL_BLOCKED',
+          metadata: { refCode: code, clusterPhones, via: 'profile-apply' },
+        })
+        return { blocked: true } as const
+      }
+
+      await tx.update(users).set({ referredBy: referrer.id }).where(eq(users.id, user.id))
+      await tx.insert(deviceEvents).values({
+        deviceId: asDeviceId(deviceId), phone: user.phone, event: 'REFERRAL_APPLIED',
+        metadata: { refCode: code, referrerId: referrer.id },
+      })
+      return { blocked: false, referrerCode: referrer.referralCode ?? code } as const
+    })
+    if (result.blocked) {
       throw Err.forbidden(
         'به دلایل امنیتی، ثبت معرف از این دستگاه امکان‌پذیر نیست.',
       )
     }
-
-    const [updated] = await db
-      .update(users)
-      .set({ referredBy: referrer.id })
-      .where(and(eq(users.id, user.id), sql`${users.referredBy} is null`))
-      .returning()
-    if (!updated) throw Err.conflict('قبلاً معرف برای حساب شما ثبت شده است.')
-
-    await this.deps.devices.logEvent(
-      deviceId,
-      user.phone,
-      'REFERRAL_APPLIED',
-      null,
-      null,
-      { refCode: code, referrerId: referrer.id },
-    )
-    return { referrerCode: referrer.referralCode ?? code }
+    return { referrerCode: result.referrerCode }
   }
 
   /** phase-3 — ویرایش name/email (مرجع: فرانت قبلاً پوسته‌ی بی‌اثر بود) */
@@ -125,20 +139,21 @@ export class ProfileService {
     }
 
     // حالت سبک: ستون‌های سنگین (txs/devices/referrals) خالی — نه کوئری
-    const [balance, totalProfit, txRows, addressRows, deviceRows, referralRows] =
+    const [balance, totalProfit, txRows, addressRows, deviceRows, referralRows, totalReferrals] =
       await Promise.all([
         this.deps.orders.walletBalance(db, userId),
         db
-          .select({ total: sql<number>`coalesce(sum(${referralProfits.amount}), 0)::int` })
+          .select({ total: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::bigint` })
           .from(referralProfits)
-          .where(eq(referralProfits.referrerId, userId))
-          .then((r) => r[0]?.total ?? 0),
+          .innerJoin(walletTransactions, eq(walletTransactions.referralProfitId, referralProfits.id))
+          .where(and(eq(referralProfits.referrerId, userId), eq(walletTransactions.userId, userId)))
+          .then((r) => Number(r[0]?.total ?? 0)),
         light
           ? Promise.resolve([] as { tx: typeof walletTransactions.$inferSelect; orderDisplayId: string | null }[])
           : db
               .select({ tx: walletTransactions, orderDisplayId: orders.displayId })
               .from(walletTransactions)
-              .leftJoin(orders, eq(orders.id, walletTransactions.orderId))
+              .leftJoin(orders, and(eq(orders.id, walletTransactions.orderId), eq(orders.userId, userId)))
               .where(eq(walletTransactions.userId, userId))
               // round-16 — سقف دفاعی: صفحهٔ کیف پول سمت کلاینت صفحه‌بندی دارد؛
               // ۲۰۰ تراکنش آخر کفایت می‌کند و پاسخ بی‌سقف با گذر زمان بمب حافظه/پهنای‌باند است
@@ -174,6 +189,9 @@ export class ProfileService {
               .where(eq(deviceIdentities.phone, user.phone))
               .orderBy(sql`${deviceIdentities.lastLoginAt} desc nulls last`),
         light ? Promise.resolve([] as Awaited<ReturnType<ProfileService['myReferrals']>>) : this.myReferrals(userId),
+        db.select({ total: sql<number>`count(*)::bigint` }).from(users)
+          .where(eq(users.referredBy, userId))
+          .then((r) => Number(r[0]?.total ?? 0)),
       ])
 
     const allOrders = light
@@ -190,6 +208,7 @@ export class ProfileService {
       referralLink: `${this.deps.config.siteUrl}/referral/${user.referralCode ?? ''}`,
       referrerCode,
       totalReferralProfit: totalProfit,
+      totalReferrals,
       joinedAt: user.createdAt,
       devices: deviceRows.map((d) => ({
         id: d.id,
@@ -235,6 +254,7 @@ export class ProfileService {
       .select()
       .from(users)
       .where(eq(users.referredBy, userId))
+      .orderBy(desc(users.createdAt), desc(users.id))
       .limit(200)
     if (referrals.length === 0) return []
 
@@ -244,7 +264,7 @@ export class ProfileService {
         .select({
           userId: orders.userId,
           orderCount: sql<number>`count(*)::int`,
-          spent: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::int`,
+          spent: sql<number>`coalesce(sum(${orders.totalAmount}), 0)::bigint`,
         })
         .from(orders)
         .where(
@@ -258,10 +278,11 @@ export class ProfileService {
       db
         .select({
           buyerId: referralProfits.buyerId,
-          profit: sql<number>`coalesce(sum(${referralProfits.amount}), 0)::int`,
+          profit: sql<number>`coalesce(sum(${signedWalletAmount}), 0)::bigint`,
         })
         .from(referralProfits)
-        .where(eq(referralProfits.referrerId, userId))
+        .innerJoin(walletTransactions, eq(walletTransactions.referralProfitId, referralProfits.id))
+        .where(and(eq(referralProfits.referrerId, userId), eq(walletTransactions.userId, userId), inArray(referralProfits.buyerId, buyerIds)))
         .groupBy(referralProfits.buyerId),
     ])
 
@@ -273,8 +294,8 @@ export class ProfileService {
       phone: r.phone,
       registerDate: r.createdAt,
       totalOrders: orderMap.get(r.id)?.orderCount ?? 0,
-      totalSpent: orderMap.get(r.id)?.spent ?? 0,
-      myProfit: profitMap.get(r.id) ?? 0,
+      totalSpent: Number(orderMap.get(r.id)?.spent ?? 0),
+      myProfit: Number(profitMap.get(r.id) ?? 0),
     }))
   }
 }

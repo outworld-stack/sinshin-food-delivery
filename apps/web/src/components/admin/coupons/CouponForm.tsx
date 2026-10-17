@@ -14,6 +14,7 @@ import type {
         CouponRule,
         CouponWithConditionsDto,
 } from '@sinshin/shared'
+import { normalizeCouponCode } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 // src/components/admin/coupons/CouponForm.tsx
 // phase-9: فرم واحد ساخت/ویرایش کوپن — جایگزین CouponModal (حذف‌شده).
@@ -94,7 +95,7 @@ const ruleConfig: Record<
                 optionalQuantity: true,
         },
         REGISTERED_DAYS_AGO: {
-                label: 'ثبت‌نام در X روز گذشته',
+                label: 'حداقل روزهای گذشته از ثبت‌نام',
                 placeholder: 'مثلا: 30',
                 inputType: 'number',
         },
@@ -334,7 +335,7 @@ export function CouponForm({
 
         const handleSubmit = useCallback(() => {
                 // ── اعتبارسنجی سمت کلاینت — پیام فارسی روشن، قبل از رفت‌وبرگشت سرور ──
-                const code = form.code.trim()
+                const code = normalizeCouponCode(form.code)
                 if (!CODE_PATTERN.test(code)) {
                         showToast(
                                 'کد تخفیف باید ۳ تا ۱۶ نویسه باشد: حروف لاتین یا فارسی، رقم و خط تیره',
@@ -342,11 +343,11 @@ export function CouponForm({
                         )
                         return
                 }
-                if (form.discount < 1 || form.discount > 99) {
+                if (!Number.isInteger(form.discount) || form.discount < 1 || form.discount > 99) {
                         showToast('درصد تخفیف باید بین ۱ تا ۹۹ باشد', 'error')
                         return
                 }
-                if (form.maxUses < 0) {
+                if (!Number.isInteger(form.maxUses) || form.maxUses < 0 || form.maxUses > 1_000_000) {
                         showToast('حداکثر استفاده نمی‌تواند منفی باشد', 'error')
                         return
                 }
@@ -354,17 +355,17 @@ export function CouponForm({
                 // می‌دهد؛ اینجا بدون رفت‌وبرگشت پیام روشن می‌گیرد). مقایسه در سطح
                 // «روزِ تهران» — تاریخِ خودِ امروز مجاز است.
                 if (form.expiryJalali) {
-                        const todayJalali = jalaliToISO(gregorianToJalali(new Date()))
-                        if (form.expiryJalali < todayJalali) {
+                        const expiry = buildExpiryISO()
+                        if (!expiry || new Date(expiry).getTime() <= Date.now()) {
                                 showToast(
-                                        'تاریخ انقضا نمی‌تواند در گذشته باشد — امروز یا آینده را انتخاب کنید',
+                                        'تاریخ و ساعت انقضا باید در آینده باشد',
                                         'error',
                                 )
                                 return
                         }
                 }
                 // stage-66 — سقف مصرف به‌ازای کاربر (فقط عمومی؛ عدد صحیح ≥ ۰)
-                if (form.isPublic && (!Number.isFinite(form.maxPerUser) || form.maxPerUser < 0)) {
+                if (form.isPublic && (!Number.isInteger(form.maxPerUser) || form.maxPerUser < 0 || form.maxPerUser > 1_000_000)) {
                         showToast('حداکثر مصرف به‌ازای هر کاربر نمی‌تواند منفی باشد', 'error')
                         return
                 }
@@ -375,13 +376,13 @@ export function CouponForm({
                         )
                         return
                 }
-                const emptyRule = form.rules.some((r) => String(r.value).trim() === '')
+                const emptyRule = !form.isPublic && form.rules.some((r) => String(r.value).trim() === '')
                 if (emptyRule) {
                         showToast('مقدار همه‌ی شرط‌ها را کامل کنید', 'error')
                         return
                 }
                 // stage-47 — سوییچ روشن ولی تعداد نامعتبر (< 1) → خطای روشن
-                const badQuantity = form.rules.some(
+                const badQuantity = !form.isPublic && form.rules.some(
                         (r) =>
                                 ruleConfig[r.type].optionalQuantity &&
                                 (r.quantity ?? 0) >= 1 === false &&

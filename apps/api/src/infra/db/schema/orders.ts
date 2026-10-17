@@ -1,5 +1,6 @@
 //src/infra/db/schema/orders.ts
 import {
+	type AnyPgColumn,
 	boolean,
 	index,
 	integer,
@@ -24,6 +25,7 @@ import type {
 import { users } from "./users";
 import { addresses } from "./addresses";
 import { couriers } from "./couriers";
+import { coupons } from "./coupons";
 
 /**
  * وضعیت‌ها:
@@ -98,7 +100,8 @@ export const orders = pgTable(
 			.default("GATEWAY"),
 		totalAmount: integer("total_amount").notNull(),
 		breakdown: jsonb("breakdown").$type<OrderBreakdown>().notNull(),
-		couponId: uuid("coupon_id").$type<CampaignId>(),
+		couponId: uuid("coupon_id").$type<CampaignId>()
+			.references((): AnyPgColumn => coupons.id, { onDelete: "set null" }),
 
 		/** تصویر لحظه‌ای هنگام ثبت — سفارش‌های قبل از فعال‌سازی ردیابی نمی‌گیرند */
 		trackingEnabled: boolean("tracking_enabled").notNull().default(false),

@@ -32,7 +32,7 @@ import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain
 import { Err } from '#/domain/shared/errors'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
-import { likePattern, maskPhone } from '#/domain/shared/pg'
+import { isUniqueViolation, likePattern, maskPhone } from '#/domain/shared/pg'
 import { deviceDisplayName } from '#/domain/device/device-label'
 import type { AdminOrdersData, AdminStatsDto, AdminUserSort, AdminUsersData } from '@sinshin/shared'
 
@@ -637,13 +637,13 @@ export class AdminService {
             if (actorRole !== 'admin') {
                 throw Err.forbidden('تغییر کد معرف فقط توسط ادمین اصلی')
             }
-            const clean = input.referralCode.trim()
-            if (!/^[A-Za-z0-9_-]{3,16}$/.test(clean)) {
-                throw Err.validation('کد معرف فقط حروف، رقم و خط تیره (۳ تا ۳۲ کاراکتر).')
+            const clean = input.referralCode.trim().toUpperCase()
+            if (!/^[A-Z0-9_-]{3,16}$/.test(clean)) {
+                throw Err.validation('کد معرف فقط حروف، رقم، خط تیره و زیرخط (۳ تا ۱۶ کاراکتر).')
             }
             if (clean !== user.referralCode) {
                 const clash = await this.deps.db.query.users.findFirst({
-                    where: eq(users.referralCode, clean),
+                    where: and(sql`upper(${users.referralCode}) = ${clean}`, ne(users.id, uid)),
                 })
                 if (clash && clash.id !== uid) {
                     throw Err.conflict('این کد معرف قبلاً برای کاربر دیگری ثبت شده است.')
@@ -653,7 +653,14 @@ export class AdminService {
         }
 
         if (Object.keys(patch).length === 0) return
-        await this.deps.db.update(users).set(patch).where(eq(users.id, uid))
+        try {
+            await this.deps.db.update(users).set(patch).where(eq(users.id, uid))
+        } catch (error) {
+            if (isUniqueViolation(error)) {
+                throw Err.conflict('شماره موبایل یا کد معرف قبلاً برای کاربر دیگری ثبت شده است.')
+            }
+            throw error
+        }
     }
 
 

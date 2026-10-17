@@ -4,7 +4,6 @@
 // کامیت پیشنهادی: stage fifty-eight
 // ═══════════════════════════════════════════════════════════════
 
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 // src/components/dashboard/order-detail/PendingPaymentBox.tsx
 /**
  * stage-58 — باکس «ادامه‌ی پرداخت» برای سفارش‌های PENDING_PAYMENT.
@@ -25,13 +24,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
  *  • خطای 409 (استعلام نامشخص/«چند دقیقه بعد») → توستِ apiError؛
  *    دکمه می‌ماند و کاربر دوباره می‌زند.
  */
-import { memo, useCallback, useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { CreditCard } from 'reicon-react'
 import { tpl, useI18n } from '#/i18n'
-import { mockPay, retryOrderPayment } from '#/server/checkout'
+import { useOrderPaymentRetry } from '#/hooks/dashboard/useOrderPaymentRetry'
 import type { UserOrder } from '#/server/user'
-import { useToastStore } from '#/stores/toastStore'
-import { qk } from '#/utils/queryKeys'
 
 interface PendingPaymentBoxProps {
 	order: UserOrder
@@ -40,9 +37,8 @@ interface PendingPaymentBoxProps {
 export const PendingPaymentBox = memo(function PendingPaymentBox({
 	order,
 }: PendingPaymentBoxProps) {
-	const { t, fmt, apiError } = useI18n()
-	const showToast = useToastStore((s) => s.showToast)
-	const queryClient = useQueryClient()
+	const { t, fmt } = useI18n()
+	const { retryMutation, handleRetry } = useOrderPaymentRetry(order.id)
 
 	// ?payment=pending — فقط بعد از هیدریشن بخوان (SSR بی‌خطر؛ پارامترِ
 	// ریدایرکتِ سرورِ callback است و اثری روی رندر اولیه ندارد)
@@ -55,47 +51,6 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 			setJustReturned(false)
 		}
 	}, [])
-
-	const retryMutation = useMutation({
-		mutationFn: () => retryOrderPayment({ orderId: order.id }),
-		onSuccess: async (res) => {
-			if (!res.paymentUrl) {
-				showToast(apiError(t['dash.orderDetail.pendingRetryNoUrl']), 'error')
-				return
-			}
-			// ── درگاه واقعی (URL مطلق) — ریدایرکت کامل ──
-			if (res.paymentUrl.startsWith('http')) {
-				window.location.href = res.paymentUrl
-				return
-			}
-			// ── MOCK (URL نسبی) — فقط محیط توسعه؛ روت mock فقط POST است ──
-			try {
-				const payResult = await mockPay(res.paymentUrl, true)
-				// پولینگ/کوئری صفحه وضعیت تازه را می‌گیرد؛ invalidate فوری‌تر
-				await queryClient.invalidateQueries({
-					queryKey: qk.orderDetails(order.id),
-				})
-				showToast(
-					payResult.paymentStatus === 'SUCCESS'
-						? t['checkout.paySuccess']
-						: t['checkout.payFailed'],
-					payResult.paymentStatus === 'SUCCESS' ? 'success' : 'error',
-				)
-			} catch (err) {
-				showToast(
-					apiError(err instanceof Error ? err.message : t['common.error']),
-					'error',
-				)
-			}
-		},
-		onError: (err) => {
-			showToast(apiError(err.message || t['common.error']), 'error')
-		},
-	})
-
-	const handleRetry = useCallback(() => {
-		if (!retryMutation.isPending) retryMutation.mutate()
-	}, [retryMutation])
 
 	const amount = order.breakdown?.amountPaidOnline ?? order.totalAmount
 

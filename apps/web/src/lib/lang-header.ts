@@ -40,7 +40,7 @@ function parseLangCookie(cookie: string): 'fa' | 'ar' {
 /** زبان فعالِ این درخواست — مرورگر یا SSR (اول ?lang=، بعد کوکی) */
 export async function resolveRequestLang(): Promise<'fa' | 'ar'> {
         if (!import.meta.env.SSR) {
-                return parseLangCookie(document.cookie)
+                try { return parseLangCookie(document.cookie) } catch { return 'fa' }
         }
         // SSR — الگوی geoGate: ماژول سرور فقط داخل این گارد پویا درون‌ریزی می‌شود؛
         // در بیلد کلاینت import.meta.env.SSR=false → کل شاخه (با درون‌ریزی) حذف.

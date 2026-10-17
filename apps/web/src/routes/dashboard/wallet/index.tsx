@@ -73,7 +73,7 @@ function WalletPage() {
           <WalletStatsRow
             stats={{
               totalReferralProfit: user.totalReferralProfit,
-              referralsCount: user.myReferrals.length,
+              referralsCount: user.totalReferrals ?? user.myReferrals.length,
             }}
           />
 
@@ -81,6 +81,8 @@ function WalletPage() {
             referrals={page.visibleReferrals}
             currentPage={page.refCurrentPage}
             totalPages={page.refTotalPages}
+            totalItems={page.refTotalItems}
+            allReferralsCount={user.totalReferrals ?? user.myReferrals.length}
             itemsPerPage={page.state.refLimit}
             onPageChange={page.handleRefPage}
             onItemsPerPageChange={page.handleRefLimit}
@@ -91,6 +93,7 @@ function WalletPage() {
             currentSort={page.state.txSort}
             currentPage={page.txCurrentPage}
             totalPages={page.txTotalPages}
+            totalItems={page.txTotalItems}
             itemsPerPage={page.state.txLimit}
             onSortChange={page.handleTxSort}
             onPageChange={page.handleTxPage}

@@ -14,6 +14,8 @@ import { qk } from '#/utils/queryKeys'
 import { ArticleForm } from '#/components/admin/ArticleForm'
 import { AdminArticleFormSkeleton } from '#/components/LoadingSkeletons'
 import { useToastStore } from '#/stores/toastStore'
+import { usePermissions } from '#/hooks/admin/usePermissions'
+import { PermissionGate } from '#/components/shared/PermissionGate'
 import type { ArticleFormData } from '#/types/forms'
 
 export const Route = createFileRoute('/admin/articles/$articleId/edit')({
@@ -31,6 +33,8 @@ function EditArticlePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const showToast = useToastStore((state) => state.showToast)
+  // stage-82 — گارد: ادمین اصلی همیشه؛ ادمین۲ فقط با articlesWrite
+  const { permissions } = usePermissions()
 
   const { data: article, isLoading } = useQuery(adminArticleDetailsOptions(articleId))
 
@@ -47,6 +51,12 @@ function EditArticlePage() {
     }
   })
 
+  // stage-82 — گارد: ادمین اصلی همیشه؛ ادمین۲ فقط با articlesWrite
+  // (بعد از همه‌ی هوک‌ها — قانونِ useHookAtTopLevel)
+  if (!permissions.articlesWrite) {
+    return <PermissionGate hasAccess={false} pageName="ویرایش مقاله" />
+  }
+
   if (isLoading || !article) {
     return <AdminArticleFormSkeleton />
   }
@@ -60,6 +70,8 @@ function EditArticlePage() {
         // round-34 — نرمال‌سازی فیلدهای عربی (null → '' = پشتیبان فارسی)
         // stage-60 — پرچم «ویژه» (نیامد = خاموش)
         isFeatured: article.isFeatured ?? false,
+        // stage-82 — سند بلوکی (null = مقاله‌ی متنی قدیمی — فرم از متن ساده شروع می‌کند)
+        blocks: article.blocks ?? null,
         titleAr: article.titleAr ?? '',
         excerptAr: article.excerptAr ?? '',
         contentAr: article.contentAr ?? '',

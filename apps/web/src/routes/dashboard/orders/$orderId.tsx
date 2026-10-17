@@ -29,10 +29,12 @@ import { ReferralProfitBox } from '#/components/dashboard/order-detail/ReferralP
 import { OrderDetailSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { useOrderDetailPage } from '#/hooks/dashboard/useOrderDetailPage'
+import { useOrderFinancialSync } from '#/hooks/dashboard/useOrderFinancialSync'
 import { useI18n } from '#/i18n'
 import { useAuthStore } from '#/stores/authStore'
 import { useCartStore } from '#/stores/cartStore'
-import { PENDING_CHECKOUT_KEY } from '#/types/site/checkout'
+import { consumePendingCheckout } from '#/lib/pending-checkout'
+import { clearCheckoutIntent } from '#/lib/checkout-intent'
 import {
 	liveTrackingOptions,
 	orderDetailsOptions,
@@ -85,14 +87,15 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 	})
 
 	const page = useOrderDetailPage(orderId)
+	useOrderFinancialSync(orderId, order?.status, order?.paymentStatus)
 
 	// ⬅ phase-3: برگشت از درگاه — اولین SUCCESS با پرچمِ «همین سفارشِ همین تب» →
 	// سبد پاک شود. دیدن سفارش‌های قدیمی/سفارش دیگران سبد را پاک نمی‌کند.
 	useEffect(() => {
-		if (!order || order.paymentStatus !== 'SUCCESS') return
-		if (sessionStorage.getItem(PENDING_CHECKOUT_KEY) !== orderId) return
-		sessionStorage.removeItem(PENDING_CHECKOUT_KEY)
-		clearCart()
+		if (!order || !['SUCCESS', 'FAILED', 'REFUNDED'].includes(order.paymentStatus)) return
+		if (!consumePendingCheckout(orderId)) return
+		clearCheckoutIntent()
+		if (order.paymentStatus === 'SUCCESS') clearCart()
 		setActiveOrderId(orderId)
 	}, [order, orderId, clearCart, setActiveOrderId])
 

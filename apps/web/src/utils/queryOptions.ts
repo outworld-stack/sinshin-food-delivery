@@ -154,9 +154,10 @@ export const myOrdersOptions = (page: number, limit: number, sort: string) =>
 // stage-67 — صندوق اعلان‌های من (صفحه‌ی پروفایل): staleTime کوتاه —
 // اعلان‌ها «زنده»اند (SSE notify:{userId} در هوک صفحه invalidate می‌کند)؛
 // این staleTime فقط برای بازگشت‌های بدون رویداد است.
-export const myNotificationsOptions = queryOptions({
-  queryKey: qk.myNotifications,
+export const myNotificationsOptions = (userId: string | undefined) => queryOptions({
+  queryKey: [...qk.myNotifications, userId],
   queryFn: () => getMyNotifications(),
+  enabled: Boolean(userId),
   staleTime: 30_000,
 })
 

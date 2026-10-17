@@ -5,19 +5,16 @@
  *
  *   bun scripts/test-zarinpal-verify.ts   (از apps/api)
  *
- * ریشه‌ی باگِ گزارش کارفرما: زرین‌پال برای «پرداخت لغوشده» (Status=NOK در
- * callback) در Verify پاسخی برمی‌گرداند که کدش غالباً در آرایه/شیءِ errors
- * می‌آید نه data.code — آداپتور قبلاً فقط data.code می‌خواند ⇒ undefined ⇒
- * indeterminate ⇒ سفارش تا ۲۴ ساعت در PENDING_PAYMENT می‌ماند و مبلغش در
- * «مجموع پرداخت‌ها» می‌نشست. این تست هر شکل را ثابت می‌کند:
+ * خطای اعتبارسنجی/پذیرنده عدم برداشت وجه را ثابت نمی‌کند. تست‌ها شکل
+ * آرایه‌ای/شیئی errors و data.code را با همین قاعده بررسی می‌کنند:
  *
  *  موفق:    data.code=100 / data.code=101
- *  قطعی-ناموفق (حالا از هر دو شکل): data.code یا errors[].code در {-9,-10,-11}
+ *  نامشخص: data.code یا errors[].code در {-9,-10,-11}
  *    • آرایه‌ای:  {"data":{},"errors":[{"code":-11,"message":"…"}]}
  *    • شیئی:     {"data":{},"errors":{"code":-11}}
  *  نامشخص:   کد ناشناخته / data خالی / پاسخ غیر-JSON (null)
  *  جعل‌گریزی: Status=NOK + verify=100 → موفق (پاسخ سرور-به-سرور مقدم است)
- *  پارامترها: مبلغ ریالی (×10)، authority از gatewayRef مقدم بر query
+ *  پارامترها: مبلغ ریالی (×10)، authority فقط از gatewayRef ذخیره‌شده
  */
 import type { AppConfig } from '#/infra/config/env'
 import { ZarinpalAdapter } from '#/domain/payment/zarinpal.adapter'
@@ -82,34 +79,34 @@ async function main(): Promise<void> {
   mockFetch(() => jsonResponse({ data: { code: 101 } }))
   ok('data.code=101 → success (قبلاً تاییدشده)', (await adapter.verify({ gatewayRef: AUTH, amount, query: {} })).success)
 
-  // ── قطعی-ناموفق — شکلِ data.code (از قبل کار می‌کرد) ──
+  // Merchant/validation errors cannot establish nonpayment.
   mockFetch(() => jsonResponse({ data: { code: -11 } }))
   const r11 = await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
-  ok('data.code=-11 → FAILED قطعی (بدون indeterminate)', !r11.success && !r11.indeterminate)
+  ok('merchant error -11 cannot establish nonpayment', !r11.success && r11.indeterminate === true)
 
-  // ── قطعی-ناموفق — شکلِ errors آرایه‌ای (باگِ اصلی stage-74) ──
+  // The same rule applies to errors arrays.
   mockFetch(() => jsonResponse({ data: {}, errors: [{ code: -11, message: 'Transaction not found' }] }))
   const rArr11 = await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
   ok(
-    'errors[0].code=-11 (آرایه) → FAILED قطعی — باگ اصلی رفع شد',
-    !rArr11.success && !rArr11.indeterminate,
+    'array merchant errors preserve pending payment',
+    !rArr11.success && rArr11.indeterminate === true,
     JSON.stringify(rArr11),
   )
 
   mockFetch(() => jsonResponse({ data: {}, errors: [{ code: -9, message: 'amount mismatch' }] }))
   const rArr9 = await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
-  ok('errors[0].code=-9 (آرایه) → FAILED قطعی', !rArr9.success && !rArr9.indeterminate)
+  ok('validation error -9 preserves pending payment', !rArr9.success && rArr9.indeterminate === true)
 
   mockFetch(() => jsonResponse({ data: {}, errors: [{ code: -10, message: 'merchant' }] }))
   const rArr10 = await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
-  ok('errors[0].code=-10 (آرایه) → FAILED قطعی', !rArr10.success && !rArr10.indeterminate)
+  ok('merchant/IP error -10 preserves pending payment', !rArr10.success && rArr10.indeterminate === true)
 
-  // ── قطعی-ناموفق — شکلِ errors شیئی ──
+  // And to a single errors object.
   mockFetch(() => jsonResponse({ data: {}, errors: { code: -11, message: 'not found' } }))
   const rObj11 = await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
   ok(
-    'errors.code=-11 (شیء) → FAILED قطعی',
-    !rObj11.success && !rObj11.indeterminate,
+    'object merchant errors preserve pending payment',
+    !rObj11.success && rObj11.indeterminate === true,
     JSON.stringify(rObj11),
   )
 
@@ -138,14 +135,14 @@ async function main(): Promise<void> {
     rFakeNok.success,
   )
 
-  mockFetch(() => jsonResponse({ data: {}, errors: [{ code: -11 }] }))
+  mockFetch(() => jsonResponse({ data: {}, errors: [{ code: -51 }] }))
   const rRealNok = await adapter.verify({
     gatewayRef: AUTH,
     amount,
     query: { Status: 'NOK' },
   })
   ok(
-    'Status=NOK + verify=-11 (errors) → FAILED قطعی (لغوی واقعی)',
+    'explicit unsuccessful transaction verdict -51 can release payment',
     !rRealNok.success && !rRealNok.indeterminate,
   )
 

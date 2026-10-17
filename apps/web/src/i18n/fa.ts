@@ -493,8 +493,11 @@ export const fa = {
         'dash.wallet.title': 'کیف پول من',
         'dash.wallet.subtitle': 'مدیریت موجودی و تراکنش‌های مالی',
         'dash.wallet.currentBalance': 'موجودی فعلی شما',
+        'dash.home.copyFailed': 'کپی لینک انجام نشد؛ لینک بالا را انتخاب و کپی کنید.',
+        'dash.orderDetail.refundedToWallet': 'مبلغ {n} به کیف پول شما بازگردانده شد.',
+        'dash.wallet.recentReferralsHint': 'این فهرست {n} زیرمجموعهٔ اخیر را نشان می‌دهد.',
         'dash.wallet.chargeNote':
-                'کیف پول سین‌شین فقط از طریق سود معرفی دوستان شارژ می‌شود و امکان افزایش آن از درگاه پرداخت وجود ندارد.',
+                'سود معرفی دوستان و مبالغ بازگشتی به کیف پول واریز می‌شوند. امکان شارژ مستقیم از درگاه پرداخت وجود ندارد.',
         'dash.wallet.totalInviteProfit': 'سود کلی از دعوت',
         'dash.wallet.referralsCount': 'تعداد زیرمجموعه‌ها',
         'dash.wallet.recentTxs': 'تراکنش‌های اخیر',

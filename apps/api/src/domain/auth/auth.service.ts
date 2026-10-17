@@ -1,8 +1,8 @@
 //src/domain/auth/auth.service.ts
 import { desc, eq, sql } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
-import { devices, deviceIdentities, users, type UserRow, type DeviceRow } from '#/infra/db/schema'
+import type { Db, DbOrTx } from '#/infra/db/client'
+import { devices, deviceEvents, deviceIdentities, users, type UserRow, type DeviceRow } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { AppError, Err } from '#/domain/shared/errors'
 import { isUniqueViolation } from '#/domain/shared/pg'
@@ -131,24 +131,6 @@ export class AuthService {
       throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
     }
 
-    // stage-79 — ممیزیِ گذرِ استثنا: رویداد PERMIT_BYPASS روی همین ردیفِ
-    // دستگاه (پنل ادمین می‌بیند). مصرفِ واقعی بعداً داخل tx اتفاق می‌افتد.
-    if (permit && peek.device) {
-      const owner = peek.device.registeredOwnerPhone ?? null
-      await this.deps.devices.logEvent(
-        peek.device.id,
-        phone,
-        'PERMIT_BYPASS',
-        ip,
-        signals.userAgent ?? null,
-        {
-          permitId: permit.id,
-          deviceBlocked: peek.device.isBlocked,
-          ownerConflict: owner !== null && owner !== phone,
-        },
-      )
-    }
-
     const maxPhones = config.device.maxPhonesPerDevice
     let finalDevice: DeviceRow | undefined
     // stage-79 — آیا همین ثبت‌نام از مسیرِ مجوزِ مصرف‌شده گذشت؟ (برای
@@ -200,15 +182,18 @@ export class AuthService {
             `[device] referral blocked for ${phone} — cluster already has ${peek.clusterPhoneCount} phone(s)`,
           )
         } else {
-          const refCode = opts.refCode.trim().toUpperCase().slice(0, 32)
-          const referrer = await db.query.users.findFirst({
-            where: eq(users.referralCode, refCode),
-          })
-          referredBy = referrer?.id ?? null
+          const refCode = opts.refCode.trim().toUpperCase()
+          if (/^[A-Z0-9_-]{3,16}$/.test(refCode)) {
+            const referrers = await db.query.users.findMany({
+              where: sql`upper(${users.referralCode}) = ${refCode}`,
+              limit: 2,
+            })
+            // Legacy codes can differ only by case. Do not guess which account
+            // should receive money when the normalized code is ambiguous.
+            referredBy = referrers.length === 1 ? referrers[0]!.id : null
+          }
         }
       }
-
-      await this.deps.devices.assertQuota(phone, willBeRole, peek.device?.id ?? null)
 
       // ── تراکنش اتمیک: کاربر + دستگاه + claim مالکیت — یا هیچ ──
       // stage-72 (P2-۹/۱۰): ① سهمیه داخل tx بعد از قفلِ شماره (TOCTOU)
@@ -222,32 +207,30 @@ export class AuthService {
         db.transaction(async (tx) => {
           // قفلِ شماره: ثبت‌نام/ورودِ هم‌زمانِ همین شماره سریال می‌شود
           await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
+          const currentPeek = await this.deps.devices.peekOn(tx, signals, phone)
+          await this.deps.devices.assertQuotaOn(tx, phone, willBeRole, currentPeek.device?.id ?? null)
 
           // ── stage-79 — claim اتمیکِ مجوز (قبل از هر تصمیمِ استثنا) ──
           const claimedPermit = permit
-            ? await this.deps.permits.consumeForRegistration(tx, phone, peek.device?.id ?? null)
+            ? await this.deps.permits.consumeForRegistration(tx, phone, currentPeek.device?.id ?? null)
             : null
           const permitOverride = claimedPermit !== null
 
           // مجوزِ لحظه‌ای (peek) دیده شد ولی claim نشد — لغو/انقضای هم‌زمان:
           // تصمیمِ گذر از مسدودیِ مرحله‌ی peek را برگردان (مسیرِ سختِ عادی)
-          if (permit && !permitOverride && peek.device?.isBlocked) {
+          if (!permitOverride && currentPeek.device?.isBlocked) {
             throw Err.forbidden('این دستگاه مسدود شده است؛ با پشتیبانی تماس بگیرید.')
           }
-
-          // بازبینی سهمیه زیر قفل — دو ورودِ هم‌زمانِ همین شماره دیگر سقف
-          // دستگاه‌ها را رد نمی‌کنند (P2-۹)
-          await this.deps.devices.assertQuotaOn(tx, phone, willBeRole, peek.device?.id ?? null)
 
           // بازبینی مالکیت زیر قفل — رقیبی بین peek و تراکنش claim کرده باشد
           // (stage-79: با مجوزِ مصرف‌شده این چک نادیده گرفته می‌شود —
           // finalize با claim بی‌قیدوشرط مالک را بازنویسی می‌کند و گام ۵-b
           // دستگاه را برای همیشه می‌بندد)
-          if (peek.device && !permitOverride) {
+          if (currentPeek.device && !permitOverride) {
             const rows = await tx
               .select({ owner: devices.registeredOwnerPhone })
               .from(devices)
-              .where(eq(devices.id, peek.device.id))
+              .where(eq(devices.id, currentPeek.device.id))
               .for('update')
             const currentOwner = rows[0]?.owner ?? null
             if (config.deviceEnforcement && maxPhones > 0 && currentOwner && currentOwner !== phone) {
@@ -261,7 +244,7 @@ export class AuthService {
               phone,
               role: willBeRole,
               lastLoginAt: new Date(),
-              referralCode: await this.generateUniqueReferralCode(),
+              referralCode: await this.generateUniqueReferralCode(tx),
               referredBy,
               termsAcceptedAt: new Date(),
               termsVersion: opts.termsVersion ?? null,
@@ -273,12 +256,32 @@ export class AuthService {
             signals,
             phone,
             ip,
-            peek,
+            peek: currentPeek,
             event: 'REGISTER',
             ...(permitOverride
               ? { permitOverride: true, permitId: claimedPermit?.id ?? null }
               : {}),
           })
+
+          // New device links only exist after finalize. Recheck the resulting
+          // cluster before committing a referral, including storage-reset devices.
+          if (createdUser.referredBy) {
+            const clusterPhones = await this.deps.devices.referralBlockedForDeviceOn(
+              tx, device.id, phone,
+            )
+            if (clusterPhones >= config.device.referralBlockAfter) {
+              await tx.update(users).set({ referredBy: null }).where(eq(users.id, createdUser.id))
+              createdUser.referredBy = null
+              await tx.insert(deviceEvents).values({
+                deviceId: device.id,
+                phone,
+                event: 'REFERRAL_BLOCKED',
+                ip: ip ?? null,
+                userAgent: signals.userAgent ?? null,
+                metadata: { refCode: opts.refCode, clusterPhones },
+              })
+            }
+          }
 
           // رکوردِ ممیزی: ردیفِ دستگاهِ نهایی که مجوز را مصرف کرد
           if (claimedPermit) {
@@ -295,14 +298,12 @@ export class AuthService {
     } else {
       if (user.bannedAt) throw Err.banned()
 
-      await this.deps.devices.assertQuota(phone, user.role, peek.device?.id ?? null)
-
       const existingUser = user
       const outcome = await db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`)
-
-        // stage-72 (P2-۹) — بازبینی سهمیه داخل tx (همان الگوی ثبت‌نام)
-        await this.deps.devices.assertQuotaOn(tx, phone, existingUser.role, peek.device?.id ?? null)
+        const currentPeek = await this.deps.devices.peekOn(tx, signals, phone)
+        const effectiveRole = config.isSuperAdmin(phone) ? 'admin' : existingUser.role
+        await this.deps.devices.assertQuotaOn(tx, phone, effectiveRole, currentPeek.device?.id ?? null)
 
         const patch: Partial<typeof users.$inferInsert> = { lastLoginAt: new Date() }
         if (config.isSuperAdmin(phone) && existingUser.role !== 'admin') patch.role = 'admin'
@@ -320,7 +321,7 @@ export class AuthService {
           signals,
           phone,
           ip,
-          peek,
+          peek: currentPeek,
           event: 'LOGIN',
         })
         return { user: updated ?? existingUser, device }
@@ -422,11 +423,11 @@ export class AuthService {
     }
   }
 
-  private async generateUniqueReferralCode(): Promise<string> {
+  private async generateUniqueReferralCode(db: DbOrTx): Promise<string> {
     for (let i = 0; i < 5; i++) {
       const code = i < 4 ? randomReferralCode(6) : randomReferralCode(10)
-      const clash = await this.deps.db.query.users.findFirst({
-        where: eq(users.referralCode, code),
+      const clash = await db.query.users.findFirst({
+        where: sql`upper(${users.referralCode}) = ${code}`,
       })
       if (!clash) return code
     }

@@ -19,16 +19,64 @@
 import { Elysia, t } from 'elysia'
 
 import type { SessionService } from '#/domain/auth/session.service'
+import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { ArticleService } from '#/domain/article/article.service'
-import { requireAdmin } from '#/http/hooks/require-auth'
+import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { UUID_PATTERN } from '#/domain/shared/ids'
+
+const HEX_COLOR = '^#[0-9a-fA-F]{6}$'
 
 
 const processSchema = t.Object({
   title: t.String({ minLength: 1, maxLength: 120 }),
   items: t.Array(t.String({ minLength: 1, maxLength: 300 }), { maxItems: 20 }),
 })
+
+// ═══ stage-82 — پاکتِ سندِ بلوکی (لایه ۱ از ۳) ═══
+// enum ها و سقف‌های کلی این‌جا؛ اعتبارسنجیِ سخت‌گیرِ per-type در
+// blocks-normalize سرویس انجام می‌شود (لایه ۲). props عمداً باز است —
+// normalizer فقط whitelist را نگه می‌دارد و باقی را حذف می‌کند.
+const blockStyleSchema = t.Object({
+  bg: t.Optional(t.String({ pattern: HEX_COLOR, maxLength: 7 })),
+  fg: t.Optional(t.String({ pattern: HEX_COLOR, maxLength: 7 })),
+  align: t.Optional(t.Union([t.Literal('start'), t.Literal('center')])),
+  pad: t.Optional(t.Union([t.Literal('sm'), t.Literal('md'), t.Literal('lg')])),
+})
+const blockSchema = t.Object({
+  id: t.Optional(t.String({ maxLength: 64 })),
+  type: t.Union([
+    t.Literal('hero'),
+    t.Literal('heading'),
+    t.Literal('paragraph'),
+    t.Literal('image'),
+    t.Literal('gallery'),
+    t.Literal('quote'),
+    t.Literal('callout'),
+    t.Literal('list'),
+    t.Literal('cta'),
+    t.Literal('divider'),
+  ]),
+  width: t.Optional(t.Union([t.Literal('sm'), t.Literal('md'), t.Literal('lg'), t.Literal('full')])),
+  anim: t.Optional(
+    t.Union([
+      t.Literal('none'),
+      t.Literal('fade'),
+      t.Literal('fade-up'),
+      t.Literal('slide'),
+      t.Literal('zoom'),
+      t.Literal('blur'),
+    ]),
+  ),
+  style: t.Optional(blockStyleSchema),
+  props: t.Optional(t.Record(t.String(), t.Unknown())),
+})
+const blocksDocSchema = t.Nullable(
+  t.Object({
+    version: t.Literal(1),
+    blocks: t.Array(blockSchema, { maxItems: 200 }),
+  }),
+)
 
 const articleBody = t.Object({
   title: t.String({ minLength: 1, maxLength: 160 }),
@@ -47,6 +95,8 @@ const articleBody = t.Object({
   processesAr: t.Optional(t.Nullable(t.Array(processSchema, { maxItems: 10 }))),
   // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora؛ نیامد = false/دست‌نخورده)
   isFeatured: t.Optional(t.Boolean()),
+  // stage-82 — سندِ بلوکیِ صفحه‌ساز (null = پاک‌کردن → مقاله‌ی متنی)
+  blocks: t.Optional(blocksDocSchema),
 })
 
 const categoryBody = t.Object({
@@ -61,6 +111,8 @@ const categoryBody = t.Object({
 export interface ArticlesRoutesDeps {
   sessions: SessionService
   articles: ArticleService
+  /** stage-82 — ادمین۲ با articlesRead/Write هم وارد می‌شود (ادمین اصلی همیشه) */
+  admin2: Admin2Service
 }
 
 export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
@@ -91,9 +143,11 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
       },
     )
 
-  // ═══ ادمین — فقط ادمین اصلی (منوی ادمین۲ آیتم مقالات ندارد) ═══
-  const adminRoutes = new Elysia({ prefix: '/admin/articles', tags: ['Admin / Articles'] })
-    .use(requireAdmin(deps.sessions))
+  // ═══ ادمین — stage-82: ادمین اصلی + ادمین۲ با مجوز (پیش‌تر فقط ادمین اصلی).
+  // requireAdmin2Permission نقش admin را همیشه رد می‌کند؛ ادمین۲ فقط با
+  // پرچمِ متناظر — خواندن با articlesRead، نوشتن با articlesWrite. ═══
+  const adminRead = new Elysia({ prefix: '/admin/articles', tags: ['Admin / Articles'] })
+    .use(requireAdmin2Permission({ sessions: deps.sessions, admin2: deps.admin2 }, 'articlesRead'))
 
     .get('/', () => deps.articles.listAdmin(), {
       detail: { summary: 'All articles incl. INACTIVE' },
@@ -106,6 +160,10 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
         detail: { summary: 'Article detail for edit form (any status)' },
       },
     )
+
+  const adminWrite = new Elysia({ prefix: '/admin/articles', tags: ['Admin / Articles'] })
+    .use(requireAdmin2Permission({ sessions: deps.sessions, admin2: deps.admin2 }, 'articlesWrite'))
+
     .post('/', ({ body }) => deps.articles.create(body), {
       body: articleBody,
       detail: { summary: 'Create article' },
@@ -159,5 +217,5 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
       },
     )
 
-  return new Elysia().use(publicRoutes).use(adminRoutes)
+  return new Elysia().use(publicRoutes).use(adminRead).use(adminWrite)
 }

@@ -1,102 +1,91 @@
 // src/domain/order/checkout-idempotency.service.ts
 import { and, eq, isNull, lt, sql } from 'drizzle-orm'
+import { normalizeCouponCode, type CheckoutInput } from '@sinshin/shared'
 
 import type { Db } from '#/infra/db/client'
 import { checkoutIdempotency } from '#/infra/db/schema'
 
-/** نتیجهٔ تصرف — سه حالت ممکن برای کلیدِ Idempotency-Key چک‌اوت */
+export type CheckoutClaim = { key: string; token: string }
 export type IdempotencyClaim =
-  | { kind: 'claimed' }
+  | { kind: 'claimed'; token: string }
   | { kind: 'replay'; response: Record<string, unknown> }
   | { kind: 'in-flight' }
+  | { kind: 'mismatch' }
 
-/**
- * round-20 — تصرف اتمیکِ تکرارناپذیری چک‌اوت روی PK مرکب (user_id, key).
- *
- * چرا DB و نه Redis (جایگزینی کامل، نه لایهٔ دوم): چک‌اوت ذاتاً یک عمل
- * سنگینِ DB است؛ هزینهٔ یک درجِ اضافی در برابر «سفارش تکراری با کسر
- * دوبارهٔ کیف پول» صفر است. ذخیره‌سازی مقیم یعنی قطعی و ری‌استارتِ ردیس
- * (که تا امروز پنجرهٔ تکرارناپذیری را بی‌صدا صفر می‌کرد) دیگر اثری بر
- * مسیر پول ندارد.
- *
- * پایداری: خطای DB در claim/complete مثل خود چک‌اوت خطای ۵۰۰ می‌دهد،
- * نه کرش؛ complete/release عمداً بهترین‌تلاش‌اند (توضیح در تک‌تک).
- */
+/** Stable across JSON property order and omitted nullable fields. */
+export function checkoutRequestHash(input: CheckoutInput): string {
+  const canonical = JSON.stringify({
+    items: input.items.map((item) => ({
+      productId: item.productId.toLowerCase(),
+      sizeId: item.sizeId?.toLowerCase() ?? null,
+      quantity: item.quantity,
+    })),
+    deliveryType: input.deliveryType,
+    useWallet: input.useWallet,
+    addressId: input.deliveryType === 'DELIVERY' ? input.addressId?.toLowerCase() ?? null : null,
+    customerNote: input.customerNote ?? null,
+    couponCode: normalizeCouponCode(input.couponCode ?? '') || null,
+    gatewayId: input.gatewayId?.trim().toUpperCase() || null,
+  })
+  return new Bun.CryptoHasher('sha256').update(canonical).digest('hex')
+}
+
 const STALE_CLAIM = sql`now() - interval '60 seconds'`
 
 export class CheckoutIdempotency {
   constructor(private readonly deps: { db: Db }) {}
 
-  /**
-   * ① درجِ آزاد → تصرف مال ماست
-   * ② ردیف موجود با پاسخ → replay همان پاسخ
-   * ③ ردیفِ در-حال-پردازشِ تازه → درگیری (409 در روت)
-   * ④ ردیفِ در-حال-پردازشِ بی‌صاحب (>۶۰s — کرش فرایند) → تصرف اتمیک
-   */
-  async claim(userId: string, key: string): Promise<IdempotencyClaim> {
+  async claim(userId: string, key: string, requestHash: string): Promise<IdempotencyClaim> {
     const { db } = this.deps
-
-    const inserted = await db
-      .insert(checkoutIdempotency)
-      .values({ userId, key })
+    const token = crypto.randomUUID()
+    const inserted = await db.insert(checkoutIdempotency)
+      .values({ userId, key, requestHash, claimToken: token })
       .onConflictDoNothing()
       .returning({ userId: checkoutIdempotency.userId })
-    if (inserted.length > 0) return { kind: 'claimed' }
+    if (inserted.length > 0) return { kind: 'claimed', token }
 
-    const existing = await db
-      .select({ response: checkoutIdempotency.response })
-      .from(checkoutIdempotency)
+    const [existing] = await db.select().from(checkoutIdempotency)
       .where(and(eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, key)))
-      .then((rows) => rows[0])
-    // ردیف همین لحظه حذف شد (retention روی ردیف >۴۸h) — مثل درگیریِ
-    // زنده رفتار می‌کنیم؛ تلاش مجددِ بعدیِ فرانت با کلید تازه بی‌درنگ می‌گیرد
     if (!existing) return { kind: 'in-flight' }
+    if (existing.requestHash !== null && existing.requestHash !== requestHash) return { kind: 'mismatch' }
     if (existing.response !== null) return { kind: 'replay', response: existing.response }
 
-    // تصرف فقط با ساعت DB (بدون اختلاف ساعت): تصرفِ تازه (<۶۰s) شرط را رد می‌کند.
-    // tx چک‌اوت هرگز ۶۰ ثانیه طول نمی‌کشد؛ صاحبِ واقعیِ زنده حذف نمی‌شود.
-    const took = await db
-      .update(checkoutIdempotency)
-      .set({ claimedAt: sql`now()`, updatedAt: sql`now()` })
-      .where(
-        and(
-          eq(checkoutIdempotency.userId, userId),
-          eq(checkoutIdempotency.key, key),
-          isNull(checkoutIdempotency.response),
-          lt(checkoutIdempotency.claimedAt, STALE_CLAIM),
-        ),
-      )
+    // Checkout holds this row lock until both its order and fallback response
+    // commit. A slow live transaction cannot be reclaimed after the lease ages.
+    const took = await db.update(checkoutIdempotency)
+      .set({ claimToken: token, requestHash, claimedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(and(
+        eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, key),
+        eq(checkoutIdempotency.claimToken, existing.claimToken),
+        isNull(checkoutIdempotency.response), lt(checkoutIdempotency.claimedAt, STALE_CLAIM),
+      ))
       .returning({ userId: checkoutIdempotency.userId })
-    return took.length > 0 ? { kind: 'claimed' } : { kind: 'in-flight' }
+    return took.length > 0 ? { kind: 'claimed', token } : { kind: 'in-flight' }
   }
 
-  /**
-   * ثبت پاسخ نهایی برای replay ها — بهترین‌تلاش و عمداً غیر-پرتاب:
-   * سفارش همین حالا commit شده و پاسخ به دست کاربر رسیده؛ اگر این درج
-   * شکست بخورد فقط «کشِ کلید» از دست می‌رود (replay بعدی سفارش جدید
-   * می‌سازد — همان قرارداد ۴۸ ساعتهٔ پنجره)؛ خطا نباید موفقیت را بشکند.
-   */
-  async complete(userId: string, key: string, response: Record<string, unknown>): Promise<void> {
+  /** Enrich the already durable fallback with the gateway URL. Failure leaves
+   * the committed order response available; it never permits a second order. */
+  async complete(userId: string, claim: CheckoutClaim, response: Record<string, unknown>): Promise<void> {
     try {
-      await this.deps.db
-        .update(checkoutIdempotency)
+      await this.deps.db.update(checkoutIdempotency)
         .set({ response, updatedAt: sql`now()` })
-        .where(and(eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, key)))
+        .where(and(
+          eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, claim.key),
+          eq(checkoutIdempotency.claimToken, claim.token),
+        ))
     } catch (err) {
-      console.error('[idempotency] complete failed (order already committed):', err)
+      console.error('[idempotency] response enrichment failed; durable order response retained:', err)
     }
   }
 
-  /**
-   * آزادسازی تصرف پس از شکست چک‌اوت — تلاش مجدد بلافاصله ممکن می‌شود.
-   * غیر-پرتاب: خطای این پاک‌سازی نباید خطای اصلیِ چک‌اوت را بپوشاند؛
-   * اگر نشد، تصرف بعد از ۶۰ ثانیه خودبه‌خود دوباره ممکن می‌شود.
-   */
-  async release(userId: string, key: string): Promise<void> {
+  /** Release only this attempt, and only if no order was committed. */
+  async release(userId: string, claim: CheckoutClaim): Promise<void> {
     try {
-      await this.deps.db
-        .delete(checkoutIdempotency)
-        .where(and(eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, key)))
+      await this.deps.db.delete(checkoutIdempotency)
+        .where(and(
+          eq(checkoutIdempotency.userId, userId), eq(checkoutIdempotency.key, claim.key),
+          eq(checkoutIdempotency.claimToken, claim.token), isNull(checkoutIdempotency.response),
+        ))
     } catch (err) {
       console.error('[idempotency] release failed:', err)
     }

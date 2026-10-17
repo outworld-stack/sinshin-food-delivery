@@ -1,7 +1,7 @@
 // src/components/dashboard/wallet/ReferralsList.tsx
 import { memo } from 'react'
 import { Pagination } from '#/components/Pagination'
-import { useI18n } from '#/i18n'
+import { tpl, useI18n } from '#/i18n'
 import { formatReferralId } from '#/utils/format'
 import type { ReferralRow } from '#/types/dashboard/wallet'
 
@@ -9,13 +9,15 @@ interface ReferralsListProps {
   referrals: ReferralRow[]
   currentPage: number
   totalPages: number
+  totalItems: number
+  allReferralsCount: number
   itemsPerPage: number
   onPageChange: (page: number) => void
   onItemsPerPageChange: (limit: number) => void
 }
 
 export const ReferralsList = memo(function ReferralsList({
-  referrals, currentPage, totalPages, itemsPerPage, onPageChange, onItemsPerPageChange,
+  referrals, currentPage, totalPages, totalItems, allReferralsCount, itemsPerPage, onPageChange, onItemsPerPageChange,
 }: ReferralsListProps) {
   const { t, fmt } = useI18n()
   return (
@@ -23,6 +25,12 @@ export const ReferralsList = memo(function ReferralsList({
       <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-6 pb-4 border-b border-gray-100 dark:border-white/5">
         {t['dash.home.myReferrals']}
       </h2>
+
+      {allReferralsCount > totalItems && (
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 font-DanaMedium">
+          {tpl(t['dash.wallet.recentReferralsHint'], { n: fmt.num(totalItems) })}
+        </p>
+      )}
 
       {referrals.length > 0 ? (
         <div className="space-y-3">
@@ -57,13 +65,13 @@ export const ReferralsList = memo(function ReferralsList({
         </div>
       )}
 
-      {totalPages > 1 && (
+      {totalItems > 0 && (
         <div className="mt-4">
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
             itemsPerPage={itemsPerPage}
-            totalItems={referrals.length}
+            totalItems={totalItems}
             onPageChange={onPageChange}
             onItemsPerPageChange={onItemsPerPageChange}
             pageSizeOptions={[5, 10]}

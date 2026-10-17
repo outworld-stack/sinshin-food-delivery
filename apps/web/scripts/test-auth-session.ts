@@ -92,6 +92,10 @@ const server = Bun.serve({
                 headers: { 'content-type': 'application/json' },
             })
         }
+        if (route === '/race') {
+            return Response.json({ error: { message: 'نشست هم‌زمان چرخیده است؛ دوباره تلاش کنید.' } }, { status: 401 })
+        }
+        if (route === '/invalid-token') return Response.json({ accessToken: 42 })
         return new Response('?', { status: 500 })
     },
 })
@@ -221,9 +225,10 @@ async function main(): Promise<void> {
     // فقط watchdog تضمین می‌کند refreshPromise در بودجه settle شود.
     {
         const realFetch = globalThis.fetch
+        let releaseLate!: (response: Response) => void
         ;(globalThis as Record<string, unknown>).fetch = () =>
-            new Promise<Response>(() => {
-                /* هرگز settle؛ abort هم بی‌اثر — باگِ فرضی */
+            new Promise<Response>((resolve) => {
+                releaseLate = resolve
             })
         const t0 = Date.now()
         const r = await tryRefresh()
@@ -238,7 +243,44 @@ async function main(): Promise<void> {
         route = '/ok'
         const rAfter = await tryRefresh()
         ok('R7: بعد از watchdog، refresh بعدی تازه می‌زند (آزاد شد)', rAfter === true)
+        releaseLate(Response.json({ accessToken: 'EXPIRED-CYCLE-TOKEN' }))
+        await wait(0)
+        ok('R7: a response after watchdog expiry cannot overwrite a fresh token', getAccessToken() === 'TOKEN-NEW-1')
     }
+
+    // The boot refresh may still be in flight while OTP verification creates
+    // a new session. Neither a late success nor a late 401 owns that session.
+    for (const status of [200, 401]) {
+        const previousFetch = globalThis.fetch
+        let release!: (response: Response) => void
+        globalThis.fetch = (() => new Promise<Response>((resolve) => { release = resolve })) as unknown as typeof fetch
+        setAccessToken('BEFORE-LOGIN')
+        const pending = tryRefresh()
+        setAccessToken('NEW-LOGIN-TOKEN')
+        release(Response.json(status === 200 ? { accessToken: 'OLD-SESSION' } : { error: { message: 'expired' } }, { status }))
+        ok(`R8: stale ${status} cannot change a completed login`, await pending === false && getAccessToken() === 'NEW-LOGIN-TOKEN')
+        globalThis.fetch = previousFetch
+    }
+
+    {
+        const previousFetch = globalThis.fetch
+        let release!: (response: Response) => void
+        globalThis.fetch = (() => new Promise<Response>((resolve) => { release = resolve })) as unknown as typeof fetch
+        const pending = tryRefresh()
+        mod.onUnauthorized()
+        release(Response.json({ accessToken: 'LOGGED-OUT-TOKEN' }))
+        ok('R9: a late refresh cannot revive a logged-out session', await pending === false && getAccessToken() === null)
+        globalThis.fetch = previousFetch
+    }
+
+    route = '/race'
+    setAccessToken('BEFORE-RACE')
+    refreshHits = 0
+    ok('R10: repeated rotation races preserve the session', await tryRefresh() === false && getAccessToken() === 'BEFORE-RACE')
+    ok('R10: a rotation race retries once', refreshHits === 2)
+
+    route = '/invalid-token'
+    ok('R11: malformed token responses do not replace an existing token', await tryRefresh() === false && getAccessToken() === 'BEFORE-RACE')
 
     globalThis.fetch = realFetch // بازگردانیِ fetch اصلی
     server.stop(true)

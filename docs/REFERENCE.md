@@ -1107,3 +1107,102 @@ cd apps/api && bun run db:test:sep && bun run db:test:mellat && bun run db:test:
 ### فایل‌ها (۳: ۲ جایگزینیِ تست + مستند)
 apps/api/scripts/test-migrations.ts · apps/api/scripts/test-registration-permit.ts ·
 docs/REFERENCE.md
+
+## ۲-۱۰-۱۴ — stage-82: صفحه‌سازِ بلوکیِ مقالات — انیمیشن، رنگ، جانماییِ درگ‌اند‌دراپ
+
+> درخواست کارفرما: «صفحات افزودن/ویرایش مقالات را پیشرفته کنم — امکانات کامل‌تر و
+> زیباتر. ادمین اصلی و ادمین سطح ۲ (با مجوز ادمین اصلی) باید بتوانند کامل‌ترین و
+> زیباترین صفحات را بسازند: انیمیشن‌های مختلف، انتخاب رنگ‌های مختلف، جانماییِ
+> عناصر در صفحه در سایزهای مختلف با درگ‌اند‌دراپ… تحقیق گسترده انجام بده.»
+
+### ۰) خلاصه‌ی تحقیق (۱۶+ جست‌وجو — الگو ← برداشت)
+| منبع/الگو | اصل | برداشتِ ما |
+|---|---|---|
+| Editor.js / Puck | سند = `{ version, blocks[] }` — JSON خالص نه HTML؛ جدا بودن ادیتور از رندر | `ArticleBlocksDoc` در shared + دو مصرف‌کننده‌ی مستقل |
+| WordPress Gutenberg | «invalid content» وقتی شکل عوض شود | `version` در سند + بلوکِ ناشناخته = حذف، نه reject کل سند |
+| Notion | id پایدار GUID برای هر بلوک | `crypto.randomUUID()` — دوبل‌کردن id تازه می‌گیرد (هرگز key=index) |
+| Ghost | عرضِ پله‌ای: normal/wide/full | `ab-w-sm/md/lg/full` + موبایل همه full (container-query) |
+| AOS | data-attribute انیمیشن + delay پلکانی + once | `data-anim` + `--ab-delay` + unobserve بعد از ورود |
+| Base Web DnD / whatwg#3114 | درگ فقط روی handle؛ پاک‌سازی در dragend | handle ⠿ جدا از فیلدها؛ cleanup در dragend (لغو با Esc تمیز) |
+| Redux undo | استک snapshot فقط ساختاری | واگردِ ۳۰ مرحله‌ای (افزودن/حذف/جابجایی/دوبل) |
+| WCAG 1.4.3 + C39 | کنتراست متن با luminance؛ reduced-motion | `pickContrastText` خودکار + خاموشیِ کامل انیمیشن‌ها |
+| IBM rich-text XSS | sanitize در ۳ لایه | TypeBox پاکت → normalizer سخت‌گیر → رندر defensive |
+| MDN prefers-reduced-motion | انیمیشن = خطر vestibular | media query خاموش‌کن + SSR مرئی |
+
+### ۱) مدل داده (منبعِ حقیقت: packages/shared/src/blocks.ts)
+- ۱۰ نوع بلوک: **hero · heading · paragraph · image · gallery · quote · callout ·
+  list · cta · divider** — استایل مشترک `{bg?, fg?, align?, pad?}` + `width` +
+  `anim` (۶ حالت). رنگ فقط hex ۶رقمی (رشته‌ی آزاد ممنوع).
+- ذخیره: ستون jsonb `articles.blocks` (الگوی processes). **back-compat کامل:**
+  NULL = همان مسیرِ متنیِ قبل (`content.split('\n\n')`).
+- **content همیشه از بلوک‌ها مشتق می‌شود** (`blocksToPlainText` — فرانت و بک
+  هردو): لیست/سئو/sitemap/صفِ ترجمه که روی content سوارند هرگز از صفحه‌ساز
+  عقب نمی‌مانند (درسِ تحقیق: «content متنی را ول نکن»).
+- دوزبانگی: بلوک‌ها فارسی‌زبان‌اند؛ نمایِ عمومی ar همان مسیرِ متنیِ contentAr را
+  نگه می‌دارد (`toView: lang==='ar' → blocks=null`) — صادقانه و بدون کپیِ ادیتور.
+
+### ۲) اعتبارسنجیِ سه‌لایه (هیچ HTML خامی ذخیره نمی‌شود)
+1. **TypeBox (روت):** پاکتِ سند — version literal، enum های type/width/anim،
+   hex pattern، maxItems ۲۰۰.
+2. **`blocks-normalize.ts` (سرویس):** whitelist بسته‌ی per-type props + trim +
+   سقف‌ها (متن ۵۰۰۰/گالری ۱۲/فهرست ۳۰×۳۰۰) + **URL فقط `^https://` یا `/` نسبی**
+   (javascript:/http:/data: رد) + cta بدون href معتبر → تنزل امن به menu +
+   id تکراری → بازتولید + سقف سند ۲۵۶KB.
+3. **رندر عمومی:** بلوکِ ناشناخته/خراب = skip، نه کرشِ صفحه.
+
+### ۳) ادیتور (ArticlePageBuilder — React خالص، صفر پکیج جدید)
+- پالتِ افزودن (۱۰ بلوک) + درج بعد از بلوکِ انتخاب‌شده.
+- **درگ‌اند‌دراپ HTML5 روی handle** (⠿) با خطِ جایگاه (placeholder) — منطقِ فقط-Y
+  (ذاتاً RTL-safe)؛ + دکمه‌های ↑/↓ (a11y/لمس) + دوبل + حذف.
+- تنظیماتِ داخلِ هر بلوک: عرض (۴ پله با نوارِ زنده)، انیمیشن (۶)، رنگِ پس‌زمینه
+  (۸ preset + color-picker بومی + حذف) + **متنِ خودکارِ کنتراست** با هشدارِ AA،
+  پدینگ، چینش.
+- **واگرد** (استکِ ساختاری) + **پیش‌نمایشِ موبایل/دسکتاپ** با container-query
+  (عرض‌ها به کانتینر واکنش نشان می‌دهند — نه iframe).
+- آپلود عکس با همان `FileUploader` موجود (progress/retry/uuid).
+- در فرم: سوییچِ «صفحه‌ساز بلوکی ⇄ متن ساده» — تبدیلِ دوسویه (متن→پاراگراف‌ها)
+  + هشدارِ صریح وقتی ذخیره در حالتِ متنی سند را پاک می‌کند.
+
+### ۴) رندر عمومی (ArticleBlocksRenderer)
+- **SSR/سئو-امن:** حالتِ مخفیِ انیمیشن فقط بعد از mount با کلاس `ab-js` —
+  کرالر/بدون-JS متنِ کاملاً مرئی می‌گیرد؛ یک IntersectionObserver مشترک،
+  threshold ۰٫۱۵، once، stagger پلکانی (سقف ۵×۸۰ms).
+- عرض‌ها: sm ۵۰٪/md ۷۰٪/lg ۱۰۰٪/full = خروجِ امن از حاشیه (calc + margin
+  منفی؛ **هرگز 100vw** — درسِ overflowX موبایل).
+- prefers-reduced-motion → همه‌چیز مرئی و بی‌حرکت.
+
+### ۵) مجوزها — «ادمین۲ با مجوز ادمین اصلی»
+- دو پرچم جدید: `articlesRead` / `articlesWrite` (admin2_profiles + قرارداد).
+- روت‌های `/admin/articles`: خواندن با articlesRead، نوشتن/دسته‌ها با
+  articlesWrite (`requireAdmin2Permission` — ادمین اصلی همیشه رد می‌شود).
+- فرانت: پیشوندِ مجاز + آیتمِ منو (gated) + PermissionGate روی new/edit +
+  دو سوییچ در PermissionsEditor (پیش‌فرضِ افزودن: read=روشن، write=خاموش).
+- فرمِ ادمینی‌سازی دست‌نخورده: هر دو نقش صفحه‌سازِ کامل را می‌گیرند.
+
+### ۶) مایگریشن ۰۰۰۹ + درسِ استیج-۸۱ اعمال شد
+- `0009_rapid_sage.sql` (drizzle-kit): `articles.blocks` jsonb +
+  `admin2_profiles.articles_read/articles_write` — **rewindِ سناریوی A همان
+  لحظه در test-migrations گسترش یافت** (drop column ها) و دو بندِ A2 تازه با
+  راهنمایِ داینامیکِ «زنجیره بدون ۰۰۰۹ → bun run db:generate».
+
+### ۷) تست‌ها (۲۰۹ بندِ سبز روی PG 18.4 واقعی در سندباکس)
+- `db:test:blocks` (جدید — ۵۵ بندِ خالصِ بدون-PG): پاکت/بلوک‌ناشناخته/id/سقف‌ها/
+  URL-الگو/گالری/CTA-تنزل/فهرست/استایل-whitelist/۲۵۶KB + مشتقِ متن + کنتراست.
+- `db:test:migrations` ۵۹→**۶۱** (rewind + دو بندِ ۰۰۰۹) · `db:test:device` ۳۲ ·
+  `db:test:permit` ۳۳ · `db:test:intel` ۲۸ — همه‌ی رگرسیون‌ها سبز.
+
+### ۸) دروازه‌ها
+- tsc api/web/shared = ۰ · **biome web = ۶۳۹/۱۴/۹ = دقیقاً baseline** (فایل‌های
+  جدید فرمت‌شده + بدون خطای تازه) · i18n دست‌نخورده — پاریتی ۴۹۶/۴۹۶ (فرم‌های
+  ادمین مثلِ قبل فارسیِ hardcode — الگوی موجود).
+
+### فایل‌ها (۳۱: ۶ جدید + ۲۵ جایگزینی)
+مشترک: blocks.ts (جدید) · contracts · index — بک: schema/articles · schema/admin2 ·
+drizzle/0009 (جدید) + meta/0009_snapshot (جدید) + _journal · blocks-normalize.ts
+(جدید) · article.service · admin2.service · articles.routes · admin2.routes · app ·
+scripts/test-article-blocks.ts (جدید) · test-migrations · package.json — فرانت:
+builder/blockModel.ts (جدید) · builder/ArticlePageBuilder.tsx (جدید) ·
+site/article/ArticleBlocksRenderer.tsx (جدید) · ArticleForm · types/forms ·
+server/articles · admin/articles/new · admin/articles/$articleId/edit · admin/route ·
+AdminLayout · usePermissions · PermissionsEditor · articles/$articleId · styles.css —
+مستند: REFERENCE.md

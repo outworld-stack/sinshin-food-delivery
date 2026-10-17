@@ -20,7 +20,7 @@
 
 import type { RedisService } from '#/infra/redis/redis'
 import { Err } from '#/domain/shared/errors'
-import { randomOtpCode, safeEqual, sha256 } from '#/domain/shared/crypto'
+import { randomOtpCode, randomToken, sha256 } from '#/domain/shared/crypto'
 
 /** کلیدهای ردیسی جریان — هر فراخوان پیشوند خودش را دارد */
 export interface OtpKeys {
@@ -61,6 +61,7 @@ export type OtpVerifyResult =
   | { ok: true }
   | { ok: false; reason: 'no-code' }
   | { ok: false; reason: 'too-many' }
+  | { ok: false; reason: 'locked'; retryAfterSeconds: number }
   | { ok: false; reason: 'mismatch'; attemptsLeft: number }
 
 /**
@@ -74,50 +75,38 @@ export async function sendOtp(
   const { redis } = deps
   const { keys, messages } = p
 
-  // ۱) سقف ساعتی/روزانه‌ی هر شماره — فقط‌خواندنی، ردِ سریع
-  const hourCount = Number((await redis.get(keys.hour(p.phone))) ?? 0)
-  if (hourCount >= p.maxPerHour) {
-    throw Err.rateLimited(messages.hourCap, 3600)
-  }
-  if (keys.day && p.maxPerDay) {
-    const dayCount = Number((await redis.get(keys.day(p.phone))) ?? 0)
-    if (dayCount >= p.maxPerDay) {
-      throw Err.rateLimited(messages.dayCap ?? messages.hourCap, 86400)
-    }
-  }
-
-  // ۲) فاصله‌ی بین دو درخواست — گیت اتمیک (امن-۲):
-  // SET NX فقط به یکی از درخواست‌های هم‌زمان اجازه می‌دهد.
-  // null (ردیس در دسترس نیست) = در خطا باز می‌گذارد، مثل بقیه‌ی محدودیت‌ها.
-  const gate = await redis.setNx(keys.cooldown(p.phone), '1', { ex: p.cooldownSeconds })
-  if (gate === false) {
-    throw Err.rateLimited(messages.cooldown(p.cooldownSeconds), p.cooldownSeconds)
-  }
-
-  // ۳) کد + هش (خود کد هرگز ذخیره نمی‌شود) — round-28: ۶ رقم
   const code = randomOtpCode(6)
-  const ok = await redis.set(keys.code(p.phone), sha256(`${code}:${p.phone}`), {
-    ex: p.ttlSeconds,
+  const value = `${sha256(`${code}:${p.phone}`)}:${randomToken(16)}`
+  const challengeKeys: [string, string, string] = [
+    keys.code(p.phone), keys.cooldown(p.phone), keys.attempts(p.phone),
+  ]
+  // Reserve cooldown, challenge and fixed-window budgets in one operation.
+  const issued = await redis.issueOtp({
+    keys: [...challengeKeys, keys.hour(p.phone), ...(keys.day ? [keys.day(p.phone)] : [])],
+    value,
+    ttlSeconds: p.ttlSeconds,
+    cooldownSeconds: p.cooldownSeconds,
+    maxPerHour: p.maxPerHour,
+    maxPerDay: p.maxPerDay,
   })
-  if (ok !== 'OK') {
-    // ردیس ناپایدار — گیت را پس بگیر تا کاربر روی کول‌داون قفل نشود
-    await redis.del(keys.cooldown(p.phone))
-    throw Err.internal(messages.storeFail)
+  if (!issued) throw Err.serviceUnavailable(messages.storeFail)
+  const [status, retryAfter] = issued
+  if (status === 'hour') throw Err.rateLimited(messages.hourCap, retryAfter)
+  if (status === 'day') throw Err.rateLimited(messages.dayCap ?? messages.hourCap, retryAfter)
+  if (status === 'cooldown') {
+    throw Err.rateLimited(messages.cooldown(retryAfter), retryAfter)
   }
-  await redis.incr(keys.hour(p.phone))
-  await redis.expire(keys.hour(p.phone), 3600)
-  if (keys.day) {
-    await redis.incr(keys.day(p.phone))
-    await redis.expire(keys.day(p.phone), 86400)
-  }
-  await redis.del(keys.attempts(p.phone))
+  if (status !== 'ok') throw Err.serviceUnavailable(messages.storeFail)
 
-  // ۴) ارسال — فراخوان‌کننده قالب را انتخاب کرده است (فاز-۲)
-  const sent = await p.sendSms(p.phone, code)
+  let sent: boolean
+  try {
+    sent = await p.sendSms(p.phone, code)
+  } catch {
+    await redis.cancelOtp(challengeKeys, value)
+    throw Err.internal(messages.smsFail)
+  }
   if (!sent && p.isProd) {
-    // درگاه مرد؛ کد و کول‌داون را پس بگیر تا کول‌داون کاربر سوخته نشود
-    await redis.del(keys.code(p.phone))
-    await redis.del(keys.cooldown(p.phone))
+    await redis.cancelOtp(challengeKeys, value)
     throw Err.internal(messages.smsFail)
   }
   // در محیط توسعه یا provider=console کد در پاسخ هم هست تا بدون پنل تست کنی
@@ -129,8 +118,8 @@ export async function sendOtp(
  * تایید کد: مقایسه‌ی زمان-ثابت با هشِ ذخیره.
  * شمارنده‌ی تلاش اتمیک است (INCR اول، بعد سقف — round-28): N درخواست موازی
  * دیگر همه attempts=0 نمی‌بینند و هر حدس دقیقاً یکی شمرده می‌شود.
- * این تابع عمداً خطا نمی‌اندازد: سرویس فراخوان، پیام و سیاست (پنجره‌ی مستقل خطای
- * تایید، پیام «چند تلاش مانده» و…) را خودش اعمال می‌کند.
+ * Code consumption, attempts and the optional cross-code failure window are
+ * atomic. Verification outcomes are returned; Redis unavailability throws 503.
  */
 export async function verifyOtp(
   deps: { redis: RedisService },
@@ -140,27 +129,29 @@ export async function verifyOtp(
     maxAttempts: number
     ttlSeconds: number
     keys: OtpKeys
+    failureWindow?: { key: string; cap: number; ttlSeconds: number }
   },
 ): Promise<OtpVerifyResult> {
   const { redis } = deps
   const { keys } = p
 
-  const stored = await redis.get(keys.code(p.phone))
-  if (!stored) return { ok: false, reason: 'no-code' }
-
-  const attempts = await redis.incr(keys.attempts(p.phone))
-  if (attempts === 1) await redis.expire(keys.attempts(p.phone), p.ttlSeconds)
-  if (attempts > p.maxAttempts) {
-    await redis.del(keys.code(p.phone))
-    return { ok: false, reason: 'too-many' }
+  const result = await redis.consumeOtp({
+    keys: [keys.code(p.phone), keys.attempts(p.phone),
+      ...(p.failureWindow ? [p.failureWindow.key] : [])],
+    hash: sha256(`${p.code}:${p.phone}`),
+    maxAttempts: p.maxAttempts,
+    ttlSeconds: p.ttlSeconds,
+    failureCap: p.failureWindow?.cap,
+    failureWindowSeconds: p.failureWindow?.ttlSeconds,
+  })
+  if (!result) throw Err.serviceUnavailable()
+  const [status, attemptsLeft, retryAfterSeconds] = result
+  switch (status) {
+    case 'ok': return { ok: true }
+    case 'no-code': return { ok: false, reason: 'no-code' }
+    case 'too-many': return { ok: false, reason: 'too-many' }
+    case 'locked': return { ok: false, reason: 'locked', retryAfterSeconds }
+    case 'mismatch': return { ok: false, reason: 'mismatch', attemptsLeft }
+    default: throw Err.serviceUnavailable()
   }
-
-  if (!safeEqual(stored, sha256(`${p.code}:${p.phone}`))) {
-    return { ok: false, reason: 'mismatch', attemptsLeft: p.maxAttempts - attempts }
-  }
-
-  // درست بود → مصرف شود (کد + شمارنده؛ پنجره‌های خاص هر سرویس بیرون پاک می‌شوند)
-  await redis.del(keys.code(p.phone))
-  await redis.del(keys.attempts(p.phone))
-  return { ok: true }
 }

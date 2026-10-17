@@ -238,7 +238,7 @@ export const buildApp = (deps: AppDeps) => {
         admin2: deps.admin2,
       }),
     )
-    .use(articlesRoutes({ sessions: deps.sessions, articles: deps.articles }))
+    .use(articlesRoutes({ sessions: deps.sessions, articles: deps.articles, admin2: deps.admin2 }))
     .use(menuRoutes({ menu: deps.menu, cart: deps.cart, redis: deps.redis }))
     .use(addressRoutes({ sessions: deps.sessions, addresses: deps.addresses }))
     .use(

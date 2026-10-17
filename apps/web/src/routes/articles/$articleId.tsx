@@ -9,6 +9,7 @@
 import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { ChevronRight, Feather } from 'reicon-react'
 import { Gallery } from '#/components/Gallery'
+import { ArticleBlocksRenderer } from '#/components/site/articles/ArticleBlocksRenderer'
 import { ArticleDetailSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { useBack } from '#/hooks/useBack'
@@ -154,11 +155,16 @@ function ArticleDetailPage() {
                                 {article.excerpt}
                         </p>
 
-                        <div className="max-w-none text-gray-700 dark:text-gray-300 leading-loose font-DanaRegular space-y-6 mb-8">
-                                {article.content.split('\n\n').map((p, i) => (
-                                        <p key={i}>{p}</p>
-                                ))}
-                        </div>
+        {/* ═══ stage-82 — بدنه‌ی مقاله: سندِ بلوکی (صفحه‌ساز) یا مسیرِ متنیِ قبل ═══ */}
+        {article.blocks && article.blocks.blocks.length > 0 ? (
+                <ArticleBlocksRenderer doc={article.blocks} />
+        ) : (
+                <div className="max-w-none text-gray-700 dark:text-gray-300 leading-loose font-DanaRegular space-y-6 mb-8">
+                        {article.content.split('\n\n').map((p, i) => (
+                                <p key={i}>{p}</p>
+                        ))}
+                </div>
+        )}
 
                         <Gallery images={galleryImages} />
 

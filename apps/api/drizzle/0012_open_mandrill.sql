@@ -1,0 +1,3 @@
+DROP INDEX "wallet_tx_refund_once_key";--> statement-breakpoint
+CREATE UNIQUE INDEX "wallet_tx_referral_credit_once_key" ON "wallet_transactions" USING btree ("referral_profit_id") WHERE type = 'DEPOSIT' and referral_profit_id is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "wallet_tx_refund_once_key" ON "wallet_transactions" USING btree ("order_id") WHERE type = 'DEPOSIT' and order_id is not null and referral_profit_id is null;

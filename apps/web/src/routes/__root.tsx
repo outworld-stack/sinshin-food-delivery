@@ -96,6 +96,10 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+	const referralLocation = useRouterState({ select: (s) => s.location.href })
+	useEffect(() => {
+		captureRefFromUrl()
+	}, [referralLocation])
 	// رارد ۳۸ — lang سند از کانتکست مچ ریشه (نتیجه‌ی beforeLoad بالا) —
 	// نه هاردکد «fa». کرالری که ?lang=ar را می‌گیرد HTMLی با lang="ar"
 	// می‌بیند؛ کلاینت هم بعد از سوییچ LangSwitcher همان مقدار کوکی را
@@ -107,7 +111,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 	})
 
 	useEffect(() => {
-		captureRefFromUrl()
 		// رارد ۳۱ — علامت «اپ بالا آمد» برای نگهبانِ بنر مرورگر قدیمی:
 		// اگر باندل مدرن در موتور قدیمی کرش کند، این خط هرگز اجرا نمی‌شود و
 		// اسکریپت ES5 در head بعد از ۶ ثانیه بنر را روشن می‌کند.

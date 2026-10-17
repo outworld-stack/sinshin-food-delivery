@@ -76,7 +76,6 @@ export class OtpService {
    *    چرخه‌ی «کد جدید بگیر تا شمارنده صفر شود» دیگر حدس اضافه نمی‌دهد.
    */
   async verify(phone: string, code: string): Promise<void> {
-    const { redis } = this.deps
     const { ttlSeconds, maxAttempts } = this.deps.config.otp
 
     const result = await verifyOtp(
@@ -87,11 +86,11 @@ export class OtpService {
         maxAttempts,
         ttlSeconds,
         keys: K,
+        failureWindow: { key: vfailsKey(phone), cap: VERIFY_FAIL_CAP, ttlSeconds: VERIFY_FAIL_WINDOW_S },
       },
     )
     if (result.ok) {
-      // مالکِ شماره ثابت شده است — پنجره‌ی مستقل هم پاک می‌شود
-      await redis.del(vfailsKey(phone))
+      // Challenge and failure window were consumed atomically.
       return
     }
     if (result.reason === 'no-code') {
@@ -100,13 +99,10 @@ export class OtpService {
     if (result.reason === 'too-many') {
       throw Err.rateLimited('تعداد تلاش‌های ناموفق زیاد است؛ کد جدید بگیر.')
     }
-    // mismatch — پنجره‌ی مستقل (با کد جدید ریست نمی‌شود؛ شرح در VERIFY_FAIL_CAP)
-    const fails = await redis.incr(vfailsKey(phone))
-    if (fails === 1) await redis.expire(vfailsKey(phone), VERIFY_FAIL_WINDOW_S)
-    if (fails >= VERIFY_FAIL_CAP) {
+    if (result.reason === 'locked') {
       throw Err.rateLimited(
         `تلاش‌های ناموفق زیاد است؛ ${Math.ceil(VERIFY_FAIL_WINDOW_S / 60)} دقیقه دیگر تلاش کنید.`,
-        VERIFY_FAIL_WINDOW_S,
+        result.retryAfterSeconds,
       )
     }
     const left = result.attemptsLeft

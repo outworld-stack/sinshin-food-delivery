@@ -2,10 +2,11 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
-import { orders, reconcileFindings } from '#/infra/db/schema'
+import { coupons, orders, payments, reconcileFindings, users } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import type { OrderService } from '#/domain/order/order.service'
 import { asOrderId } from '#/domain/shared/brand'
+import { lockWalletAccounts } from '#/domain/shared/wallet-sql'
 
 export interface CheckResult {
     checkId: string
@@ -26,7 +27,7 @@ export interface ReconcileReport {
 }
 
 /**
- * مغایرت‌گیری مالی — ۱۱ چک، شغل ۰۳:۰۰ تهران.
+ * Financial reconciliation, scheduled daily at 03:00 Tehran.
  *
  * Flags per-check: RECONCILE_AUTO_R1..R10 (on/off) — پیش‌فرض همه off.
  * حالت off = report-only (R1 findings را می‌سازد ولی تسویه نمی‌زند؛
@@ -61,6 +62,8 @@ export class ReconcileService {
         checks.push(await this.r9AmountMismatch())
         checks.push(await this.r10StuckPending())
         checks.push(await this.r11FailedGatewayPayments())
+        checks.push(await this.r13RefundCredits())
+        checks.push(await this.r14ReferralLedger())
 
         let totalOpen = 0
         for (const c of checks) totalOpen += c.findings.length
@@ -151,17 +154,52 @@ export class ReconcileService {
             // «بعد از commit» اجرا شود (بیرون از قفل کاربر).
             let settledUserId: string | null = null
             await this.deps.db.transaction(async (tx) => {
-                const order = (
+                const candidate = (
                     await tx.select().from(orders).where(eq(orders.id, asOrderId(orderId)))
                 )[0]
+                if (!candidate || candidate.status !== 'PENDING_PAYMENT') return
+                await lockWalletAccounts(tx, [candidate.userId])
+                await tx.select({ id: users.id }).from(users).where(eq(users.id, candidate.userId)).for('no key update')
+                if (candidate.couponId) {
+                    await tx.select({ id: coupons.id }).from(coupons).where(eq(coupons.id, candidate.couponId)).for('update')
+                }
+                const [order] = await tx.select().from(orders).where(eq(orders.id, candidate.id)).for('update')
                 if (!order || order.status !== 'PENDING_PAYMENT') return // هم‌زمان settle شد
+                // Revalidate the evidence after acquiring locks: the earlier
+                // diagnostic snapshot cannot authorize a later money write.
+                const successful = await tx.select().from(payments)
+                    .where(and(eq(payments.orderId, order.id), eq(payments.status, 'SUCCESS'))).for('update')
+                if (successful.length !== 1 || successful[0]!.userId !== order.userId ||
+                    successful[0]!.amount !== order.breakdown.amountPaidOnline) return
+                const payment = successful[0]!
+                if (!Number.isSafeInteger(payment.amount) || payment.amount <= 0) return
+                if (payment.gateway === 'MOCK') {
+                    if (payment.mode !== 'mock' || this.deps.config.gateway.mode !== 'mock') return
+                } else {
+                    if (!['MELLAT', 'ZARINPAL', 'SEP'].includes(payment.gateway) ||
+                        !['direct', 'indirect'].includes(payment.mode)) return
+                    const reference = payment.gatewayRef
+                    if (!reference || reference.trim() !== reference) return
+                    const receipt = payment.gateway === 'MELLAT' ? /^\d+:s:(\d+)$/.exec(reference)?.[1] : reference
+                    if (!receipt) return
+                    // Share the callback receipt lock: an old SUCCESS row cannot
+                    // authorize another order paid with the same bank receipt.
+                    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`payment-receipt:${payment.gateway}:${receipt}`}, 0))`)
+                    const [duplicate] = await tx.select({ id: payments.id }).from(payments).where(and(
+                        sql`${payments.id} <> ${payment.id}`, eq(payments.gateway, payment.gateway), eq(payments.status, 'SUCCESS'),
+                        payment.gateway === 'MELLAT'
+                            ? sql`${payments.gatewayRef} like '%:s:%' and split_part(${payments.gatewayRef}, ':', 3) = ${receipt}`
+                            : eq(payments.gatewayRef, reference),
+                    )).limit(1)
+                    if (duplicate) return
+                }
                 await this.deps.orders.settlePayment(tx, order)
                 settledUserId = order.userId
             })
             if (settledUserId) {
                 await this.deps.orders.grantCouponsAfterCommit(settledUserId)
+                console.log(`[reconcile] R1 auto-fixed ${displayId}`)
             }
-            console.log(`[reconcile] R1 auto-fixed ${displayId}`)
         } catch (e) {
             console.error(`[reconcile] R1 auto-fix failed for ${displayId}:`, e)
         }
@@ -174,6 +212,7 @@ export class ReconcileService {
       select o.id, o.display_id
       from orders o
       where o.payment_status = 'SUCCESS'
+        and (o.breakdown->>'amountPaidOnline')::bigint > 0
         and not exists (
           select 1 from payments p
           where p.order_id = o.id and p.status = 'SUCCESS'
@@ -219,10 +258,10 @@ export class ReconcileService {
         const rows = (await this.deps.db.execute(sql`
       select o.id, o.display_id,
              o.breakdown->>'walletDeduction' as promised,
-             coalesce(w.actual, 0)::int as actual
+             coalesce(w.actual, 0)::bigint as actual
       from orders o
       left join (
-        select order_id, sum(amount)::int as actual
+        select order_id, sum(amount)::bigint as actual
         from wallet_transactions
         where type = 'WITHDRAW' and order_id is not null
         group by order_id
@@ -236,14 +275,14 @@ export class ReconcileService {
         const findings: CheckResult['findings'] = []
         for (const r of rows) {
             const promised = Number(r.promised) // integer در jsonb — بدون float
-            if (promised !== r.actual) {
+            if (promised !== Number(r.actual)) {
                 findings.push({
                     entityType: 'order',
                     entityId: r.id,
                     detail: {
                         orderDisplayId: r.display_id,
                         promisedWalletDeduction: promised,
-                        actualWithdrawTotal: r.actual,
+                        actualWithdrawTotal: Number(r.actual),
                     },
                 })
             }
@@ -258,6 +297,7 @@ export class ReconcileService {
       select o.id, o.display_id
       from orders o
       where o.status <> 'PENDING_PAYMENT' and o.status <> 'CANCELED'
+        and (o.breakdown->>'amountPaidOnline')::bigint > 0
         and not exists (select 1 from payments p where p.order_id = o.id)
     `)) as unknown as Array<{ id: string; display_id: string }>
 
@@ -321,7 +361,7 @@ export class ReconcileService {
         const rows = (await this.deps.db.execute(sql`
       select w.id, w.type, w.description
       from wallet_transactions w
-      where w.order_id is null and w.type = 'WITHDRAW'
+      where w.order_id is null and w.type = 'WITHDRAW' and w.referral_profit_id is null
     `)) as unknown as Array<{ id: string; type: string; description: string }>
 
         return {
@@ -340,7 +380,7 @@ export class ReconcileService {
 
     private async r8NegativeBalance(): Promise<CheckResult> {
         const rows = (await this.deps.db.execute(sql`
-      select user_id, sum(case when type = 'DEPOSIT' then amount else -amount end)::int as bal
+      select user_id, sum(case when type = 'DEPOSIT' then amount else -amount end)::bigint as bal
       from wallet_transactions
       group by user_id
       having sum(case when type = 'DEPOSIT' then amount else -amount end) < 0
@@ -352,7 +392,7 @@ export class ReconcileService {
             findings: rows.map((r) => ({
                 entityType: 'user' as const,
                 entityId: r.user_id,
-                detail: { balance: r.bal },
+                detail: { balance: Number(r.bal) },
             })),
             wouldFix: 0,
         }
@@ -461,6 +501,55 @@ export class ReconcileService {
         }
     }
 
+    /** Historical refund-index collisions could mark orders refunded while
+     * skipping buyer credit. Report the discrepancy; never mint money here. */
+    private async r13RefundCredits(): Promise<CheckResult> {
+        const rows = await this.deps.db.execute(sql`
+          select o.id, o.display_id, o.payment_status,
+            case when o.payment_status = 'REFUNDED' then o.total_amount
+              else (o.breakdown->>'walletDeduction')::bigint end as expected,
+            coalesce(w.credited, 0)::bigint as actual
+          from orders o
+          left join (
+            select order_id, user_id, sum(amount)::bigint as credited
+            from wallet_transactions
+            where type = 'DEPOSIT' and referral_profit_id is null and order_id is not null
+            group by order_id, user_id
+          ) w on w.order_id = o.id and w.user_id = o.user_id
+          where o.payment_status in ('REFUNDED', 'FAILED')
+            and coalesce(w.credited, 0) <> case when o.payment_status = 'REFUNDED'
+              then o.total_amount else (o.breakdown->>'walletDeduction')::bigint end
+        `) as unknown as Array<{ id: string; display_id: string; payment_status: string; expected: number; actual: number }>
+        return { checkId: 'R13', severity: 'critical', wouldFix: 0, findings: rows.map(r => ({
+            entityType: 'order', entityId: r.id,
+            detail: { orderDisplayId: r.display_id, paymentStatus: r.payment_status,
+                expectedCredit: Number(r.expected), actualCredit: Number(r.actual), manualReview: true },
+        })) }
+    }
+
+    private async r14ReferralLedger(): Promise<CheckResult> {
+        const rows = await this.deps.db.execute(sql`
+          select p.id, p.amount, o.display_id, o.payment_status,
+            coalesce(w.credited, 0)::bigint as credited, coalesce(w.reversed, 0)::bigint as reversed
+          from referral_profits p join orders o on o.id = p.order_id
+          left join (
+            select referral_profit_id, user_id,
+              sum(amount) filter (where type = 'DEPOSIT') as credited,
+              sum(amount) filter (where type = 'WITHDRAW') as reversed
+            from wallet_transactions where referral_profit_id is not null
+            group by referral_profit_id, user_id
+          ) w on w.referral_profit_id = p.id and w.user_id = p.referrer_id
+          where coalesce(w.credited, 0) <> p.amount
+            or coalesce(w.reversed, 0) <> case when o.payment_status = 'REFUNDED' then p.amount else 0 end
+        `) as unknown as Array<{ id: string; amount: number; display_id: string; payment_status: string; credited: number; reversed: number }>
+        return { checkId: 'R14', severity: 'critical', wouldFix: 0, findings: rows.map(r => ({
+            entityType: 'wallet_tx', entityId: r.id,
+            detail: { orderDisplayId: r.display_id, expectedCredit: r.amount,
+                actualCredit: Number(r.credited), actualReversal: Number(r.reversed),
+                expectedReversal: r.payment_status === 'REFUNDED' ? r.amount : 0, manualReview: true },
+        })) }
+    }
+
     // ═══════════ ثبت findings — idempotent روزانه ═══════════
 
     /**
@@ -491,6 +580,8 @@ export class ReconcileService {
                             set: {
                                 lastSeenAt: sql`now()`,
                                 occurrences: sql`${reconcileFindings.occurrences} + 1`,
+                                detail: f.detail,
+                                severity: check.severity,
                             },
                         })
                 }
@@ -500,7 +591,7 @@ export class ReconcileService {
             await tx.execute(sql`
               update reconcile_findings
               set status = 'open', resolved_at = null
-              where status in ('acknowledged', 'resolved_external')
+              where status in ('acknowledged', 'resolved_external', 'auto_fixed')
                 and last_seen_at = now()
             `)
         })

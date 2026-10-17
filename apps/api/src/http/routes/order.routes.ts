@@ -36,13 +36,14 @@ import type { ProfileService } from '#/domain/order/profile.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { PaymentService } from '#/domain/payment/payment.service'
 import type { RedisService } from '#/infra/redis/redis'
-import type { CheckoutIdempotency } from '#/domain/order/checkout-idempotency.service'
+import { checkoutRequestHash, type CheckoutIdempotency } from '#/domain/order/checkout-idempotency.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import type { NotificationService } from '#/domain/notification/notification.service'
 import { requireAuth } from '#/http/hooks/require-auth'
 import { Err } from '#/domain/shared/errors'
 import { langFromHeaders } from '#/domain/shared/lang'
 import type { CheckoutResponse } from '@sinshin/shared'
+import { normalizeCouponCode } from '@sinshin/shared'
 import { UUID_PATTERN, DISPLAY_PATTERN, isDisplayId } from '#/domain/shared/ids'
 import { cartItemSchema, deliveryTypeSchema } from '#/http/schemas'
 
@@ -101,7 +102,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
       fallbackLimit(key, limit, windowSeconds)
       return
     }
-    if (count === 1 || count <= limit) {
+    if (count === 1) {
       await deps.redis.expire(key, windowSeconds)
     }
     if (count > limit) {
@@ -199,7 +200,10 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         if (typeof idemKey !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(idemKey)) {
           throw Err.validation('Idempotency-Key (۸ تا ۶۴ کاراکتر حرفی/عددی) الزامی است.')
         }
-        const claim = await deps.idempotency.claim(user.id, idemKey)
+        const claim = await deps.idempotency.claim(user.id, idemKey, checkoutRequestHash(body))
+        if (claim.kind === 'mismatch') {
+          throw Err.conflict('این شناسه قبلاً برای سبد دیگری استفاده شده است؛ سفارش را دوباره بررسی کنید.')
+        }
         // replay: همان پاسخ قبلی — بدون ساخت سفارش
         if (claim.kind === 'replay') {
           // stage-58 — پاسخِ کش‌شده ۴۸ ساعت عمر دارد؛ اگر paymentUrl آن
@@ -211,8 +215,8 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
           const replay = claim.response
           const replayOrderId = typeof replay.orderId === 'string' ? replay.orderId : ''
           const replayUrl = typeof replay.paymentUrl === 'string' ? replay.paymentUrl : ''
-          if (replay.requiresPayment === true && replayUrl && replayOrderId) {
-            const st = await deps.payments.paymentReplayState(user.id, replayOrderId)
+          if (replay.requiresPayment === true && replayOrderId) {
+            const st = await deps.payments.paymentReplayState(user.id, replayOrderId, replayUrl)
             if (st === 'success') {
               return { ...replay, orderCompleted: true, requiresPayment: false, paymentUrl: undefined }
             }
@@ -222,11 +226,11 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
           }
           return replay
         }
-        // تصرف زندهٔ دیگری (درخواست موازی/تاخیرافتن) — 409؛ تلاش مجدد با
-        // کلید تازه بی‌درنگ موفق می‌شود
+        // A retry must retain the purchase key while another request is live.
         if (claim.kind === 'in-flight') {
           throw Err.conflict('درخواست قبلی هنوز در حال پردازش است — چند لحظه صبر کنید.')
         }
+        const ownedClaim = { key: idemKey, token: claim.token }
 
         // رارد ۴۳ — پاسخ چک‌اوت با قرارداد مشترک تایپ‌دار شد
         let response: CheckoutResponse
@@ -235,7 +239,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         // دوم + رزرو دوبل کیف/کوپن تا ۳۰ دقیقه). پس: قفل، نه آزادسازی.
         let committed: { displayId: string; breakdown: CheckoutResponse['breakdown'] } | null = null
         try {
-          const r = await deps.orders.checkout(user.id, body)
+          const r = await deps.orders.checkout(user.id, body, ownedClaim)
           committed = { displayId: r.displayId, breakdown: r.breakdown }
           // round-16 — چک‌اوت تمام-کیف‌پول همین‌جا PAID می‌شود؛
           // پس از commit به پنل زنده اعلام (مسیر درگاهی در PaymentService.finalize اعلام می‌کند)
@@ -283,7 +287,7 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
             // باعث می‌شود replayِ همان کلید دوباره سفارش نسازد؛ کاربر پرداخت
             // را از صفحه‌ی سفارش ادامه می‌دهد (job تایم‌اوت هم آن را می‌پاید).
             if (idemKey) {
-              await deps.idempotency.complete(user.id, idemKey, {
+              await deps.idempotency.complete(user.id, ownedClaim, {
                 orderCompleted: false,
                 orderId: committed.displayId,
                 requiresPayment: true,
@@ -297,12 +301,12 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
             )
           }
           // شکستِ واقعی چک‌اوت (قبل از commit) — تصرف آزاد شود تا تلاش مجدد ممکن باشد
-          if (idemKey) await deps.idempotency.release(user.id, idemKey)
+          if (idemKey) await deps.idempotency.release(user.id, ownedClaim)
           throw e
         }
 
         if (idemKey) {
-          await deps.idempotency.complete(user.id, idemKey, response)
+          await deps.idempotency.complete(user.id, ownedClaim, response)
         }
         return response
       },
@@ -338,19 +342,17 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
         // پشتیبان در-حافظه (L7) همچنان بسته است.
         if (body.couponCode && body.couponCode.trim() !== '') {
           const probeKey = `rl:coupon-probe:user:${user.id}`
-          const added = await deps.redis.sAdd(
+          const admitted = await deps.redis.sAddWithinLimit(
             probeKey,
-            body.couponCode.trim().toUpperCase().slice(0, 32),
+            normalizeCouponCode(body.couponCode),
+            10,
             60,
           )
-          if (added !== null) {
-            const distinct = await deps.redis.sCard(probeKey)
-            if (distinct !== null && distinct > 10) {
+          if (admitted === false) {
               throw Err.rateLimited(
                 'تلاش برای کدهای تخفیف زیاد است؛ کمی بعد دوباره امتحان کنید.',
                 60,
               )
-            }
           }
         }
         return deps.orders.preview(user.id, body)

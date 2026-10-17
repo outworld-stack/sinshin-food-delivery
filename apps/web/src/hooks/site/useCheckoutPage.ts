@@ -6,7 +6,7 @@
 
 // src/hooks/site/useCheckoutPage.ts
 
-import type { CheckoutItemInput } from '@sinshin/shared'
+import { normalizeCouponCode, type CheckoutItemInput } from '@sinshin/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -28,7 +28,8 @@ import type {
 	CouponStatus,
 	DeliveryType,
 } from '#/types/site/checkout'
-import { PENDING_CHECKOUT_KEY } from '#/types/site/checkout'
+import { rememberPendingCheckout } from '#/lib/pending-checkout'
+import { checkoutIntentKey, clearCheckoutIntent } from '#/lib/checkout-intent'
 import { qk } from '#/utils/queryKeys'
 import { checkoutPreviewOptions } from '#/utils/queryOptions'
 
@@ -126,34 +127,17 @@ export function useCheckoutPage(deps: {
 	// رارد ۳۲ — توست‌ها/خطاهای دوزبانه؛ پیام‌های سرور تا رارد ۳۳ فارسی می‌مانند
 	const { t, fmt, apiError } = useI18n()
 
-	// phase-fix: پشتیبان برای مرورگرهای قدیمی (iOS < 15.4 / WebView ناامن) —
-	// نبود randomUUID یعنی TypeError در لحظه‌ی ثبت سفارش = چک‌اوت مرده
-	const newIdempotencyKey = (): string =>
-		crypto.randomUUID?.() ??
-		`idm-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
-
 	// stage-77 (P3-16) — گاردِ دوبله‌زدن در فلوی MOCK: onSuccessِ میوتیشن
 	// «موفق» شده و isPending=false می‌شود در حالی که mockPay هنوز در جریان
 	// است؛ کلیکِ دوباره ⇒ processCheckout دوباره با همان کلید (سرور رد
 	// می‌کند) + mockPay/توستِ تکراری. دکمه تا پایانِ ناوبری قفل می‌ماند.
 	const [mockPayPending, setMockPayPending] = useState(false)
 
-	// phase-3: تکرارناپذیری — یک کلید به‌ازای هر نیت خرید؛ تلاش مجدد شبکه همان کلید
-	// را می‌فرستد → سفارش دوم ساخته نمی‌شود. فقط بعد از «شکست قطعی» تازه می‌شود.
-	// رارد L13 — lazy-init: آرگومان useRef در هر رندر اجرا می‌شد (تولید UUID
-	// بی‌اثر و دورریختن). حالا فقط در اولین نیاز ساخته می‌شود.
-	const idempotencyKeyRef = useRef<string | null>(null)
-	const getIdempotencyKey = (): string => {
-		if (idempotencyKeyRef.current === null) {
-			idempotencyKeyRef.current = newIdempotencyKey()
-		}
-		return idempotencyKeyRef.current
-	}
-
 	// ⬅ پیش‌نمایش — قیمت‌گذاری ۱۰۰٪ سروری: سایز/تخفیف/کوپن/ناحیه/بسته‌بندی/کیف پول
 	const {
 		data: previewData,
 		isLoading: isDetailsLoading,
+		isFetching: isPreviewFetching,
 		isError: isPreviewError,
 		error: previewError,
 		refetch: refetchPreview,
@@ -219,6 +203,7 @@ export function useCheckoutPage(deps: {
 				announcedCouponInvalid.current = true
 				showToast(apiError(c.message, t['checkout.couponInvalid']), 'error')
 			}
+			if (c.valid) announcedCouponInvalid.current = false
 			return
 		}
 		announcedCoupon.current = code
@@ -276,6 +261,7 @@ export function useCheckoutPage(deps: {
 				: blocked.dineInBlockedNames
 	const isDeliveryBlocked = deliveryBlockedFor.length > 0
 	const isSubmitBlocked =
+		!previewData || isPreviewFetching ||
 		(state.couponStatus === 'HAVE' && !couponApplied) ||
 		isPreviewError ||
 		hasUnavailableItems ||
@@ -315,13 +301,7 @@ export function useCheckoutPage(deps: {
 		// می‌فرستاد نه «20» ⇒ کدِ معتبر SINSHIN20 رد می‌شد («کد نامعتبر»).
 		// حروف فارسی (کدهای الفبایی) دست‌نخورده می‌مانند؛ فقط رقم‌ها ترجمه
 		// می‌شوند.
-		const sanitized = raw
-			.replace(/[\u06F0-\u06F9]/g, (d) =>
-				String.fromCharCode(d.charCodeAt(0) - 0x06f0),
-			)
-			.replace(/[\u0660-\u0669]/g, (d) =>
-				String.fromCharCode(d.charCodeAt(0) - 0x0660),
-			)
+		const sanitized = normalizeCouponCode(raw)
 			.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '')
 			.toUpperCase()
 			.slice(0, 16)
@@ -351,7 +331,7 @@ export function useCheckoutPage(deps: {
 	// --- ثبت سفارش ---
 	const checkoutMutation = useMutation({
 		mutationFn: (payload: CheckoutSubmitPayload) =>
-			processCheckout(payload, getIdempotencyKey()),
+			processCheckout(payload, checkoutIntentKey(payload)),
 		onSuccess: async (res) => {
 			queryClient.invalidateQueries({ queryKey: qk.userProfile })
 			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
@@ -360,7 +340,9 @@ export function useCheckoutPage(deps: {
 
 			// ── تمام-کیف‌پول: همین، نتیجه است ──
 			if (res.orderCompleted && res.orderId) {
-				sessionStorage.setItem(PENDING_CHECKOUT_KEY, res.orderId)
+				// Keep this purchase key while navigation is pending and the old
+				// basket is still visible. The matching order page clears it.
+				rememberPendingCheckout(res.orderId)
 				setActiveOrderId(res.orderId)
 				showToast(t['checkout.orderPlaced'])
 				navigate({
@@ -377,10 +359,7 @@ export function useCheckoutPage(deps: {
 					try {
 						const payResult = await mockPay(res.paymentUrl, true)
 						if (payResult.paymentStatus === 'SUCCESS') {
-							sessionStorage.setItem(
-								PENDING_CHECKOUT_KEY,
-								payResult.orderDisplayId,
-							)
+							rememberPendingCheckout(payResult.orderDisplayId)
 							setActiveOrderId(payResult.orderDisplayId)
 							showToast(t['checkout.paySuccess'])
 							navigate({
@@ -389,11 +368,17 @@ export function useCheckoutPage(deps: {
 							})
 						} else {
 							// شکست قطعی → کلید تازه؛ سبد «پاک نشده» — کاربر دوباره می‌زند
-							idempotencyKeyRef.current = newIdempotencyKey()
+							clearCheckoutIntent()
 							showToast(t['checkout.payFailed'], 'error')
 						}
 					} catch (err) {
-						idempotencyKeyRef.current = newIdempotencyKey()
+						// Network failure is not a confirmed payment failure. Keep
+						// the purchase key and recover through the existing order.
+						if (res.orderId) {
+							rememberPendingCheckout(res.orderId)
+							setActiveOrderId(res.orderId)
+							void navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
+						}
 						showToast(
 							err instanceof Error ? err.message : t['checkout.payError'],
 							'error',
@@ -408,11 +393,17 @@ export function useCheckoutPage(deps: {
 				// برگشت از درگاه → /dashboard/orders/:orderId → پول →
 				// اولین SUCCESS با پرچمِ همین سفارش → سبد پاک می‌شود
 				if (res.orderId)
-					sessionStorage.setItem(PENDING_CHECKOUT_KEY, res.orderId)
+					rememberPendingCheckout(res.orderId)
 				window.location.href = res.paymentUrl
 				return
 			}
 
+			if (res.orderId) {
+				rememberPendingCheckout(res.orderId)
+				setActiveOrderId(res.orderId)
+				void navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
+				return
+			}
 			showToast(t['checkout.orderProcessFail'], 'error')
 		},
 		// onError عمداً کلید را عوض «نمی‌کند»: خطای شبکه → تلاش مجدد با همان کلید
@@ -422,6 +413,7 @@ export function useCheckoutPage(deps: {
 	})
 
 	const handleFinalSubmit = useCallback(() => {
+		if (checkoutMutation.isPending || mockPayPending || isPreviewFetching || !previewData) return
 		// stage-48 — گارد ناموجودی (سروری): پرداخت قفل تا رفع/حذف آیتم
 		if (hasUnavailableItems) {
 			showToast(
@@ -476,6 +468,9 @@ export function useCheckoutPage(deps: {
 		isPreviewError,
 		showToast,
 		checkoutMutation,
+		mockPayPending,
+		isPreviewFetching,
+		previewData,
 		t,
 		hasUnavailableItems,
 		isDeliveryBlocked,

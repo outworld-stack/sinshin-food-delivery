@@ -106,9 +106,11 @@ export function useWalletPage(transactions: TransactionRowData[], referrals: Ref
       refLimit: search.refLimit,
     },
     visibleTransactions,
+    txTotalItems: sortedTransactions.length,
     txCurrentPage: txSafePage,     // ← صفحه‌ی فعلی (نسخه‌ی ایمن)
     txTotalPages,                  // ← تعداد کل صفحات
     visibleReferrals,
+    refTotalItems: sortedReferrals.length,
     refCurrentPage: refSafePage,
     refTotalPages,
     handleTxSort, handleTxPage, handleTxLimit,

@@ -23,6 +23,7 @@ import { getAccessToken, tryRefresh } from '#/lib/auth-session'
 import {
         enablePush,
         getPushState,
+        reconcileSubscription,
         type PushState,
 } from '#/lib/push-subscription'
 import { createFetchSse } from '#/lib/sse-client'
@@ -55,7 +56,7 @@ function phaseOf(state: PushState): InboxPushPhase {
                         return 'unsupported'
                 case 'granted':
                         // مجوز هست؛ اشتراک ثبت‌شده؟ (بدون آن پوش نمی‌رسد — ولی صندوق کار می‌کند)
-                        return state.subscribed ? 'on' : 'default'
+                        return state.subscribed ? 'on' : state.failureReason ? 'failed' : 'default'
         }
 }
 
@@ -77,7 +78,7 @@ export function useNotificationInboxPage(userId: string | undefined) {
         const { t, apiError } = useI18n()
 
         const { data, isLoading, isError, isFetching, refetch } = useQuery({
-                ...myNotificationsOptions,
+                ...myNotificationsOptions(userId),
                 enabled: Boolean(userId),
         })
 
@@ -201,7 +202,7 @@ export function useNotificationInboxPage(userId: string | undefined) {
 
         useEffect(() => {
                 let cancelled = false
-                void getPushState()
+                void getPushState().then((s) => s.state === 'granted' ? reconcileSubscription() : s)
                         .then((s) => {
                                 if (!cancelled && s) setPushPhase(phaseOf(s))
                         })
@@ -211,7 +212,7 @@ export function useNotificationInboxPage(userId: string | undefined) {
                 return () => {
                         cancelled = true
                 }
-        }, [])
+        }, [userId])
 
         const handleEnablePush = useCallback(async () => {
                 setPushPhase('busy')
@@ -238,7 +239,9 @@ export function useNotificationInboxPage(userId: string | undefined) {
         // مجوز از تنظیمات مرورگر، کاربر اینجا وضعیت را تازه می‌کند
         const handleRecheck = useCallback(async () => {
                 setPushPhase('loading')
-                const s = await getPushState().catch(() => null)
+                const s = await getPushState()
+                        .then((state) => state.state === 'granted' ? reconcileSubscription() : state)
+                        .catch(() => null)
                 setPushPhase(s ? phaseOf(s) : 'denied')
         }, [])
 

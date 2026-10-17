@@ -161,21 +161,24 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           const marked = await deps.notifications.markAllRead(user.id)
           return { success: true, marked }
         }
-        const ok = await deps.notifications.markRead(user.id, body.id ?? '')
+        const ok = await deps.notifications.markRead(user.id, body.id!)
         return { success: ok }
       },
       {
-        body: t.Object({
-          id: t.Optional(t.String({ maxLength: 40 })),
-          all: t.Optional(t.Boolean()),
-        }),
+        body: t.Union([
+          t.Object({ id: t.String({ format: 'uuid' }), all: t.Optional(t.Literal(false)) }),
+          t.Object({ all: t.Literal(true), id: t.Optional(t.String({ format: 'uuid' })) }),
+        ]),
         detail: { summary: 'Mark one (id) or all notifications as read' },
       },
     )
 
     .get(
       '/push-status',
-      async ({ user }) => deps.notifications.pushStatus(user.id),
+      async ({ user, set }) => {
+        set.headers['cache-control'] = 'no-store'
+        return deps.notifications.pushStatus(user.id)
+      },
       { detail: { summary: 'Active push subscriptions of me' } },
     )
 
@@ -189,6 +192,12 @@ export const notificationRoutes = (deps: NotificationRoutesDeps) => {
           userAgent: request.headers.get('user-agent') ?? undefined,
         })
         if (!res.ok) {
+          if (res.reason === 'db') {
+            return new Response(
+              JSON.stringify({ error: { code: 'PUSH_SUB_UNAVAILABLE', message: 'ثبت اشتراک پوش موقتاً در دسترس نیست.' } }),
+              { status: 503, headers: { 'content-type': 'application/json' } },
+            )
+          }
           // stage-55 — تسخیر اشتراک کاربر دیگری: 409 اختصاصی (نه 422 کلی)
           // تا فرانت پیام روشن نشان دهد و قربانی بداند اشتراکش ربوده نشده
           if (res.reason === 'owned-by-other') {

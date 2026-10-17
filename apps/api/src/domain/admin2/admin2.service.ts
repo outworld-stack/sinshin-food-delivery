@@ -69,6 +69,8 @@ export const ALL_ADMIN2_PERMISSIONS: Admin2Permissions = {
     notificationsRead: true,
     notificationsSend: true,
     productsAvailability: true,
+    articlesRead: true,
+    articlesWrite: true,
 }
 
 /**
@@ -92,6 +94,9 @@ const DEFAULT_ADMIN2_PERMISSIONS = {
     notificationsRead: true,
     notificationsSend: false,
     productsAvailability: true,
+    /** stage-82 — خواندنِ مقالات پیش‌فرض روشن؛ نوشتن فقط با مجوزِ صریح */
+    articlesRead: true,
+    articlesWrite: false,
 } as const
 
 export class Admin2Service {
@@ -511,6 +516,8 @@ export class Admin2Service {
             notificationsRead: p.notificationsRead,
             notificationsSend: p.notificationsSend,
             productsAvailability: p.productsAvailability,
+            articlesRead: p.articlesRead,
+            articlesWrite: p.articlesWrite,
         }
     }
 

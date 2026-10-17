@@ -85,6 +85,7 @@ export class CouponScanJob implements DailyJob {
           eq(coupons.isActive, true),
           eq(coupons.isPublic, false),
           eq(coupons.cronEnabled, true),
+          sql`${coupons.startsAt} <= now()`,
           sql`(${coupons.endsAt} is null or ${coupons.endsAt} > now())`,
           sql`(${coupons.maxUses} = 0 or ${coupons.usedCount} < ${coupons.maxUses})`,
         ),

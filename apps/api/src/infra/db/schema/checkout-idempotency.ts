@@ -26,6 +26,8 @@ export const checkoutIdempotency = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     /** همان قاعدهٔ هدر Idempotency-Key در order.routes — ۸ تا ۶۴ کاراکتر */
     key: varchar('key', { length: 64 }).notNull(),
+    requestHash: varchar('request_hash', { length: 64 }),
+    claimToken: uuid('claim_token').notNull().defaultRandom(),
     /** پاسخ نهایی چک‌اوت برای replay — null یعنی هنوز در حال پردازش */
     response: jsonb('response').$type<Record<string, unknown> | null>(),
     claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),

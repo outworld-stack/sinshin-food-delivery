@@ -52,6 +52,7 @@
  */
 
 import { apiBase } from '#/lib/api'
+import { fetchWithTimeout } from '#/lib/api-fetch'
 import { ensureSession, getAccessToken, tryRefresh } from '#/lib/auth-session'
 
 export type PushPermission = 'granted' | 'denied' | 'default' | 'unsupported'
@@ -89,12 +90,52 @@ const FETCH_TIMEOUT_MS = 10_000
 /** subscribe می‌تواند (فایرفاکس/شبکه‌ی کند) طول بکشد — ۳۰ ثانیه سقف */
 const SUBSCRIBE_TIMEOUT_MS = 30_000
 
+let pushGeneration = 0
+let pushSuspended = false
+let pushOperation: Promise<PushState> | null = null
+type IsCurrent = () => boolean
+const inactiveState = (): PushState => ({ state: 'granted', subscribed: false })
+
+/** Logout invalidates pending subscriptions before clearing the auth session. */
+export function resumePushSynchronization(): void {
+	pushSuspended = false
+}
+
+function runPushOperation(
+	action: (isCurrent: IsCurrent) => Promise<PushState>,
+): Promise<PushState> {
+	if (pushSuspended) return Promise.resolve(inactiveState())
+	if (pushOperation) return pushOperation
+	const generation = pushGeneration
+	const operation = action(
+		() => !pushSuspended && generation === pushGeneration,
+	)
+	pushOperation = operation
+	void operation
+		.finally(() => {
+			if (pushOperation === operation) pushOperation = null
+		})
+		.catch(() => {})
+	return operation
+}
+
 /** رقابتِ promise با تایمر — برنده‌ی اول؛ هیچ‌وقت معلق نمی‌ماند */
-function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-	return Promise.race([
-		p,
-		new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-	])
+async function withTimeout<T>(
+	p: Promise<T>,
+	ms: number,
+	fallback: T,
+): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	try {
+		return await Promise.race([
+			p,
+			new Promise<T>((resolve) => {
+				timer = setTimeout(() => resolve(fallback), ms)
+			}),
+		])
+	} finally {
+		clearTimeout(timer)
+	}
 }
 
 /**
@@ -109,10 +150,39 @@ export async function readJsonWithTimeout<T>(
 	ms: number,
 	fallback: T,
 ): Promise<T> {
+	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+	let timer: ReturnType<typeof setTimeout> | undefined
 	try {
-		return await withTimeout(res.json() as Promise<T>, ms, fallback)
+		if (!res.body) return fallback
+		reader = res.body.getReader()
+		const decoder = new TextDecoder()
+		const read = async () => {
+			let body = ''
+			while (true) {
+				const chunk = await reader!.read()
+				if (chunk.done) break
+				body += decoder.decode(chunk.value, { stream: true })
+			}
+			return JSON.parse(body + decoder.decode()) as T
+		}
+		return await Promise.race([
+			read(),
+			new Promise<T>((resolve) => {
+				timer = setTimeout(() => {
+					void reader?.cancel().catch(() => {})
+					resolve(fallback)
+				}, ms)
+			}),
+		])
 	} catch {
 		return fallback
+	} finally {
+		clearTimeout(timer)
+		try {
+			reader?.releaseLock()
+		} catch {
+			/* cancelled read is settling */
+		}
 	}
 }
 
@@ -123,7 +193,13 @@ export async function readJsonWithTimeout<T>(
 async function getRegistrationFast(): Promise<ServiceWorkerRegistration | null> {
 	if (!('serviceWorker' in navigator)) return null
 	try {
-		return (await navigator.serviceWorker.getRegistration()) ?? null
+		return (
+			(await withTimeout(
+				navigator.serviceWorker.getRegistration(),
+				GETSTATE_TIMEOUT_MS,
+				undefined,
+			)) ?? null
+		)
 	} catch {
 		return null
 	}
@@ -140,7 +216,11 @@ async function ensurePushRegistration(): Promise<ServiceWorkerRegistration | nul
 	const existing = await getRegistrationFast()
 	if (existing) return existing
 	try {
-		return await navigator.serviceWorker.register(SW_PUSH_URL)
+		return await withTimeout(
+			navigator.serviceWorker.register(SW_PUSH_URL),
+			READY_TIMEOUT_MS,
+			null,
+		)
 	} catch {
 		return null
 	}
@@ -168,29 +248,34 @@ async function readyWithTimeout(
 export async function authedPushFetch(
 	url: string,
 	init: RequestInit,
+	isCurrent: IsCurrent = () => true,
 ): Promise<Response | null> {
 	// نشست را قبل از حرکت تازه کن (توکنِ ۱۵ دقیقه‌ای ممکن است مرده باشد)
 	await ensureSession().catch(() => {})
-	const buildHeaders = (): Record<string, string> => {
-		const headers: Record<string, string> = {
-			...(init.headers as Record<string, string> | undefined),
-		}
+	if (!isCurrent()) return null
+	const buildHeaders = (): Headers => {
+		const headers = new Headers(init.headers)
 		const token = getAccessToken()
-		if (token) headers.authorization = `Bearer ${token}`
+		if (token) headers.set('authorization', `Bearer ${token}`)
 		return headers
 	}
 	const run = (): Promise<Response | null> =>
 		withTimeout(
-			fetch(url, { ...init, headers: buildHeaders(), credentials: 'include' }),
+			fetchWithTimeout(
+				url,
+				{ ...init, headers: buildHeaders(), credentials: 'include' },
+				{ timeoutMs: FETCH_TIMEOUT_MS },
+			),
 			FETCH_TIMEOUT_MS,
 			null,
 		).catch(() => null)
 
 	let res = await run()
 	if (res !== null && res.status === 401) {
+		if (!isCurrent()) return null
 		// توکن کهنه — یک‌بار نوسازی و تلاش مجدد
 		const refreshed = await tryRefresh().catch(() => false)
-		if (refreshed) res = await run()
+		if (refreshed && isCurrent()) res = await run()
 	}
 	return res
 }
@@ -262,21 +347,41 @@ async function fetchVapidKey(): Promise<Uint8Array<ArrayBuffer> | null> {
 /** ساخت (یا گرفتن) اشتراک روی این رجیستری — بدون POST سرور */
 async function obtainLocalSubscription(
 	reg: ServiceWorkerRegistration,
+	isCurrent: IsCurrent,
 ): Promise<PushSubscription | null> {
-	const existing = await reg.pushManager.getSubscription().catch(() => null)
+	const existing = await withTimeout(
+		reg.pushManager.getSubscription(),
+		GETSTATE_TIMEOUT_MS,
+		null,
+	).catch(() => null)
+	if (!isCurrent()) return null
 	if (existing) return existing
 	const applicationServerKey = await fetchVapidKey()
-	if (!applicationServerKey) return null
+	if (!applicationServerKey || !isCurrent()) return null
 	try {
 		const sub = await withTimeout(
-			reg.pushManager.subscribe({
-				userVisibleOnly: true,
-				applicationServerKey,
-			}),
+			reg.pushManager
+				.subscribe({
+					userVisibleOnly: true,
+					applicationServerKey,
+				})
+				.then(async (sub) => {
+					// Native subscribe cannot be aborted. A late completion after logout
+					// must be detached instead of restoring delivery for the old account.
+					if (!isCurrent()) {
+						await withTimeout(
+							sub.unsubscribe(),
+							GETSTATE_TIMEOUT_MS,
+							false,
+						).catch(() => false)
+						return null
+					}
+					return sub
+				}),
 			SUBSCRIBE_TIMEOUT_MS,
 			null,
 		)
-		if (!sub) {
+		if (!sub && isCurrent()) {
 			console.warn(
 				`[push] subscribe بعد از ${SUBSCRIBE_TIMEOUT_MS / 1000}s مهلت پر شد`,
 			)
@@ -300,20 +405,26 @@ interface SubscriptionJson {
 /** POST ثبت اشتراک در سرور — خروجی: کد وضعیت | null(شبکه) */
 async function postSubscription(
 	sub: PushSubscription,
+	isCurrent: IsCurrent,
 ): Promise<Response | null> {
+	if (!isCurrent()) return null
 	const raw = sub.toJSON() as SubscriptionJson
 	if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) {
 		console.warn('[push] ساختار اشتراک ناقص است (endpoint/keys)')
 		return null
 	}
-	return authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({
-			endpoint: raw.endpoint,
-			keys: { p256dh: raw.keys.p256dh, auth: raw.keys.auth },
-		}),
-	})
+	return authedPushFetch(
+		`${apiBase()}/notifications/subscriptions`,
+		{
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				endpoint: raw.endpoint,
+				keys: { p256dh: raw.keys.p256dh, auth: raw.keys.auth },
+			}),
+		},
+		isCurrent,
+	)
 }
 
 /**
@@ -328,32 +439,36 @@ async function postSubscription(
 async function registerOnServer(
 	reg: ServiceWorkerRegistration,
 	sub: PushSubscription,
+	isCurrent: IsCurrent,
 ): Promise<'ok' | 'guest' | 'register-failed'> {
-	let res = await postSubscription(sub)
-	if (res === null) return 'register-failed'
+	let res = await postSubscription(sub, isCurrent)
+	if (res === null || !isCurrent()) return 'register-failed'
 
 	// ── گره‌ی ۴۰۹: اشتراکِ متعلق به حساب قبلی — بازسازی تازه ──
 	if (res.status === 409) {
 		// stage-77 — بدنه زیرِ مهلت؛ خطا/مهلت/بدنه‌ی بی-کد = فرضِ «متعلق به
 		// دیگری» (محافظه‌کارانه‌ی قبلی — ۴۰۹ از این مسیر فقط همین معنی را دارد)
 		const body = await readJsonWithTimeout<{ error?: { code?: string } }>(
-			res.clone(),
+			res,
 			FETCH_TIMEOUT_MS,
 			{},
 		)
 		const owned =
 			body.error?.code === 'PUSH_SUB_OWNED' || body.error?.code === undefined
 		if (owned) {
+			if (!isCurrent()) return 'register-failed'
 			console.warn('[push] اشتراک به حساب دیگری تعلق داشت — بازسازی تازه')
 			try {
-				await sub.unsubscribe()
+				if (!(await withTimeout(sub.unsubscribe(), GETSTATE_TIMEOUT_MS, false)))
+					return 'register-failed'
 			} catch {
-				/* بهترین تلاش */
+				return 'register-failed'
 			}
-			const fresh = await obtainLocalSubscription(reg)
+			const fresh = await obtainLocalSubscription(reg, isCurrent)
 			if (fresh) {
-				res = await postSubscription(fresh)
-				if (res?.ok) return 'ok'
+				res = await postSubscription(fresh, isCurrent)
+				if (res?.ok && isCurrent()) return 'ok'
+				if (res?.status === 401) return 'guest'
 			}
 			return 'register-failed'
 		}
@@ -372,7 +487,11 @@ async function registerOnServer(
 }
 
 /** درخواست permission + subscribe + ثبت در بک‌اند (مسیر دستی/خودکار) */
-export async function enablePush(): Promise<PushState> {
+export function enablePush(): Promise<PushState> {
+	return runPushOperation(enablePushCurrent)
+}
+
+async function enablePushCurrent(isCurrent: IsCurrent): Promise<PushState> {
 	if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
 		return { state: 'unsupported', reason: 'no-sw' }
 	}
@@ -380,7 +499,9 @@ export async function enablePush(): Promise<PushState> {
 		return { state: 'unsupported', reason: 'no-push-api' }
 	}
 	// iOS غیرنصب‌شده — پیام روشن بده نه خطای خام
-	const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
+	const isIos =
+		/iphone|ipad|ipod/i.test(navigator.userAgent) ||
+		(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 	const isStandalone =
 		window.matchMedia('(display-mode: standalone)').matches ||
 		(window.navigator as unknown as { standalone?: boolean }).standalone ===
@@ -391,6 +512,7 @@ export async function enablePush(): Promise<PushState> {
 
 	try {
 		const permission = await Notification.requestPermission()
+		if (!isCurrent()) return inactiveState()
 		if (permission !== 'granted') {
 			return permission === 'denied'
 				? { state: 'denied' }
@@ -401,12 +523,16 @@ export async function enablePush(): Promise<PushState> {
 		// sw-push.js؛ فقط بعدش منتظر فعال‌شدن بمان.
 		let reg = await ensurePushRegistration()
 		if (reg) reg = (await readyWithTimeout(READY_TIMEOUT_MS)) ?? reg
-		if (!reg)
+		if (!reg || !isCurrent())
 			return { state: 'granted', subscribed: false, failureReason: 'subscribe' }
 
-		let sub = await reg.pushManager.getSubscription().catch(() => null)
+		let sub = await withTimeout(
+			reg.pushManager.getSubscription(),
+			GETSTATE_TIMEOUT_MS,
+			null,
+		).catch(() => null)
 		if (!sub) {
-			sub = await obtainLocalSubscription(reg)
+			sub = await obtainLocalSubscription(reg, isCurrent)
 			if (!sub) {
 				return {
 					state: 'granted',
@@ -416,7 +542,7 @@ export async function enablePush(): Promise<PushState> {
 			}
 		}
 
-		const outcome = await registerOnServer(reg, sub)
+		const outcome = await registerOnServer(reg, sub, isCurrent)
 		if (outcome === 'ok') return { state: 'granted', subscribed: true }
 		if (outcome === 'guest') {
 			// stage-58 — مهمان: اشتراک محلی ساخته شد؛ ثبت سرور بعد از لاگین
@@ -435,7 +561,13 @@ export async function enablePush(): Promise<PushState> {
  * GET push-status خودش ارزان است (SELECT کوچک) و POST فقط وقتی واقعاً
  * لازم است رخ می‌دهد (نرخ‌سقف ۲۰/min/IP هم برای NATها نگرانی نیست).
  */
-export async function reconcileSubscription(): Promise<PushState> {
+export function reconcileSubscription(): Promise<PushState> {
+	return runPushOperation(reconcileSubscriptionCurrent)
+}
+
+async function reconcileSubscriptionCurrent(
+	isCurrent: IsCurrent,
+): Promise<PushState> {
 	if (
 		typeof window === 'undefined' ||
 		!('serviceWorker' in navigator) ||
@@ -443,17 +575,24 @@ export async function reconcileSubscription(): Promise<PushState> {
 	) {
 		return { state: 'unsupported', reason: 'no-push-api' }
 	}
-	if (!('Notification' in window) || Notification.permission !== 'granted') {
+	if (!('Notification' in window)) {
+		return { state: 'unsupported', reason: 'no-notification-api' }
+	}
+	if (Notification.permission !== 'granted') {
 		return Notification.permission === 'denied'
 			? { state: 'denied' }
 			: { state: 'default' }
 	}
 	try {
 		const reg = await ensurePushRegistration()
-		if (!reg) return { state: 'granted', subscribed: false }
+		if (!reg || !isCurrent()) return inactiveState()
 
-		const sub = await reg.pushManager.getSubscription().catch(() => null)
-		if (!sub) return { state: 'granted', subscribed: false }
+		const sub = await withTimeout(
+			reg.pushManager.getSubscription(),
+			GETSTATE_TIMEOUT_MS,
+			null,
+		).catch(() => null)
+		if (!sub || !isCurrent()) return inactiveState()
 
 		// سرور چه اشتراک‌هایی برای «این کاربر» دارد؟ (لاگین‌نشده = 401)
 		const statusRes = await authedPushFetch(
@@ -461,7 +600,9 @@ export async function reconcileSubscription(): Promise<PushState> {
 			{
 				method: 'GET',
 			},
+			isCurrent,
 		)
+		if (!isCurrent()) return inactiveState()
 		if (statusRes === null) {
 			return { state: 'granted', subscribed: false, failureReason: 'register' }
 		}
@@ -484,11 +625,13 @@ export async function reconcileSubscription(): Promise<PushState> {
 		}
 		const endpoints: string[] = body.endpoints
 
+		if (!isCurrent()) return inactiveState()
+
 		if (endpoints.includes(sub.endpoint)) {
 			return { state: 'granted', subscribed: true }
 		}
 		// سرور ندارد — ثبت (با بازیابی ۴۰۹)
-		const outcome = await registerOnServer(reg, sub)
+		const outcome = await registerOnServer(reg, sub, isCurrent)
 		if (outcome === 'ok') return { state: 'granted', subscribed: true }
 		if (outcome === 'guest')
 			return { state: 'granted', subscribed: false, pendingLogin: true }
@@ -501,24 +644,54 @@ export async function reconcileSubscription(): Promise<PushState> {
 
 /** لغو اشتراک — هم مرورگر هم بک‌اند */
 export async function disablePush(): Promise<PushState> {
+	pushSuspended = true
+	++pushGeneration
 	try {
 		const reg = await getRegistrationFast()
-		const sub = reg ? await reg.pushManager.getSubscription() : null
+		const sub = reg
+			? await withTimeout(
+					reg.pushManager.getSubscription(),
+					GETSTATE_TIMEOUT_MS,
+					null,
+				)
+			: null
 		if (sub) {
-			const raw = sub.toJSON() as { endpoint?: string }
-			if (raw.endpoint) {
-				await authedPushFetch(`${apiBase()}/notifications/subscriptions`, {
-					method: 'DELETE',
-					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ endpoint: raw.endpoint }),
-				})
+			try {
+				// Use the existing identity without refreshing it during logout. Local
+				// unsubscribe in finally also cuts delivery when the server is unreachable.
+				const headers = new Headers({ 'content-type': 'application/json' })
+				const token = getAccessToken()
+				if (token) headers.set('authorization', `Bearer ${token}`)
+				await withTimeout(
+					fetchWithTimeout(
+						`${apiBase()}/notifications/subscriptions`,
+						{
+							method: 'DELETE',
+							headers,
+							credentials: 'include',
+							body: JSON.stringify({ endpoint: sub.endpoint }),
+						},
+						{ timeoutMs: FETCH_TIMEOUT_MS },
+					),
+					FETCH_TIMEOUT_MS,
+					null,
+				).catch(() => null)
+			} finally {
+				if (
+					!(await withTimeout(sub.unsubscribe(), GETSTATE_TIMEOUT_MS, false))
+				) {
+					return {
+						state: 'granted',
+						subscribed: true,
+						failureReason: 'register',
+					}
+				}
 			}
-			await sub.unsubscribe()
 		}
 	} catch (err) {
 		console.error('[push] disablePush ناموفق:', err)
 	}
-	return { state: 'granted', subscribed: false }
+	return inactiveState()
 }
 
 // ── helpers ──

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { apiBase } from '#/lib/api'
 import { getAccessToken, onUnauthorized, tryRefresh } from '#/lib/auth-session'
 import { createFetchSse } from '#/lib/sse-client'
+import { disablePush, resumePushSynchronization } from '#/lib/push-subscription'
 import { subAdminLogout, viewOrderNote } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
@@ -258,7 +259,14 @@ export function useAdmin2Panel() {
 	// subAdminLogout → POST /auth/logout (برای admin2 سشن + لاگ فعالیت هم بسته می‌شود)
 	const navigate = useNavigate()
 	const logoutMutation = useMutation({
-		mutationFn: (input: string) => subAdminLogout({ data: { adminId: input } }),
+  mutationFn: async (input: string) => {
+   await disablePush()
+   try {
+    await subAdminLogout({ data: { adminId: input } })
+   } finally {
+    resumePushSynchronization()
+   }
+  },
 		onSuccess: () => {
 			// قبلاً فقط کش رفرش می‌شد؛ توکن ماژول-گلوبال و استور پاک نمی‌شد →
 			// «خارج‌شده» همچنان توکن زنده داشت. حالا: پاک‌سازی کامل + خروج
@@ -267,6 +275,7 @@ export function useAdmin2Panel() {
 			showToast('از پنل خارج شدید')
 			navigate({ to: '/', replace: true })
 		},
+  onError: () => showToast('خروج انجام نشد؛ دوباره تلاش کنید.', 'error'),
 	})
 
 	const handleLogout = useCallback(() => {
