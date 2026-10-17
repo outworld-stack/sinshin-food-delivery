@@ -14,7 +14,7 @@
 
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { Bell, BellOff, CheckCircle } from 'reicon-react'
+import { Bell } from 'reicon-react'
 import { Brand } from '#/components/Brand'
 import { LangSwitcher } from '#/components/LangSwitcher'
 import { ThemeToggle } from '#/components/ThemeToggle'
@@ -77,6 +77,11 @@ function LandingRoute() {
  * stage-84 — دکمه‌ی فعال‌سازی نوتیفیکیشن هیرو (زیر «دیدن محصولات»).
  * الگوی درس stage-64: requestPermission فقط داخل کلیکِ کاربر (نه auto).
  * مهمان هم می‌تواند فعال کند (pendingLogin — ثبتِ سرور بعد از لاگین).
+ *
+ * stage-85 — خواسته‌ی کارفرما: «باکسِ فعال» حذف شد؛ فقط وقتی نوتیفیکیشن
+ * «فعال نیست» دکمه‌ی خالصِ «فعال‌سازی نوتیفیکیشن» (بدون هیچ کلمه/بج/حالتِ
+ * رنگیِ دیگری) زیر «دیدن محصولات» دیده می‌شود — بعد از فعال‌سازی (granted)
+ * هیچ‌چیز رندر نمی‌شود. denied هم «فعال‌ نیست» → همان دکمه‌ی واحد می‌ماند.
  */
 function LandingNotifyButton() {
 	const { t } = useI18n()
@@ -98,10 +103,9 @@ function LandingNotifyButton() {
 	}, [hydrated])
 
 	const granted = pushState?.state === 'granted' && pushState.subscribed
-	const denied = pushState?.state === 'denied'
 
 	const handleClick = () => {
-		if (busy || granted || denied) return
+		if (busy || granted) return
 		setBusy(true)
 		void enablePush()
 			.then((s) => setPushState(s))
@@ -109,36 +113,18 @@ function LandingNotifyButton() {
 			.finally(() => setBusy(false))
 	}
 
+	// فعال است → هیچ‌چیز (حتی یک px ارتفاع اضافه نمی‌ماند)
+	if (hydrated && granted) return null
+
 	return (
 		<button
 			type="button"
 			onClick={handleClick}
-			disabled={busy || granted || denied || !hydrated}
-			className={
-				'inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-2xl font-DanaMedium text-sm sm:text-base transition-all duration-300 border-2 ' +
-				(granted
-					? 'border-green-300 dark:border-green-500/40 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-500/10 cursor-default'
-					: denied
-						? 'border-gray-200 dark:border-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
-						: 'border-gray-200 dark:border-[#3a151c] text-gray-700 dark:text-[#f5e0e6] hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] cursor-pointer')
-			}
+			disabled={busy || !hydrated}
+			className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-2xl font-DanaMedium text-sm sm:text-base transition-all duration-300 border-2 border-gray-200 dark:border-[#3a151c] text-gray-700 dark:text-[#f5e0e6] hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] cursor-pointer disabled:opacity-60"
 		>
-			{granted ? (
-				<>
-					<CheckCircle size={18} />
-					{t['landing.notifyGranted']}
-				</>
-			) : denied ? (
-				<>
-					<BellOff size={18} />
-					{t['landing.notifyFail']}
-				</>
-			) : (
-				<>
-					<Bell size={18} />
-					{busy ? t['landing.notifyAsk'] : t['landing.notifyButton']}
-				</>
-			)}
+			<Bell size={18} />
+			{t['landing.notifyButton']}
 		</button>
 	)
 }
