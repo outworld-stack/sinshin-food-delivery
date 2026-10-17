@@ -93,16 +93,7 @@ function ArticleDetailPage() {
         const back = useBack('/articles')
         const { t, fmt } = useI18n()
 
-        // گالری — عکس‌های آپلودی مقاله یا پیش‌فرض گرادیانت
-        // round-12 — گارد length>=2 حذف شد: یک عکس تکی هم باید رندر شود
-        // (قبلاً بی‌صدا انداخته می‌شد و «عکس مقاله اضافه نمی‌شود» به نظر می‌رسید)
-        const galleryImages = article.galleryImages?.length
-                ? article.galleryImages
-                : [
-                        'from-blue-400 to-purple-500',
-                        'from-green-400 to-teal-500',
-                        'from-orange-400 to-red-500',
-                ]
+        const galleryImages = article.galleryImages ?? []
 
         // رارد ۳۸ — JSON-LD (Article + BreadcrumbList) به head منتقل شد:
         // دوزبانه (بومی‌سازی‌شده) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
@@ -156,12 +147,12 @@ function ArticleDetailPage() {
                         </p>
 
         {/* ═══ stage-82 — بدنه‌ی مقاله: سندِ بلوکی (صفحه‌ساز) یا مسیرِ متنیِ قبل ═══ */}
-        {article.blocks && article.blocks.blocks.length > 0 ? (
+        {article.blocks?.version === 1 && Array.isArray(article.blocks.blocks) && article.blocks.blocks.length > 0 ? (
                 <ArticleBlocksRenderer doc={article.blocks} />
         ) : (
                 <div className="max-w-none text-gray-700 dark:text-gray-300 leading-loose font-DanaRegular space-y-6 mb-8">
                         {article.content.split('\n\n').map((p, i) => (
-                                <p key={i}>{p}</p>
+                                <p key={i} className="whitespace-pre-line">{p}</p>
                         ))}
                 </div>
         )}

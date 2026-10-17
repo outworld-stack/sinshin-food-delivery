@@ -77,7 +77,7 @@ const h = normalizeBlocksDoc({
 ok('N4: level غلط → ۲', (h?.blocks[0] as { props: { level: number } } | undefined)?.props.level === 2)
 
 console.log('\n══ N5: URL تصویر — تنها سطح حمله؛ الگو سخت ══')
-const badSrcs = ['javascript:alert(1)', 'http://insecure.com/x.jpg', 'data:image/png;base64,xx', 'ftp://x/y', '  ']
+const badSrcs = ['javascript:alert(1)', 'http://insecure.com/x.jpg', 'data:image/png;base64,xx', 'ftp://x/y', '  ', '//other.example/a.jpg', '/\\other.example/a.jpg', 'https://', 'https://bad.example/\u0000.jpg']
 for (const src of badSrcs) {
   const r = normalizeBlocksDoc({ version: 1, blocks: [B('image', { src })] })
   ok(`N5: image src رد شد (${src.slice(0, 24)})`, r === null)
@@ -185,7 +185,25 @@ const huge = {
   version: 1,
   blocks: Array.from({ length: 200 }, () => B('paragraph', { text: 'x'.repeat(5000) })),
 }
-ok('N10: سند > ۲۵۶KB → null', normalizeBlocksDoc(huge) === null)
+function rejectsOversized(doc: unknown): boolean {
+  try {
+    normalizeBlocksDoc(doc)
+    return false
+  } catch (error) {
+    return error instanceof Error && 'status' in error && error.status === 422
+  }
+}
+ok('N10: oversized document returns validation error without clearing the layout', rejectsOversized(huge))
+ok('N10: document limit counts UTF-8 bytes for Persian text', rejectsOversized({
+  version: 1,
+  blocks: Array.from({ length: 30 }, (_, i) => B('paragraph', { text: 'م'.repeat(5000) }, { id: `persian-${i}` })),
+}))
+ok('N10: small Persian document remains valid', normalizeBlocksDoc({
+  version: 1, blocks: [B('paragraph', { text: 'م'.repeat(5000) })],
+}) !== null)
+ok('N10: a divider accepts omitted props', normalizeBlocksDoc({
+  version: 1, blocks: [{ type: 'divider' }],
+})?.blocks[0]?.type === 'divider')
 
 console.log('\n══ T1: مشتق‌سازیِ متن (single source برای content) ══')
 const doc: ArticleBlocksDoc = {

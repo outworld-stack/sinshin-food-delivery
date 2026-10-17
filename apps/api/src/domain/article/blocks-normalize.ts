@@ -14,7 +14,8 @@
 // ═══════════════════════════════════════════════════════════════
 import { randomUUID } from 'node:crypto'
 
-import { isHexColor, type ArticleBlock, type ArticleBlocksDoc } from '@sinshin/shared'
+import { isArticleBlockUrl, isHexColor, type ArticleBlock, type ArticleBlocksDoc } from '@sinshin/shared'
+import { Err } from '#/domain/shared/errors'
 
 /** سقف‌ها — آینه‌ی articleBody (روت) برای دفاع در عمق */
 const LIMITS = {
@@ -34,7 +35,6 @@ const LIMITS = {
         alt: 200,
 } as const
 
-const URL_RE = /^(https:\/\/[^\s]+|\/[^\s]*)$/i
 const BLOCK_TYPES = new Set([
         'hero',
         'heading',
@@ -52,7 +52,7 @@ const ANIMS = new Set<NonNullable<ArticleBlock['anim']>>(['none', 'fade', 'fade-
 const PADS = new Set<'sm' | 'md' | 'lg'>(['sm', 'md', 'lg'])
 const ALIGNS = new Set<'start' | 'center'>(['start', 'center'])
 
-const isRec = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+const isRec = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 const str = (v: unknown, max: number): string | undefined => {
         if (typeof v !== 'string') return undefined
@@ -64,7 +64,7 @@ const url = (v: unknown): string | undefined => {
         if (typeof v !== 'string') return undefined
         const t = v.trim()
         if (!t || t.length > LIMITS.url) return undefined
-        return URL_RE.test(t) ? t : undefined
+        return isArticleBlockUrl(t) ? t : undefined
 }
 
 const hex = (v: unknown): string | undefined => (isHexColor(v) ? v : undefined)
@@ -90,6 +90,7 @@ function normalizeStyle(raw: unknown): ArticleBlock['style'] {
 
 /** props هر بلوک — undefined یعنی بلوک حذف شود */
 function normalizeProps(type: string, raw: unknown): Record<string, unknown> | undefined {
+        if (type === 'divider' && raw === undefined) return { variant: 'line' }
         if (!isRec(raw)) return undefined
         switch (type) {
                 case 'hero': {
@@ -219,7 +220,7 @@ export function normalizeBlocksDoc(input: unknown): ArticleBlocksDoc | null {
                 }
                 // id پایدار — نبود/تکراری = تولیدِ تازه (کپی‌ها در ادیتور id تازه می‌گیرند؛
                 // این دفاعِ دوم است — key های رندر هرگز ایندکس نیستند)
-                let id = typeof raw.id === 'string' && raw.id.length <= 64 ? raw.id : ''
+                let id = typeof raw.id === 'string' && raw.id.length <= 64 ? raw.id.trim() : ''
                 if (!id || seenIds.has(id)) id = randomUUID()
                 seenIds.add(id)
 
@@ -235,9 +236,9 @@ export function normalizeBlocksDoc(input: unknown): ArticleBlocksDoc | null {
 
         if (blocks.length === 0) return null
         const doc: ArticleBlocksDoc = { version: 1, blocks }
-        if (JSON.stringify(doc).length > LIMITS.docBytes) {
-                console.warn('[articles] blocks doc exceeds 256KB — rejected')
-                return null
+        if (Buffer.byteLength(JSON.stringify(doc), 'utf8') > LIMITS.docBytes) {
+                // Returning null would silently erase a saved article's block layout.
+                throw Err.validation('حجم محتوای بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
         }
         if (dropped > 0) {
                 console.warn(`[articles] normalizeBlocksDoc: ${dropped} invalid block(s) dropped`)

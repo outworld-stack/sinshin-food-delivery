@@ -64,10 +64,10 @@ const ArticlesPage = memo(function ArticlesPage() {
 						<ArticlesFilterContent
 							hasSubCategories={page.hasSubCategories}
 							subCategories={page.subCategories}
-							tempSubCategory={page.state.tempSubCategory}
-							tempSortBy={page.state.tempSortBy}
-							onTempSub={page.handleTempSub}
-							onTempSort={page.handleTempSort}
+							tempSubCategory={page.subCategory}
+							tempSortBy={page.state.appliedSortBy}
+							onTempSub={page.handleSubCategoryChange}
+							onTempSort={page.handleSortChange}
 							onApply={page.handleApplyFilters}
 						/>
 					</div>
@@ -140,10 +140,10 @@ const ArticlesPage = memo(function ArticlesPage() {
 
 export const Route = createFileRoute('/articles/')({
 	validateSearch: z.object({
-		category: z.string().optional(),
-		subCategory: z.string().optional(),
+		category: z.string().trim().max(60).transform(value => value || undefined).optional().catch(undefined),
+		subCategory: z.string().trim().max(60).transform(value => value || undefined).optional().catch(undefined),
 		// ⬅ NEW: سورت در URL — shareable + back/refresh-safe
-		sort: z.enum(['newest', 'most-viewed']).optional(),
+		sort: z.enum(['newest', 'most-viewed']).optional().catch(undefined),
 	}),
 
 	// فقط category/sub دیتا رو عوض می‌کنن — سورت کلاینتیه
@@ -159,6 +159,7 @@ export const Route = createFileRoute('/articles/')({
 			context.queryClient.query(
 				articlesOptions(deps.category ?? 'all', deps.subCategory ?? 'all'),
 			),
+			context.queryClient.query(articlesOptions('all', 'all')),
 		])
 	},
 

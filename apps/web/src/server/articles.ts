@@ -34,10 +34,16 @@ export async function getArticles(input: {
 export async function getArticleById(input: {
   data: { id: string }
 }): Promise<ArticleDto | null> {
-  return getJson<ArticleDto | null>(`/articles/${input.data.id}`)
+  // An invalid route id is a missing article, not an API validation error page.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.data.id)) return null
+  return getJson<ArticleDto | null>(`/articles/${encodeURIComponent(input.data.id)}`)
 }
 
 // ─── ادمین ───
+
+export async function getAdminArticleCategories(): Promise<ArticleCategoryDto[]> {
+  return authJson<ArticleCategoryDto[]>('/admin/articles/categories', 'GET')
+}
 
 export async function getAdminArticles(): Promise<ArticleSummaryDto[]> {
   return authJson<ArticleSummaryDto[]>('/admin/articles', 'GET')
@@ -77,11 +83,12 @@ export async function updateArticle(input: {
   title: string
   excerpt: string
   content: string
-  profileImage?: string
+  author?: string
+  profileImage?: string | null
   galleryImages?: string[]
   categoryId: string
   subCategoryId?: string | null
-  processes: { title: string; items: string[] }[]
+  processes?: { title: string; items: string[] }[]
   /** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + Aurora) */
   isFeatured?: boolean
   /** stage-82 — سند بلوکی (null = پاک‌کردن → مقاله‌ی متنی) */
@@ -92,12 +99,13 @@ export async function updateArticle(input: {
   contentAr?: string | null
   processesAr?: { title: string; items: string[] }[] | null
 }): Promise<{ success: boolean }> {
-  return authJson<{ success: boolean }>(`/admin/articles/${input.id}`, 'PATCH', {
-    ...input,
-    titleAr: input.titleAr?.trim() || null,
-    excerptAr: input.excerptAr?.trim() || null,
-    contentAr: input.contentAr?.trim() || null,
-    processesAr: input.processesAr && input.processesAr.length > 0 ? input.processesAr : null,
+  const { id, ...body } = input
+  return authJson<{ success: boolean }>(`/admin/articles/${encodeURIComponent(id)}`, 'PATCH', {
+    ...body,
+    ...(input.titleAr !== undefined ? { titleAr: input.titleAr?.trim() || null } : {}),
+    ...(input.excerptAr !== undefined ? { excerptAr: input.excerptAr?.trim() || null } : {}),
+    ...(input.contentAr !== undefined ? { contentAr: input.contentAr?.trim() || null } : {}),
+    ...(input.processesAr !== undefined ? { processesAr: input.processesAr?.length ? input.processesAr : null } : {}),
   })
 }
 
@@ -139,10 +147,11 @@ export async function updateArticleCategory(input: {
   nameAr?: string | null
   subCategoriesAr?: string[] | null
 }): Promise<void> {
-  await authJson<unknown>(`/admin/articles/categories/${input.id}`, 'PATCH', {
-    ...input,
-    nameAr: input.nameAr?.trim() || null,
-    subCategoriesAr: input.subCategoriesAr ?? null,
+  const { id, ...body } = input
+  await authJson<unknown>(`/admin/articles/categories/${encodeURIComponent(id)}`, 'PATCH', {
+    ...body,
+    ...(input.nameAr !== undefined ? { nameAr: input.nameAr?.trim() || null } : {}),
+    ...(input.subCategoriesAr !== undefined ? { subCategoriesAr: input.subCategoriesAr } : {}),
   })
 }
 

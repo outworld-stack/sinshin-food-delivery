@@ -7,7 +7,7 @@
 //  · Base Web/whatwg#3114: درگ فقط روی «دسته» (نه محتوای قابل‌ویرایش)؛
 //    پاک‌سازی در dragend (نه فقط drop) — لغو با Esc هم تمیز می‌ماند
 //  · RTL: منطقِ فقط-محورِ Y — ذاتاً بی‌خطر از جهت
-//  · Redux undo: استکِ snapshot فقط برای تغییراتِ ساختاری (تایپ نه)
+//  · Redux undo: استکِ snapshot برای متن، تصویر و تغییرات ساختاری
 //  · Preview با container-query (نه iframe) — کلاس‌های عرض واقعاً
 //    به کانتینر واکنش نشان می‌دهند
 // ═══════════════════════════════════════════════════════════════
@@ -46,6 +46,7 @@ import {
 	ANIM_OPTIONS,
 	BG_PRESETS,
 	BLOCK_PALETTE,
+	blocksToPlainText,
 	duplicateBlock,
 	emptyDoc,
 	makeBlock,
@@ -130,8 +131,10 @@ function Pill({
 
 interface FieldCtx {
 	block: ArticleBlock
-	patchProps: (patch: Record<string, unknown>) => void
+	patchProps: (patch: PropsPatch) => void
 }
+
+type PropsPatch = Record<string, unknown> | ((props: ArticleBlock['props']) => Record<string, unknown>)
 
 function BlockFields({ block, patchProps }: FieldCtx) {
 	switch (block.type) {
@@ -234,7 +237,7 @@ function BlockFields({ block, patchProps }: FieldCtx) {
 						fileTypeText="WebP/PNG"
 						multiple
 						images={images.map((im) => im.src)}
-						onAdd={(url) => patchProps({ images: [...images, { src: url }] })}
+						onAdd={(url) => patchProps(props => ({ images: [...('images' in props ? props.images : []), { src: url }] }))}
 						onRemove={(index) =>
 							patchProps({ images: images.filter((_, i) => i !== index) })
 						}
@@ -642,6 +645,13 @@ function BlockSettings({
 
 export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 	const showToast = useToastStore((s) => s.showToast)
+	// Upload callbacks can resolve after other edits or a block reorder.
+	const docRef = useRef(doc)
+	docRef.current = doc
+	const commitDoc = useCallback((next: ArticleBlocksDoc) => {
+		docRef.current = next
+		onChange(next)
+	}, [onChange])
 
 	const [selectedId, setSelectedId] = useState<string | null>(null)
 	const [settingsId, setSettingsId] = useState<string | null>(null)
@@ -652,14 +662,14 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 	const dragIdRef = useRef<string | null>(null)
 	const [dropIndex, setDropIndex] = useState<number | null>(null)
 
-	// واگرد — استکِ snapshot فقط برای تغییراتِ ساختاری (الگوی Redux)
+	// Track content as well as structure, so undo never skips recent text edits.
 	const historyRef = useRef<ArticleBlocksDoc[]>([])
 	const [historyCount, setHistoryCount] = useState(0)
 
 	const pushHistory = useCallback(() => {
-		historyRef.current = [...historyRef.current.slice(-29), doc]
+		historyRef.current = [...historyRef.current.slice(-29), docRef.current]
 		setHistoryCount(historyRef.current.length)
-	}, [doc])
+	}, [])
 
 	const undo = useCallback(() => {
 		const prev = historyRef.current.pop()
@@ -668,37 +678,37 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 			showToast('چیزی برای واگرد نیست', 'error')
 			return
 		}
-		onChange(prev)
-	}, [onChange, showToast])
+		commitDoc(prev)
+	}, [commitDoc, showToast])
 
 	// ── عملیات‌های ساختاری (همه قبل از تغییر، snapshot می‌گذارند) ──
 
 	const addBlock = useCallback(
 		(type: ArticleBlock['type']) => {
+			if (doc.blocks.length >= 200) { showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error'); return }
 			pushHistory()
 			const block = makeBlock(type)
-			const at = selectedId
-				? doc.blocks.findIndex((b) => b.id === selectedId) + 1
-				: doc.blocks.length
+			const selectedIndex = doc.blocks.findIndex((b) => b.id === selectedId)
+			const at = selectedIndex >= 0 ? selectedIndex + 1 : doc.blocks.length
 			const blocks = [...doc.blocks]
 			blocks.splice(Math.max(at, 0), 0, block)
-			onChange({ ...doc, blocks })
+			commitDoc({ ...doc, blocks })
 			setSelectedId(block.id)
 			if (type !== 'hero' && type !== 'divider') setPaletteOpen(false)
 		},
-		[doc, onChange, pushHistory, selectedId],
+		[doc, commitDoc, pushHistory, selectedId, showToast],
 	)
 
 	const removeBlock = useCallback(
 		(index: number) => {
 			pushHistory()
 			const blocks = doc.blocks.filter((_, i) => i !== index)
-			onChange({
+			commitDoc({
 				...doc,
 				blocks: blocks.length > 0 ? blocks : emptyDoc().blocks,
 			})
 		},
-		[doc, onChange, pushHistory],
+		[doc, commitDoc, pushHistory],
 	)
 
 	const move = useCallback(
@@ -706,36 +716,41 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 			const next = moveBlock(doc, from, to)
 			if (next !== doc) {
 				pushHistory()
-				onChange(next)
+				commitDoc(next)
 			}
 		},
-		[doc, onChange, pushHistory],
+		[doc, commitDoc, pushHistory],
 	)
 
 	const duplicate = useCallback(
 		(index: number) => {
+			if (doc.blocks.length >= 200) { showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error'); return }
 			pushHistory()
-			onChange(duplicateBlock(doc, index))
+			commitDoc(duplicateBlock(doc, index))
 		},
-		[doc, onChange, pushHistory],
+		[doc, commitDoc, pushHistory, showToast],
 	)
 
 	const patchProps = useCallback(
-		(index: number, patch: Record<string, unknown>) => {
-			const blocks = doc.blocks.map((b, i) => {
-				if (i !== index) return b
-				return { ...b, props: { ...b.props, ...patch } } as ArticleBlock
+		(id: string, patch: PropsPatch) => {
+			const current = docRef.current
+			if (!current.blocks.some(block => block.id === id)) return
+			pushHistory()
+			const blocks = current.blocks.map((b) => {
+				if (b.id !== id) return b
+				const nextProps = typeof patch === 'function' ? patch(b.props) : patch
+				return { ...b, props: { ...b.props, ...nextProps } } as ArticleBlock
 			})
 			// ویرایشِ محتوا همین بلوک را «انتخاب» می‌کند (جای div تعاملی)
-			const target = blocks[index]
-			if (target) setSelectedId(target.id)
-			onChange({ ...doc, blocks })
+			setSelectedId(id)
+			commitDoc({ ...current, blocks })
 		},
-		[doc, onChange],
+		[commitDoc, pushHistory],
 	)
 
 	const patchStyle = useCallback(
 		(index: number, patch: Partial<ArticleBlockStyle>) => {
+			pushHistory()
 			const blocks = doc.blocks.map((b, i) => {
 				if (i !== index) return b
 				const style = { ...(b.style ?? {}), ...patch }
@@ -748,26 +763,30 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 					style: Object.keys(style).length > 0 ? style : undefined,
 				}
 			})
-			onChange({ ...doc, blocks })
+			commitDoc({ ...doc, blocks })
 		},
-		[doc, onChange],
+		[doc, commitDoc, pushHistory],
 	)
 
 	const setWidth = useCallback(
-		(index: number, width: ArticleBlock['width']) =>
-			onChange({
+		(index: number, width: ArticleBlock['width']) => {
+			pushHistory()
+			commitDoc({
 				...doc,
 				blocks: doc.blocks.map((b, i) => (i === index ? { ...b, width } : b)),
-			}),
-		[doc, onChange],
+			})
+		},
+		[doc, commitDoc, pushHistory],
 	)
 	const setAnim = useCallback(
-		(index: number, anim: ArticleBlock['anim']) =>
-			onChange({
+		(index: number, anim: ArticleBlock['anim']) => {
+			pushHistory()
+			commitDoc({
 				...doc,
 				blocks: doc.blocks.map((b, i) => (i === index ? { ...b, anim } : b)),
-			}),
-		[doc, onChange],
+			})
+		},
+		[doc, commitDoc, pushHistory],
 	)
 
 	// ── DnD handlers (پاک‌سازی در dragend — درسِ تحقیق #۲) ──
@@ -819,11 +838,7 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 	const textBlocks = useMemo(
 		() =>
 			doc.blocks.filter(
-				(b) =>
-					b.type === 'paragraph' ||
-					b.type === 'heading' ||
-					b.type === 'list' ||
-					b.type === 'quote',
+				(b) => Boolean(blocksToPlainText({ version: 1, blocks: [b] }).trim()),
 			).length,
 		[doc.blocks],
 	)
@@ -844,7 +859,7 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 					type="button"
 					onClick={undo}
 					disabled={historyCount === 0}
-					title="واگردِ تغییرات ساختاری (افزودن/حذف/جابجایی/دوبل)"
+					title="واگرد آخرین تغییر متن، تصویر یا چیدمان"
 					className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-xs font-DanaMedium text-gray-600 dark:text-gray-300 cursor-pointer hover:border-gray-400 dark:hover:border-[#4a1a24] transition disabled:opacity-40 disabled:cursor-not-allowed"
 				>
 					<ArrowsRotate />
@@ -1043,7 +1058,7 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 								{/* فیلدهای محتوا — ویرایشِ فیلد، بلوک را انتخاب می‌کند (patchProps) */}
 								<BlockFields
 									block={block}
-									patchProps={(patch) => patchProps(index, patch)}
+									patchProps={(patch) => patchProps(block.id, patch)}
 								/>
 
 								{/* تنظیماتِ نمایش */}

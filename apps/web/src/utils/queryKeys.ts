@@ -118,6 +118,7 @@ export const qk = {
 
   // مقالات — لیست مدیریت + جزئیات فرم ویرایش
   adminArticles: ['admin-articles'] as const,
+  adminArticleCategories: ['admin-article-categories'] as const,
   adminArticleDetails: (articleId: string) => ['admin-article-details', articleId] as const,
 
   // دسته‌های اصلی — مدیر دسته‌ها + سلکت والد در فرم دسته‌بندی

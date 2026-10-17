@@ -6,11 +6,12 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/articles/ArticleCategoryManager.tsx
-import { memo, useState, useCallback } from 'react'
+import { memo, useState, useCallback, useRef } from 'react'
+import { useRouter } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createArticleCategory, updateArticleCategory, deleteArticleCategory, type ArticleCategory } from '#/server/articles'
-import { articleCategoriesOptions } from '#/utils/queryOptions'
-import { qk } from '#/utils/queryKeys'
+import { adminArticleCategoriesOptions } from '#/utils/queryOptions'
+import { invalidateArticleQueries } from './invalidateArticleQueries'
 import { useToastStore } from '#/stores/toastStore'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { ArField } from '#/components/admin/ArField'
@@ -44,8 +45,10 @@ const EMPTY_FORM: ArticleCategoryFormState = {
   confirmDeleteId: null,
 }
 
-export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
+export const ArticleCategoryManager = memo(function ArticleCategoryManager({ canWrite }: { canWrite: boolean }) {
   const queryClient = useQueryClient()
+  const router = useRouter()
+  const mutationLock = useRef(false)
   const showToast = useToastStore((s) => s.showToast)
 
   const [form, setForm] = useState<ArticleCategoryFormState>(EMPTY_FORM)
@@ -53,7 +56,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
     setForm(f => ({ ...f, ...partial }))
   }, [])
 
-  const { data: categories } = useQuery(articleCategoriesOptions)
+  const { data: categories } = useQuery(adminArticleCategoriesOptions)
 
   const createMut = useMutation({
     mutationFn: (data: {
@@ -63,11 +66,13 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
       subCategories: string[]
       subCategoriesAr?: string[] | null
     }) => createArticleCategory(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.articleCategories })
+    onSuccess: async () => {
+      await invalidateArticleQueries(queryClient)
+      await router.invalidate()
       set({ isModalOpen: false })
       showToast('دسته‌بندی ایجاد شد')
     },
+    onSettled: () => { mutationLock.current = false },
   })
 
   const updateMut = useMutation({
@@ -79,28 +84,31 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
       subCategories: string[]
       subCategoriesAr?: string[] | null
     }) => updateArticleCategory(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.articleCategories })
+    onSuccess: async () => {
+      await invalidateArticleQueries(queryClient)
+      await router.invalidate()
       set({ isModalOpen: false })
       showToast('ویرایش شد')
     },
+    onSettled: () => { mutationLock.current = false },
   })
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => deleteArticleCategory(id),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
-      queryClient.invalidateQueries({ queryKey: qk.articleCategories })
-      // stage-63 — حذف آبشاری: مقالاتِ این دسته هم رفته‌اند؛ لیست ادمین و
-      // لیست عمومی مقالات باید همان لحظه تازه شوند
-      queryClient.invalidateQueries({ queryKey: qk.adminArticles })
-      queryClient.invalidateQueries({ queryKey: qk.articlesAll })
+      await invalidateArticleQueries(queryClient)
+      await router.invalidate()
       showToast(res.message ?? 'حذف شد')
       set({ confirmDeleteId: null })
     },
+    onSettled: () => { mutationLock.current = false },
   })
 
+  const isSaving = createMut.isPending || updateMut.isPending
+
   const openModal = useCallback((cat?: ArticleCategory) => {
+    if (!canWrite || mutationLock.current) return
     if (cat) {
       set({
         isModalOpen: true,
@@ -115,17 +123,21 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
     } else {
       set({ isModalOpen: true, editingId: null, name: '', nameAr: '', hasSub: false, subTags: [], subTagsAr: [], subInput: '' })
     }
-  }, [set])
+  }, [canWrite, set])
 
-  const closeModal = useCallback(() => set({ isModalOpen: false }), [set])
+  const closeModal = useCallback(() => {
+    if (!mutationLock.current) set({ isModalOpen: false })
+  }, [set])
 
   const handleSubKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && form.subInput.trim()) {
       e.preventDefault()
+      if (mutationLock.current) return
       const tag = form.subInput.trim()
+      if (form.subTags.length >= 12) { showToast('حداکثر ۱۲ زیردسته مجاز است', 'error'); return }
       if (!form.subTags.includes(tag)) set({ subTags: [...form.subTags, tag], subTagsAr: [...form.subTagsAr, ''], subInput: '' })
     }
-  }, [form.subInput, form.subTags, form.subTagsAr, set])
+  }, [form.subInput, form.subTags, form.subTagsAr, set, showToast])
 
   const removeSubTag = useCallback((tag: string) => {
     const idx = form.subTags.indexOf(tag)
@@ -142,23 +154,29 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
   }, [form.subTagsAr, set])
 
   const handleSave = useCallback(() => {
+    if (!canWrite || mutationLock.current) return
     if (!form.name.trim()) { showToast('نام دسته را وارد کنید', 'error'); return }
+    const pendingTag = form.hasSub ? form.subInput.trim() : ''
+    const addPending = pendingTag && !form.subTags.includes(pendingTag)
+    const subCategories = addPending ? [...form.subTags, pendingTag] : form.subTags
+    if (subCategories.length > 12) { showToast('حداکثر ۱۲ زیردسته مجاز است', 'error'); return }
     const payload = {
       name: form.name.trim(),
       nameAr: form.nameAr.trim() || null,
       hasSubCategories: form.hasSub,
-      subCategories: form.subTags,
-      subCategoriesAr: form.subTagsAr.map(s => s.trim()),
+      subCategories,
+      subCategoriesAr: subCategories.map((_, index) => form.subTagsAr[index]?.trim() ?? ''),
     }
+    mutationLock.current = true
     if (form.editingId) updateMut.mutate({ id: form.editingId, ...payload })
     else createMut.mutate(payload)
-  }, [form, showToast, updateMut, createMut])
+  }, [canWrite, form, showToast, updateMut, createMut])
 
   return (
     <div className="w-full bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm h-fit">
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100 dark:border-white/5">
         <h2 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white">دسته‌بندی‌های مقالات</h2>
-        <button onClick={() => openModal()} className="px-3 py-1.5 rounded-lg bg-primary dark:bg-dark-primary text-white text-xs font-DanaMedium cursor-pointer">افزودن دسته</button>
+        {canWrite && <button type="button" onClick={() => openModal()} className="px-3 py-1.5 rounded-lg bg-primary dark:bg-dark-primary text-white text-xs font-DanaMedium cursor-pointer">افزودن دسته</button>}
       </div>
 
       <div className="space-y-3">
@@ -168,22 +186,22 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
               <span className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300">{cat.name}</span>
               {cat.hasSubCategories && <span className="text-[10px] text-primary dark:text-dark-primary block mt-1">ساب‌کتگوری‌ها: {(cat.subCategories ?? []).map(s => s.name).join('، ')}</span>}
             </div>
-            <div className="flex gap-1">
+            {canWrite && <div className="flex gap-1">
               <button onClick={() => openModal(cat)} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer"><Pen size={16} /></button>
               <button onClick={() => set({ confirmDeleteId: cat.id })} className="p-1.5 rounded text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer"><Trash2 size={16} /></button>
-            </div>
+            </div>}
           </div>
         ))}
       </div>
 
       {form.isModalOpen && (
-        <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" aria-label={form.editingId ? 'ویرایش دسته' : 'دسته جدید'} className="fixed inset-0 z-100 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={closeModal}></div>
-          <div className="relative bg-white dark:bg-[#2a1015] p-6 rounded-2xl shadow-xl w-full max-w-md space-y-4">
+          <fieldset disabled={isSaving} className="relative bg-white dark:bg-[#2a1015] p-6 rounded-2xl shadow-xl w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto min-w-0">
             <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white">{form.editingId ? 'ویرایش دسته' : 'دسته جدید'}</h3>
             <div>
               <label className="block text-xs text-gray-400 mb-1">نام دسته</label>
-              <input value={form.name} onChange={(e) => set({ name: e.target.value })} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" />
+              <input value={form.name} maxLength={60} onChange={(e) => set({ name: e.target.value })} className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" />
             </div>
 
             {/* round-34 — نام عربی دسته (خالی = پشتیبان فارسی) */}
@@ -209,6 +227,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
                 <label className="block text-xs text-gray-400 mb-1">ساب‌کتگوری‌ها (تایپ و اینتر)</label>
                 <input
                   value={form.subInput}
+                  maxLength={60}
                   onChange={(e) => set({ subInput: e.target.value })}
                   onKeyDown={handleSubKeyDown}
                   className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
@@ -237,17 +256,23 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager() {
 
             <div className="flex gap-3 pt-2">
               <button onClick={closeModal} className="flex-1 py-2 rounded-lg bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 text-sm cursor-pointer">انصراف</button>
-              <button onClick={handleSave} className="flex-1 py-2 rounded-lg bg-primary text-white text-sm cursor-pointer">ذخیره</button>
+              <button type="button" onClick={handleSave} className="flex-1 py-2 rounded-lg bg-primary text-white text-sm cursor-pointer disabled:opacity-50">{isSaving ? 'در حال ذخیره...' : 'ذخیره'}</button>
             </div>
-          </div>
+          </fieldset>
         </div>
       )}
 
       <ConfirmModal
         isOpen={form.confirmDeleteId !== null}
+        isPending={deleteMut.isPending}
         title="حذف دسته‌بندی"
         message="آیا از حذف این دسته‌بندی مطمئن هستید؟ تمام مقالاتِ زیر آن هم حذف می‌شوند. این عملیات قابل بازگشت نیست."
-        onConfirm={() => { if (form.confirmDeleteId) deleteMut.mutate(form.confirmDeleteId) }}
+        onConfirm={() => {
+          if (form.confirmDeleteId && canWrite && !mutationLock.current) {
+            mutationLock.current = true
+            deleteMut.mutate(form.confirmDeleteId)
+          }
+        }}
         onCancel={() => set({ confirmDeleteId: null })}
       />
     </div>

@@ -25,6 +25,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
       <Link
         to="/articles/$articleId"
         params={{ articleId: article.id }}
+        preload={false}
         className="relative w-28 h-28 sm:aspect-4/3 sm:w-auto sm:h-auto shrink-0 sm:mb-4 rounded-2xl rounded-bl-3xl overflow-hidden block bg-gray-200 dark:bg-[#2a1015]"
       >
         {article.profileImage ? (
@@ -46,6 +47,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
         <Link
           to="/articles/$articleId"
           params={{ articleId: article.id }}
+          preload={false}
           className={`font-DanaMedium text-sm/7 mt-2.5 ml-1.5 sm:ml-0 sm:mt-0 md:text-lg line-clamp-2 max-w-48 ${aurora ? 'text-zinc-800 dark:text-white' : 'text-zinc-700 dark:text-white'} hover:text-primary dark:hover:text-dark-primary transition-colors`}
         >
           {article.title}

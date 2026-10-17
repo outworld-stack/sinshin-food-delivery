@@ -488,13 +488,14 @@ html.lang-switching body {
   container-type: inline-size;
 }
 
-.ab-block { max-width: 100%; }
+.ab-block { max-width: 100%; overflow-wrap: anywhere; }
 
 /* عرض پله‌ای بلوک */
 .ab-w-sm  { width: 50%; }
 .ab-w-md  { width: 70%; }
 .ab-w-lg  { width: 100%; }
 .ab-w-full { width: calc(100% + 2rem); margin-inline: -1rem; }
+.ab-block.ab-w-full { max-width: calc(100% + 2rem); }
 .ab-center { margin-inline: auto; }
 
 /* موبایل: عرض‌های باریک تمام‌عرض می‌شوند (سقفِ کانتینر) */
@@ -540,4 +541,13 @@ html[dir='rtl'] .ab-js [data-anim='slide'].ab-inview { animation-name: ab-slide-
   .ab-js [data-anim]:not(.ab-inview) { opacity: 1; }
   .ab-js [data-anim].ab-inview { animation: none !important; }
   .ab-width-bar { transition: none; }
+}
+
+@media print {
+  .ab-js [data-anim] {
+    opacity: 1 !important;
+    animation: none !important;
+    transform: none !important;
+    filter: none !important;
+  }
 }

@@ -204,6 +204,11 @@ if (!g.__sinshin_signals) {
       /* هیچ‌کاری نمی‌کند */
     }
     try {
+      await articles.close()
+    } catch (error) {
+      console.error('[articles] failed to flush views during shutdown:', error)
+    }
+    try {
       redis.close()
     } catch {
       /* هیچ‌کاری نمی‌کند */

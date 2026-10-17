@@ -55,7 +55,7 @@ import {
   getSubAdminSession,
   getSubAdmins,
 } from '#/server/admin'
-import { getAdminArticleDetails, getAdminArticles, getArticleCategories, getArticles } from '#/server/articles'
+import { getAdminArticleDetails, getAdminArticleCategories, getAdminArticles, getArticleCategories, getArticles } from '#/server/articles'
 import { getCheckoutPreview, getRestaurantStatus } from '#/server/checkout'
 import { getAdminCoupon, getAdminCoupons, getCouponConsumers } from '#/server/coupons'
 import { getDeliveryZones } from '#/server/deliveryZones'
@@ -121,6 +121,13 @@ export const productByIdOptions = (productId: ProductId | string) =>
 export const articleCategoriesOptions = queryOptions({
   queryKey: qk.articleCategories,
   queryFn: () => getArticleCategories(),
+  staleTime: 5 * 60_000,
+})
+
+// Editing always needs the original Persian names and their Arabic counterparts.
+export const adminArticleCategoriesOptions = queryOptions({
+  queryKey: qk.adminArticleCategories,
+  queryFn: () => getAdminArticleCategories(),
   staleTime: 5 * 60_000,
 })
 

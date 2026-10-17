@@ -33,7 +33,13 @@ export type ArticleBlockType =
 export type ArticleBlockWidth = 'sm' | 'md' | 'lg' | 'full'
 
 /** انیمیشنِ ورود بلوک در صفحه‌ی عمومی (الگوی AOS) */
-export type ArticleBlockAnim = 'none' | 'fade' | 'fade-up' | 'slide' | 'zoom' | 'blur'
+export type ArticleBlockAnim =
+	| 'none'
+	| 'fade'
+	| 'fade-up'
+	| 'slide'
+	| 'zoom'
+	| 'blur'
 
 /** استایلِ بصری مشترک — رنگ‌ها همیشه hex خالص ۶رقمی (تایپ/سریال‌سازی ساده) */
 export interface ArticleBlockStyle {
@@ -121,9 +127,30 @@ export interface ArticleBlocksDoc {
 // ═══════════════════ توابع خالص (فرانت + بک) ═══════════════════
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
+// biome-ignore lint/suspicious/noControlCharactersInRegex: Reject raw controls before the URL parser can discard them.
+const INVALID_URL_CHARACTERS_RE = /[\s\\\u0000-\u001f\u007f]/u
 
 export function isHexColor(v: unknown): v is string {
 	return typeof v === 'string' && HEX_RE.test(v)
+}
+
+/** HTTPS or a local root-relative path; never a protocol-relative URL. */
+export function isArticleBlockUrl(value: unknown): value is string {
+	if (
+		typeof value !== 'string' ||
+		!value ||
+		INVALID_URL_CHARACTERS_RE.test(value)
+	) {
+		return false
+	}
+	if (value.startsWith('/')) return !value.startsWith('//')
+	if (!/^https:\/\/[^/]/i.test(value)) return false
+	try {
+		const parsed = new URL(value)
+		return parsed.protocol === 'https:' && Boolean(parsed.hostname)
+	} catch {
+		return false
+	}
 }
 
 /**
@@ -136,9 +163,10 @@ export function pickContrastText(bg: string): '#000000' | '#ffffff' {
 	const r = Number.parseInt(hex.slice(0, 2), 16) / 255
 	const g = Number.parseInt(hex.slice(2, 4), 16) / 255
 	const b = Number.parseInt(hex.slice(4, 6), 16) / 255
-	const lin = (c: number) => (c <= 0.039_28 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+	const lin = (c: number) =>
+		c <= 0.039_28 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
 	const l = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
-	const withWhite = (1.05) / (l + 0.05)
+	const withWhite = 1.05 / (l + 0.05)
 	const withBlack = (l + 0.05) / 0.05
 	return withWhite >= withBlack ? '#ffffff' : '#000000'
 }
@@ -166,37 +194,42 @@ export function contrastRatio(a: string, b: string): number {
  * با صفحه‌ساز هم‌زمان بمانند (درسِ تحقیق: content متنی را «ول نکن»).
  * ترتیب بلوک‌ها حفظ می‌شود؛ بلوک‌های تصویری/جداکننده متن نمی‌سازند.
  */
-export function blocksToPlainText(doc: ArticleBlocksDoc | null | undefined): string {
+export function blocksToPlainText(
+	doc: ArticleBlocksDoc | null | undefined,
+): string {
 	if (!doc || !Array.isArray(doc.blocks)) return ''
 	const parts: string[] = []
+	const cleanText = (value: unknown): string =>
+		typeof value === 'string' ? value.trim() : ''
+	const append = (value: unknown): void => {
+		const text = cleanText(value)
+		if (text) parts.push(text)
+	}
 	for (const b of doc.blocks) {
 		if (!b || typeof b !== 'object') continue
 		switch (b.type) {
 			case 'hero':
-				if (b.props?.title) parts.push(b.props.title)
-				if (b.props?.text) parts.push(b.props.text)
+			case 'callout':
+			case 'cta':
+				append(b.props?.title)
+				append(b.props?.text)
 				break
 			case 'heading':
-				if (b.props?.text?.trim()) parts.push(b.props.text.trim())
-				break
 			case 'paragraph':
-				if (b.props?.text?.trim()) parts.push(b.props.text.trim())
+				append(b.props?.text)
 				break
-			case 'quote':
-				if (b.props?.text?.trim()) {
-					parts.push(b.props.author?.trim() ? `${b.props.text.trim()} — ${b.props.author.trim()}` : b.props.text.trim())
+			case 'quote': {
+				const text = cleanText(b.props?.text)
+				const author = cleanText(b.props?.author)
+				if (text) {
+					parts.push(author ? `${text} — ${author}` : text)
 				}
 				break
-			case 'callout':
-				if (b.props?.title?.trim()) parts.push(b.props.title.trim())
-				if (b.props?.text?.trim()) parts.push(b.props.text.trim())
-				break
+			}
 			case 'list':
-				if (b.props?.items?.length) parts.push(b.props.items.filter((s) => s?.trim()).join('\n'))
-				break
-			case 'cta':
-				if (b.props?.title?.trim()) parts.push(b.props.title.trim())
-				if (b.props?.text?.trim()) parts.push(b.props.text.trim())
+				if (Array.isArray(b.props?.items)) {
+					append(b.props.items.map(cleanText).filter(Boolean).join('\n'))
+				}
 				break
 			default:
 				break

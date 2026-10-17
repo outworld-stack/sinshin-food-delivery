@@ -33,6 +33,12 @@ const processSchema = t.Object({
   items: t.Array(t.String({ minLength: 1, maxLength: 300 }), { maxItems: 20 }),
 })
 
+// Blank Arabic entries keep the same indexes as Persian and fall back field by field.
+const processArSchema = t.Object({
+  title: t.String({ maxLength: 120 }),
+  items: t.Array(t.String({ maxLength: 300 }), { maxItems: 20 }),
+})
+
 // ═══ stage-82 — پاکتِ سندِ بلوکی (لایه ۱ از ۳) ═══
 // enum ها و سقف‌های کلی این‌جا؛ اعتبارسنجیِ سخت‌گیرِ per-type در
 // blocks-normalize سرویس انجام می‌شود (لایه ۲). props عمداً باز است —
@@ -92,7 +98,7 @@ const articleBody = t.Object({
   titleAr: t.Optional(t.Nullable(t.String({ maxLength: 160 }))),
   excerptAr: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
   contentAr: t.Optional(t.Nullable(t.String({ maxLength: 100000 }))),
-  processesAr: t.Optional(t.Nullable(t.Array(processSchema, { maxItems: 10 }))),
+  processesAr: t.Optional(t.Nullable(t.Array(processArSchema, { maxItems: 10 }))),
   // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora؛ نیامد = false/دست‌نخورده)
   isFeatured: t.Optional(t.Boolean()),
   // stage-82 — سندِ بلوکیِ صفحه‌ساز (null = پاک‌کردن → مقاله‌ی متنی)
@@ -151,6 +157,9 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
 
     .get('/', () => deps.articles.listAdmin(), {
       detail: { summary: 'All articles incl. INACTIVE' },
+    })
+    .get('/categories', () => deps.articles.categories('fa'), {
+      detail: { summary: 'Article categories in the editing language, with raw Arabic translations' },
     })
     .get(
       '/:id',

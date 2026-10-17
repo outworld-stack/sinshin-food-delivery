@@ -2,8 +2,8 @@
 // ⬅ NEW: پیش‌واکشی موازی در loader (مقالات + دسته‌ها) + pendingComponent/errorComponent + head noindex
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
+import { useRef, useState } from 'react'
 import { Ban, Pen, Plus, Trash2 } from 'reicon-react'
 import { ArticleCategoryManager } from '#/components/admin/articles/ArticleCategoryManager'
 import { ConfirmModal } from '#/components/ConfirmModal'
@@ -11,10 +11,12 @@ import { AdminArticlesPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { deleteArticle, toggleArticleStatus } from '#/server/articles'
 import { useToastStore } from '#/stores/toastStore'
-import { qk } from '#/utils/queryKeys'
+import { invalidateArticleQueries } from '#/components/admin/articles/invalidateArticleQueries'
+import { usePermissions } from '#/hooks/admin/usePermissions'
+import { PermissionGate } from '#/components/shared/PermissionGate'
 import {
         adminArticlesOptions,
-        articleCategoriesOptions,
+        adminArticleCategoriesOptions,
 } from '#/utils/queryOptions'
 
 export const Route = createFileRoute('/admin/articles/')({
@@ -26,7 +28,7 @@ export const Route = createFileRoute('/admin/articles/')({
         loader: async ({ context }) => {
                 await Promise.all([
                         context.queryClient.query(adminArticlesOptions),
-                        context.queryClient.query(articleCategoriesOptions),
+                        context.queryClient.query(adminArticleCategoriesOptions),
                 ])
         },
 
@@ -43,11 +45,14 @@ export const Route = createFileRoute('/admin/articles/')({
 
 function AdminArticlesPage() {
         const queryClient = useQueryClient()
+        const router = useRouter()
+        const { permissions, isChecking } = usePermissions()
+        const mutationLock = useRef(false)
         const showToast = useToastStore((state) => state.showToast)
 
         // ⬅ NEW: کوئری‌ها — همان کلیدهایی که loader روت با کوئری پر کرده
-        const { data: articles, isLoading } = useQuery(adminArticlesOptions)
-        const { data: categories } = useQuery(articleCategoriesOptions)
+        const { data: articles, isLoading, isError, refetch } = useQuery(adminArticlesOptions)
+        const { data: categories } = useQuery(adminArticleCategoriesOptions)
 
         const [confirmToggleArticle, setConfirmToggleArticle] = useState<
                 string | null
@@ -58,25 +63,35 @@ function AdminArticlesPage() {
 
         const toggleMut = useMutation({
                 mutationFn: (id: string) => toggleArticleStatus(id),
-                onSuccess: () => {
-                        queryClient.invalidateQueries({ queryKey: qk.adminArticles })
+                onSuccess: async () => {
+                        await invalidateArticleQueries(queryClient)
+                        await router.invalidate()
                         showToast('وضعیت مقاله تغییر کرد')
                         setConfirmToggleArticle(null)
                 },
+                onSettled: () => { mutationLock.current = false },
         })
 
         const deleteMut = useMutation({
                 mutationFn: (id: string) => deleteArticle(id),
-                onSuccess: () => {
-                        queryClient.invalidateQueries({ queryKey: qk.adminArticles })
+                onSuccess: async () => {
+                        await invalidateArticleQueries(queryClient)
+                        await router.invalidate()
                         showToast('مقاله حذف شد')
                         setConfirmDeleteArticle(null)
                 },
+                onSettled: () => { mutationLock.current = false },
         })
 
-        if (isLoading) {
+        if (isLoading || isChecking) {
                 return <AdminArticlesPageSkeleton />
         }
+
+        if (!permissions.articlesRead) return <PermissionGate hasAccess={false} pageName="مقالات" />
+        if (isError && !articles) return <div role="alert" className="space-y-3 text-center py-12">
+                <p>دریافت مقالات ناموفق بود.</p>
+                <button type="button" onClick={() => refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+        </div>
 
         return (
                 <div className="space-y-6">
@@ -89,13 +104,13 @@ function AdminArticlesPage() {
                                                 لیست مقالات و دسته‌بندی‌ها
                                         </p>
                                 </div>
-                                <Link
+                                {permissions.articlesWrite && <Link
                                         to="/admin/articles/new"
                                         className="px-5 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium hover:opacity-90 transition cursor-pointer flex items-center gap-2 justify-center"
                                 >
                                         <Plus size={16} />
                                         افزودن مقاله
-                                </Link>
+                                </Link>}
                         </div>
 
                         <div className="flex flex-col gap-6">
@@ -138,7 +153,7 @@ function AdminArticlesPage() {
                                                                                                 {a.status === 'ACTIVE' ? 'فعال' : 'غیرفعال'}
                                                                                         </span>
                                                                                 </div>
-                                                                                <div className="flex items-center justify-end gap-2">
+                                                                                {permissions.articlesWrite && <div className="flex items-center justify-end gap-2">
                                                                                         <Link
                                                                                                 to="/admin/articles/$articleId/edit"
                                                                                                 params={{ articleId: a.id }}
@@ -158,7 +173,7 @@ function AdminArticlesPage() {
                                                                                         >
                                                                                                 <Trash2 size={18} />
                                                                                         </button>
-                                                                                </div>
+                                                                                </div>}
                                                                         </div>
 
                                                                         {/* کارت موبایل — round-13: بدون عکس */}
@@ -172,7 +187,7 @@ function AdminArticlesPage() {
                                                                                                 {a.status === 'ACTIVE' ? 'فعال' : 'غیرفعال'}
                                                                                         </p>
                                                                                 </div>
-                                                                                <div className="flex gap-2">
+                                                                                {permissions.articlesWrite && <div className="flex gap-2">
                                                                                         <Link
                                                                                                 to="/admin/articles/$articleId/edit"
                                                                                                 params={{ articleId: a.id }}
@@ -192,25 +207,30 @@ function AdminArticlesPage() {
                                                                                         >
                                                                                                 <Trash2 size={16} />
                                                                                         </button>
-                                                                                </div>
+                                                                                </div>}
                                                                         </div>
                                                                 </div>
                                                         )
                                                 })}
+                                                {articles?.length === 0 && <p className="py-8 text-center text-gray-500">هنوز مقاله‌ای ثبت نشده است.</p>}
                                         </div>
                                 </div>
 
                                 {/* مدیریت دسته‌بندی مقالات (کامپوننت استخراج‌شده) */}
-                                <ArticleCategoryManager />
+                                <ArticleCategoryManager canWrite={permissions.articlesWrite} />
                         </div>
 
                         {/* مودال تاییدیه تغییر وضعیت مقاله */}
                         <ConfirmModal
                                 isOpen={!!confirmToggleArticle}
+                                isPending={toggleMut.isPending}
                                 title="تایید تغییر وضعیت"
                                 message="آیا از تغییر وضعیت این مقاله مطمئن هستید؟"
                                 onConfirm={() => {
-                                        if (confirmToggleArticle) toggleMut.mutate(confirmToggleArticle)
+                                        if (confirmToggleArticle && !mutationLock.current && permissions.articlesWrite) {
+                                                mutationLock.current = true
+                                                toggleMut.mutate(confirmToggleArticle)
+                                        }
                                 }}
                                 onCancel={() => setConfirmToggleArticle(null)}
                         />
@@ -218,10 +238,14 @@ function AdminArticlesPage() {
                         {/* مودال تاییدیه حذف مقاله */}
                         <ConfirmModal
                                 isOpen={!!confirmDeleteArticle}
+                                isPending={deleteMut.isPending}
                                 title="حذف مقاله"
                                 message="آیا از حذف این مقاله مطمئن هستید؟ این عملیات قابل بازگشت نیست."
                                 onConfirm={() => {
-                                        if (confirmDeleteArticle) deleteMut.mutate(confirmDeleteArticle)
+                                        if (confirmDeleteArticle && !mutationLock.current && permissions.articlesWrite) {
+                                                mutationLock.current = true
+                                                deleteMut.mutate(confirmDeleteArticle)
+                                        }
                                 }}
                                 onCancel={() => setConfirmDeleteArticle(null)}
                         />

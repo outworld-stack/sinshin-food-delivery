@@ -16,11 +16,15 @@
 import {
 	type ArticleBlock,
 	type ArticleBlocksDoc,
+	isArticleBlockUrl,
+	isHexColor,
 	pickContrastText,
 } from '@sinshin/shared'
 
 import { Link } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
+
+import { observeArticleBlocks } from './articleBlockAnimations'
 
 const cx = (...parts: Array<string | false | undefined>): string =>
 	parts
@@ -30,25 +34,79 @@ const cx = (...parts: Array<string | false | undefined>): string =>
 /** استایلِ رنگ + پد + چینش — inline (hex پویا با کلاس ممکن نیست) */
 const blockVisual = (block: ArticleBlock): React.CSSProperties => {
 	const style = block.style
-	if (!style?.bg) return {}
+	const bg = isHexColor(style?.bg) ? style.bg : undefined
+	const fg = isHexColor(style?.fg) ? style.fg : undefined
 	return {
-		backgroundColor: style.bg,
-		color: style.fg ?? pickContrastText(style.bg),
+		backgroundColor: bg,
+		color: fg ?? (bg ? pickContrastText(bg) : undefined),
+	}
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** Persisted JSON may predate validation; one bad block must not break the page. */
+const isRenderableBlock = (value: unknown): value is ArticleBlock => {
+	if (
+		!isRecord(value) ||
+		typeof value.id !== 'string' ||
+		!isRecord(value.props)
+	)
+		return false
+	const props = value.props
+	const optionalText = (...keys: string[]) =>
+		keys.every((key) => props[key] == null || typeof props[key] === 'string')
+	switch (value.type) {
+		case 'hero':
+			return optionalText('src', 'title', 'text')
+		case 'heading':
+		case 'paragraph':
+			return typeof props.text === 'string'
+		case 'image':
+			return isArticleBlockUrl(props.src) && optionalText('alt', 'caption')
+		case 'gallery':
+			return (
+				Array.isArray(props.images) &&
+				props.images.every(
+					(image) =>
+						isRecord(image) &&
+						isArticleBlockUrl(image.src) &&
+						(image.alt == null || typeof image.alt === 'string'),
+				)
+			)
+		case 'quote':
+			return typeof props.text === 'string' && optionalText('author')
+		case 'callout':
+			return typeof props.text === 'string' && optionalText('title')
+		case 'list':
+			return (
+				Array.isArray(props.items) &&
+				props.items.every((item) => typeof item === 'string')
+			)
+		case 'cta':
+			return (
+				typeof props.label === 'string' && optionalText('title', 'text', 'href')
+			)
+		case 'divider':
+			return true
+		default:
+			return false
 	}
 }
 
 // ═══════════════ رندرِ یک بلوک ═══════════════
 
 function BlockContent({ block }: { block: ArticleBlock }) {
+	const textStyle = blockVisual(block).color ? { color: 'inherit' } : undefined
 	switch (block.type) {
 		case 'hero': {
 			const { src, title, text } = block.props
 			return (
-				<section className="ab-hero relative w-full aspect-video md:aspect-21/9 rounded-3xl overflow-hidden shadow-lg bg-gray-200 dark:bg-[#2a1015]">
-					{src ? (
+				<section className="ab-hero relative grid w-full aspect-video md:aspect-21/9 rounded-3xl overflow-hidden shadow-lg bg-gray-200 dark:bg-[#2a1015]">
+					{isArticleBlockUrl(src) ? (
 						<img
 							src={src}
-							alt={title ?? 'تصویر سرِ مقاله'}
+							alt={title ?? ''}
 							className="absolute inset-0 w-full h-full object-cover"
 							decoding="async"
 							fetchPriority="high"
@@ -57,14 +115,23 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 						<div className="absolute inset-0 bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]" />
 					)}
 					{(title || text) && (
-						<div className="absolute inset-0 flex flex-col items-center justify-center text-center gap-2 p-6 bg-black/35">
+						<div
+							className="relative flex flex-col items-center justify-center text-center gap-2 p-6 bg-black/35"
+							style={{ textAlign: block.style?.align }}
+						>
 							{title && (
-								<h2 className="font-MorabbaBold text-2xl md:text-4xl text-white drop-shadow-lg leading-snug">
+								<h2
+									style={textStyle}
+									className="font-MorabbaBold text-2xl md:text-4xl text-white drop-shadow-lg leading-snug"
+								>
 									{title}
 								</h2>
 							)}
 							{text && (
-								<p className="text-sm md:text-base text-white/90 max-w-xl leading-relaxed">
+								<p
+									style={textStyle}
+									className="text-sm md:text-base text-white/90 max-w-xl leading-relaxed whitespace-pre-wrap"
+								>
 									{text}
 								</p>
 							)}
@@ -76,18 +143,27 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 		case 'heading': {
 			const { text, level } = block.props
 			return level === 3 ? (
-				<h3 className="font-DanaDemiBold text-xl md:text-2xl text-gray-800 dark:text-white leading-snug">
+				<h3
+					style={textStyle}
+					className="font-DanaDemiBold text-xl md:text-2xl text-gray-800 dark:text-white leading-snug"
+				>
 					{text}
 				</h3>
 			) : (
-				<h2 className="font-MorabbaBold text-2xl md:text-3xl text-gray-900 dark:text-white leading-snug">
+				<h2
+					style={textStyle}
+					className="font-MorabbaBold text-2xl md:text-3xl text-gray-900 dark:text-white leading-snug"
+				>
 					{text}
 				</h2>
 			)
 		}
 		case 'paragraph':
 			return (
-				<p className="text-gray-700 dark:text-gray-300 leading-loose font-DanaRegular text-[15px] md:text-base whitespace-pre-wrap">
+				<p
+					style={textStyle}
+					className="text-gray-700 dark:text-gray-300 leading-loose font-DanaRegular text-[15px] md:text-base whitespace-pre-wrap"
+				>
 					{block.props.text}
 				</p>
 			)
@@ -105,7 +181,10 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 						/>
 					</div>
 					{caption && (
-						<figcaption className="text-center text-xs text-gray-500 dark:text-gray-400 font-DanaMedium">
+						<figcaption
+							style={textStyle}
+							className="text-center text-xs text-gray-500 dark:text-gray-400 font-DanaMedium"
+						>
 							{caption}
 						</figcaption>
 					)}
@@ -155,12 +234,18 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 		case 'quote': {
 			const { text, author } = block.props
 			return (
-				<blockquote className="border-r-4 border-primary dark:border-dark-primary pr-4 pl-2 py-1">
-					<p className="text-gray-700 dark:text-gray-200 text-base md:text-lg leading-relaxed font-DanaMedium italic">
+				<blockquote className="border-s-4 border-primary dark:border-dark-primary ps-4 pe-2 py-1">
+					<p
+						style={textStyle}
+						className="text-gray-700 dark:text-gray-200 text-base md:text-lg leading-relaxed font-DanaMedium italic whitespace-pre-wrap"
+					>
 						{text}
 					</p>
 					{author && (
-						<footer className="mt-2 text-xs text-gray-500 dark:text-gray-400 font-DanaMedium">
+						<footer
+							style={textStyle}
+							className="mt-2 text-xs text-gray-500 dark:text-gray-400 font-DanaMedium"
+						>
 							— {author}
 						</footer>
 					)}
@@ -170,13 +255,25 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 		case 'callout': {
 			const { title, text } = block.props
 			return (
-				<div className="rounded-2xl border border-primary/25 dark:border-dark-primary/25 bg-primary/6 dark:bg-dark-primary/6">
+				<div
+					className={cx(
+						'rounded-2xl border border-primary/25 dark:border-dark-primary/25',
+						!isHexColor(block.style?.bg) &&
+							'p-4 bg-primary/6 dark:bg-dark-primary/6',
+					)}
+				>
 					{title && (
-						<p className="font-DanaDemiBold text-sm md:text-base mb-1.5 text-primary dark:text-dark-primary">
+						<p
+							style={textStyle}
+							className="font-DanaDemiBold text-sm md:text-base mb-1.5 text-primary dark:text-dark-primary"
+						>
 							{title}
 						</p>
 					)}
-					<p className="text-sm md:text-[15px] leading-relaxed text-gray-700 dark:text-gray-300">
+					<p
+						style={textStyle}
+						className="text-sm md:text-[15px] leading-relaxed text-gray-700 dark:text-gray-300 whitespace-pre-wrap"
+					>
 						{text}
 					</p>
 				</div>
@@ -187,14 +284,18 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 			const Tag = ordered ? 'ol' : 'ul'
 			return (
 				<Tag
+					style={textStyle}
 					className={cx(
 						'space-y-2 text-gray-700 dark:text-gray-300',
 						ordered ? 'list-decimal list-inside' : 'list-none',
 					)}
 				>
 					{items.map((item, i) => (
-						// biome-ignore lint/suspicious/noArrayIndexKey: مورد تکراری در فهرست مجال است — ایندکس بخشی از یکتایی
-						<li key={`${item}-${i}`} className="flex items-start gap-2">
+						<li
+							// biome-ignore lint/suspicious/noArrayIndexKey: Duplicate items are allowed; the index distinguishes them.
+							key={`${item}-${i}`}
+							className={ordered ? 'list-item' : 'flex items-start gap-2'}
+						>
 							{!ordered && (
 								<span
 									className="w-2 h-2 rounded-full bg-primary dark:bg-dark-primary mt-2 shrink-0"
@@ -212,18 +313,31 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 		case 'cta': {
 			const { title, text, label, to, href } = block.props
 			return (
-				<div className="rounded-3xl p-6 sm:p-8 text-center space-y-3 bg-linear-to-br from-[#f6339a15] to-[#2fd4d115] dark:from-[#2fd4d110] dark:to-[#f6339a10] border border-primary/20 dark:border-dark-primary/20">
+				<div
+					style={{ textAlign: block.style?.align }}
+					className={cx(
+						'rounded-3xl p-6 sm:p-8 text-center space-y-3 border border-primary/20 dark:border-dark-primary/20',
+						!isHexColor(block.style?.bg) &&
+							'bg-linear-to-br from-[#f6339a15] to-[#2fd4d115] dark:from-[#2fd4d110] dark:to-[#f6339a10]',
+					)}
+				>
 					{title && (
-						<p className="font-DanaDemiBold text-lg md:text-xl text-gray-800 dark:text-white">
+						<p
+							style={textStyle}
+							className="font-DanaDemiBold text-lg md:text-xl text-gray-800 dark:text-white"
+						>
 							{title}
 						</p>
 					)}
 					{text && (
-						<p className="text-sm md:text-[15px] text-gray-600 dark:text-gray-300 leading-relaxed">
+						<p
+							style={textStyle}
+							className="text-sm md:text-[15px] text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
+						>
 							{text}
 						</p>
 					)}
-					{to === 'url' && href ? (
+					{to === 'url' && isArticleBlockUrl(href) ? (
 						<a
 							href={href}
 							className="inline-block px-8 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold cursor-pointer hover:opacity-90 transition"
@@ -263,54 +377,34 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 
 // ═══════════════ رندرِ کلِ سند ═══════════════
 
-export function ArticleBlocksRenderer({ doc }: { doc: ArticleBlocksDoc }) {
+export function ArticleBlocksRenderer({
+	doc,
+}: {
+	doc: ArticleBlocksDoc | null | undefined
+}) {
 	const rootRef = useRef<HTMLDivElement | null>(null)
 
 	// reveal-on-scroll — الگوی AOS با یک IO مشترک؛ کلاس ab-js فقط بعد از
 	// mount می‌نشیند تا خروجیِ SSR (کرالر/بدون-JS) متنِ مرئی باشد.
 	useEffect(() => {
 		const root = rootRef.current
-		if (!root) return
-		const reduced = window.matchMedia(
-			'(prefers-reduced-motion: reduce)',
-		).matches
-		root.classList.add('ab-js')
+		if (!root || !doc) return
+		return observeArticleBlocks(root)
+	}, [doc])
 
-		if (reduced) {
-			for (const el of root.querySelectorAll('[data-anim]'))
-				el.classList.add('ab-inview')
-			return
-		}
-
-		const io = new IntersectionObserver(
-			(entries) => {
-				for (const entry of entries) {
-					if (!entry.isIntersecting) continue
-					entry.target.classList.add('ab-inview')
-					io.unobserve(entry.target) // once — بی‌نهایت تکرار نه (AOS)
-				}
-			},
-			{ threshold: 0.15, rootMargin: '0px 0px -8% 0px' },
-		)
-		for (const el of root.querySelectorAll('[data-anim]')) {
-			const anim = el.getAttribute('data-anim')
-			if (anim && anim !== 'none') io.observe(el)
-			else el.classList.add('ab-inview')
-		}
-		return () => io.disconnect()
-		// doc از loader می‌آید و در عمرِ view ثابت است — observed ها همین‌جا کامل‌اند
-	}, [])
-
-	const index = { i: 0 }
+	const blocks =
+		doc?.version === 1 && Array.isArray(doc.blocks)
+			? doc.blocks.filter(isRenderableBlock)
+			: []
 	return (
 		<div ref={rootRef} className="ab-viewport my-8 space-y-6">
-			{doc.blocks.map((block) => {
+			{blocks.map((block, index) => {
 				const width = block.width ?? 'lg'
 				const style = block.style ?? {}
 				const pad = style.pad ?? 'md'
 				const visual = blockVisual(block)
 				// stagger پلکانی — سقف ۵ پله (پایانِ صفحه مه‌آلود نشود)
-				const step = Math.min(index.i++, 5)
+				const step = Math.min(index, 5)
 				return (
 					<div
 						key={block.id}
@@ -329,8 +423,8 @@ export function ArticleBlocksRenderer({ doc }: { doc: ArticleBlocksDoc }) {
 									? 'ab-center'
 									: 'ab-start'
 								: '',
-							style.bg && `ab-pad-${pad}`,
-							style.align === 'center' && !style.bg && 'text-center',
+							isHexColor(style.bg) && `ab-pad-${pad}`,
+							style.align === 'center' && 'text-center',
 							'rounded-2xl',
 						)}
 					>

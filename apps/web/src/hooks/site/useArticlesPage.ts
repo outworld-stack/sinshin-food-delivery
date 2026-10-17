@@ -1,5 +1,5 @@
 // src/hooks/site/useArticlesPage.ts
-import { useReducer, useCallback, useMemo } from 'react'
+import { useReducer, useCallback, useMemo, useEffect } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { articleCategoriesOptions, articlesOptions } from '#/utils/queryOptions'
@@ -20,7 +20,8 @@ type ArticlesAction =
   | { type: 'SET_TEMP_SUB'; payload: string }
   | { type: 'SET_TEMP_SORT'; payload: SortBy }
   | { type: 'APPLY_FILTERS' }
-  | { type: 'OPEN_FILTER'; payload: string }
+  | { type: 'OPEN_FILTER'; subCategory: string; sort: SortBy }
+  | { type: 'SYNC_FILTERS'; subCategory: string; sort: SortBy }
   | { type: 'CLOSE_FILTER' }
   | { type: 'RESET_COUNT' }
   | { type: 'LOAD_MORE' }
@@ -40,8 +41,9 @@ function articlesReducer(state: ArticlesState, action: ArticlesAction): Articles
     case 'APPLY_FILTERS':
       return { ...state, isFilterOpen: false, visibleCount: 8 }
     case 'OPEN_FILTER':
-      // tempSub با sub فعلی URL سینک شه — مقدار ارسالی از هندلر
-      return { ...state, isFilterOpen: true, tempSubCategory: action.payload }
+      return { ...state, isFilterOpen: true, tempSubCategory: action.subCategory, tempSortBy: action.sort }
+    case 'SYNC_FILTERS':
+      return { ...initialState, tempSubCategory: action.subCategory, tempSortBy: action.sort }
     case 'CLOSE_FILTER': return { ...state, isFilterOpen: false }
     case 'RESET_COUNT': return { ...state, visibleCount: 8 }
     case 'LOAD_MORE': return { ...state, visibleCount: state.visibleCount + 8 }
@@ -118,7 +120,6 @@ function mergePinnedIntoSlots<T>(normal: readonly T[], pinned: readonly T[], rng
 
 // --- هوک ---
 export function useArticlesPage() {
-  const [state, dispatch] = useReducer(articlesReducer, initialState)
   const navigate = useNavigate()
   const search = useSearch({ from: '/articles/' })
   const { t } = useI18n()
@@ -128,14 +129,22 @@ export function useArticlesPage() {
   const subCategory: string = search.subCategory ?? 'all'
   // ⬅ سورت اعمال‌شده = URL (قبلاً کاهنده بود — با رفرش گم می‌شد)
   const appliedSortBy: SortBy = search.sort ?? DEFAULT_SORT
+  const [state, dispatch] = useReducer(articlesReducer, {
+    ...initialState, tempSubCategory: subCategory, tempSortBy: appliedSortBy,
+  })
+
+  // Shared URLs, category changes and history navigation reset the mobile draft.
+  useEffect(() => {
+    dispatch({ type: 'SYNC_FILTERS', subCategory, sort: appliedSortBy })
+  }, [category, subCategory, appliedSortBy])
 
   // --- دیتا: گزینه‌های مرکزی — loader روت با کوئری پرشون کرده ---
-  const { data: categories } = useQuery(articleCategoriesOptions)
-  const { data: articles, isLoading } = useQuery(articlesOptions(category, subCategory))
+  const { data: categories } = useQuery({ ...articleCategoriesOptions, throwOnError: true })
+  const { data: articles, isLoading } = useQuery({ ...articlesOptions(category, subCategory), throwOnError: true })
   // stage-60 — لیست کامل (بدون فیلتر): مقاله‌های ویژه «فارغ از» دسته/
   // زیردسته‌ی فعال باید در ۴ آیتم اول دیده شوند؛ وقتی خود کاربر روی all
   // است، همان کلید قبلی است و فچ اضافه‌ای نمی‌شود (staleTime یکسان ۶۰s)
-  const { data: allArticles } = useQuery(articlesOptions('all', 'all'))
+  const { data: allArticles } = useQuery({ ...articlesOptions('all', 'all'), throwOnError: true })
 
   // --- مشتق‌شده‌ها ---
   const currentCategory = useMemo(
@@ -194,8 +203,26 @@ export function useArticlesPage() {
   }, [navigate, search, state.tempSubCategory, state.tempSortBy])
 
   const handleOpenFilter = useCallback(() => {
-    dispatch({ type: 'OPEN_FILTER', payload: subCategory })
-  }, [subCategory])
+    dispatch({ type: 'OPEN_FILTER', subCategory, sort: appliedSortBy })
+  }, [subCategory, appliedSortBy])
+
+  // Desktop controls apply immediately; only the mobile sheet uses a draft.
+  const handleSubCategoryChange = useCallback((slug: string) => {
+    navigate({
+      to: '/articles',
+      search: { ...search, subCategory: slug !== 'all' ? slug : undefined },
+      replace: true,
+    })
+    dispatch({ type: 'RESET_COUNT' })
+  }, [navigate, search])
+  const handleSortChange = useCallback((sort: SortBy) => {
+    navigate({
+      to: '/articles',
+      search: { ...search, sort: sort !== DEFAULT_SORT ? sort : undefined },
+      replace: true,
+    })
+    dispatch({ type: 'RESET_COUNT' })
+  }, [navigate, search])
 
   const handleCloseFilter = useCallback(() => dispatch({ type: 'CLOSE_FILTER' }), [])
   const handleTempSub = useCallback((v: string) => dispatch({ type: 'SET_TEMP_SUB', payload: v }), [])
@@ -219,6 +246,7 @@ export function useArticlesPage() {
     isLoading,
     hasSubCategories,
     subCategories,
+    subCategory,
     visibleArticles,
     hasMore,
     scrollerItems,
@@ -228,6 +256,8 @@ export function useArticlesPage() {
     handleCloseFilter,
     handleTempSub,
     handleTempSort,
+    handleSubCategoryChange,
+    handleSortChange,
     handleLoadMore,
   }
 }

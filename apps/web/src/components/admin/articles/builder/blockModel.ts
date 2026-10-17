@@ -102,10 +102,23 @@ export function emptyDoc(): ArticleBlocksDoc {
  */
 export function plainTextToDoc(content: string): ArticleBlocksDoc {
 	const paragraphs = content
-		.split('\n\n')
+		.replace(/\r\n?/g, '\n')
+		.split(/\n\s*\n/)
 		.map((p) => p.trim())
 		.filter(Boolean)
-	const blocks: ArticleBlock[] = paragraphs.map((text) => ({
+	// The API caps paragraph text at 5,000 characters. Split long paragraphs
+	// before migrating instead of silently truncating an existing article.
+	const chunks = paragraphs.flatMap(paragraph => {
+		const result: string[] = []
+		for (let start = 0; start < paragraph.length;) {
+			let end = Math.min(start + 5000, paragraph.length)
+			if (end < paragraph.length && /[\uD800-\uDBFF]/.test(paragraph[end - 1]) && /[\uDC00-\uDFFF]/.test(paragraph[end])) end--
+			result.push(paragraph.slice(start, end))
+			start = end
+		}
+		return result
+	})
+	const blocks: ArticleBlock[] = chunks.map((text) => ({
 		id: newBlockId(),
 		type: 'paragraph',
 		width: 'lg',
@@ -128,7 +141,7 @@ export function moveBlock(
 	to: number,
 ): ArticleBlocksDoc {
 	const blocks = [...doc.blocks]
-	if (from < 0 || from >= blocks.length || to < 0 || to > blocks.length)
+	if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || from >= blocks.length || to < 0 || to > blocks.length)
 		return doc
 	const [moved] = blocks.splice(from, 1)
 	if (!moved) return doc

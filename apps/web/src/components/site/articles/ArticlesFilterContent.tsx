@@ -1,5 +1,5 @@
 // src/components/site/articles/ArticlesFilterContent.tsx
-import { memo, useCallback } from 'react'
+import { memo, useId } from 'react'
 import type { SortBy } from '#/hooks/site/useArticlesPage'
 import { useI18n } from '#/i18n'
 
@@ -33,10 +33,7 @@ export const ArticlesFilterContent = memo(function ArticlesFilterContent({
   onTempSub, onTempSort, onApply,
 }: ArticlesFilterContentProps) {
   const { t } = useI18n()
-
-  const handleSort = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    onTempSort(e.target.value as SortBy)
-  }, [onTempSort])
+  const groupId = useId()
 
   const optionCls = 'flex items-center gap-3 cursor-pointer p-3 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 transition'
   const inputCls = 'w-4 h-4 accent-primary dark:accent-dark-primary'
@@ -49,12 +46,12 @@ export const ArticlesFilterContent = memo(function ArticlesFilterContent({
         <div className="space-y-2">
           <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-3">{t['articles.subFilter']}</h3>
           <label className={optionCls}>
-            <input type="radio" name="subCat" checked={tempSubCategory === 'all'} onChange={() => onTempSub('all')} className={inputCls} />
+            <input type="radio" name={`${groupId}-subCat`} value="all" checked={tempSubCategory === 'all'} onChange={() => onTempSub('all')} className={inputCls} />
             <span className="font-DanaMedium text-gray-600 dark:text-gray-300">{t['common.allItems']}</span>
           </label>
           {subCategories.map(sub => (
             <label key={sub.id} className={optionCls}>
-              <input type="radio" name="subCat" checked={tempSubCategory === sub.slug} onChange={() => onTempSub(sub.slug)} className={inputCls} />
+              <input type="radio" name={`${groupId}-subCat`} value={sub.slug} checked={tempSubCategory === sub.slug} onChange={() => onTempSub(sub.slug)} className={inputCls} />
               <span className="font-DanaMedium text-gray-600 dark:text-gray-300">{sub.name}</span>
             </label>
           ))}
@@ -66,7 +63,7 @@ export const ArticlesFilterContent = memo(function ArticlesFilterContent({
         <h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-3">{t['articles.sortBy']}</h3>
         {SORT_OPTIONS.map(option => (
           <label key={option.key} className={optionCls}>
-            <input type="radio" name="sortBy" checked={tempSortBy === option.key} onChange={handleSort} className={inputCls} />
+            <input type="radio" name={`${groupId}-sortBy`} value={option.key} checked={tempSortBy === option.key} onChange={() => onTempSort(option.key)} className={inputCls} />
             <span className={`font-DanaMedium ${tempSortBy === option.key ? 'text-primary dark:text-dark-primary' : 'text-gray-600 dark:text-gray-300'}`}>
               {t[option.labelKey]}
             </span>

@@ -6,9 +6,9 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/ArticleForm.tsx
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { articleCategoriesOptions } from '#/utils/queryOptions'
+import { adminArticleCategoriesOptions } from '#/utils/queryOptions'
 import { ImageField } from '#/components/shared/ImageField'
 import { Toggle } from '#/components/shared/Toggle'
 import { Brush, Star } from 'reicon-react'
@@ -22,14 +22,16 @@ import {
   emptyDoc,
   plainTextToDoc,
 } from '#/components/admin/articles/builder/blockModel'
-import type { ArticleBlocksDoc } from '@sinshin/shared'
+import { isArticleBlockUrl, type ArticleBlocksDoc } from '@sinshin/shared'
 
 export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleFormProps) {
   const showToast = useToastStore((state) => state.showToast)
   // دسته‌ها از فکتوری مشترک — همون کش ادیتور دسته‌بندی و لیست مقالات
-  const { data: categories } = useQuery(articleCategoriesOptions)
+  const { data: categories, isPending: categoriesPending, isError: categoriesError, refetch: refetchCategories } = useQuery(adminArticleCategoriesOptions)
 
-  const [formData, setFormData] = useState<ArticleFormData>({
+  // Seed the draft once. Query refreshes and mutation status updates must not
+  // replace unsaved edits; the edit route keys this form by article ID.
+  const [formData, setFormData] = useState<ArticleFormData>(() => ({
     title: '',
     author: '', // اضافه شدن استیت نویسنده
     excerpt: '',
@@ -38,17 +40,23 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     galleryImages: [],
     categoryId: '',
     subCategoryId: null,
-    processes: [],
     // stage-60 — پرچم «ویژه/سنجاق‌شده»
     isFeatured: false,
     // stage-82 — سند بلوکی صفحه‌ساز (null = حالت متن ساده)
-    blocks: null,
+    blocks: initialData ? initialData.blocks ?? null : emptyDoc(),
     // round-34 — فیلدهای عربی (خالی = پشتیبان فارسی)
     titleAr: '',
     excerptAr: '',
     contentAr: '',
-    processesAr: [],
-  })
+    ...initialData,
+    // Keep translated processes aligned even for older, partially translated
+    // articles, and never mutate arrays held in the query cache.
+    processes: initialData?.processes?.map(p => ({ ...p, items: [...p.items] })) ?? [],
+    processesAr: initialData?.processes?.map((_, index) => ({
+      title: initialData.processesAr?.[index]?.title ?? '',
+      items: [...(initialData.processesAr?.[index]?.items ?? [])],
+    })) ?? [],
+  }))
   const [processInput, setProcessInput] = useState({ title: '', item: '' })
 
   // stage-82 — حالتِ ویرایش: مقاله‌ی بلوکی → صفحه‌ساز؛ متنی → متن ساده
@@ -58,34 +66,9 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
   )
 
 
-  useEffect(() => {
-    if (initialData) {
-      setFormData({
-        title: initialData.title || '',
-        author: initialData.author || '', // ست شدن مقدار اولیه نویسنده
-        excerpt: initialData.excerpt || '',
-        content: initialData.content || '',
-        profileImage: initialData.profileImage || '',
-        galleryImages: initialData.galleryImages || [],
-        categoryId: initialData.categoryId || '',
-        subCategoryId: initialData.subCategoryId || null,
-        // stage-60 — پرچم «ویژه» (نیامد = خاموش)
-        isFeatured: initialData.isFeatured ?? false,
-        processes: initialData.processes?.map((p) => ({ title: p.title, items: p.items || [] })) || [],
-        // stage-82 — سند بلوکی ذخیره‌شده (null = مقاله‌ی متنی قدیمی)
-        blocks: initialData.blocks ?? null,
-        // round-34 — مقادیر عربی ذخیره‌شده (روندها: موازی با ایندکس processes)
-        titleAr: initialData.titleAr || '',
-        excerptAr: initialData.excerptAr || '',
-        contentAr: initialData.contentAr || '',
-        processesAr: initialData.processesAr?.map((p) => ({ title: p.title || '', items: p.items || [] })) || [],
-      })
-    }
-  }, [initialData])
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
+    setFormData(prev => ({ ...prev, [name]: value, ...(name === 'categoryId' ? { subCategoryId: null } : {}) }))
   }
 
   // stage-82 — جابجاییِ حالت ویرایش (بلوکی ⇄ متنی):
@@ -94,19 +77,22 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
   //    اما ذخیره در حالتِ متنی یعنی سند پاک شود (null) — ادمینِ تصمیم‌گیر
   const switchMode = (to: 'builder' | 'plain') => {
     if (to === builderMode) return
-    if (to === 'builder') {
-      setFormData(prev => ({
-        ...prev,
-        blocks: prev.blocks ?? plainTextToDoc(prev.content),
-      }))
-    }
+    setFormData(prev => to === 'builder' ? {
+      ...prev,
+      blocks: prev.blocks && blocksToPlainText(prev.blocks) === prev.content
+        ? prev.blocks
+        : plainTextToDoc(prev.content),
+    } : {
+      ...prev,
+      content: blocksToPlainText(prev.blocks),
+    })
     setBuilderMode(to)
   }
 
   // متنِ زنده — در حالتِ بلوکی از سند مشتق می‌شود (منبع واحد؛
   // لیست/سئو/ترجمه روی content سوارند)
   const liveContent = useMemo(
-    () => (builderMode && formData.blocks ? blocksToPlainText(formData.blocks) : formData.content),
+    () => (builderMode === 'builder' ? blocksToPlainText(formData.blocks) : formData.content),
     [builderMode, formData.blocks, formData.content],
   )
 
@@ -118,20 +104,26 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
     if (!processInput.title.trim()) { showToast('لطفا عنوان روند را وارد کنید', 'error'); return }
     if (!processInput.item.trim()) { showToast('لطفا متن گام را وارد کنید', 'error'); return }
 
-    const existingProcessIndex = formData.processes?.findIndex(p => p.title === processInput.title)
-
-    if (existingProcessIndex !== undefined && existingProcessIndex !== -1 && formData.processes) {
-      const newProcesses = [...formData.processes]
-      newProcesses[existingProcessIndex].items.push(processInput.item)
-      setFormData(prev => ({ ...prev, processes: newProcesses }))
-    } else {
-      // round-34 — روندهای عربی موازی با ایندکس حفظ می‌شوند (ورودی خالی = پشتیبان فارسی)
-      setFormData(prev => ({
-        ...prev,
-        processes: [...(prev.processes || []), { title: processInput.title, items: [processInput.item] }],
-        processesAr: [...(prev.processesAr || []), { title: '', items: [] }],
-      }))
+    const title = processInput.title.trim()
+    const item = processInput.item.trim()
+    const existing = formData.processes.find(p => p.title.trim() === title)
+    if ((!existing && formData.processes.length >= 10) || (existing && existing.items.length >= 20)) {
+      showToast('حداکثر ۱۰ روند و ۲۰ گام در هر روند مجاز است', 'error')
+      return
     }
+    setFormData(prev => {
+      const existingIndex = prev.processes.findIndex(p => p.title.trim() === title)
+      if (existingIndex !== -1) return {
+        ...prev,
+        processes: prev.processes.map((p, index) => index === existingIndex
+          ? { ...p, items: [...p.items, item] } : p),
+      }
+      return {
+        ...prev,
+        processes: [...prev.processes, { title, items: [item] }],
+        processesAr: [...prev.processesAr, { title: '', items: [] }],
+      }
+    })
 
     setProcessInput({ title: '', item: '' })
   }
@@ -153,7 +145,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
       next[index] = {
         title: patch.title !== undefined ? patch.title : cur.title,
         items: patch.itemsText !== undefined
-          ? patch.itemsText.split('\n').map(l => l.trim()).filter(Boolean)
+          ? patch.itemsText.split('\n')
           : cur.items,
       }
       return { ...prev, processesAr: next }
@@ -163,15 +155,24 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting || categoriesPending || categoriesError) return
 
     // stage-82 — در حالتِ بلوکی، content از بلوک‌ها مشتق می‌شود؛
     // سندِ بدونِ بلوکِ متنی = مقاله‌ای بدون متن (ردِ صریح با پیام)
     let content = formData.content
     let blocks = formData.blocks
-    if (builderMode) {
+    if (builderMode === 'builder') {
+      if (formData.blocks?.blocks.some(block => block.type === 'cta' && block.props.to === 'url' && !isArticleBlockUrl(block.props.href))) {
+        showToast('برای دکمه اقدام، یک پیوند معتبر https یا مسیر داخلی وارد کنید', 'error')
+        return
+      }
+      if (formData.blocks?.blocks.some(block => block.type === 'gallery' && block.props.images.length > 12)) {
+        showToast('حداکثر ۱۲ عکس در هر بلوک گالری مجاز است', 'error')
+        return
+      }
       const derived = blocksToPlainText(formData.blocks)
       if (!derived.trim()) {
-        showToast('در حالت صفحه‌ساز، حداقل یک بلوک متنی (پاراگراف/تیتر/فهرست/نقل‌قول) لازم است', 'error')
+        showToast('در حالت صفحه‌ساز، حداقل یک بلوک دارای متن لازم است', 'error')
         return
       }
       content = derived
@@ -180,8 +181,12 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
       blocks = null
     }
 
-    if (!formData.title?.trim() || !content.trim()) {
-      showToast('عنوان و متن مقاله الزامی است', 'error')
+    if (!formData.title.trim() || !formData.excerpt.trim() || !content.trim() || !selectedCat) {
+      showToast('عنوان، خلاصه، متن و دسته‌بندی مقاله الزامی است', 'error')
+      return
+    }
+    if (formData.processesAr.some(process => process.items.length > 20 || process.items.some(item => item.length > 300))) {
+      showToast('هر روند عربی حداکثر ۲۰ گام دارد و هر گام حداکثر ۳۰۰ نویسه است', 'error')
       return
     }
 
@@ -190,6 +195,13 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
       ...formData,
       content,
       blocks,
+      title: formData.title.trim(),
+      excerpt: formData.excerpt.trim(),
+      subCategoryId: selectedSub?.id ?? null,
+      processesAr: formData.processes.map((_, index) => ({
+        title: formData.processesAr[index]?.title.trim() ?? '',
+        items: (formData.processesAr[index]?.items ?? []).map(item => item.trim()),
+      })),
       author: formData.author?.trim() || 'سین شین'
     }
 
@@ -197,20 +209,21 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
   }
 
   const selectedCat = categories?.find(c => c.id === formData.categoryId)
-  const selectedSub = selectedCat?.subCategories?.find(s => s.id === formData.subCategoryId)
+  const selectedSub = selectedCat?.hasSubCategories ? selectedCat.subCategories?.find(s => s.id === formData.subCategoryId) : undefined
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+      <fieldset disabled={isSubmitting} className="space-y-6 min-w-0">
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">عنوان مقاله</label>
-          <input type="text" name="title" value={formData.title} onChange={handleChange} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none" />
+          <input type="text" name="title" value={formData.title} onChange={handleChange} maxLength={160} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none" />
         </div>
         {/* فیلد نام نویسنده */}
         <div>
           <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">نام نویسنده (اختیاری)</label>
-          <input type="text" name="author" value={formData.author} onChange={handleChange} className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none" placeholder="اگر خالی بگذارید، 'سین شین' ثبت می‌شود" />
+          <input type="text" name="author" value={formData.author} onChange={handleChange} maxLength={120} className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none" placeholder="اگر خالی بگذارید، 'سین شین' ثبت می‌شود" />
         </div>
         <div className="md:col-span-2">
           <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">دسته‌بندی</label>
@@ -218,6 +231,8 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
             <option value="">انتخاب کنید...</option>
             {categories?.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
           </select>
+          {categoriesPending && <p className="mt-2 text-xs text-gray-500">در حال دریافت دسته‌بندی‌ها...</p>}
+          {categoriesError && <p role="alert" className="mt-2 text-xs text-red-500">دریافت دسته‌بندی‌ها ناموفق بود. <button type="button" onClick={() => refetchCategories()} className="underline cursor-pointer">تلاش دوباره</button></p>}
         </div>
       </div>
 
@@ -253,7 +268,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
 
       <div>
         <label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">خلاصه مقاله (Excerpt)</label>
-        <textarea name="excerpt" value={formData.excerpt} onChange={handleChange} rows={2} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none resize-none"></textarea>
+        <textarea name="excerpt" value={formData.excerpt} onChange={handleChange} rows={2} maxLength={1000} required className="w-full px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none resize-none"></textarea>
       </div>
 
       {/* round-34 — عنوان و خلاصه عربی */}
@@ -292,7 +307,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
               type="button"
               aria-pressed={builderMode === 'builder'}
               onClick={() => switchMode('builder')}
-              className={`px-3 py-1.5 rounded-md text-xs font-DanaDemiBold cursor-pointer transition ${builderMode ? 'bg-primary dark:bg-dark-primary text-white' : 'text-gray-500 dark:text-gray-400'}`}
+              className={`px-3 py-1.5 rounded-md text-xs font-DanaDemiBold cursor-pointer transition ${builderMode === 'builder' ? 'bg-primary dark:bg-dark-primary text-white' : 'text-gray-500 dark:text-gray-400'}`}
             >
               صفحه‌ساز بلوکی
             </button>
@@ -300,7 +315,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
               type="button"
               aria-pressed={builderMode === 'plain'}
               onClick={() => switchMode('plain')}
-              className={`px-3 py-1.5 rounded-md text-xs font-DanaDemiBold cursor-pointer transition ${!builderMode ? 'bg-primary dark:bg-dark-primary text-white' : 'text-gray-500 dark:text-gray-400'}`}
+              className={`px-3 py-1.5 rounded-md text-xs font-DanaDemiBold cursor-pointer transition ${builderMode === 'plain' ? 'bg-primary dark:bg-dark-primary text-white' : 'text-gray-500 dark:text-gray-400'}`}
             >
               متن ساده
             </button>
@@ -309,7 +324,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
 
         {/* بدنه */}
         <div className="p-4">
-          {builderMode ? (
+          {builderMode === 'builder' ? (
             <>
               <p className="text-xs text-gray-400 mb-4 leading-relaxed">
                 بلوک‌ها را از «افزودن بلوک» انتخاب کنید، با دسته‌ی ⠿ یا ↑/↓ جابجا کنید و برای هر بلوک
@@ -327,7 +342,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
               {formData.blocks && (
                 <p className="mt-2 text-[11px] text-amber-500 leading-relaxed">
                   این مقاله سندِ بلوکی دارد — ذخیره در حالتِ «متن ساده» آن را پاک می‌کند (صفحه‌ی عمومی
-                  همان متن ساده را نشان می‌دهد). با «صفحه‌ساز بلوکی» برگردید تا بلوک‌ها حفظ شوند.
+                  همان متن ساده را نشان می‌دهد). بازگشت بدون تغییر متن، بلوک‌ها را حفظ می‌کند؛ پس از تغییر متن، صفحه‌ساز آن را به پاراگراف تبدیل می‌کند.
                 </p>
               )}
             </>
@@ -345,6 +360,7 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         faSource={liveContent}
         multiline
         rows={6}
+        maxLength={100000}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -364,7 +380,10 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
           accept="image/webp"
           multiple
           images={formData.galleryImages ?? []}
-          onAdd={(url) => setFormData(prev => ({ ...prev, galleryImages: [...(prev.galleryImages || []), url] }))}
+          onAdd={(url) => setFormData(prev => {
+            if (prev.galleryImages.length >= 12) { showToast('حداکثر ۱۲ عکس در گالری مجاز است', 'error'); return prev }
+            return { ...prev, galleryImages: [...prev.galleryImages, url] }
+          })}
           onRemove={(index) => { setFormData(prev => ({ ...prev, galleryImages: prev.galleryImages?.filter((_, i) => i !== index) || [] })); showToast('عکس حذف شد') }}
         />
       </div>
@@ -415,9 +434,9 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
         </div>
 
         <div className="flex flex-col gap-2 p-4 rounded-lg border border-dashed border-gray-300 dark:border-[#3a151c]">
-          <input value={processInput.title} onChange={e => setProcessInput({ ...processInput, title: e.target.value })} placeholder="عنوان روند (مثلا: آماده‌سازی مواد)" className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" />
+          <input value={processInput.title} maxLength={120} onChange={e => setProcessInput({ ...processInput, title: e.target.value })} placeholder="عنوان روند (مثلا: آماده‌سازی مواد)" className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" />
           <div className="flex gap-2">
-            <input value={processInput.item} onChange={e => setProcessInput({ ...processInput, item: e.target.value })} placeholder="متن گام (اینتر یا دکمه را بزنید)" className="flex-1 px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addProcess() } }} />
+            <input value={processInput.item} maxLength={300} onChange={e => setProcessInput({ ...processInput, item: e.target.value })} placeholder="متن گام (اینتر یا دکمه را بزنید)" className="flex-1 px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addProcess() } }} />
             <button type="button" onClick={addProcess} className="px-4 py-1.5 rounded-lg bg-primary dark:bg-dark-primary text-white text-xs cursor-pointer">افزودن گام</button>
           </div>
         </div>
@@ -442,11 +461,11 @@ export function ArticleForm({ initialData, onSubmit, isSubmitting }: ArticleForm
 
       <div className="flex gap-3 pt-4 border-t border-gray-100 dark:border-white/5">
         <Link to="/admin/articles" className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium text-center cursor-pointer hover:bg-gray-200 dark:hover:bg-[#3a151c] transition">انصراف</Link>
-        <button type="submit" disabled={isSubmitting} className="flex-1 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50">
+        <button type="submit" disabled={isSubmitting || categoriesPending || categoriesError} className="flex-1 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50">
           {isSubmitting ? 'در حال ذخیره...' : 'ذخیره مقاله'}
         </button>
       </div>
-
+      </fieldset>
     </form>
   )
 }
