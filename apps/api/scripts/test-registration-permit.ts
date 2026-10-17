@@ -121,22 +121,34 @@ async function main(): Promise<void> {
 
   const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
 
-  const signals = (clientId?: string | null) => ({
-    clientId: clientId ?? null,
-    canvasHash: 'a'.repeat(64),
-    webglHash: 'b'.repeat(64),
-    audioHash: 'c'.repeat(64),
-    fontsHash: 'd'.repeat(64),
-    screen: '390x844x24@3',
-    platform: 'iPhone',
-    timezone: 'Asia/Tehran',
-    language: 'fa-IR',
-    hardwareConcurrency: 6,
-    deviceMemory: 4,
-    touch: true,
-    networkType: '4g',
-    userAgent: UA,
-  })
+  // stage-81 — هش‌های «یکتا per-client»: تا ۷۹ همه‌ی clientها هش‌های ثابتِ
+  // یکسان داشتند (fixture بی‌ضرر)؛ stage-80 وراثتِ مسدودی (cluster-block-inherit)
+  // به‌درستی دستگاهِ تازه‌ای را که هش‌هایش با دستگاهِ «مسدود» بایت‌یکسان
+  // باشد همان فراریِ storage-پاک می‌گیرد — پس «دستگاه تازه» در تست باید
+  // هش‌های یکتا داشته باشد (همان الگوی test-device-policy). ثبت‌نام‌های
+  // repeat روی یک clientId همچنان همان سیگنال‌ها را می‌گیرند (تکرارپذیر).
+  const deviceHash = (clientId: string, salt: string): string =>
+    new Bun.CryptoHasher('sha256').update(`${clientId}:${salt}`).digest('hex')
+
+  const signals = (clientId?: string | null) => {
+    const id = clientId ?? 'anon'
+    return {
+      clientId: clientId ?? null,
+      canvasHash: deviceHash(id, 'canvas'),
+      webglHash: deviceHash(id, 'webgl'),
+      audioHash: deviceHash(id, 'audio'),
+      fontsHash: deviceHash(id, 'fonts'),
+      screen: '390x844x24@3',
+      platform: 'iPhone',
+      timezone: 'Asia/Tehran',
+      language: 'fa-IR',
+      hardwareConcurrency: 6,
+      deviceMemory: 4,
+      touch: true,
+      networkType: '4g',
+      userAgent: UA,
+    }
+  }
 
   /** خطای AppError را با کد برمی‌گرداند (یا '__none__') */
   const login = async (phone: string, clientId: string | null, opts?: { terms?: boolean }) => {

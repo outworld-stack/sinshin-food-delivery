@@ -1045,3 +1045,65 @@ cd apps/api && bun run db:test:sep && bun run db:test:mellat && bun run db:test:
 بک: device-signals.ts · device.service.ts · schema/devices.ts · env.ts · drizzle/0008 (جدید)
 + meta/0008_snapshot (جدید) + _journal · package.json (db:test:intel) · scripts/test-device-intel.ts (جدید)
 · scripts/test-device-policy.ts · scripts/test-migrations.ts — مستند: REFERENCE.md
+
+## ۲-۱۰-۱۳ — stage-81: ترمیمِ تست‌ها بعد از ۸۰ — تصادمِ replay با rewind ناقص + fixtureِ کهنه
+
+> درخواست کارفرما: «اون تست‌هایی که ارور داده رو خودت اجرا کن و ببین چی می‌گه» —
+> بعد از اجرای `db:test:migrations` روی ماشینِ خودش: خطای 42P07
+> (`devices_canvas_hash_idx already exists`) + آبشارِ A2 + کرشِ `device_type`.
+
+### ۰) بازتولید — PostgreSQL واقعی در سندباکس (embedded binaries 18.4)
+- همان خطا **بایت‌به‌بایت** روی کلون با مایگریشنِ خودِ کلون (`0008_cool_thundra`)
+  بازتولید شد؛ کارفرما فایلِ خودش (`0008_grey_expediter`) را داشت — پس ریشه،
+  «تفاوتِ اسم فایل» نیست (فرضیه‌ی کارفرما رد شد). تست اصلاً name-agnostic است:
+  `CHAIN_COUNT` را از journalِ روی دیسک می‌خواند و ایندکس‌ها را با «نامِ تعریفِ
+  اسکیما» در pg_indexes می‌شمارد (برچسبِ ۸→۹ ورودی خودش عوض شد).
+
+### ۱) ریشه — rewind ناقص در `buildLegacyAt0004` (سناریوی A)
+- این تابع ابتدا کلِ زنجیره‌ی روی دیسک را اجرا می‌کند (پس هر مایگریشنِ تازه،
+  شیءهایش را می‌سازد) و بعد حالتِ «۰۰۰۴ + دیتای کثیف» را باز می‌سازد: تا ۷۹
+  جدول‌های ۰۰۰۶/۰۰۰۷، ایندکس‌های ۰۰۰۵، ستون‌های ۰۰۰۵ و ورودی‌های journal
+  برمی‌گشتند — اما چهار ایندکسِ ۰۰۰۸ (stage-80) drop نمی‌شدند.
+- A1: replay از ۰۰۰۵ تا ۰۰۰۸ روی ایندکس‌های موجود → **42P07** → rollbackِ کلِ
+  batch (مهاجرت‌ها یک‌جا اجرا می‌شوند) → ۰۰۵/۰۰۶/۰۰۷ هم غایب می‌مانند → آبشارِ
+  بندهای A2 + کرشِ «column device_type» در A3.
+- شاهدِ قطعی از خروجیِ کارفرما: «چهار ایندکسِ ۰۰۰۸ ✓» همزمان با «ایندکسِ ۰۰۰۵ ✗ ·
+  journal ✗ · ۰۰۰۶ ✗ · ۰۰۰۷ ✗» — ایندکس‌ها را **setup** ساخته بود، نه replay؛
+  rollback هم به آن‌ها نرسید.
+- اجرای اولِ کارفرما (قبل از db:generate) هم توضیحِ روشن دارد: زنجیره‌ی دیسک
+  ۰۰۰۸ نداشت → تنها خطا «count=0» بندِ A2 بود — گزارشِ درستِ «فایل مفقود».
+
+### ۲) اصلاح — test-migrations.ts
+- rewind کامل شد: چهار `drop index if exists` برای ایندکس‌های جمعیتِ هش (همان
+  الگوی stage-79 برای اشیاءِ ۰۰۰۷).
+- کامنتِ «درسِ بازتولید»: هر استیجی که شیءِ DDL تازه می‌آورد باید «همان شیء» را
+  در rewind برگرداند — وگرنه replay در A1 روی خودش «already exists» می‌خوابد.
+- پیامِ خطای بندِ A2 از «count=0» مبهم به راهنمای صریح: «زنجیره‌ی روی دیسک هنوز
+  ۰۰۰۸ ندارد — اول: bun run db:generate» (پرچمِ `CHAIN_HAS_0008` داینامیک از
+  journal؛ فقط متنِ خطا — semantics دست‌نخورده).
+
+### ۳) کشفِ دوم — fixtureِ کهنه‌ی تستِ مجوز (۲۷✓/۲✗ در سندباکس)
+- `db:test:permit` بعد از ۸۰ در سندباکس شکست: B6 «پیش‌نیاز — ثبت‌نام عادی روی
+  دستگاهِ تازه» → FORBIDDEN. علت: همه‌ی clientهای fixture هش‌های ثابتِ یکسان
+  (a/b/c/d×64) داشتند؛ «دستگاهِ تازه» (client-E) با ۴ هشِ بایت‌یکسانِ devA
+  (مسدود) → strongEvasionMatch → cluster-block-inherit — **دقیقاً همان رفتاری که
+  S2 خودِ استیج-۸۰ تأیید کرده است** (۳۲/۳۲). یعنی رفتارِ محصول درست است و
+  fixture از ۸۰ عقب مانده بود: دستگاهِ «تازه» باید هش‌های یکتا داشته باشد.
+- اصلاح: هش‌های sha256 یکتا per-clientId (تکرارپذیر برای همان client) — همان
+  الگوی test-device-policy. **صفر تغییر در سرویس‌ها** — device.service/auth.service
+  و کلِ منطقِ ۷۳–۸۰ دست‌نخورده.
+
+### ۴) نتیجه — برای نخستین‌بار همه‌ی تست‌های PG در سندباکس اجرا شدند
+- `db:test:migrations` **59/59** · `db:test:device` **32/32** · `db:test:permit`
+  **33/33** · `db:test:intel` **28/28** — جمعاً ۱۵۲ بندِ سبز روی PostgreSQL 18.4.
+- دروازه‌های ایستا: tsc api=۰ · tsc web=۰ · tsc shared=۰ · biome web = ۶۳۹/۱۴/۹
+  = دقیقاً baseline.
+
+### راهنمای اعمال
+- جای‌گذاریِ ۲ فایلِ تست (+ REFERENCE) — **بدون مایگریشن/env/پکیج جدید**؛ کارفرما
+  ۰۰۰۸ خودش را قبلاً generate و migrate کرده، پس فقط اجرای دوباره‌ی تست‌ها کافی
+  است: `db:test:migrations` → 59/59 و `db:test:permit` → 33/33.
+
+### فایل‌ها (۳: ۲ جایگزینیِ تست + مستند)
+apps/api/scripts/test-migrations.ts · apps/api/scripts/test-registration-permit.ts ·
+docs/REFERENCE.md

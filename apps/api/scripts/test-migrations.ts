@@ -60,11 +60,14 @@ const { admin, target, targetDb } = parseUrl()
 
 /** تعداد ورودی‌های زنجیره‌ی روی دیسک — داینامیک (قبل/بعد از db:generate کار می‌کند) */
 const DRIZZLE_DIR = join(import.meta.dir, '..', 'drizzle')
-const CHAIN_COUNT = (
-  JSON.parse(readFileSync(join(DRIZZLE_DIR, 'meta', '_journal.json'), 'utf8')) as {
-    entries: unknown[]
-  }
-).entries.length
+const DISK_JOURNAL = JSON.parse(readFileSync(join(DRIZZLE_DIR, 'meta', '_journal.json'), 'utf8')) as {
+  entries: Array<{ tag: string }>
+}
+const CHAIN_COUNT = DISK_JOURNAL.entries.length
+/** stage-81 — آیا زنجیره‌ی روی دیسک ورودیِ ۰۰۰۸ را دارد؟ (کارفرما فایل‌های
+ *  drizzle این‌جا کپی نمی‌شود و خودش db:generate می‌زند؛ این پرچم فقط پیامِ
+ *  خطای بندِ A2 را از «count=0» مبهم به راهنمای دقیق تبدیل می‌کند) */
+const CHAIN_HAS_0008 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0008'))
 
 const scratches: string[] = []
 let pass = 0
@@ -189,7 +192,15 @@ insert into "devices" ("id","fingerprint_hash","canvas_hash","webgl_hash","audio
   ('20000000-0000-0000-0000-0000000000${suffix}','f-new${suffix}','cn${suffix}','wn${suffix}','an${suffix}','fon${suffix}',true,'auto: crowded-cluster,canvas-drift',now(),95);
 `
 
-/** بازگرداندن دیتابیسِ تازه به حالتِ «۰۰۰۴ + دیتای کثیف» (شبیه‌سازی پروداکشن) */
+/** بازگرداندن دیتابیسِ تازه به حالتِ «۰۰۰۴ + دیتای کثیف» (شبیه‌سازی پروداکشن)
+ *
+ * stage-81 — درسِ بازتولید خطای کارفرما: این تابع نخست زنجیره‌ی «کاملِ روی
+ * دیسک» را اجرا می‌کند (پس هر شیءِ تازه در مایگریشن‌های جدید ساخته می‌شود)
+ * و بعد حالتِ ۰۰۰۴ را باز می‌سازد. هر استیجی که شیءِ DDL تازه می‌آورد باید
+ * «همان شیء» را اینجا هم برگرداند — وگرنه replay در A1 روی همان شیء
+ * «already exists» می‌خوابد. نمونه: چهار ایندکسِ ۰۰۰۸ که در stage-80 به
+ * بندِ A2 اضافه شدند اما اینجا drop نشدند (خطای 42P07 کارفرما).
+ */
 async function buildLegacyAt0004(url: string): Promise<void> {
   const res = await runRealMigrate(url)
   if (res.code !== 0) throw new Error('migrate اولیه برای ساخت legacy ناموفق بود')
@@ -198,6 +209,10 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     drop table if exists "backfill_runs";
     drop index if exists "devices_client_id_uidx";
     drop index if exists "devices_type_idx";
+    drop index if exists "devices_canvas_hash_idx";
+    drop index if exists "devices_webgl_hash_idx";
+    drop index if exists "devices_audio_hash_idx";
+    drop index if exists "devices_fonts_hash_idx";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
@@ -279,7 +294,13 @@ await withScratch('a', async (url) => {
     url,
     `select count(*)::int as n from pg_indexes where indexname in ('devices_canvas_hash_idx','devices_webgl_hash_idx','devices_audio_hash_idx','devices_fonts_hash_idx')`,
   )
-  ok('A2: چهار ایندکسِ جمعیتِ هش (۰۰۰۸ stage-80) ساخته شد', hashIdx === 4, `count=${hashIdx}`)
+  ok(
+    'A2: چهار ایندکسِ جمعیتِ هش (۰۰۰۸ stage-80) ساخته شد',
+    hashIdx === 4,
+    hashIdx === 0 && !CHAIN_HAS_0008
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۰۸ ندارد — اول: bun run db:generate'
+      : `count=${hashIdx}`,
+  )
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)
   const expects: Array<[string, string | null, string | null]> = [
