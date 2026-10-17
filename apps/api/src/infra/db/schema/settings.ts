@@ -35,6 +35,18 @@ export const SETTING_KEYS = {
   temporaryCloseReasonAr: 'temporary_close_reason_ar', // string
   /** ردیابی زنده پیک */
   liveTrackingEnabled: 'live_tracking_enabled', // boolean
+  /**
+   * stage-84 — وضعیت «شلوغی» رستوران (فقط اطلاع‌رسانی؛ سفارش‌دهی آزاد می‌ماند).
+   * ادمین اصلی + ادمین۲ با مجوز canAnnounceBusy. در چک‌اوت، سرو در محل
+   * هنگام شلوغی، یادداشتِ «اسم و شماره میز» را الزامی می‌کند.
+   */
+  restaurantBusy: 'restaurant_busy', // boolean
+  /**
+   * stage-84 — درگاه‌های پرداختِ فعال برای مشتری (jsonb):
+   * { mellat: boolean, zarinpal: boolean, sep: boolean } — «فعال» یعنی
+   * نمایشِ آن درگاه در چک‌اوت. کلید نداشته/نبود = فعال (پشتیبان ایمن).
+   */
+  paymentGateways: 'payment_gateways', // { mellat, zarinpal, sep }
   /** مختصات مبدأ ارسال */
   restaurantLocation: 'restaurant_location', // { lat, lng }
   // round-11: کلید packagingFee حذف شد — stage-10 هزینهٔ بسته‌بندی

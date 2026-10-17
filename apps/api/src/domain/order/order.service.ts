@@ -216,6 +216,18 @@ export class OrderService {
                                 }
                         }
 
+                        // ── stage-84 — شلوغی: سرو در محل ⇄ یادداشتِ «اسم و شماره میز» ──
+                        // خطای قبل از هر رزرو/درج ⇒ rollback تمیز؛ کلید idempotency
+                        // در روت release می‌شود و کاربر بعد از تکمیلِ یادداشت دوباره می‌تواند.
+                        if (input.deliveryType === "DINE_IN") {
+                                const busy = await this.deps.settings.isBusy(tx);
+                                if (busy && !(input.customerNote ?? "").trim()) {
+                                        throw Err.validation(
+                                                "رستوران در حال حاضر شلوغ است — برای سرویس در محل، اسم و شماره میز خود را در توضیحات سفارش وارد کنید (مثال: علی امیری - 22).",
+                                        );
+                                }
+                        }
+
                         // ── قیمت آیتم‌ها — سروری، تصویر لحظه‌ای ──
                         // perf-fix (کار-۲): قبلاً به‌ازای هر آیتم تا ۲ کوئری (محصول + سایزها)
                         // داخل tx → سبد ۵ آیتمه = تا ۱۰ کوئری. الان: حداکثر ۲ کوئریِ دسته‌ای.
@@ -239,10 +251,16 @@ export class OrderService {
                         // stage-10: بسته‌بندیِ هر محصول — جمع (هزینه بسته‌بندی محصول × تعداد)
                         // فقط برای DELIVERY و PICKUP؛ DINE_IN (سرو در محل) بسته‌بندی ندارد.
                         let packagingTotal = 0;
-                        const { productMap, sizesByProduct } = await loadPricingBases(
+                        const { productMap, sizesByProduct, packagingByProduct } = await loadPricingBases(
                                 tx,
                                 input.items,
                         );
+                        // stage-84 — هزینه بسته‌بندی مؤثر: اقلامِ فعالِ انتخابی (اگر لینکی
+                        // باشد) وگرنه پشتیبانِ ستونِ legacy — بقیه‌ی منطق دست‌نخورده.
+                        const packagingCostOf = (productId: ProductId, legacy: number): number => {
+                                const v = packagingByProduct.get(productId);
+                                return v === undefined ? legacy : v;
+                        };
                         // stage-48 — حالت‌های دسته (یک کوئری) → مؤثر = دسته AND محصول
                         const catModes = await loadCategoryModes(
                                 tx,
@@ -302,7 +320,7 @@ export class OrderService {
                                         }
                                 }
                                 foodTotal += unitPrice * item.quantity;
-                                packagingTotal += product.packagingCost * item.quantity;
+                                packagingTotal += packagingCostOf(product.id, product.packagingCost) * item.quantity;
                                 itemRows.push({
                                         productId: product.id,
                                         sizeId,
@@ -310,7 +328,7 @@ export class OrderService {
                                         name: product.name,
                                         unitPrice,
                                         quantity: item.quantity,
-                                        packagingCost: product.packagingCost,
+                                        packagingCost: packagingCostOf(product.id, product.packagingCost),
                                 });
                         }
                         if (itemRows.length === 0)
@@ -516,17 +534,29 @@ export class OrderService {
                         // commit در gateway() (پروداکشن real) خطا می‌داد ⇒ سفارشِ
                         // PENDING_PAYMENTِ بی‌راه‌حل + رزرو دوبل کیف/کوپن. حالا
                         // خطای اعتبارسنجی داخل tx ⇒ rollback کامل؛ چک‌اوت تمیز 422.
+                        // stage-84 — لیست درگاه‌ها از تنظیمات (سوئیچ ادمین اصلی) می‌آید؛
+                        // خواندن با tx یعنی مقدارِ تازه بدون کشِ ۳۰ثانیه‌ای. callbackهای
+                        // درگاهِ بعداً-غیرفعال‌شده همچنان پردازش می‌شوند (پولِ در جریان).
                         const REAL_GATEWAYS = ["MELLAT", "ZARINPAL", "SEP"] as const;
+                        const gwEnabled = await this.deps.settings.enabledGateways(tx);
+                        const allowedGateways = REAL_GATEWAYS.filter(
+                                (id) =>
+                                        id === "MELLAT" ? gwEnabled.mellat
+                                        : id === "ZARINPAL" ? gwEnabled.zarinpal
+                                        : gwEnabled.sep,
+                        );
                         const requestedGateway = (input.gatewayId ?? "").trim().toUpperCase();
                         const isMockMode = this.deps.config.gateway.mode === "mock";
                         const gatewayId = isMockMode
                                 ? "MOCK"
-                                : (REAL_GATEWAYS as readonly string[]).includes(requestedGateway)
+                                : (allowedGateways as readonly string[]).includes(requestedGateway)
                                   ? requestedGateway
                                   : "";
                         if (!gatewayId) {
                                 throw Err.validation(
-                                        "درگاه پرداخت را انتخاب کنید (ملت / زرین‌پال / سامان).",
+                                        allowedGateways.length === 0
+                                                ? "در حال حاضر هیچ درگاه پرداخت آنلاین فعال نیست — لطفاً بعداً تلاش کنید یا از کیف پول استفاده کنید."
+                                                : "درگاه پرداخت را انتخاب کنید (ملت / زرین‌پال / سامان).",
                                 );
                         }
                         const paymentRow = (
@@ -654,10 +684,15 @@ export class OrderService {
                 let foodTotal = 0;
                 // stage-10: بسته‌بندیِ هر محصول — همان جمعِ چک‌اوت
                 let packagingTotal = 0;
-                const { productMap, sizesByProduct } = await loadPricingBases(
+                const { productMap, sizesByProduct, packagingByProduct } = await loadPricingBases(
                         db,
                         input.items,
                 );
+                // stage-84 — همان پشتیبانِ چک‌اوت: اقلام فعال یا ستونِ legacy
+                const packagingCostOf = (productId: ProductId, legacy: number): number => {
+                        const v = packagingByProduct.get(productId);
+                        return v === undefined ? legacy : v;
+                };
                 // stage-48 — حالت‌های دسته (یک کوئری) → مؤثر = دسته AND محصول
                 const catModes = await loadCategoryModes(
                         db,
@@ -703,7 +738,7 @@ export class OrderService {
                                 }
                         }
                         foodTotal += available ? unitPrice * item.quantity : 0;
-                        packagingTotal += available ? product.packagingCost * item.quantity : 0;
+                        packagingTotal += available ? packagingCostOf(product.id, product.packagingCost) * item.quantity : 0;
                         items.push({
                                 name: product.name,
                                 sizeName,
@@ -777,6 +812,23 @@ export class OrderService {
                         payableFood - walletDeduction + deliveryFee + packagingFee;
                 assertMoneyAmounts(foodTotal, discount, walletDeduction, deliveryFee, packagingFee, totalAmount, amountPaidOnline);
 
+                // stage-84 — درگاه‌های فعال + وضعیت شلوغی برای UI چک‌اوت (پیش‌نمایش
+                // همیشه قبل از انتخاب درگاه صدا زده می‌شود — کانال طبیعیِ همین دو فیلد).
+                // mock → ['MOCK']؛ real → فقط فعال‌ها از تنظیمات.
+                const isMockMode = this.deps.config.gateway.mode === "mock";
+                const [gwEnabled, busy] = await Promise.all([
+                        this.deps.settings.enabledGateways(db),
+                        this.deps.settings.isBusy(db),
+                ]);
+                const gateways = isMockMode
+                        ? ["MOCK"]
+                        : (["MELLAT", "ZARINPAL", "SEP"] as const).filter(
+                                  (id) =>
+                                          id === "MELLAT" ? gwEnabled.mellat
+                                          : id === "ZARINPAL" ? gwEnabled.zarinpal
+                                          : gwEnabled.sep,
+                          );
+
                 return {
                         breakdown: {
                                 foodTotal,
@@ -789,6 +841,8 @@ export class OrderService {
                         },
                         items,
                         coupon,
+                        gateways,
+                        restaurantBusy: busy,
                 };
         }
 

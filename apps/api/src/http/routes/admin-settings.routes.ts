@@ -50,7 +50,31 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     .get(
       '/restaurant/status',
       () => deps.settings.restaurantStatus(),
-      { detail: { summary: 'Full status — schedule + temporary' } },
+      { detail: { summary: 'Full status — schedule + temporary + busy' } },
+    )
+    // stage-84 — اعلام وضعیت «شلوغ» (ادمین اصلی + ادمین۲ با canAnnounceBusy؛
+    // مجوز داخل سرویس چک می‌شود — الگوی temporary-close). شلوغی فقط
+    // اطلاع‌رسانی است: سفارش‌دهی آزاد می‌ماند و سرو در محل یادداشت می‌خواهد.
+    .post(
+      '/busy',
+      async ({ user, body }) => {
+        await deps.admin2.setBusy(user.id, user.role, body.busy)
+        await deps.audit.log({
+          actorId: user.id,
+          action: body.busy ? 'BUSY_ON' : 'BUSY_OFF',
+          entity: 'settings',
+          metadata: { busy: body.busy },
+        })
+        return { success: true }
+      },
+      {
+        body: t.Object({ busy: t.Boolean() }),
+        detail: {
+          summary: 'Announce restaurant busy status (main admin or level-2 with canAnnounceBusy)',
+          description:
+            'stage-84: busy is informational only — ordering stays open. In checkout, DINE_IN orders require the customer note (name + table number) while busy. Mirrors temporary-close permission model.',
+        },
+      },
     )
     .post(
       '/temporary-close',
@@ -194,6 +218,52 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       '/live-tracking',
       async () => ({ enabled: await deps.settings.liveTrackingEnabled() }),
       { detail: { summary: 'Live-tracking flag (default: off) — main admin only' } },
+    )
+    // stage-84 — سوئیچ درگاه‌های پرداخت (فقط ادمین اصلی): «فعال» یعنی نمایشِ
+    // آن درگاه در چک‌اوت. اعمال سروری داخل tx چک‌اوت (بدون کش) + فیلترِ UI
+    // از preview. callbackهای درگاهِ غیرفعال‌شده همچنان پردازش می‌شوند (پولِ
+    // در جریان هرگز گروگانِ سوئیچ نمی‌شود).
+    .get(
+      '/gateways',
+      async () => ({ gateways: await deps.settings.enabledGateways() }),
+      {
+        detail: {
+          summary: 'Payment gateway switches (mellat/zarinpal/sep; default: all on) — main admin only',
+        },
+      },
+    )
+    .post(
+      '/gateways',
+      async ({ body, user }) => {
+        await deps.settings.setGateways({
+          mellat: body.mellat,
+          zarinpal: body.zarinpal,
+          sep: body.sep,
+        })
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'GATEWAY_TOGGLE',
+          entity: 'settings',
+          metadata: {
+            mellat: body.mellat,
+            zarinpal: body.zarinpal,
+            sep: body.sep,
+          },
+        })
+        return { success: true }
+      },
+      {
+        body: t.Object({
+          mellat: t.Boolean(),
+          zarinpal: t.Boolean(),
+          sep: t.Boolean(),
+        }),
+        detail: {
+          summary: 'Set enabled payment gateways — main admin only',
+          description:
+            'stage-84: enabled = shown to customers in checkout. Server-side validation reads the fresh value inside the checkout transaction (no 30s cache). In-flight payments of a later-disabled gateway still complete (callbacks are never blocked).',
+        },
+      },
     )
     .post(
       '/live-tracking',

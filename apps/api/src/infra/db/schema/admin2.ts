@@ -51,6 +51,8 @@ export const admin2Profiles = pgTable(
     articlesRead: boolean('articles_read').notNull().default(false),
     /** stage-82 — ایجاد/ویرایش مقاله با صفحه‌ساز — فقط با مجوزِ صریحِ ادمین اصلی */
     articlesWrite: boolean('articles_write').notNull().default(false),
+    /** stage-84 — اعلام وضعیت «شلوغ» رستوران (پیش‌فرضِ افزودن = false) */
+    canAnnounceBusy: boolean('can_announce_busy').notNull().default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

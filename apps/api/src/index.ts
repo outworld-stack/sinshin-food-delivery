@@ -29,6 +29,7 @@ import { RegistrationPermitService } from '#/domain/auth/registration-permit.ser
 import { AuthService } from '#/domain/auth/auth.service'
 import { SettingsService } from '#/domain/settings/settings.service'
 import { MenuService } from '#/domain/menu/menu.service'
+import { PackagingService } from '#/domain/menu/packaging.service'
 import { CartService } from '#/domain/cart/cart.service'
 import { AddressService } from '#/domain/address/address.service'
 import { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
@@ -127,6 +128,8 @@ const notifications = new NotificationService({ db, config, hub: sseHub })
 // stage-48 — منو: پخش نوتیفیکیشن تخفیف + SSE عمومی menu:live
 // (بعد از notifications ساخته می‌شود تا هر دو سرویس را بگیرد)
 const menu = new MenuService({ db, redis, notifications, hub: sseHub })
+// stage-84 — اقلام بسته‌بندی (قیمت سراسری؛ CRUD ادمین)
+const packaging = new PackagingService({ db })
 const orders = new OrderService({ db, config, zones, settings, coupons, notifications })
 const profile = new ProfileService({ db, config, orders, devices })
 // round-20 — تکرارناپذیری چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)
@@ -137,7 +140,7 @@ const payments = new PaymentService({ db, config, orders, notifications, hub: ss
 const uploads = new UploadService(config.uploadDir)
 const admin2 = new Admin2Service({ db, config, settings, hub: sseHub })
 const live = new LiveService({ db, config, admin2, hub: sseHub })
-const couriers = new CourierService({ db, config, redis, sms })
+const couriers = new CourierService({ db, config, redis, sms, settings, neshan })
 const admin = new AdminService({ db })
 const reviews = new ReviewService({ db })
 const links = new ReportLinks(config)
@@ -238,6 +241,7 @@ const app = buildApp({
   devices,
   permits,
   menu,
+  packaging,
   cart,
   addresses,
   zones,

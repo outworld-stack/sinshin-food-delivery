@@ -93,13 +93,14 @@ export class SettingsService {
    *  round-34 — lang='ar': علت بسته‌بودن موقت از کلید موازی عربی
    *  (temporary_close_reason_ar) می‌آید؛ خالی = همان فارسی (fallback). */
   async restaurantStatus(lang: Lang = 'fa', db?: DbOrTx): Promise<RestaurantStatusDto> {
-    const [open, tempClosed, reason, reasonAr, tempReopen, nextOpenTime] = await Promise.all([
+    const [open, tempClosed, reason, reasonAr, tempReopen, nextOpenTime, busy] = await Promise.all([
       this.get<boolean>(SETTING_KEYS.restaurantOpen, true, db),
       this.get<boolean>(SETTING_KEYS.temporarilyClosed, false, db),
       this.get<string>(SETTING_KEYS.temporaryCloseReason, '', db),
       this.get<string>(SETTING_KEYS.temporaryCloseReasonAr, '', db),
       this.get<string>(SETTING_KEYS.temporaryReopenTime, '', db),
       this.get<string>(SETTING_KEYS.nextOpenTime, '۱۱:۰۰ صبح', db),
+      this.get<boolean>(SETTING_KEYS.restaurantBusy, false, db),
     ])
     // round-34 — COALESCE: عربی خالی → همان فارسی (بدون ترجمه‌ی برچسب‌های زمانی —
     // ساعت‌ها عددی‌اند و فرانت با فرمتر خودش ارقام را عربی می‌کند)
@@ -112,6 +113,8 @@ export class SettingsService {
       temporaryReopenTime: tempClosed ? tempReopen : '',
       nextOpenTime,
       anyClosed: !open || tempClosed,
+      // stage-84 — شلوغی: مستقل از بسته‌بودن (رستورانِ بازِ شلوغ ممکن است)
+      isBusy: busy,
     }
   }
 
@@ -128,6 +131,48 @@ export class SettingsService {
 
   async liveTrackingEnabled(db?: DbOrTx): Promise<boolean> {
     return this.get<boolean>(SETTING_KEYS.liveTrackingEnabled, false, db)
+  }
+
+  /**
+   *  stage-84 — وضعیت «شلوغی» رستوران (فقط اطلاع‌رسانی؛ سفارش‌دهی آزاد).
+   *  ادمین اصلی + ادمین۲ با مجوزِ canAnnounceBusy (گارد در Admin2Service).
+   */
+  async isBusy(db?: DbOrTx): Promise<boolean> {
+    return this.get<boolean>(SETTING_KEYS.restaurantBusy, false, db)
+  }
+
+  async setBusy(busy: boolean): Promise<void> {
+    await this.set<boolean>(SETTING_KEYS.restaurantBusy, busy)
+  }
+
+  /**
+   *  stage-84 — درگاه‌های پرداختِ فعال (سوئیچ‌های ادمین اصلی).
+   *  شکلِ ذخیره: { mellat, zarinpal, sep } — کلید غایب/false = خاموش.
+   *  مقدار پیش‌فرض (بدون کلید): همه فعال — پشتیبانِ ایمنِ نصب‌های موجود.
+   */
+  async enabledGateways(db?: DbOrTx): Promise<{
+    mellat: boolean
+    zarinpal: boolean
+    sep: boolean
+  }> {
+    const raw = await this.get<{
+      mellat?: unknown
+      zarinpal?: unknown
+      sep?: unknown
+    }>(SETTING_KEYS.paymentGateways, {}, db)
+    return {
+      mellat: raw.mellat !== false,
+      zarinpal: raw.zarinpal !== false,
+      sep: raw.sep !== false,
+    }
+  }
+
+  async setGateways(value: {
+    mellat: boolean
+    zarinpal: boolean
+    sep: boolean
+  }): Promise<void> {
+    await this.set(SETTING_KEYS.paymentGateways, value)
   }
 
   /**

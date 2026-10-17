@@ -127,6 +127,121 @@ ok(
   (ctaOk?.blocks[0] as { props: { to: string; href?: string } } | undefined)?.props.href === 'https://example.com/menu',
 )
 
+// ═══ stage-84 — بلوک‌های link/location ═══
+
+console.log('\n══ N11: link — label + href معتبر هر دو الزامی ══')
+ok(
+  'N11: بدون label → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('link', { href: 'https://ok.com' })] }) === null,
+)
+ok(
+  'N11: بدون href → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('link', { label: 'مشاهده' })] }) === null,
+)
+ok(
+  'N11: href خراب (javascript:) → حذف کل بلوک',
+  normalizeBlocksDoc({
+    version: 1,
+    blocks: [B('link', { label: 'مشاهده', href: 'javascript:alert(1)' })],
+  }) === null,
+)
+ok(
+  'N11: href پروتکل-نسبی (//evil) → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('link', { label: 'مشاهده', href: '//evil.com' })] }) === null,
+)
+const linkOk = normalizeBlocksDoc({
+  version: 1,
+  blocks: [
+    B('link', { label: 'مشاهده منو', href: 'https://example.com', title: 'تیتر', text: 'توضیح' }),
+  ],
+})
+ok('N11: https معتبر + title/text → حفظ', linkOk !== null && linkOk.blocks.length === 1)
+ok(
+  'N11: href ذخیره شد',
+  (linkOk?.blocks[0] as { props: { href?: string } } | undefined)?.props.href === 'https://example.com',
+)
+const linkRel = normalizeBlocksDoc({
+  version: 1,
+  blocks: [B('link', { label: 'داخلی', href: '/products' })],
+})
+ok(
+  'N11: مسیر نسبی داخلی → حفظ',
+  (linkRel?.blocks[0] as { props: { href?: string } } | undefined)?.props.href === '/products',
+)
+const linkVariant = normalizeBlocksDoc({
+  version: 1,
+  blocks: [B('link', { label: 'کارت', href: '/articles', variant: 'card' })],
+})
+ok(
+  'N11: variant=card ذخیره شد',
+  (linkVariant?.blocks[0] as { props: { variant?: string } } | undefined)?.props.variant === 'card',
+)
+const linkVariantDefault = normalizeBlocksDoc({
+  version: 1,
+  blocks: [B('link', { label: 'دکمه', href: '/products', variant: 'button' })],
+})
+ok(
+  'N11: variant=button (پیش‌فرض) → ذخیره نمی‌شود (کوچک نگاه داشتن سند)',
+  (linkVariantDefault?.blocks[0] as { props: { variant?: string } } | undefined)?.props.variant === undefined,
+)
+
+console.log('\n══ N12: location — مختصات محدوده‌دار + گرد ۶ رقم ══')
+ok(
+  'N12: بدون مختصات → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('location', { title: 'شعبه' })] }) === null,
+)
+ok(
+  'N12: lat رشته → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('location', { lat: '37', lng: 49 })] }) === null,
+)
+ok(
+  'N12: lat خارج از محدوده (۹۱) → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('location', { lat: 91, lng: 49 })] }) === null,
+)
+ok(
+  'N12: lng خارج از محدوده (۱۸۱) → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('location', { lat: 37, lng: 181 })] }) === null,
+)
+ok(
+  'N12: NaN → حذف',
+  normalizeBlocksDoc({ version: 1, blocks: [B('location', { lat: Number.NaN, lng: 49 })] }) === null,
+)
+const locRounded = normalizeBlocksDoc({
+  version: 1,
+  blocks: [B('location', { lat: 37.48220561234, lng: 49.44182739876, address: 'بندرانزلی' })],
+})
+ok(
+  'N12: گرد به ۶ رقم',
+  (locRounded?.blocks[0] as { props: { lat?: number } } | undefined)?.props.lat === 37.482206,
+)
+ok(
+  'N12: آدرس ذخیره شد',
+  (locRounded?.blocks[0] as { props: { address?: string } } | undefined)?.props.address === 'بندرانزلی',
+)
+const locEdge = normalizeBlocksDoc({
+  version: 1,
+  blocks: [B('location', { lat: -90, lng: 180 })],
+})
+ok(
+  'N12: مرزهای ±۹۰/۱۸۰ مجازند',
+  (locEdge?.blocks[0] as { props: { lat?: number; lng?: number } } | undefined)?.props.lat === -90,
+)
+
+console.log('\n══ N13: blocksToPlainText — link/location مشارکت متن ══')
+const txtLink = blocksToPlainText({
+  version: 1,
+  blocks: [
+    B('link', { label: 'برو', href: 'https://x.com', title: 'عنوان لینک', text: 'توضیح لینک' }),
+    B('location', { lat: 37, lng: 49, title: 'شعبه مرکزی', address: 'خیابان اصلی' }),
+  ] as unknown as ArticleBlocksDoc['blocks'],
+})
+ok('N13: عنوان/توضیح لینک در متن مشتق هست', txtLink.includes('عنوان لینک') && txtLink.includes('توضیح لینک'))
+ok('N13: label دکمه در متن مشتق نیست (نویز نیست)', !txtLink.includes('برو'))
+ok(
+  'N13: عنوان/آدرس موقعیت در متن مشتق هست',
+  txtLink.includes('شعبه مرکزی') && txtLink.includes('خیابان اصلی'),
+)
+
 console.log('\n══ N8: فهرست/نقل‌قول/باکس — فیلتر اقلام + متن الزامی ══')
 const list = normalizeBlocksDoc({
   version: 1,

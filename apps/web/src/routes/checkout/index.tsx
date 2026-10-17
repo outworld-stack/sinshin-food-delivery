@@ -158,6 +158,7 @@ function CheckoutPage() {
 						gatewaysDisabled={page.isGatewayDisabled}
 						amountPaidOnline={page.calc.amountPaidOnline}
 						deliveryType={page.state.deliveryType}
+						availableGateways={page.availableGateways}
 					/>
 
 					{page.state.deliveryType === 'DELIVERY' && (
@@ -169,10 +170,11 @@ function CheckoutPage() {
 						/>
 					)}
 
-					{/* آیتم ۱۳: یادداشت مشتری */}
+					{/* آیتم ۱۳: یادداشت مشتری — stage-84: هشدار شلوغی زیر باکس */}
 					<CustomerNoteBox
 						value={page.state.customerNote}
 						onChange={page.handleCustomerNoteChange}
+						busyDineIn={page.busyDineIn}
 					/>
 				</div>
 

@@ -23,11 +23,13 @@ import { Err } from '#/domain/shared/errors'
 import { likePattern } from '#/domain/shared/pg'
 import type { RedisService } from '#/infra/redis/redis'
 import type { SmsService } from '#/infra/sms/sms.service'
+import type { NeshanService } from '#/infra/maps/neshan.service'
+import type { SettingsService, RestaurantLocation } from '#/domain/settings/settings.service'
 import { sendOtp, verifyOtp, type OtpKeys } from '#/domain/shared/otp-core'
 import { asCourierId } from '#/domain/shared/brand'
 import { requireOrder } from '#/domain/order/order-lookup'
 
-const COURIER_TOKEN_TTL_SECONDS = 3600 // ۱ ساعت
+const COURIER_TOKEN_TTL_SECONDS = 10_800 // ۳ ساعت — stage-84: QR روی فاکتور تا ۳ ساعت قابل اسکن است
 const LOCATION_THROTTLE_MS = 3000 // حداکثر یک آپدیت در ۳ ثانیه
 // سیاست‌های OTP پیک — همان اعداد قبلی، حالا نام‌دار و کنار هم
 const COURIER_OTP_TTL_SECONDS = 120
@@ -53,12 +55,20 @@ const K = {
  * پیک — بدون user سیستم.
  *
  * احراز (پیش‌فرض خاموش): اگر ادمین۲ موقع تایید securityEnabled روشن کند،
- * پیک با شماره‌ی خودش OTP می‌گیرد → توکن ۱ ساعته → اسکنِ فقط پیکِ تخصیصی.
+ * پیک با شماره‌ی خودش OTP می‌گیرد → توکن ۳ ساعته → اسکنِ فقط پیکِ تخصیصی.
  * بدون security: اسکن آزاد.
  */
 export class CourierService {
   constructor(
-    private readonly deps: { db: Db; config: AppConfig; redis: RedisService; sms: SmsService },
+    private readonly deps: {
+      db: Db
+      config: AppConfig
+      redis: RedisService
+      sms: SmsService
+      /** stage-84 — مسیرِ نمایشی بعد از اسکن (اختیاری؛ miss-soft) */
+      settings?: SettingsService
+      neshan?: NeshanService
+    },
   ) { }
 
   // ── OTP پیک (فقط برای سفارش‌های securityEnabled) ──
@@ -120,7 +130,7 @@ export class CourierService {
       throw Err.validation('کد وارد شده صحیح نیست.')
     }
 
-    // توکن ۱ ساعته
+    // توکن ۳ ساعته (stage-84) — QR روی فاکتور تا ۳ ساعت قابل اسکن می‌ماند
     const token = crypto.randomUUID()
     await this.deps.redis.setJson(K.token(token), { courierId: courier.id, phone }, {
       ex: COURIER_TOKEN_TTL_SECONDS,
@@ -140,17 +150,77 @@ export class CourierService {
   // نتواند بین «سفارش نیست / وضعیت اشتباه / توکن غلط» تفکیک کند (status oracle).
   private static readonly SCAN_FAILED = 'اسکن ناموفق بود.'
 
+  /** ترمیم اسکنِ استیج-۸۴ — پنجره‌ی اعتبارِ QR پس از «اولین اسکنِ موفق»:
+   *  تا ۳ ساعت اسکن مجدد idempotent موفق است (خواسته‌ی کارفرما: «اگه اتفاقی
+   *  پیش اومد دوباره اسکن کن»؛ قبلاً یک‌بارمصرف بود و ارور می‌داد)؛ پس از آن
+   *  پیامِ انقضای صریح. لنگر = courierArrivedAt (زمانِ اولین اسکن). */
+  private static readonly QR_RESCAN_WINDOW_MS = 3 * 60 * 60 * 1000
+  private static readonly QR_EXPIRED = 'اعتبار این QR به پایان رسیده است.'
+
+  /**
+   * stage-84 — مسیرِ «رستوران → مقصد مشتری» برای نقشه‌ی صفحه‌ی اسکن.
+   * best-effort: هر شکستی فقط polyline=null می‌دهد (خط مستقیم سمت کلاینت)؛
+   * اسکنِ موفق هرگز به خاطر نقشه نمی‌شکند.
+   */
+  private async routeForScan(
+    row: OrderRow,
+  ): Promise<{
+    origin: { lat: number; lng: number }
+    destination: { lat: number; lng: number } | null
+    address: string | null
+    polyline: string | null
+    distanceMeters: number | null
+    durationSeconds: number | null
+  }> {
+    const fallback: RestaurantLocation = { lat: 37.4822056, lng: 49.4418273 }
+    let origin = fallback
+    try {
+      origin = (await this.deps.settings?.restaurantLocation()) ?? fallback
+    } catch {
+      origin = fallback
+    }
+    const destination = row.customerLocation ?? null
+    let polyline: string | null = null
+    let distanceMeters: number | null = null
+    let durationSeconds: number | null = null
+    if (destination && this.deps.neshan) {
+      try {
+        const route = await this.deps.neshan.routeNoTraffic(origin, destination)
+        if (route) {
+          polyline = route.overviewPolyline
+          distanceMeters = route.distanceMeters
+          durationSeconds = route.durationSeconds
+        }
+      } catch {
+        // بدون نقشه هم اسکن موفق است — خط مستقیم سمت کلاینت
+      }
+    }
+    return { origin, destination, address: row.addressSnapshot ?? null, polyline, distanceMeters, durationSeconds }
+  }
+
   async scanArrival(
     displayId: string,
     courierToken: string | null,
-  ): Promise<{ success: boolean; message?: string }> {
+  ): Promise<{
+    success: boolean
+    message?: string
+    /** ترمیم اسکنِ استیج-۸۴ — true یعنی «اسکنِ مجدد» (سفارش قبلاً در مسیر بوده)؛
+     *  کلاینت توستِ متفاوت می‌دهد و وضعیت دوباره جابه‌جا نمی‌شود */
+    alreadyScanned?: boolean
+    /** stage-84 — فقط روی موفقیت: مسیر نمایشی برای نقشه‌ی اسکن */
+    route?: {
+      origin: { lat: number; lng: number }
+      destination: { lat: number; lng: number } | null
+      address: string | null
+      polyline: string | null
+      distanceMeters: number | null
+      durationSeconds: number | null
+    }
+  }> {
     let row: OrderRow
     try {
       row = await this.mustGet(displayId)
     } catch {
-      return { success: false, message: CourierService.SCAN_FAILED }
-    }
-    if (row.status !== 'CONFIRMED') {
       return { success: false, message: CourierService.SCAN_FAILED }
     }
     if (row.deliveryType !== 'DELIVERY') {
@@ -170,6 +240,25 @@ export class CourierService {
       }
     }
 
+    // ترمیم اسکنِ استیج-۸۴ — اسکنِ مجدد: سفارشِ در مسیر، تا ۳ ساعت پس از
+    // اولین اسکن، دوباره «موفق + مسیر» جواب می‌دهد (idempotent — بدون تغییرِ
+    // وضعیت/زمان). حادثه/رفرش/بستنِ صفحه دیگر پیک را گیر نمی‌اندازد.
+    if (row.status === 'ON_THE_WAY') {
+      const arrivedAt = row.courierArrivedAt?.getTime() ?? 0
+      if (
+        arrivedAt > 0 &&
+        Date.now() - arrivedAt > CourierService.QR_RESCAN_WINDOW_MS
+      ) {
+        return { success: false, message: CourierService.QR_EXPIRED }
+      }
+      const route = await this.routeForScan(row)
+      return { success: true, alreadyScanned: true, route }
+    }
+
+    if (row.status !== 'CONFIRMED') {
+      return { success: false, message: CourierService.SCAN_FAILED }
+    }
+
     const [updated] = await this.deps.db
       .update(orders)
       .set({
@@ -182,7 +271,9 @@ export class CourierService {
     if (!updated) return { success: false, message: CourierService.SCAN_FAILED }
 
     // سفرِ پیک — باز کن اگر سشنِ بازی نیست، تحویل ثبت در confirmDelivery
-    return { success: true }
+    // stage-84 — مسیر رستوران→مشتری همراه پاسخ (نقشه‌ی صفحه‌ی اسکن)
+    const route = await this.routeForScan(updated)
+    return { success: true, alreadyScanned: false, route }
   }
 
   // ── استریم موقعیت ──

@@ -253,6 +253,10 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
             confirmedBy:
               user.role === 'admin2' ? user.id : query.confirmedBy || undefined,
             courierId: query.courierId || undefined,
+            // stage-84 — بازه‌ی تاریخ (مرزِ روزِ «امروز» را کلاینت با
+            // timeZone Asia/Tehran حساب و ISO می‌فرستد)
+            dateFrom: query.dateFrom || undefined,
+            dateTo: query.dateTo || undefined,
           },
           user.role === 'admin2' ? { maskPhones: true } : undefined,
         ),
@@ -267,6 +271,9 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
           sortAmount: t.Optional(t.String({ maxLength: 10 })),
           confirmedBy: t.Optional(t.String({ maxLength: 40 })),
           courierId: t.Optional(t.String({ maxLength: 40 })),
+          // stage-84 — ISO تاریخ (شروع/پایان روز) — نامعتبر در سرویس نادیده گرفته می‌شود
+          dateFrom: t.Optional(t.String({ maxLength: 40 })),
+          dateTo: t.Optional(t.String({ maxLength: 40 })),
         }),
         detail: { summary: 'Admin orders — sortable/filterable; admin2 auto-scoped to own' },
       },

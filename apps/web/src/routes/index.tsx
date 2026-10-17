@@ -13,6 +13,8 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { createFileRoute, Link } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import { Bell, BellOff, CheckCircle } from 'reicon-react'
 import { Brand } from '#/components/Brand'
 import { LangSwitcher } from '#/components/LangSwitcher'
 import { ThemeToggle } from '#/components/ThemeToggle'
@@ -20,6 +22,11 @@ import { WordSlider } from '#/components/WordSlider'
 import { useHydrated } from '#/hooks/useHydrated'
 import { I18nProvider, useI18n } from '#/i18n'
 import { shouldShowOutdatedBanner } from '#/lib/browserSupport'
+import {
+	enablePush,
+	getPushState,
+	type PushState,
+} from '#/lib/push-subscription'
 import { seoHead } from '#/lib/seo'
 import { useAuthStore } from '#/stores/authStore'
 
@@ -63,6 +70,76 @@ function LandingRoute() {
 		<I18nProvider initialLang={lang ?? 'fa'}>
 			<LandingPage showBanner={oldBrowser ?? false} />
 		</I18nProvider>
+	)
+}
+
+/**
+ * stage-84 — دکمه‌ی فعال‌سازی نوتیفیکیشن هیرو (زیر «دیدن محصولات»).
+ * الگوی درس stage-64: requestPermission فقط داخل کلیکِ کاربر (نه auto).
+ * مهمان هم می‌تواند فعال کند (pendingLogin — ثبتِ سرور بعد از لاگین).
+ */
+function LandingNotifyButton() {
+	const { t } = useI18n()
+	const hydrated = useHydrated()
+	const [pushState, setPushState] = useState<PushState | null>(null)
+	const [busy, setBusy] = useState(false)
+
+	useEffect(() => {
+		if (!hydrated) return
+		let cancelled = false
+		void getPushState()
+			.then((s) => {
+				if (!cancelled) setPushState(s)
+			})
+			.catch(() => {})
+		return () => {
+			cancelled = true
+		}
+	}, [hydrated])
+
+	const granted = pushState?.state === 'granted' && pushState.subscribed
+	const denied = pushState?.state === 'denied'
+
+	const handleClick = () => {
+		if (busy || granted || denied) return
+		setBusy(true)
+		void enablePush()
+			.then((s) => setPushState(s))
+			.catch(() => {})
+			.finally(() => setBusy(false))
+	}
+
+	return (
+		<button
+			type="button"
+			onClick={handleClick}
+			disabled={busy || granted || denied || !hydrated}
+			className={
+				'inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-2xl font-DanaMedium text-sm sm:text-base transition-all duration-300 border-2 ' +
+				(granted
+					? 'border-green-300 dark:border-green-500/40 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-500/10 cursor-default'
+					: denied
+						? 'border-gray-200 dark:border-[#3a151c] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+						: 'border-gray-200 dark:border-[#3a151c] text-gray-700 dark:text-[#f5e0e6] hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] cursor-pointer')
+			}
+		>
+			{granted ? (
+				<>
+					<CheckCircle size={18} />
+					{t['landing.notifyGranted']}
+				</>
+			) : denied ? (
+				<>
+					<BellOff size={18} />
+					{t['landing.notifyFail']}
+				</>
+			) : (
+				<>
+					<Bell size={18} />
+					{busy ? t['landing.notifyAsk'] : t['landing.notifyButton']}
+				</>
+			)}
+		</button>
 	)
 }
 
@@ -134,60 +211,73 @@ function LandingPage({ showBanner }: { showBanner: boolean }) {
 				</button>
 			</div>
 
-			<ThemeToggle className="fixed top-6 left-6 z-50" />
-			{/* سوییچر زبان — قرینه‌ی آیکون دارک: دارک گوشه‌ی چپ‌بالا، زبان راست‌بالا.
-          همان اندازه‌ی دکمه و همان سایه/بوردر ThemeToggle → قرینگی کامل. */}
-			<LangSwitcher className="fixed top-6 right-6 z-50" />
-
-			<div className="min-h-screen w-full flex flex-col items-center justify-center relative overflow-hidden bg-white dark:bg-[#1a0a0e] transition-colors duration-500 px-6 py-10">
+			{/* stage-84 — توگل‌ها از شناورِ fixed به نوارِ بالای صفحه (جریانِ عادی)
+                        آمدند: در گوشی‌های باریک، برندِ وسط زیر «العربية» نمی‌رود (اولویت
+                        z بالاتر + جریان مستقل). قرینگی حفظ: دارک چپ، زبان راست؛ هیرو در
+                        فضای باقی‌مانده همان وسط‌چینِ قبلی است. */}
+			<div className="min-h-screen w-full flex flex-col relative overflow-hidden bg-white dark:bg-[#1a0a0e] transition-colors duration-500 px-6 py-6">
 				<div className="absolute top-0 -right-20 w-72.5 h-62.5 sm:w-150 sm:h-150 sm:-right-40 bg-primary/20 dark:bg-dark-primary/10 rounded-full blur-[100px] pointer-events-none"></div>
 				<div className="absolute bottom-0 -left-20 w-62.5 h-62.5 sm:w-150 sm:h-150 sm:-left-40 bg-dark-primary/35 dark:bg-[#4a1a24]/30 rounded-full blur-[100px] pointer-events-none"></div>
 
-				{/* stage-55 — ورود پلکانی هیرو (CSS-only — hero-stagger) */}
-				<div className="relative z-10 text-center max-w-4xl mx-auto flex flex-col items-center hero-stagger">
-					<Brand />
-					<div className="flex items-center mt-[18vh] sm:mt-[13vh] md:mt-[15vh] lg:mt-[22vh] text-2xl sm:text-4xl md:text-5xl max-sm:-mr-5">
-						<div className="font-DanaRegular flex items-center">
-							<span>{t['landing.sliderPrefix']}</span>
-							<WordSlider
-								/* stage-55 — فونت تعریف‌نشده font-da → DanaDemiBold */
-								className="text-primary dark:text-dark-primary font-DanaDemiBold mt-1 mr-1 sm:mr-1.5"
-								words={sliderWords}
-							/>
+				{/* نوار بالای صفحه — جای توگل‌ها (جریان، نه fixed) */}
+				<div className="relative z-20 w-full max-w-6xl mx-auto flex items-center justify-between">
+					<ThemeToggle className="" />
+					<LangSwitcher className="" />
+				</div>
+
+				{/* هیرو — وسطِ فضای باقی‌مانده (همان قرینه‌ی قبلی) */}
+				<div className="flex-1 w-full flex flex-col items-center justify-center">
+					{/* stage-55 — ورود پلکانی هیرو (CSS-only — hero-stagger) */}
+					<div className="relative z-10 text-center max-w-4xl mx-auto flex flex-col items-center hero-stagger">
+						<Brand />
+						<div className="flex items-center mt-[18vh] sm:mt-[13vh] md:mt-[15vh] lg:mt-[22vh] text-2xl sm:text-4xl md:text-5xl max-sm:-mr-5">
+							<div className="font-DanaRegular flex items-center">
+								<span>{t['landing.sliderPrefix']}</span>
+								<WordSlider
+									/* stage-55 — فونت تعریف‌نشده font-da → DanaDemiBold */
+									className="text-primary dark:text-dark-primary font-DanaDemiBold mt-1 mr-1 sm:mr-1.5"
+									words={sliderWords}
+								/>
+							</div>
 						</div>
-					</div>
-					<h1 className="font-MorabbaBold text-3xl sm:text-5xl md:text-7xl text-black dark:text-white my-7 leading-tight tracking-tight">
-						{t['landing.heroLine1']}
-						<br />
-						<span className="text-primary dark:text-dark-primary">
-							{t['landing.heroLine2']}
-						</span>
-					</h1>
-					<p className="font-DanaRegular text-base sm:text-lg md:text-xl text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-						{t['landing.sub']}
-					</p>
-					<div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
-						{showAuthed ? (
+						<h1 className="font-MorabbaBold text-3xl sm:text-5xl md:text-7xl text-black dark:text-white my-7 leading-tight tracking-tight">
+							{t['landing.heroLine1']}
+							<br />
+							<span className="text-primary dark:text-dark-primary">
+								{t['landing.heroLine2']}
+							</span>
+						</h1>
+						<p className="font-DanaRegular text-sm sm:text-base md:text-lg text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-10 leading-snug sm:leading-relaxed">
+							{t['landing.sub']}
+						</p>
+						<div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
+							{showAuthed ? (
+								<Link
+									to="/dashboard"
+									className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-base sm:text-lg transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5"
+								>
+									{t['landing.profile']}
+								</Link>
+							) : (
+								<Link
+									to="/login"
+									className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-base sm:text-lg transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5"
+								>
+									{t['landing.auth']}
+								</Link>
+							)}
 							<Link
-								to="/dashboard"
-								className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-base sm:text-lg transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5"
+								to="/products"
+								className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-transparent text-gray-800 dark:text-[#f5e0e6] border-2 border-gray-200 dark:border-[#3a151c] font-DanaDemiBold text-base sm:text-lg hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] transition-all duration-300"
 							>
-								{t['landing.profile']}
+								{t['landing.products']}
 							</Link>
-						) : (
-							<Link
-								to="/login"
-								className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-base sm:text-lg transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5"
-							>
-								{t['landing.auth']}
-							</Link>
-						)}
-						<Link
-							to="/products"
-							className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-transparent text-gray-800 dark:text-[#f5e0e6] border-2 border-gray-200 dark:border-[#3a151c] font-DanaDemiBold text-base sm:text-lg hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] transition-all duration-300"
-						>
-							{t['landing.products']}
-						</Link>
+						</div>
+
+						{/* stage-84 — فعال‌سازی نوتیفیکیشن، زیر «دیدن محصولات» */}
+						<div className="mt-4 w-full sm:w-auto flex justify-center">
+							<LandingNotifyButton />
+						</div>
 					</div>
 				</div>
 			</div>

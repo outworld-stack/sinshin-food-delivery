@@ -28,7 +28,9 @@ import {
 	FlagBanner,
 	Grid,
 	Image as ImageIcon,
+	Link as LinkIcon,
 	ListCheck,
+	Map as MapIcon,
 	Minus,
 	Play,
 	Plus,
@@ -67,6 +69,8 @@ const PALETTE_ICONS: Record<
 	callout: Stickynote,
 	list: ListCheck,
 	cta: Play,
+	link: LinkIcon,
+	location: MapIcon,
 	divider: Minus,
 }
 
@@ -80,6 +84,8 @@ const BLOCK_LABELS: Record<ArticleBlock['type'], string> = {
 	callout: 'باکس نکته',
 	list: 'فهرست',
 	cta: 'دکمه اقدام',
+	link: 'لینک',
+	location: 'موقعیت',
 	divider: 'جداکننده',
 }
 
@@ -134,7 +140,9 @@ interface FieldCtx {
 	patchProps: (patch: PropsPatch) => void
 }
 
-type PropsPatch = Record<string, unknown> | ((props: ArticleBlock['props']) => Record<string, unknown>)
+type PropsPatch =
+	| Record<string, unknown>
+	| ((props: ArticleBlock['props']) => Record<string, unknown>)
 
 function BlockFields({ block, patchProps }: FieldCtx) {
 	switch (block.type) {
@@ -237,7 +245,14 @@ function BlockFields({ block, patchProps }: FieldCtx) {
 						fileTypeText="WebP/PNG"
 						multiple
 						images={images.map((im) => im.src)}
-						onAdd={(url) => patchProps(props => ({ images: [...('images' in props ? props.images : []), { src: url }] }))}
+						onAdd={(url) =>
+							patchProps((props) => ({
+								images: [
+									...('images' in props ? props.images : []),
+									{ src: url },
+								],
+							}))
+						}
 						onRemove={(index) =>
 							patchProps({ images: images.filter((_, i) => i !== index) })
 						}
@@ -406,6 +421,115 @@ function BlockFields({ block, patchProps }: FieldCtx) {
 							onChange={(e) => patchProps({ href: e.target.value })}
 						/>
 					)}
+				</div>
+			)
+		case 'link':
+			return (
+				<div className="space-y-2">
+					<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+						<input
+							className={inputCls}
+							placeholder="متن دکمه (اجباری)"
+							maxLength={60}
+							value={block.props.label}
+							onChange={(e) => patchProps({ label: e.target.value })}
+						/>
+						<input
+							className={inputCls}
+							dir="ltr"
+							placeholder="https://… یا /مسیر داخلی"
+							maxLength={500}
+							value={block.props.href ?? ''}
+							onChange={(e) => patchProps({ href: e.target.value })}
+						/>
+					</div>
+					<input
+						className={inputCls}
+						placeholder="عنوان (اختیاری — بالای دکمه)"
+						maxLength={160}
+						value={block.props.title ?? ''}
+						onChange={(e) => patchProps({ title: e.target.value })}
+					/>
+					<input
+						className={inputCls}
+						placeholder="توضیح کوتاه (اختیاری)"
+						maxLength={500}
+						value={block.props.text ?? ''}
+						onChange={(e) => patchProps({ text: e.target.value })}
+					/>
+					<div className="flex gap-1.5">
+						<Pill
+							active={block.props.variant !== 'card'}
+							onClick={() => patchProps({ variant: 'button' })}
+						>
+							دکمه
+						</Pill>
+						<Pill
+							active={block.props.variant === 'card'}
+							onClick={() => patchProps({ variant: 'card' })}
+						>
+							کارت
+						</Pill>
+					</div>
+				</div>
+			)
+		case 'location':
+			return (
+				<div className="space-y-2">
+					<input
+						className={inputCls}
+						placeholder="عنوان مکان (اختیاری — مثلاً: شعبه مرکزی)"
+						maxLength={160}
+						value={block.props.title ?? ''}
+						onChange={(e) => patchProps({ title: e.target.value })}
+					/>
+					<input
+						className={inputCls}
+						placeholder="آدرس کامل مکان (اختیاری)"
+						maxLength={300}
+						value={block.props.address ?? ''}
+						onChange={(e) => patchProps({ address: e.target.value })}
+					/>
+					<div className="grid grid-cols-2 gap-2">
+						<label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+							<span className="shrink-0">عرض جغرافیایی</span>
+							<input
+								className={inputCls}
+								dir="ltr"
+								type="number"
+								step="0.000001"
+								min={-90}
+								max={90}
+								value={block.props.lat}
+								onChange={(e) =>
+									patchProps({
+										lat: Number(e.target.value) || 0,
+									})
+								}
+							/>
+						</label>
+						<label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+							<span className="shrink-0">طول جغرافیایی</span>
+							<input
+								className={inputCls}
+								dir="ltr"
+								type="number"
+								step="0.000001"
+								min={-180}
+								max={180}
+								value={block.props.lng}
+								onChange={(e) =>
+									patchProps({
+										lng: Number(e.target.value) || 0,
+									})
+								}
+							/>
+						</label>
+					</div>
+					<p className="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
+						مختصات را از نقشه (کپی موقعیت) اینجا بگذارید — در صفحه‌ی مقاله، نقشه‌ی
+						تعاملی + دکمه‌ی «مشاهده روی نقشه» به کاربر نشان داده می‌شود.
+					</p>
 				</div>
 			)
 		case 'divider':
@@ -648,10 +772,13 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 	// Upload callbacks can resolve after other edits or a block reorder.
 	const docRef = useRef(doc)
 	docRef.current = doc
-	const commitDoc = useCallback((next: ArticleBlocksDoc) => {
-		docRef.current = next
-		onChange(next)
-	}, [onChange])
+	const commitDoc = useCallback(
+		(next: ArticleBlocksDoc) => {
+			docRef.current = next
+			onChange(next)
+		},
+		[onChange],
+	)
 
 	const [selectedId, setSelectedId] = useState<string | null>(null)
 	const [settingsId, setSettingsId] = useState<string | null>(null)
@@ -685,7 +812,10 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 
 	const addBlock = useCallback(
 		(type: ArticleBlock['type']) => {
-			if (doc.blocks.length >= 200) { showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error'); return }
+			if (doc.blocks.length >= 200) {
+				showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error')
+				return
+			}
 			pushHistory()
 			const block = makeBlock(type)
 			const selectedIndex = doc.blocks.findIndex((b) => b.id === selectedId)
@@ -724,7 +854,10 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 
 	const duplicate = useCallback(
 		(index: number) => {
-			if (doc.blocks.length >= 200) { showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error'); return }
+			if (doc.blocks.length >= 200) {
+				showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error')
+				return
+			}
 			pushHistory()
 			commitDoc(duplicateBlock(doc, index))
 		},
@@ -734,7 +867,7 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 	const patchProps = useCallback(
 		(id: string, patch: PropsPatch) => {
 			const current = docRef.current
-			if (!current.blocks.some(block => block.id === id)) return
+			if (!current.blocks.some((block) => block.id === id)) return
 			pushHistory()
 			const blocks = current.blocks.map((b) => {
 				if (b.id !== id) return b
@@ -837,8 +970,8 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 
 	const textBlocks = useMemo(
 		() =>
-			doc.blocks.filter(
-				(b) => Boolean(blocksToPlainText({ version: 1, blocks: [b] }).trim()),
+			doc.blocks.filter((b) =>
+				Boolean(blocksToPlainText({ version: 1, blocks: [b] }).trim()),
 			).length,
 		[doc.blocks],
 	)

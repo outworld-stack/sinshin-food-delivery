@@ -66,6 +66,18 @@ export interface PrintDocumentSpec {
         footerNote?: string
         /** round-14 — قالب کاغذ؛ پیش‌فرض a4 (رفتار قبلی) */
         paper?: PrintPaper
+        /**
+         *  stage-84 — استایل «حرارتی» فاکتور: اعداد/نوشته‌ها «مشکیِ بولد» و
+         *  هدرها/برچسب‌ها «سفید روی نوارِ مشکیِ پررنگ». فقط با paper:'receipt'.
+         */
+        receiptStyle?: 'classic' | 'mono'
+        /**
+         *  stage-84 — طولِ چاپ = طولِ محتوا (نه کلِ رول ۲۹۷mm): بعد از رندرِ
+         *  iframe، ارتفاعِ واقعی اندازه‌گیری و «همان لحظه» به @page تزریق
+         *  می‌شود (کرومِ جدید دو-طول را پشتیبانی می‌کند؛ ۴۰ تا ۲۹۷mm کلمپ).
+         *  فقط با paper:'receipt'؛ پیش‌فرض خاموش (رفتار قبلی حفظ می‌شود).
+         */
+        fitHeight?: boolean
 }
 
 // ── ابزارها ──
@@ -176,6 +188,7 @@ table.tbl th, table.tbl td { border: 1px solid #e5e7eb; padding: 2.2mm 2.6mm; }
 
 // رسیدی 80mm — پرینتر ستونی مغازه / چاپ از موبایل.
 // عرض 80mm و طول 297mm (معتبر در کروم؛ «auto» دور انداخته می‌شد).
+// stage-84 — fitHeight طول را به اندازه‌ی محتوا می‌کاهد (تزریق پویا در چاپ).
 const RECEIPT_CSS = `
 @page { size: 80mm 297mm; margin: 2.5mm 2mm; }
 body { font-size: 12px; }
@@ -200,20 +213,45 @@ table.tbl th, table.tbl td { border: 1px solid #dfe3e8; padding: 1.8mm 1.4mm; }
 .footer { margin-top: 4mm; padding-top: 1.5mm; font-size: 9px; }
 `
 
+// stage-84 — استایل حرارتی «mono»: اعداد و نوشته‌ها مشکیِ بولد؛ هدرها/برچسب‌ها
+// سفیدِ بولد روی نوارِ مشکیِ پررنگ. روی بدنه با کلاس mono اعمال می‌شود
+// (فقط receipt؛ کلاس روی A4 اثری ندارد).
+const RECEIPT_MONO_CSS = `
+body.mono { color: #000; font-weight: bold; }
+body.mono .brand { color: #000; font-weight: bold; }
+body.mono .doc-sep { border-top: 3px solid #000; }
+body.mono h1.heading { background: #000; color: #fff; border-radius: 1.5mm; padding: 2mm 0; }
+body.mono .meta { color: #000; font-weight: bold; }
+body.mono .stat { border-bottom: 2px solid #000; }
+body.mono .stat .l { color: #000; font-weight: bold; }
+body.mono .stat .v { color: #000; font-weight: bold; }
+body.mono .tbl-title { color: #000; font-weight: bold; }
+body.mono table.tbl th { background: #000; color: #fff; }
+body.mono table.tbl th, body.mono table.tbl td { border: 1px solid #000; color: #000; font-weight: bold; }
+body.mono table.tbl tbody tr:nth-child(even) { background: #fff; }
+body.mono .note { border: 2px solid #000; color: #000; font-weight: bold; }
+body.mono .qr-box { border: 2px solid #000; }
+body.mono .qr-box .oid { color: #000; font-weight: bold; }
+body.mono .qr-box .cap { color: #000; font-weight: bold; }
+body.mono .footer { border-top: 2px solid #000; color: #000; font-weight: bold; }
+`
+
 function documentHtml(spec: PrintDocumentSpec): string {
         const origin = window.location.origin
         const font = (family: string, file: string) =>
                 `@font-face{font-family:'${family}';src:url('${origin}/fonts/${file}') format('woff2');font-display:block;}`
         const paper: PrintPaper = spec.paper ?? 'a4'
         const orientation = spec.landscape ? 'landscape' : 'portrait'
+        const mono = paper === 'receipt' && spec.receiptStyle === 'mono'
         const paperCss =
                 paper === 'receipt'
-                        ? RECEIPT_CSS
+                        ? RECEIPT_CSS + (mono ? RECEIPT_MONO_CSS : '')
                         : A4_CSS.replace('__ORIENTATION__', orientation)
         const sections = spec.sections.map(sectionHtml).join('')
         const footer = spec.footerNote
                 ? `<div class="footer">${esc(spec.footerNote)} — ${new Date().toLocaleDateString('fa-IR')}</div>`
                 : ''
+        const bodyClass = mono ? ' class="mono"' : ''
         return `<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
@@ -227,7 +265,7 @@ ${BASE_CSS}
 ${paperCss}
 </style>
 </head>
-<body>
+<body${bodyClass}>
 <p class="brand">${esc(spec.brand)}</p>
 <hr class="doc-sep" />
 ${sections}
@@ -271,6 +309,42 @@ function getPrintFrame(): HTMLIFrameElement {
  * تعطیل‌کردن چاپِ کروم همان باگ «تب قفل می‌شود، کلیک کار نمی‌کند، فقط
  * رفرش» بود.
  */
+/**
+ * stage-84 — طولِ چاپ = طولِ محتوا: ارتفاعِ رندرشده را اندازه می‌گیریم و
+ * @pageِ «همان لحظه» با اندازه‌ی واقعی (کلمپ ۴۰..۲۹۷mm + لَخی ۸mm برای
+ * حاشیه/فونت‌های در حال لود) بازنویسی می‌شود. مرورگر دو-طولِ اختصاصی
+ * (80mm × H) را پشتیبانی می‌کند؛ خطا = ماندن روی ۲۹۷mm (رفتار قبلی).
+ */
+async function fitReceiptHeight(
+        doc: Document | null | undefined,
+): Promise<void> {
+        try {
+                if (!doc?.body) return
+                const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts
+                if (fonts) await fonts.ready
+                // ترمیم اسکنِ استیج-۸۴ — اندازه‌گیری باید در «عرضِ مؤثرِ کاغذ» انجام
+                // شود (۸۰mm − حاشیه‌ها ≈ ۲۸۸px): فریمِ چاپِ صفر-پیکسلی یا پنجرهٔ
+                // موبایلِ iOS متن را در عرضِ غلط می‌شکند و ارتفاع را چند برابر
+                // می‌کند (آزمون کروم: ۸۶۵px در عرض ۰ در برابر ۲۷۷px در ۳۰۲px) →
+                // کلِ رول چاپ می‌شد. با probe عرضِ ثابت، مستقل از viewport درست
+                // اندازه می‌گیریم؛ بعد از اندازه‌گیری حذف می‌شود.
+                const probe = doc.createElement('style')
+                probe.textContent =
+                        'html,body{width:288px !important;margin:0 !important;}'
+                doc.head?.appendChild(probe)
+                const px = doc.body.scrollHeight
+                probe.remove()
+                if (px <= 0) return
+                const mm = Math.ceil((px * 25.4) / 96) + 8
+                const clamped = Math.min(Math.max(mm, 40), 297)
+                const style = doc.createElement('style')
+                style.textContent = `@page { size: 80mm ${clamped}mm; margin: 2.5mm 2mm; }`
+                doc.head?.appendChild(style)
+        } catch {
+                // بدون اندازه‌گیری هم چاپ می‌شود — ۲۹۷mm می‌ماند
+        }
+}
+
 function printHtmlDocumentAndWait(spec: PrintDocumentSpec): Promise<void> {
         const html = documentHtml(spec)
         const prevTitle = document.title
@@ -285,46 +359,74 @@ function printHtmlDocumentAndWait(spec: PrintDocumentSpec): Promise<void> {
         // (زنجیره‌ی afterprint اینجا قابل اعتماد نیست؛ فراخواننده مقصد بعدی را
         // با تأخیر کوتاه می‌فرستد)
         if (isIOS()) {
-                return new Promise<void>((resolve) => {
+                return new Promise<void>((resolve, reject) => {
                         const win = window.open('', '_blank')
                         if (!win) {
                                 restore()
-                                resolve()
+                                // ترمیم اسکنِ استیج-۸۴ — بلاکِ پاپ‌آپ دیگر «موفقِ بی‌چاپ»
+                                // نیست؛ خطا می‌دهد تا توستِ واقعی دیده شود
+                                reject(
+                                        new Error(
+                                                'پنجرهٔ چاپ توسط مرورگر بلاک شد — لطفاً پاپ‌آپ را مجاز کنید و دوباره بزنید',
+                                        ),
+                                )
                                 return
                         }
                         win.document.open()
                         win.document.write(html)
                         win.document.close()
-                        win.focus()
-                        win.print()
-                        setTimeout(resolve, 1_500)
+                        const printNow = () => {
+                                win.focus()
+                                win.print()
+                                setTimeout(resolve, 1_500)
+                        }
+                        if (spec.paper === 'receipt' && spec.fitHeight) {
+                                // ترمیم اسکنِ استیج-۸۴ — اندازه‌گیری/تزریق @page باید
+                                // «قبل» از دیالوگ چاپ تمام شود (قبلاً بعد از print
+                                // بی‌اثر می‌شد)؛ probe عرضِ کاغذ محاسبه را مستقل از
+                                // عرضِ پنجرهٔ موبایل درست می‌کند
+                                void fitReceiptHeight(win.document).then(printNow)
+                        } else {
+                                printNow()
+                        }
                 })
         }
 
         return new Promise<void>((resolve) => {
                 const iframe = getPrintFrame()
                 let settled = false
+                let timeoutId: ReturnType<typeof setTimeout> | null = null
                 const done = () => {
                         if (settled) return
                         settled = true
+                        // ترمیم اسکنِ استیج-۸۴ — تایمرِ سقفِ ۹۰ثانیه‌ای هم پاک شود
+                        if (timeoutId !== null) clearTimeout(timeoutId)
                         restore()
                         resolve()
                 }
 
                 iframe.onload = () => {
-                        try {
-                                // توجه: focus() روی فریم زده نمی‌شود — صفحهٔ اصلی فوکوس را
-                                // نگه می‌دارد و بعد از دیالوگ پاک برمی‌گردد (رفع باگ قفل‌شدن)
-                                iframe.contentWindow?.print()
-                        } finally {
-                                // afterprint روی هر دو پنجره (iframe + والد) گوش می‌دهیم —
-                                // کدام زودتر اجرا شد همان ملاک است؛ سقف ۹۰ ثانیه هم برای
-                                // مرورگرهایی که اصلاً afterprint ندارند.
-                                window.addEventListener('afterprint', done, { once: true })
-                                iframe.contentWindow?.addEventListener('afterprint', done, {
-                                        once: true,
-                                })
-                                setTimeout(done, 90_000)
+                        const fire = () => {
+                                try {
+                                        // توجه: focus() روی فریم زده نمی‌شود — صفحهٔ اصلی فوکوس را
+                                        // نگه می‌دارد و بعد از دیالوگ پاک برمی‌گردد (رفع باگ قفل‌شدن)
+                                        iframe.contentWindow?.print()
+                                } finally {
+                                        // afterprint روی هر دو پنجره (iframe + والد) گوش می‌دهیم —
+                                        // کدام زودتر اجرا شد همان ملاک است؛ سقف ۹۰ ثانیه هم برای
+                                        // مرورگرهایی که اصلاً afterprint ندارند.
+                                        window.addEventListener('afterprint', done, { once: true })
+                                        iframe.contentWindow?.addEventListener('afterprint', done, {
+                                                once: true,
+                                        })
+                                        timeoutId = setTimeout(done, 90_000)
+                                }
+                        }
+                        if (spec.paper === 'receipt' && spec.fitHeight) {
+                                // stage-84 — اول اندازه‌گیری + تزریق @page، بعد دیالوگ چاپ
+                                void fitReceiptHeight(iframe.contentDocument).then(fire)
+                        } else {
+                                fire()
                         }
                 }
 

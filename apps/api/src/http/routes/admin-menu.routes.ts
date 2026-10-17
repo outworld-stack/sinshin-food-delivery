@@ -41,6 +41,7 @@ import { Elysia, t } from 'elysia'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { MenuService } from '#/domain/menu/menu.service'
+import type { PackagingService } from '#/domain/menu/packaging.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { UUID_PATTERN } from '#/domain/shared/ids'
@@ -69,6 +70,8 @@ export interface AdminMenuRoutesDeps {
   admin2: Admin2Service // ← phase-1: برای سیم‌کیری permission
   /** stage-10: لاگ ممیزی — فقط عملیات ادمین اصلی (admin2 در activities خودش) */
   audit: AuditService
+  /** stage-84 — اقلام بسته‌بندی (CRUD سراسری) */
+  packaging: PackagingService
 }
 
 export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
@@ -252,18 +255,32 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         detail: { summary: 'Product details for edit form' },
       },
     )
+    // stage-84 — اقلام بسته‌بندی: خواندن با productsRead (فرم محصول + کارت مدیر)
+    .get('/packaging-items', () => deps.packaging.adminList(), {
+      detail: { summary: 'Packaging items (global list incl. inactive)' },
+    })
 
   const productsWrite = new Elysia({ prefix: '/admin/menu', tags: ['Admin / Menu'] })
     .use(requireAdmin2Permission(admin2, 'productsWrite'))
     .post(
       '/products',
-      async ({ body, user }) => {
+      async ({ body, user, admin2: admin2Perms }) => {
         // stage-78 — «ویژه» فقط به دست ادمین اصلی: پرچم از بدنه‌ی درخواستِ
         // ادمین۲ حذف می‌شود → create ⇒ پیش‌فرض خاموش؛ ویرایش ⇒ دست‌نخورده.
         // ادمین۲ هم محصولِ ویژه‌ی ادمین اصلی را خراب نمی‌کند و هم نمی‌تواند
         // خودش محصولی را ویژه کند (بج/Aura/صفحه‌ی متحرک = تصمیم برند).
         if (user.role !== 'admin' && body.isFeatured !== undefined) {
           delete body.isFeatured
+        }
+        // ترمیم اسکنِ استیج-۸۴ — انتخابِ اقلامِ بسته‌بندی «هزینه‌ی پولی» را تعیین
+        // می‌کند (جمعِ اقلام) → مثل ویژه‌سازی فقط با مجوزِ canEditPackagingFee
+        // یا ادمین اصلی؛ create بدون مجوز ⇒ بدون قلم (پشتیبانِ packaging_cost)
+        if (
+          user.role !== 'admin' &&
+          !admin2Perms?.canEditPackagingFee &&
+          body.packagingItemIds !== undefined
+        ) {
+          delete body.packagingItemIds
         }
         const res = await deps.menu.createProduct(body)
         // stage-10: ممیزی فقط برای ادمین اصلی — ادمین۲ activities خودش را دارد
@@ -293,6 +310,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           discountEndsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
           packagingCost: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
+          // stage-84 — اقلام بسته‌بندیِ انتخابی (id های packaging_items؛ ≤۱۲)
+          packagingItemIds: t.Optional(
+            t.Array(t.String({ pattern: UUID_PATTERN }), { maxItems: 12 }),
+          ),
           // stage-60 — M2M: همه‌ی دسته‌ها (اول = دسته‌ی اولیه؛ ≤۸).
           // سازگاری: categoryId تک‌مقداری قدیمی هنوز پذیرفته می‌شود.
           categoryIds: t.Optional(
@@ -321,11 +342,20 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     )
     .patch(
       '/products/:id',
-      async ({ params, body, user }) => {
+      async ({ params, body, user, admin2: admin2Perms }) => {
         // stage-78 — همان گاردِ ویژه‌سازی POST: ادمین۲ پرچم را تغییر نمی‌دهد
         // (undefined ⇒ دست‌نخورده — مقدار فعلی در دیتابیس می‌ماند)
         if (user.role !== 'admin' && body.isFeatured !== undefined) {
           delete body.isFeatured
+        }
+        // ترمیم اسکنِ استیج-۸۴ — مثل POST: بدونِ canEditPackagingFee انتخابِ
+        // اقلام حذف می‌شود ⇒ undefined ⇒ انتخابِ ذخیره‌شده دست‌نخورده می‌ماند
+        if (
+          user.role !== 'admin' &&
+          !admin2Perms?.canEditPackagingFee &&
+          body.packagingItemIds !== undefined
+        ) {
+          delete body.packagingItemIds
         }
         // stage-56 — نتیجه‌ی پیام‌دار (clashِ slug → پیام دوستانه در پاسخ)
         const res = await deps.menu.updateProduct({ id: params.id, ...body })
@@ -356,6 +386,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           discountEndsAt: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
           prepTime: t.Number({ minimum: 1, maximum: 600 }),
           packagingCost: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
+          // stage-84 — اقلام بسته‌بندی: نیامد = دست‌نخورده؛ آرایه = همگام‌سازی کامل
+          packagingItemIds: t.Optional(
+            t.Array(t.String({ pattern: UUID_PATTERN }), { maxItems: 12 }),
+          ),
           profileImage: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
           galleryImages: t.Optional(t.Array(t.String({ maxLength: 500 }), { maxItems: 12 })),
           sizesEnabled: t.Optional(t.Boolean()),
@@ -423,6 +457,94 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       },
     )
 
+  // ── stage-84 — اقلام بسته‌بندی (قیمتِ سراسری) ──
+  // گارد: ادمین اصلی همیشه؛ ادمین۲ فقط با canEditPackagingFee — یعنی
+  // همان پرچمی که از round-34 در قرارداد/پنل بود و روت فعالی نداشت (سرانجام
+  // wired شد). قیمتِ سراسری روی پولِ چک‌اوت اثر می‌گذارد؛ خواندن با productsRead.
+  const packagingWrite = new Elysia({ prefix: '/admin/menu', tags: ['Admin / Menu'] })
+    .use(requireAdmin2Permission(admin2, 'canEditPackagingFee'))
+    .post(
+      '/packaging-items',
+      async ({ body, user }) => {
+        const item = await deps.packaging.add(body)
+        if (user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: 'PACKAGING_ITEM_ADD',
+            entity: 'packaging_item',
+            entityId: item.id,
+            metadata: { title: item.title, price: item.price },
+          })
+        }
+        return item
+      },
+      {
+        body: t.Object({
+          title: t.String({ minLength: 1, maxLength: 60 }),
+          titleAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+          price: t.Number({ minimum: 0, maximum: 100000000 }),
+          sortOrder: t.Optional(t.Numeric({ minimum: 0, maximum: 999 })),
+        }),
+        detail: { summary: 'Add packaging item (global price)' },
+      },
+    )
+    .patch(
+      '/packaging-items/:id',
+      async ({ params, body, user }) => {
+        const item = await deps.packaging.update(params.id, {
+          title: body.title,
+          titleAr: body.titleAr,
+          price: body.price,
+          isActive: body.isActive,
+          sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
+        })
+        if (user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: 'PACKAGING_ITEM_UPDATE',
+            entity: 'packaging_item',
+            entityId: item.id,
+            metadata: { title: item.title, price: item.price, isActive: item.isActive },
+          })
+        }
+        return item
+      },
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        body: t.Object({
+          title: t.Optional(t.String({ minLength: 1, maxLength: 60 })),
+          titleAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+          price: t.Optional(t.Number({ minimum: 0, maximum: 100000000 })),
+          isActive: t.Optional(t.Boolean()),
+          sortOrder: t.Optional(t.Numeric({ minimum: 0, maximum: 999 })),
+        }),
+        detail: {
+          summary: 'Update packaging item (price is global — applies to every product that includes it)',
+        },
+      },
+    )
+    .delete(
+      '/packaging-items/:id',
+      async ({ params, user }) => {
+        await deps.packaging.remove(params.id)
+        if (user.role === 'admin') {
+          await deps.audit.log({
+            actorId: user.id,
+            action: 'PACKAGING_ITEM_REMOVE',
+            entity: 'packaging_item',
+            entityId: params.id,
+          })
+        }
+        return { success: true }
+      },
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        detail: {
+          summary: 'Delete packaging item (product links cascade; products fall back to legacy packagingCost)',
+        },
+      },
+    )
+
   // ── stage-48 — موجود/ناموجود سریع ──
   // گارد: ادمین اصلی همیشه؛ ادمین۲ فقط با productsAvailability
   // (requireAdmin2Permission نقش admin را بدون چک مجوز رد می‌کند).
@@ -463,5 +585,6 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .use(structureWrite)
     .use(productsRead)
     .use(productsWrite)
+    .use(packagingWrite)
     .use(availabilityWrite)
 }

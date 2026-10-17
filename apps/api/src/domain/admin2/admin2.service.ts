@@ -71,6 +71,7 @@ export const ALL_ADMIN2_PERMISSIONS: Admin2Permissions = {
     productsAvailability: true,
     articlesRead: true,
     articlesWrite: true,
+    canAnnounceBusy: true,
 }
 
 /**
@@ -97,6 +98,8 @@ const DEFAULT_ADMIN2_PERMISSIONS = {
     /** stage-82 — خواندنِ مقالات پیش‌فرض روشن؛ نوشتن فقط با مجوزِ صریح */
     articlesRead: true,
     articlesWrite: false,
+    /** stage-84 — اعلام شلوغی: فقط با مجوزِ صریحِ ادمین اصلی */
+    canAnnounceBusy: false,
 } as const
 
 export class Admin2Service {
@@ -469,6 +472,27 @@ export class Admin2Service {
         }
     }
 
+    /**
+     *  stage-84 — اعلام وضعیت «شلوغ» (فقط اطلاع‌رسانی؛ سفارش‌دهی آزاد).
+     *  آینه‌ی setTemporaryClose با این تفاوت‌ها: بدون علت/زمان (شلوغی
+     *  صرفاً وضعیت است)، چک‌داشتن چیزهای دیگری پاک نمی‌شود، و در چک‌اوت
+     *  سرو در محل یادداشتِ «اسم و شماره میز» را الزامی می‌کند.
+     */
+    async setBusy(
+        actorUserId: string,
+        actorRole: string,
+        busy: boolean,
+    ): Promise<void> {
+        const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
+        if (actorRole === 'admin2' && !(p?.canAnnounceBusy)) {
+            throw Err.forbidden('اجازه‌ی اعلام وضعیت شلوغی را ندارید.')
+        }
+        await this.deps.settings.setBusy(busy)
+        if (actorRole === 'admin2') {
+            await this.log(actorUserId, busy ? 'BUSY_ON' : 'BUSY_OFF', null, {})
+        }
+    }
+
     // ── داخلی ──
 
     /**
@@ -518,6 +542,7 @@ export class Admin2Service {
             productsAvailability: p.productsAvailability,
             articlesRead: p.articlesRead,
             articlesWrite: p.articlesWrite,
+            canAnnounceBusy: p.canAnnounceBusy,
         }
     }
 

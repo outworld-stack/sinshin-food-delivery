@@ -133,6 +133,8 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
           /** stage-82 — پنل مقالات + صفحه‌ساز */
           articlesRead: t.Optional(t.Boolean()),
           articlesWrite: t.Optional(t.Boolean()),
+          /** stage-84 — اعلام وضعیت «شلوغ» رستوران */
+          canAnnounceBusy: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Update scopes and permissions' },
       },

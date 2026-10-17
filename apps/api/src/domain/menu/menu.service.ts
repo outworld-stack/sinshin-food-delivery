@@ -59,7 +59,9 @@ import {
   categories,
   categoryMains,
   mainCategories,
+  packagingItems,
   productCategories,
+  productPackagingItems,
   productSizes,
   products,
 } from '#/infra/db/schema'
@@ -278,6 +280,12 @@ function mainCategoryView(m: MainCategoryRow, lang: Lang) {
 export interface PricingBases {
   productMap: Map<ProductId, ProductRow>
   sizesByProduct: Map<ProductId, ProductSizeRow[]>
+  /**
+   *  stage-84 — هزینه بسته‌بندیِ مؤثر هر محصول = جمعِ اقلامِ فعالِ انتخابی‌اش.
+   *  فقط برای محصولاتی که حداقل یک لینکِ junction دارند مقدار دارد؛ بقیه →
+   *  undefined یعنی «پشتیبانِ ستون legacy packaging_cost» (رفتار قبلی).
+   */
+  packagingByProduct: Map<ProductId, number | undefined>
 }
 
 /**
@@ -313,7 +321,31 @@ export async function loadPricingBases(
     list.push(s)
     sizesByProduct.set(s.productId, list)
   }
-  return { productMap, sizesByProduct }
+
+  // stage-84 — اقلام بسته‌بندی انتخابی + قیمت سراسری‌شان (join روی junction).
+  // «undefined» عمدی است: محصولِ بدون لینک → پشتیبانِ ستونِ legacy (بالای فایل).
+  const packagingByProduct = new Map<ProductId, number | undefined>()
+  if (ids.length > 0) {
+    const itemRows = await db
+      .select({
+        productId: productPackagingItems.productId,
+        price: packagingItems.price,
+        isActive: packagingItems.isActive,
+      })
+      .from(productPackagingItems)
+      .innerJoin(packagingItems, eq(packagingItems.id, productPackagingItems.packagingItemId))
+      .where(inArray(productPackagingItems.productId, ids))
+    for (const r of itemRows) {
+      const cur = packagingByProduct.get(r.productId)
+      if (cur === undefined) {
+        // اولین لینک این محصول → حتی اگر قلم غیرفعال باشد «سهم» را ۰ شروع کن
+        packagingByProduct.set(r.productId, r.isActive ? r.price : 0)
+      } else if (r.isActive) {
+        packagingByProduct.set(r.productId, (cur ?? 0) + r.price)
+      }
+    }
+  }
+  return { productMap, sizesByProduct, packagingByProduct }
 }
 
 /**
@@ -933,13 +965,22 @@ export class MenuService {
     const categoryIdsMap = new Map<ProductId, CategoryId[]>([
       [row.id, [row.categoryId, ...extraCats.map((l) => l.categoryId)]],
     ])
+    // stage-84 — اقلام بسته‌بندیِ انتخابی برای فرم ویرایش (chips hydrate)
+    const packagingRows = await this.deps.db
+      .select({ packagingItemId: productPackagingItems.packagingItemId })
+      .from(productPackagingItems)
+      .where(eq(productPackagingItems.productId, pid))
     const list = await this.withSizes([row], new Map([[row.categoryId, cat?.name ?? '']]), 'fa', {
       includeAr: true,
       // stage-48 — حالت مؤثر = دسته AND محصول (فرم ادمین برای قفل سوئیچ‌ها)
       catModes: new Map([[row.categoryId, categoryModesOf(cat)]]),
       categoryIdsMap,
     })
-    return list[0] ?? null
+    const dto = list[0] ?? null
+    if (dto) {
+      dto.packagingItemIds = packagingRows.map((r) => r.packagingItemId)
+    }
+    return dto
   }
 
   async createProduct(input: {
@@ -955,6 +996,8 @@ export class MenuService {
     categoryIds?: string[]
     categoryId?: string
     packagingCost?: number
+    /** stage-84 — اقلام بسته‌بندیِ انتخابی (id های packaging_items) */
+    packagingItemIds?: string[]
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
@@ -1059,6 +1102,18 @@ export class MenuService {
         .insert(productCategories)
         .values(extraCats.map((categoryId) => ({ productId: created.id, categoryId })))
     }
+    // stage-84 — اقلام بسته‌بندیِ انتخابی (junction؛ الگوی دسته‌های اضافه)
+    if (input.packagingItemIds?.length) {
+      await this.deps.db
+        .insert(productPackagingItems)
+        .values(
+          [...new Set(input.packagingItemIds)].map((packagingItemId) => ({
+            productId: created.id,
+            packagingItemId,
+          })),
+        )
+        .onConflictDoNothing()
+    }
     await this.cache.invalidate()
 
     // stage-48 — تخفیف فعال هنگام ساخت ⇒ پخش فوری به همه (بدون کرون)
@@ -1077,6 +1132,11 @@ export class MenuService {
     discountEndsAt?: Date | string | null
     prepTime: number
     packagingCost?: number
+    /**
+     *  stage-84 — اقلام بسته‌بندیِ انتخابی (undefined = دست‌نخورده — کلاینت
+     *  قدیمی/اسکریپت انتخاب‌ها را نمی‌پاکد؛ آرایه = همگام‌سازی کامل).
+     */
+    packagingItemIds?: string[]
     profileImage?: string | null
     galleryImages?: string[]
     sizesEnabled?: boolean
@@ -1223,6 +1283,38 @@ export class MenuService {
         await this.deps.db
           .insert(productCategories)
           .values(missing.map((categoryId) => ({ productId: pid, categoryId })))
+      }
+    }
+
+    // ── stage-84: همگام‌سازی اقلام بسته‌بندی (junction) ──
+    // undefined = دست‌نخورده (کلاینت قدیمی)؛ آرایه (حتی خالی) = همگام‌سازی کامل.
+    if (input.packagingItemIds) {
+      const keepItems = [...new Set(input.packagingItemIds)].slice(0, 12)
+      const existingItems = await this.deps.db
+        .select()
+        .from(productPackagingItems)
+        .where(eq(productPackagingItems.productId, pid))
+      const keepSet = new Set(keepItems)
+      const staleItems = existingItems
+        .filter((l) => !keepSet.has(l.packagingItemId))
+        .map((l) => l.packagingItemId)
+      if (staleItems.length > 0) {
+        await this.deps.db
+          .delete(productPackagingItems)
+          .where(
+            and(
+              eq(productPackagingItems.productId, pid),
+              inArray(productPackagingItems.packagingItemId, staleItems),
+            ),
+          )
+      }
+      const haveSet = new Set(existingItems.map((l) => l.packagingItemId))
+      const missingItems = keepItems.filter((c) => !haveSet.has(c))
+      if (missingItems.length > 0) {
+        await this.deps.db
+          .insert(productPackagingItems)
+          .values(missingItems.map((packagingItemId) => ({ productId: pid, packagingItemId })))
+          .onConflictDoNothing()
       }
     }
 

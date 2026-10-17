@@ -13,13 +13,13 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type {
-  AdminOrdersData,
-  AdminUserSort,
-  AdminUsersData,
-  CartItemInput,
-  CheckoutItemInput,
-  MainData,
-  ProductId,
+	AdminOrdersData,
+	AdminUserSort,
+	AdminUsersData,
+	CartItemInput,
+	CheckoutItemInput,
+	MainData,
+	ProductId,
 } from '@sinshin/shared'
 // src/utils/queryOptions.ts
 // فکتوری‌های queryOptions — الگوی رسمی TanStack Query v5
@@ -28,57 +28,76 @@ import type {
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { getAboutContent } from '#/server/about'
 import {
-  getAdmin2Options,
-  getAdmin2Stats,
-  getAdminCourierDetailsForRole,
-  getAdminCouriers,
-  getAdminOrders,
-  getAdminStats,
-  getAdminUserDetails,
-  // ⬅ NEW: لیست‌های ادمین حالا فکتوری دارند (پیش‌نیاز loader + query)
-  getAdminUsers,
-  getCourierOptions,
-  getCouriersForAssignment,
-  getGeoStatus,
-  getIranOnlyAccess,
-  getLiveOrders,
-  getLiveTrackingEnabled,
-  getOrderDetailsByRole,
-  // رارد ۳۷ — قفل جغرافیایی عراق
-  getOutsideScope,
-  getRegistrationPermits,
-  getRestaurantOpen,
-  getRestaurantStatusFull,
-  // ⬅ NEW (بچ ۵): جزئیات نقش‌محور + گزینه‌های پنل زنده
-  getSubAdminDetails,
-  getSubAdminOrders,
-  getSubAdminSession,
-  getSubAdmins,
+	getAdmin2Options,
+	getAdmin2Stats,
+	getAdminCourierDetailsForRole,
+	getAdminCouriers,
+	getAdminOrders,
+	getAdminStats,
+	getAdminUserDetails,
+	// ⬅ NEW: لیست‌های ادمین حالا فکتوری دارند (پیش‌نیاز loader + query)
+	getAdminUsers,
+	getCourierOptions,
+	getCouriersForAssignment,
+	getGeoStatus,
+	getIranOnlyAccess,
+	getLiveOrders,
+	getLiveTrackingEnabled,
+	getOrderDetailsByRole,
+	// رارد ۳۷ — قفل جغرافیایی عراق
+	getOutsideScope,
+	// stage-84 — درگاه‌های پرداخت + شلوغی
+	getPaymentGateways,
+	getRegistrationPermits,
+	getRestaurantBusy,
+	getRestaurantOpen,
+	getRestaurantStatusFull,
+	// ⬅ NEW (بچ ۵): جزئیات نقش‌محور + گزینه‌های پنل زنده
+	getSubAdminDetails,
+	getSubAdminOrders,
+	getSubAdminSession,
+	getSubAdmins,
 } from '#/server/admin'
-import { getAdminArticleDetails, getAdminArticleCategories, getAdminArticles, getArticleCategories, getArticles } from '#/server/articles'
+import {
+	getAdminArticleCategories,
+	getAdminArticleDetails,
+	getAdminArticles,
+	getArticleCategories,
+	getArticles,
+} from '#/server/articles'
 import { getCheckoutPreview, getRestaurantStatus } from '#/server/checkout'
-import { getAdminCoupon, getAdminCoupons, getCouponConsumers } from '#/server/coupons'
+import {
+	getAdminCoupon,
+	getAdminCoupons,
+	getCouponConsumers,
+} from '#/server/coupons'
 import { getDeliveryZones } from '#/server/deliveryZones'
 import { getAdminGalleryImages, getGalleryImages } from '#/server/gallery'
 import {
-  type Category,
-  getActiveMainCategories,
-  getAdminMainCategories,
-  getAdminProductDetails,
-  getAdminProducts,
-  getCartDetails,
-  getCategories,
-  getCategoriesByMain,
-  getProductById,
-  getProductsByMain,
-  type Product,
+	type Category,
+	getActiveMainCategories,
+	getAdminMainCategories,
+	getAdminProductDetails,
+	getAdminProducts,
+	getCartDetails,
+	getCategories,
+	getCategoriesByMain,
+	getPackagingItems,
+	getProductById,
+	getProductsByMain,
+	type Product,
 } from '#/server/products'
 import { getSystemMetrics } from '#/server/system'
 import { getTerms } from '#/server/terms'
-import {getAdminReviews, getApprovedProductReviews, getLiveTracking,getMyNotifications,
-  getMyOrders,getOrderDetails, 
-  getOrderReviewedProducts, 
-  getUserProfile, 
+import {
+	getAdminReviews,
+	getApprovedProductReviews,
+	getLiveTracking,
+	getMyNotifications,
+	getMyOrders,
+	getOrderDetails,
+	getOrderReviewedProducts,
+	getUserProfile,
 } from '#/server/user'
 import type { DeliveryType } from '#/types/site/checkout'
 import { qk } from './queryKeys'
@@ -88,153 +107,157 @@ import { qk } from './queryKeys'
 
 // Mainهای فعال — در Header و MainLayout و /products مشترکه (همون کلید قبلی)
 export const activeMainCategoriesOptions = queryOptions({
-  queryKey: qk.activeMainCategories,
-  queryFn: () => getActiveMainCategories(),
-  staleTime: 60_000,
+	queryKey: qk.activeMainCategories,
+	queryFn: () => getActiveMainCategories(),
+	staleTime: 60_000,
 })
 
 // محصولات + دسته‌های یک Main — mainSlug تهی = دیتای خالی (مثل رفتار قبلی)
 export const productsByMainOptions = (mainSlug: string | null) =>
-  queryOptions({
-    queryKey: qk.productsByMain(mainSlug),
-    queryFn: async (): Promise<MainData> => {
-      if (!mainSlug) return { products: [], categories: [] }
-      const [products, cats] = await Promise.all([
-        getProductsByMain({ data: { mainSlug } }),
-        getCategoriesByMain({ data: { mainSlug } }),
-      ])
-      return { products: products as Product[], categories: cats as Category[] }
-    },
-  })
+	queryOptions({
+		queryKey: qk.productsByMain(mainSlug),
+		queryFn: async (): Promise<MainData> => {
+			if (!mainSlug) return { products: [], categories: [] }
+			const [products, cats] = await Promise.all([
+				getProductsByMain({ data: { mainSlug } }),
+				getCategoriesByMain({ data: { mainSlug } }),
+			])
+			return { products: products as Product[], categories: cats as Category[] }
+		},
+	})
 
 // محصول تکی — loader صفحه‌ی جزئیات از همین پرش می‌کنه؛
 // نتیجه: برگشت از لیست به جزئیات، آنی از کش (gcTime ۵ دقیقه)
 // stage-56 — پارامتر UUID یا slug انگلیسی است (لینک‌های سئو slug می‌فرستند؛
 // مسیرهای قدیمی/سبد UUID — سرور هر دو را می‌پذیرد)
 export const productByIdOptions = (productId: ProductId | string) =>
-  queryOptions({
-    queryKey: qk.productById(productId),
-    queryFn: () => getProductById({ data: { id: productId } }),
-  })
+	queryOptions({
+		queryKey: qk.productById(productId),
+		queryFn: () => getProductById({ data: { id: productId } }),
+	})
 
 // مقاله‌ها
 export const articleCategoriesOptions = queryOptions({
-  queryKey: qk.articleCategories,
-  queryFn: () => getArticleCategories(),
-  staleTime: 5 * 60_000,
+	queryKey: qk.articleCategories,
+	queryFn: () => getArticleCategories(),
+	staleTime: 5 * 60_000,
 })
 
 // Editing always needs the original Persian names and their Arabic counterparts.
 export const adminArticleCategoriesOptions = queryOptions({
-  queryKey: qk.adminArticleCategories,
-  queryFn: () => getAdminArticleCategories(),
-  staleTime: 5 * 60_000,
+	queryKey: qk.adminArticleCategories,
+	queryFn: () => getAdminArticleCategories(),
+	staleTime: 5 * 60_000,
 })
 
 export const articlesOptions = (category: string, subCategory: string) =>
-  queryOptions({
-    queryKey: qk.articles(category, subCategory),
-    queryFn: () => getArticles({ data: { categorySlug: category, subCategorySlug: subCategory } }),
-    staleTime: 60_000,
-  })
+	queryOptions({
+		queryKey: qk.articles(category, subCategory),
+		queryFn: () =>
+			getArticles({
+				data: { categorySlug: category, subCategorySlug: subCategory },
+			}),
+		staleTime: 60_000,
+	})
 
 // پروفایل — staleTime اینجا متمرکز شد
 // کار-۶: full فقط برای صفحاتِ محتوا (سفارشات/کیف پول/اطلاعات/پروفایل من/
 // جزئیات سفارش)؛ لایه‌های همیشگی (هدر/لایوت/چک‌اوت/آدرس‌ها) از light استفاده می‌کنند
 export const userProfileOptions = queryOptions({
-  queryKey: qk.userProfile,
-  queryFn: () => getUserProfile(),
-  staleTime: 60_000,
-});
+	queryKey: qk.userProfile,
+	queryFn: () => getUserProfile(),
+	staleTime: 60_000,
+})
 
 // stage-56 — «سفارشات من» با صفحه‌بندی سروری (page/limit/sort).
 // keepPreviousData: هنگام چرخش صفحه، ردیف‌های قبلی تا رسیدن پاسخ تازه می‌مانند
 // (همان الگوی adminOrdersOptions — بدون پرش/سوسو).
 export const myOrdersOptions = (page: number, limit: number, sort: string) =>
-  queryOptions({
-    queryKey: qk.myOrders(page, limit, sort),
-    queryFn: () => getMyOrders({ page, limit, sort }),
-    placeholderData: keepPreviousData,
-    staleTime: 30_000,
-  })
+	queryOptions({
+		queryKey: qk.myOrders(page, limit, sort),
+		queryFn: () => getMyOrders({ page, limit, sort }),
+		placeholderData: keepPreviousData,
+		staleTime: 30_000,
+	})
 
 // stage-67 — صندوق اعلان‌های من (صفحه‌ی پروفایل): staleTime کوتاه —
 // اعلان‌ها «زنده»اند (SSE notify:{userId} در هوک صفحه invalidate می‌کند)؛
 // این staleTime فقط برای بازگشت‌های بدون رویداد است.
-export const myNotificationsOptions = (userId: string | undefined) => queryOptions({
-  queryKey: [...qk.myNotifications, userId],
-  queryFn: () => getMyNotifications(),
-  enabled: Boolean(userId),
-  staleTime: 30_000,
-})
+export const myNotificationsOptions = (userId: string | undefined) =>
+	queryOptions({
+		queryKey: [...qk.myNotifications, userId],
+		queryFn: () => getMyNotifications(),
+		enabled: Boolean(userId),
+		staleTime: 30_000,
+	})
 
 // کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).
 // همان DTO ولی بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها.
 // کلید زیر پریفکس qk.userProfile است → نامعتبرسازی‌های موجود این را هم می‌گیرند.
 export const userProfileLightOptions = queryOptions({
-  queryKey: qk.userProfileLight,
-  queryFn: () => getUserProfile({ light: true }),
-  staleTime: 60_000,
-});
+	queryKey: qk.userProfileLight,
+	queryFn: () => getUserProfile({ light: true }),
+	staleTime: 60_000,
+})
 
 export const userProfileLightClientOptions = queryOptions({
-  ...userProfileLightOptions,
-  queryFn: async () => {
-    const { ensureSession } = await import('#/lib/auth-session')
-    await ensureSession()
-    return getUserProfile({ light: true })
-  },
-});
+	...userProfileLightOptions,
+	queryFn: async () => {
+		const { ensureSession } = await import('#/lib/auth-session')
+		await ensureSession()
+		return getUserProfile({ light: true })
+	},
+})
 
 // نظرات تأییدشده‌ی یک محصول
 export const productReviewsOptions = (productId: string) =>
-  queryOptions({
-    queryKey: qk.productReviews(productId),
-    queryFn: () => getApprovedProductReviews({ data: { productId } }),
-    staleTime: 60_000,
-  })
+	queryOptions({
+		queryKey: qk.productReviews(productId),
+		queryFn: () => getApprovedProductReviews({ data: { productId } }),
+		staleTime: 60_000,
+	})
 
 // جزئیات سفارش — صفحه‌ی پیگیری سفارش (کلاینت + loader)
 export const orderDetailsOptions = (orderId: string) =>
-  queryOptions({
-    queryKey: qk.orderDetails(orderId),
-    queryFn: () => getOrderDetails({ data: { id: orderId } }),
-  })
+	queryOptions({
+		queryKey: qk.orderDetails(orderId),
+		queryFn: () => getOrderDetails({ data: { id: orderId } }),
+	})
 
 // پرچم ردیابی زنده — از تنظیمات ادمین
 export const liveTrackingOptions = (orderId: string) =>
-  queryOptions({
-    queryKey: qk.liveTracking(orderId),
-    queryFn: () => getLiveTracking({ data: { orderId } }),
-  })
+	queryOptions({
+		queryKey: qk.liveTracking(orderId),
+		queryFn: () => getLiveTracking({ data: { orderId } }),
+	})
 
 // محصولاتِ نظرداده‌شده‌ی یک سفارش — جلوگیری از نظر تکراری
 export const orderReviewedOptions = (orderId: string) =>
-  queryOptions({
-    queryKey: qk.orderReviewed(orderId),
-    queryFn: () => getOrderReviewedProducts({ data: { orderId } }),
-  })
+	queryOptions({
+		queryKey: qk.orderReviewed(orderId),
+		queryFn: () => getOrderReviewedProducts({ data: { orderId } }),
+	})
 
 // گالری — به‌ندرت عوض می‌شه
 export const galleryImagesOptions = queryOptions({
-  queryKey: qk.galleryImages,
-  queryFn: () => getGalleryImages(),
-  staleTime: 5 * 60_000,
+	queryKey: qk.galleryImages,
+	queryFn: () => getGalleryImages(),
+	staleTime: 5 * 60_000,
 })
 
 // درباره‌ی ما
 export const aboutContentOptions = queryOptions({
-  queryKey: qk.aboutContent,
-  queryFn: () => getAboutContent(),
-  staleTime: 5 * 60_000,
+	queryKey: qk.aboutContent,
+	queryFn: () => getAboutContent(),
+	staleTime: 5 * 60_000,
 })
 
 // وضعیت رستوران — loader چک‌اوت پرش می‌کنه
 export const restaurantStatusOptions = queryOptions({
-  queryKey: qk.restaurantStatus,
-  queryFn: () => getRestaurantStatus(),
-  // ۳۰s — باز/بسته بودن نباید کل کش رو شلوغ کنه ولی رفرش هم لازمه
-  staleTime: 30_000,
+	queryKey: qk.restaurantStatus,
+	queryFn: () => getRestaurantStatus(),
+	// ۳۰s — باز/بسته بودن نباید کل کش رو شلوغ کنه ولی رفرش هم لازمه
+	staleTime: 30_000,
 })
 
 // جزئیات چک‌اوت — آیتم‌ها + نوع تحویل + آدرس
@@ -242,205 +265,233 @@ export const restaurantStatusOptions = queryOptions({
 // placeholderData داخل فکتوری: تعویض آدرس/نوع تحویل بدون فلیک
 // رارد ۴۷ — آیتم‌ها با CheckoutItemInput قراردادی تایپ می‌شوند (کپی درون‌خطی حذف)
 export const checkoutPreviewOptions = (
-  items: ReadonlyArray<CheckoutItemInput>,
-  deliveryType: DeliveryType,
-  addressId: string | null,
-  useWallet: boolean,
-  couponCode: string | null,
+	items: ReadonlyArray<CheckoutItemInput>,
+	deliveryType: DeliveryType,
+	addressId: string | null,
+	useWallet: boolean,
+	couponCode: string | null,
 ) =>
-  queryOptions({
-    queryKey: qk.checkoutPreview(items, deliveryType, addressId, useWallet, couponCode),
-    queryFn: () => getCheckoutPreview({
-      items: items.map(i => ({
-        productId: i.productId,
-        sizeId: i.sizeId ?? null,
-        quantity: i.quantity,
-      })),
-      deliveryType,
-      useWallet,
-      addressId,
-      couponCode,
-    }),
-    placeholderData: keepPreviousData,
-  })
+	queryOptions({
+		queryKey: qk.checkoutPreview(
+			items,
+			deliveryType,
+			addressId,
+			useWallet,
+			couponCode,
+		),
+		queryFn: () =>
+			getCheckoutPreview({
+				items: items.map((i) => ({
+					productId: i.productId,
+					sizeId: i.sizeId ?? null,
+					quantity: i.quantity,
+				})),
+				deliveryType,
+				useWallet,
+				addressId,
+				couponCode,
+			}),
+		placeholderData: keepPreviousData,
+	})
 
 // ═══════════════ پنل ادمین ═══════════════
 
 // سشن ادمین۲ — سه مصرف‌کننده (usePermissions/AdminLayout/داشبورد) یک کش؛
 // تازه‌ترین مصرف‌کننده (Layout با ۱۵s) ملاکه → staleTime ۱۵s
 export const admin2SessionOptions = queryOptions({
-  queryKey: qk.admin2Session,
-  queryFn: () => getSubAdminSession(),
-  staleTime: 15_000,
+	queryKey: qk.admin2Session,
+	queryFn: () => getSubAdminSession(),
+	staleTime: 15_000,
 })
 
 // آمار داشبورد ادمین
 export const adminStatsOptions = queryOptions({
-  queryKey: qk.adminStats,
-  queryFn: () => getAdminStats(),
-  staleTime: 30_000,
+	queryKey: qk.adminStats,
+	queryFn: () => getAdminStats(),
+	staleTime: 30_000,
 })
 
 // round-18 — اسنپ‌شات مانیتورینگ سیستم؛ staleTime کوتاه چون سنجه‌های
 // پنجره‌ای (۱m/۵m) با گذر زمان بی‌معنا می‌شوند. رفرش خودکار ۳۰s در خود باکس.
 export const systemMetricsOptions = queryOptions({
-  queryKey: qk.systemMetrics,
-  queryFn: () => getSystemMetrics(),
-  staleTime: 15_000,
+	queryKey: qk.systemMetrics,
+	queryFn: () => getSystemMetrics(),
+	staleTime: 15_000,
 })
 
 // کتگوری‌ها — بین فرم محصول/کوپن و فیلتر لیست‌ها مشترکه
 // (قبلاً staleTime نداشت؛ ۶۰s کافیه چون کتگوری ندرتاً عوض می‌شه)
 export const adminCategoriesOptions = queryOptions({
-  queryKey: qk.categories,
-  queryFn: () => getCategories(),
-  staleTime: 60_000,
+	queryKey: qk.categories,
+	queryFn: () => getCategories(),
+	staleTime: 60_000,
+})
+
+// stage-84 — اقلام بسته‌بندی — بین فرم محصول (چیپ‌ها) و کارتِ مدیر مشترک
+export const packagingItemsOptions = queryOptions({
+	queryKey: qk.packagingItems,
+	queryFn: () => getPackagingItems(),
+	staleTime: 60_000,
 })
 
 // گزینه‌های فیلتر سفارشات — فقط ادمین اصلی (enabled رو مصرف‌کننده تعیین می‌کنه)
 export const admin2FilterOptions = queryOptions({
-  queryKey: qk.admin2Options,
-  queryFn: () => getAdmin2Options(),
-  staleTime: 60_000,
+	queryKey: qk.admin2Options,
+	queryFn: () => getAdmin2Options(),
+	staleTime: 60_000,
 })
 
 export const courierFilterOptions = queryOptions({
-  queryKey: qk.courierOptions,
-  queryFn: () => getCourierOptions(),
-  staleTime: 60_000,
+	queryKey: qk.courierOptions,
+	queryFn: () => getCourierOptions(),
+	staleTime: 60_000,
 })
 
 // نظرات مدیریت — برای مودریشن
 export const adminReviewsOptions = queryOptions({
-  queryKey: qk.adminReviews,
-  queryFn: () => getAdminReviews(),
-  staleTime: 30_000,
+	queryKey: qk.adminReviews,
+	queryFn: () => getAdminReviews(),
+	staleTime: 30_000,
 })
 
 // ⬅ NEW: کوپن‌ها — لیست مدیریت (تعداد کم؛ بدون صفحه‌بندی)
 // قبلاً کلید خام ['admin-coupons'] داخل خود صفحه بود؛ حالا loader روت
 // هم می‌تواند همین کوئری را اجرا کند (پری‌فچ روی هاور)
 export const adminCouponsOptions = queryOptions({
-  queryKey: qk.adminCoupons,
-  queryFn: () => getAdminCoupons(),
-  staleTime: 30_000,
+	queryKey: qk.adminCoupons,
+	queryFn: () => getAdminCoupons(),
+	staleTime: 30_000,
 })
 
 // phase-9: جزئیات یک کوپن — صفحه‌ی اختصاصی؛ staleTime مثل لیست
 export const adminCouponDetailsOptions = (id: string) =>
-  queryOptions({
-    queryKey: qk.adminCouponDetails(id),
-    queryFn: () => getAdminCoupon(id),
-    staleTime: 30_000,
-  })
+	queryOptions({
+		queryKey: qk.adminCouponDetails(id),
+		queryFn: () => getAdminCoupon(id),
+		staleTime: 30_000,
+	})
 
 // stage-65: مصرف‌کنندگان واقعی کوپن — صفحه‌بندی سروری؛ صفحه در کلید
 // (صفحه‌ی جدید = کش تازه)؛ placeholderData برای تعویض صفحه بدون پرش اسکلتون
 export const adminCouponConsumersOptions = (id: string, page: number) =>
-  queryOptions({
-    queryKey: qk.adminCouponConsumers(id, page),
-    queryFn: () => getCouponConsumers(id, page),
-    staleTime: 30_000,
-    placeholderData: keepPreviousData,
-  })
+	queryOptions({
+		queryKey: qk.adminCouponConsumers(id, page),
+		queryFn: () => getCouponConsumers(id, page),
+		staleTime: 30_000,
+		placeholderData: keepPreviousData,
+	})
 
 // ⬅ NEW: ادمین‌های سطح ۲ — لیست مدیریت
 export const subAdminsOptions = queryOptions({
-  queryKey: qk.subAdmins,
-  queryFn: () => getSubAdmins(),
-  staleTime: 30_000,
+	queryKey: qk.subAdmins,
+	queryFn: () => getSubAdmins(),
+	staleTime: 30_000,
 })
 
 // مقالات — لیست مدیریت (بدون صفحه‌بندی)
 export const adminArticlesOptions = queryOptions({
-  queryKey: qk.adminArticles,
-  queryFn: () => getAdminArticles(),
-  staleTime: 30_000,
+	queryKey: qk.adminArticles,
+	queryFn: () => getAdminArticles(),
+	staleTime: 30_000,
 })
 
 // جزئیات مقاله برای فرم ویرایش — بعد از ذخیره خودش نامعتبرسازی می‌شه
 export const adminArticleDetailsOptions = (articleId: string) =>
-  queryOptions({
-    queryKey: qk.adminArticleDetails(articleId),
-    queryFn: () => getAdminArticleDetails(articleId),
-  })
+	queryOptions({
+		queryKey: qk.adminArticleDetails(articleId),
+		queryFn: () => getAdminArticleDetails(articleId),
+	})
 
 // دسته‌های اصلی — مدیر دسته‌ها + سلکت والد در فرم دسته‌بندی؛
 // بعد از هر تغییر، میوتیشن خودش نامعتبرسازی می‌کنه
 export const adminMainCategoriesOptions = queryOptions({
-  queryKey: qk.adminMainCategories,
-  queryFn: () => getAdminMainCategories(),
-  staleTime: 60_000,
+	queryKey: qk.adminMainCategories,
+	queryFn: () => getAdminMainCategories(),
+	staleTime: 60_000,
 })
 
 // جزئیات محصول برای فرم ویرایش — بعد از ذخیره نامعتبرسازی می‌شه
 export const adminProductDetailsOptions = (productId: string) =>
-  queryOptions({
-    queryKey: qk.adminProductDetails(productId),
-    queryFn: () => getAdminProductDetails({ data: { id: productId } }),
-  })
+	queryOptions({
+		queryKey: qk.adminProductDetails(productId),
+		queryFn: () => getAdminProductDetails({ data: { id: productId } }),
+	})
 
 // ═══════════════ تنظیمات ═══════════════
 
 // پرچم ردیابی زنده — فقط ادمین اصلی (enabled رو مصرف‌کننده تعیین می‌کنه)
 export const settingsTrackingOptions = queryOptions({
-  queryKey: qk.settingsTracking,
-  queryFn: () => getLiveTrackingEnabled(),
+	queryKey: qk.settingsTracking,
+	queryFn: () => getLiveTrackingEnabled(),
+})
+
+// stage-84 — درگاه‌های پرداخت (کارت ادمین اصلی) — staleTime 0: سوئیچ فوری
+export const settingsGatewaysOptions = queryOptions({
+	queryKey: qk.settingsGateways,
+	queryFn: () => getPaymentGateways(),
+	staleTime: 0,
+})
+
+// stage-84 — شلوغی رستوران (کارت وضعیت) — staleTime 0: اعلام فوری
+export const settingsBusyOptions = queryOptions({
+	queryKey: qk.settingsBusy,
+	queryFn: () => getRestaurantBusy(),
+	staleTime: 0,
 })
 
 // وضعیت باز/بسته — staleTime صفر: تغییر ادمین باید فوری دیده شه
 export const settingsRestaurantOptions = queryOptions({
-  queryKey: qk.settingsRestaurant,
-  queryFn: () => getRestaurantOpen(),
-  staleTime: 0,
+	queryKey: qk.settingsRestaurant,
+	queryFn: () => getRestaurantOpen(),
+	staleTime: 0,
 })
 
 // round-13 — وضعیت کامل رستوران (شامل بسته موقت + علت) — کارت تنظیمات
 export const settingsRestaurantStatusOptions = queryOptions({
-  queryKey: qk.settingsRestaurantStatus,
-  queryFn: () => getRestaurantStatusFull(),
-  staleTime: 15_000,
+	queryKey: qk.settingsRestaurantStatus,
+	queryFn: () => getRestaurantStatusFull(),
+	staleTime: 15_000,
 })
 
 // phase-fix — پرچم «فقط ایران» — staleTime صفر: تغییر ادمین باید فوری دیده شه
 export const settingsIranOnlyOptions = queryOptions({
-  queryKey: qk.settingsIranOnly,
-  queryFn: () => getIranOnlyAccess(),
-  staleTime: 0,
+	queryKey: qk.settingsIranOnly,
+	queryFn: () => getIranOnlyAccess(),
+	staleTime: 0,
 })
 
 // ═════════════ رارد ۳۷ — قفل جغرافیایی عراق ═════════════
 
 // دامنه‌ی ورود خارج از ایران (فقط عراق / همه) — مثل پرچم ایران: فوری
 export const settingsOutsideScopeOptions = queryOptions({
-  queryKey: qk.settingsOutsideScope,
-  queryFn: () => getOutsideScope(),
-  staleTime: 0,
+	queryKey: qk.settingsOutsideScope,
+	queryFn: () => getOutsideScope(),
+	staleTime: 0,
 })
 
 // وضعیت زنده‌ی دروازه (رنج‌های IR/IQ، منبع، زمان به‌روزرسانی) — کارت تنظیمات؛
 // هر ۳۰ ثانیه خودش تازه می‌شود تا ادمین شمار رنج‌ها را «زنده» ببیند
 export const geoStatusOptions = queryOptions({
-  queryKey: qk.geoStatus,
-  queryFn: () => getGeoStatus(),
-  staleTime: 15_000,
-  refetchInterval: 30_000,
+	queryKey: qk.geoStatus,
+	queryFn: () => getGeoStatus(),
+	staleTime: 15_000,
+	refetchInterval: 30_000,
 })
 
 // stage-79 — مجوزهای ثبت‌نام ویژه — staleTime صفر: صدور/لغو/مصرفِ مجوز
 // باید همان لحظه در کارت دیده شود (مصرف از مسیر ثبت‌نام هم ردیف را عوض می‌کند)
 export const settingsRegistrationPermitsOptions = queryOptions({
-  queryKey: qk.settingsRegistrationPermits,
-  queryFn: () => getRegistrationPermits(),
-  staleTime: 0,
+	queryKey: qk.settingsRegistrationPermits,
+	queryFn: () => getRegistrationPermits(),
+	staleTime: 0,
 })
 
 // قوانین — نسخه‌دار؛ مودال ثبت‌نام و ادیتور ادمین یک کش مشترک
 // (هر ذخیره = نسخه جدید → خودش نامعتبرسازی می‌کنه)
 export const termsContentOptions = queryOptions({
-  queryKey: qk.termsContent,
-  queryFn: () => getTerms(),
-  staleTime: 5 * 60_000,
+	queryKey: qk.termsContent,
+	queryFn: () => getTerms(),
+	staleTime: 5 * 60_000,
 })
 
 // ═══════════════ سبد خرید ═══════════════
@@ -448,16 +499,15 @@ export const termsContentOptions = queryOptions({
 // جزئیات سبد — قیمت‌های زنده‌ی سرور؛ هر تغییر سبد = کلید تازه (hash ساختاری)
 // placeholderData: تغییر quantity بدون فلیک، مجموع قبلی تا رسیدن جواب تازه
 // رارد ۴۷ — آیتم‌های سبد هم شکل خام سیم شدند (قرارداد)؛ برند لازم ندارد
-export const cartDetailsOptions = (
-  items: ReadonlyArray<CartItemInput>,
-) =>
-  queryOptions({
-    queryKey: qk.cartDetails(items),
-    // کپی mutable برای اسکیمای سرور (مثل checkoutDetails)
-    queryFn: () => getCartDetails({ data: { items: items.map(i => ({ ...i })) } }),
-    placeholderData: keepPreviousData,
-    staleTime: 30_000,
-  })
+export const cartDetailsOptions = (items: ReadonlyArray<CartItemInput>) =>
+	queryOptions({
+		queryKey: qk.cartDetails(items),
+		// کپی mutable برای اسکیمای سرور (مثل checkoutDetails)
+		queryFn: () =>
+			getCartDetails({ data: { items: items.map((i) => ({ ...i })) } }),
+		placeholderData: keepPreviousData,
+		staleTime: 30_000,
+	})
 
 // ═══════════════════════════════════════════════════════════════
 // ⬅ NEW: فکتوری‌های لیست‌های ادمین
@@ -474,17 +524,17 @@ export type UserSortDir = 'newest' | 'oldest' | 'none'
 export type AmountSortDir = 'highest' | 'lowest' | 'none'
 
 export interface AdminUsersFilters {
-  page: number
-  limit: number
-  search: string
-  /** stage-70 — all | mobile | tablet | desktop */
-  deviceType: string
-  /** stage-70 — all | apple | samsung | xiaomi | huawei | google | other */
-  deviceBrand: string
-  status: string
-  sortDate: UserSortDir
-  sortWallet: AmountSortDir
-  sortSpent: AmountSortDir
+	page: number
+	limit: number
+	search: string
+	/** stage-70 — all | mobile | tablet | desktop */
+	deviceType: string
+	/** stage-70 — all | apple | samsung | xiaomi | huawei | google | other */
+	deviceBrand: string
+	status: string
+	sortDate: UserSortDir
+	sortWallet: AmountSortDir
+	sortSpent: AmountSortDir
 }
 
 // ردیف/بسته‌ی داده‌ی کاربران — رارد ۴۳ مستقیم از قرارداد مشترک
@@ -493,146 +543,180 @@ export interface AdminUsersFilters {
 // sorts سرور از فیلدهای کش‌شده مشتق می‌شه — مپینگ یکجا
 // رارد ۴۷ — خروجی با AdminUserSort قراردادی تایپ می‌شود (منبع واحد)
 function usersSorts(f: AdminUsersFilters): AdminUserSort[] {
-  const arr: AdminUserSort[] = []
-  if (f.sortDate !== 'none') arr.push({ field: 'registeredAt', dir: f.sortDate === 'newest' ? 'desc' : 'asc' })
-  if (f.sortWallet !== 'none') arr.push({ field: 'walletBalance', dir: f.sortWallet === 'highest' ? 'desc' : 'asc' })
-  if (f.sortSpent !== 'none') arr.push({ field: 'totalSpent', dir: f.sortSpent === 'highest' ? 'desc' : 'asc' })
-  return arr
+	const arr: AdminUserSort[] = []
+	if (f.sortDate !== 'none')
+		arr.push({
+			field: 'registeredAt',
+			dir: f.sortDate === 'newest' ? 'desc' : 'asc',
+		})
+	if (f.sortWallet !== 'none')
+		arr.push({
+			field: 'walletBalance',
+			dir: f.sortWallet === 'highest' ? 'desc' : 'asc',
+		})
+	if (f.sortSpent !== 'none')
+		arr.push({
+			field: 'totalSpent',
+			dir: f.sortSpent === 'highest' ? 'desc' : 'asc',
+		})
+	return arr
 }
 
 export const adminUsersOptions = (f: AdminUsersFilters) =>
-  queryOptions({
-    queryKey: qk.adminUsers(f),
-    queryFn: async (): Promise<AdminUsersData> => getAdminUsers({
-
-      page: f.page,
-      limit: f.limit,
-      search: f.search,
-      deviceType: f.deviceType,
-      deviceBrand: f.deviceBrand,
-      status: f.status,
-      sorts: usersSorts(f),
-
-    }),
-    // صفحه‌بندی/فیلتر نرم — بدون پرش اسکلتون بین صفحات
-    placeholderData: keepPreviousData,
-  })
+	queryOptions({
+		queryKey: qk.adminUsers(f),
+		queryFn: async (): Promise<AdminUsersData> =>
+			getAdminUsers({
+				page: f.page,
+				limit: f.limit,
+				search: f.search,
+				deviceType: f.deviceType,
+				deviceBrand: f.deviceBrand,
+				status: f.status,
+				sorts: usersSorts(f),
+			}),
+		// صفحه‌بندی/فیلتر نرم — بدون پرش اسکلتون بین صفحات
+		placeholderData: keepPreviousData,
+	})
 
 // --- سفارشات: نقش‌محور (ادمین اصلی در برابر ادمین۲) ---
 export interface AdminOrdersFilters {
-  page: number
-  limit: number
-  search: string
-  status: string
-  sortDate: string
-  sortAmount: string
-  admin2: string
-  courier: string
-  role: string | null
-  admin2Id: string | null
+	page: number
+	limit: number
+	search: string
+	status: string
+	sortDate: string
+	sortAmount: string
+	admin2: string
+	courier: string
+	role: string | null
+	admin2Id: string | null
 }
 
 export const adminOrdersOptions = (f: AdminOrdersFilters) =>
-  queryOptions({
-    queryKey: qk.adminOrders(f),
-    queryFn: async (): Promise<AdminOrdersData> => {
-      // ادمین۲ → فقط سفارشات خودش
-      if (f.role === 'admin2' && f.admin2Id) {
-        // رارد ۴۷ — adminId از امضا حذف شد: سمت HTTP هرگز ارسال نمی‌شد؛
-        // محدودکردن به سفارشات خودِ ادمین۲ از طریق توکن احراز هویت انجام می‌شود
-        return getSubAdminOrders({
-          page: f.page, limit: f.limit,
-          search: f.search || undefined,
-          status: f.status,
-          sortDate: f.sortDate || undefined,
-          sortAmount: f.sortAmount || undefined,
-        })
-      }
-      // ادمین اصلی — با فیلتر ادمین۲/پیک
-      return getAdminOrders({
-
-        page: f.page, limit: f.limit,
-        search: f.search,
-        status: f.status,
-        sortDate: f.sortDate,
-        sortAmount: f.sortAmount,
-        confirmedBy: f.admin2,
-        courierId: f.courier,
-
-      })
-    },
-    placeholderData: keepPreviousData,
-  })
+	queryOptions({
+		queryKey: qk.adminOrders(f),
+		queryFn: async (): Promise<AdminOrdersData> => {
+			// stage-84 — «امروز»: مرزِ روزِ تقویمیِ تهران (مستقل از TZ سرور/کلاینت)
+			// با Intl حساب و ISO فرستاده می‌شود؛ sort عملاً جدیدترین است.
+			const today = f.sortDate === 'today'
+			let dateFrom: string | undefined
+			let dateTo: string | undefined
+			if (today) {
+				const fmt = new Intl.DateTimeFormat('en-CA', {
+					timeZone: 'Asia/Tehran',
+					year: 'numeric',
+					month: '2-digit',
+					day: '2-digit',
+				})
+				const day = fmt.format(new Date()) // YYYY-MM-DD (en-CA)
+				dateFrom = `${day}T00:00:00+03:30`
+				dateTo = `${day}T23:59:59.999+03:30`
+			}
+			const sortDate = today ? 'newest' : f.sortDate
+			// ادمین۲ → فقط سفارشات خودش
+			if (f.role === 'admin2' && f.admin2Id) {
+				// رارد ۴۷ — adminId از امضا حذف شد: سمت HTTP هرگز ارسال نمی‌شد؛
+				// محدودکردن به سفارشات خودِ ادمین۲ از طریق توکن احراز هویت انجام می‌شود
+				return getSubAdminOrders({
+					page: f.page,
+					limit: f.limit,
+					search: f.search || undefined,
+					status: f.status,
+					sortDate: sortDate || undefined,
+					sortAmount: f.sortAmount || undefined,
+					dateFrom,
+					dateTo,
+				})
+			}
+			// ادمین اصلی — با فیلتر ادمین۲/پیک
+			return getAdminOrders({
+				page: f.page,
+				limit: f.limit,
+				search: f.search,
+				status: f.status,
+				sortDate,
+				sortAmount: f.sortAmount,
+				confirmedBy: f.admin2,
+				courierId: f.courier,
+				dateFrom,
+				dateTo,
+			})
+		},
+		placeholderData: keepPreviousData,
+	})
 
 // --- پیک‌ها ---
 export interface AdminCouriersFilters {
-  page: number
-  limit: number
-  search: string
-  dateFrom: string
-  dateTo: string
+	page: number
+	limit: number
+	search: string
+	dateFrom: string
+	dateTo: string
 }
 
 export const adminCouriersOptions = (f: AdminCouriersFilters) =>
-  queryOptions({
-    queryKey: qk.adminCouriers(f),
-    queryFn: () => getAdminCouriers({
-
-      page: f.page, limit: f.limit,
-      search: f.search || undefined,
-      dateFrom: f.dateFrom || undefined,
-      dateTo: f.dateTo || undefined,
-
-    }),
-    placeholderData: keepPreviousData,
-  })
+	queryOptions({
+		queryKey: qk.adminCouriers(f),
+		queryFn: () =>
+			getAdminCouriers({
+				page: f.page,
+				limit: f.limit,
+				search: f.search || undefined,
+				dateFrom: f.dateFrom || undefined,
+				dateTo: f.dateTo || undefined,
+			}),
+		placeholderData: keepPreviousData,
+	})
 
 // --- محصولات (پنل) ---
 export interface AdminProductsFilters {
-  page: number
-  limit: number
-  search: string
-  status: string
-  categoryId: string
+	page: number
+	limit: number
+	search: string
+	status: string
+	categoryId: string
 }
 
 export const adminProductsOptions = (f: AdminProductsFilters) =>
-  queryOptions({
-    queryKey: qk.adminProducts(f),
-    queryFn: () => getAdminProducts({
-      data: {
-        page: f.page, limit: f.limit,
-        search: f.search,
-        status: f.status,
-        categoryId: f.categoryId,
-      }
-    }),
-    placeholderData: keepPreviousData,
-  })
+	queryOptions({
+		queryKey: qk.adminProducts(f),
+		queryFn: () =>
+			getAdminProducts({
+				data: {
+					page: f.page,
+					limit: f.limit,
+					search: f.search,
+					status: f.status,
+					categoryId: f.categoryId,
+				},
+			}),
+		placeholderData: keepPreviousData,
+	})
 
 // --- جزئیات کاربر (صفحه $userId) ---
 // قبلاً loader مستقیم دیتا برمی‌گردوند و نامعتبرسازی در میوتیشن‌ها
 // به کشِ کوئریِ خالی اشاره می‌کرد (رفرش واقعی رخ نمی‌داد).
 // حالا loader و صفحه یک کش مشترک دارند → نامعتبرسازی واقعاً کار می‌کنه.
 export const adminUserDetailsOptions = (userId: string) =>
-  queryOptions({
-    queryKey: qk.adminUserDetails(userId),
-    queryFn: () => getAdminUserDetails({ data: { id: userId } }),
-  })
+	queryOptions({
+		queryKey: qk.adminUserDetails(userId),
+		queryFn: () => getAdminUserDetails({ data: { id: userId } }),
+	})
 
 // --- آمار ادمین۲ (داشبورد شخصی) — قبلاً کلید خام ['admin2-stats', adminId] بود ---
 export const admin2StatsOptions = (adminId: string) =>
-  queryOptions({
-    queryKey: qk.admin2Stats(adminId),
-    queryFn: () => getAdmin2Stats({ data: { adminId } }),
-  })
+	queryOptions({
+		queryKey: qk.admin2Stats(adminId),
+		queryFn: () => getAdmin2Stats({ data: { adminId } }),
+	})
 
 // --- سفارشات لایو (پنل ادمین۲) — نظارت دوره‌ای ---
 export const admin2LiveOrdersOptions = (adminId: string) =>
-  queryOptions({
-    queryKey: qk.admin2LiveOrders(adminId),
-    queryFn: () => getLiveOrders({ data: { adminId } }),
-  })
+	queryOptions({
+		queryKey: qk.admin2LiveOrders(adminId),
+		queryFn: () => getLiveOrders({ data: { adminId } }),
+	})
 // ═══════════════════════════════════════════════════════════════
 // ⬅ NEW (بچ ۵): فکتوری‌های باقی‌مانده‌ی پنل — آخرین کلیدهای خام مهاجرت‌شده
 // ═══════════════════════════════════════════════════════════════
@@ -640,49 +724,55 @@ export const admin2LiveOrdersOptions = (adminId: string) =>
 // --- ناحیه‌های ارسال — تنظیمات (هر دو نقش) ---
 // قبلاً کلید خام ['delivery-zones'] در DeliveryZonesManager بود (هم‌hash)
 export const deliveryZonesOptions = queryOptions({
-  queryKey: qk.deliveryZones,
-  queryFn: () => getDeliveryZones(),
-  staleTime: 60_000,
+	queryKey: qk.deliveryZones,
+	queryFn: () => getDeliveryZones(),
+	staleTime: 60_000,
 })
 
 // --- گالری ادمین — مدیریت محتوای تنظیمات ---
 // قبلاً contentKeys.adminGallery در useSiteContentSettings بود (هم‌hash)
 export const adminGalleryImagesOptions = queryOptions({
-  queryKey: qk.adminGalleryImages,
-  queryFn: () => getAdminGalleryImages(),
-  staleTime: 5 * 60_000,
+	queryKey: qk.adminGalleryImages,
+	queryFn: () => getAdminGalleryImages(),
+	staleTime: 5 * 60_000,
 })
 
 // --- پیک‌های قابل تخصیص — مودال تایید سفارش زنده ---
 // قبلاً کلید خام ['couriers-assignment'] بود (هم‌hash → کش حفظ)
 export const couriersAssignmentOptions = queryOptions({
-  queryKey: qk.couriersAssignment,
-  queryFn: () => getCouriersForAssignment(),
-  staleTime: 60_000,
+	queryKey: qk.couriersAssignment,
+	queryFn: () => getCouriersForAssignment(),
+	staleTime: 60_000,
 })
 
 // --- جزئیات ادمین سطح ۲ — صفحه‌ی $adminId ---
 // قبلاً loader مستقیم دیتا برمی‌گردوند و کامپوننت از useLoaderData می‌خواند؛
 // حالا loader و کامپوننت یک کش مشترک دارند => نامعتبرسازی واقعاً رفرش می‌کنه
 export const subAdminDetailsOptions = (adminId: string) =>
-  queryOptions({
-    queryKey: qk.subAdminDetails(adminId),
-    queryFn: () => getSubAdminDetails({ data: { id: adminId } }),
-  })
+	queryOptions({
+		queryKey: qk.subAdminDetails(adminId),
+		queryFn: () => getSubAdminDetails({ data: { id: adminId } }),
+	})
 
 // --- جزئیات سفارش پنل ادمین — نقش‌محور ---
 // admin2Id فقط برای ادمین۲: سرور فقط سفارشات خودش را برمی‌گرداند
 export const adminOrderDetailsOptions = (orderId: string, admin2Id?: string) =>
-  queryOptions({
-    queryKey: qk.adminOrderDetails(orderId, admin2Id),
-    // رارد ۴۷ — adminId مرده حذف شد (سرور نقش را از توکن می‌خواند)
-    queryFn: () => getOrderDetailsByRole({ data: { orderId } }),
-  })
+	queryOptions({
+		queryKey: qk.adminOrderDetails(orderId, admin2Id),
+		// رارد ۴۷ — adminId مرده حذف شد (سرور نقش را از توکن می‌خواند)
+		queryFn: () => getOrderDetailsByRole({ data: { orderId } }),
+	})
 
 // --- جزئیات پیک — نقش‌محور ---
 // admin2Id فقط برای ادمین۲: سفرها فیلتر می‌شن به تحویل‌های سفارشات خودش
-export const adminCourierDetailsOptions = (courierId: string, admin2Id?: string) =>
-  queryOptions({
-    queryKey: qk.adminCourierDetails(courierId, admin2Id),
-    queryFn: () => getAdminCourierDetailsForRole({ data: { id: courierId, adminId: admin2Id } }),
-  })
+export const adminCourierDetailsOptions = (
+	courierId: string,
+	admin2Id?: string,
+) =>
+	queryOptions({
+		queryKey: qk.adminCourierDetails(courierId, admin2Id),
+		queryFn: () =>
+			getAdminCourierDetailsForRole({
+				data: { id: courierId, adminId: admin2Id },
+			}),
+	})

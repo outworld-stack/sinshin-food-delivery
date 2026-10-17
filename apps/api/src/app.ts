@@ -29,6 +29,7 @@ import type { AuthService } from '#/domain/auth/auth.service'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { DeviceService } from '#/domain/device/device.service'
 import type { MenuService } from '#/domain/menu/menu.service'
+import type { PackagingService } from '#/domain/menu/packaging.service'
 import type { CartService } from '#/domain/cart/cart.service'
 import type { AddressService } from '#/domain/address/address.service'
 import type { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
@@ -107,6 +108,8 @@ export interface AppDeps {
   /** stage-79 — مجوز ثبت‌نام ویژه */
   permits: RegistrationPermitService
   menu: MenuService
+  /** stage-84 — اقلام بسته‌بندی (قیمت سراسری) */
+  packaging: PackagingService
   cart: CartService
   addresses: AddressService
   zones: DeliveryZoneService
@@ -247,6 +250,7 @@ export const buildApp = (deps: AppDeps) => {
         menu: deps.menu,
         admin2: deps.admin2,
         audit: deps.audit,
+        packaging: deps.packaging,
       }),
     )
     .use(
@@ -348,7 +352,7 @@ export const buildApp = (deps: AppDeps) => {
         credentials: true,
       }),
     )
-    .use(uploadRoutes({ sessions: deps.sessions, uploads: deps.uploads }))
+    .use(uploadRoutes({ sessions: deps.sessions, admin2: deps.admin2, uploads: deps.uploads }))
     .get('/', () => ({
       service: 'sinshin-foodpark-api',
       health: '/api/health',

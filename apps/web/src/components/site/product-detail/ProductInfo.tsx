@@ -1,10 +1,11 @@
 // src/components/site/product-detail/ProductInfo.tsx
 // stage-48 — حالت‌های سفارشِ مؤثر محصول (پیک/بیرون‌بر/سرو در محل)
-// به‌شکل کامل و مفصل‌تر از کارت: کارتِ مجزا با آیکون + توضیح + وضعیت.
+// stage-84 — استایلِ جدید: آیکون‌ها می‌مانند؛ تیک/ضرب + پس‌زمینه + بوردرِ وضعیت
+// حذف شد — «کلمه‌ی حالت + آیکون» سبز است اگر مجاز، قرمز اگر نه.
 import { memo } from 'react'
-import { Clock, Bicycle, Bag, Chair, Check, X } from 'reicon-react'
+import { Bag, Bicycle, Chair, Clock } from 'reicon-react'
+import { tpl, useI18n } from '#/i18n'
 import type { Product } from '#/server/products'
-import { useI18n, tpl } from '#/i18n'
 
 interface ProductInfoProps {
 	product: Product
@@ -59,7 +60,7 @@ export const ProductInfo = memo(function ProductInfo({
 				{product.description}
 			</p>
 
-			{/* ── stage-48 — حالت‌های سفارش (مفصل و زیبا) ── */}
+			{/* ── stage-48 — حالت‌های سفارش · استایل جدید stage-84 ── */}
 			<div className="mb-8 p-4 rounded-2xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c]">
 				<p className="text-xs font-DanaDemiBold text-gray-600 dark:text-gray-300 mb-3">
 					{t['pdetail.orderModesTitle']}
@@ -68,37 +69,22 @@ export const ProductInfo = memo(function ProductInfo({
 					{modes.map(({ ok, icon: Icon, title, desc }) => (
 						<div
 							key={title}
-							className={`flex flex-col gap-2 p-3 rounded-xl border transition ${
-								ok
-									? 'border-green-200 bg-green-50/60 dark:border-green-500/20 dark:bg-green-500/5'
-									: 'border-red-200 bg-red-50/60 dark:border-red-500/20 dark:bg-red-500/5'
-							}`}
+							role="status"
+							className="flex flex-col gap-2 p-3 rounded-xl"
+							aria-label={`${title}: ${ok ? t['pdetail.modeAvailable'] : t['pdetail.modeRestricted']}`}
 						>
-							<div className="flex items-center justify-between gap-2">
-								<span className="flex items-center gap-1.5 min-w-0">
-									<span
-										className={`shrink-0 ${
-											ok
-												? 'text-green-600 dark:text-green-400'
-												: 'text-red-500 dark:text-red-400'
-										}`}
-									>
-										<Icon size={18} />
-									</span>
-									<span className="text-xs font-DanaDemiBold text-gray-700 dark:text-gray-200 truncate">
-										{title}
-									</span>
+							<span
+								className={`flex items-center gap-1.5 ${
+									ok
+										? 'text-green-600 dark:text-green-400'
+										: 'text-red-500 dark:text-red-400'
+								}`}
+							>
+								<Icon size={18} />
+								<span className="text-xs font-DanaDemiBold truncate">
+									{title}
 								</span>
-								<span
-									className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${
-										ok
-											? 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400'
-											: 'bg-red-100 text-red-500 dark:bg-red-500/20 dark:text-red-400'
-									}`}
-								>
-									{ok ? <Check size={12} /> : <X size={12} />}
-								</span>
-							</div>
+							</span>
 							<p className="text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">
 								{ok ? desc : t['pdetail.modeRestricted']}
 							</p>

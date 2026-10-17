@@ -2,21 +2,22 @@
 // ⬅ NEW: فیلترها/صفحه‌بندی شهروند URL شدن (validateSearch + loaderDeps + loader)
 // + پیش‌واکشی روی هاور (defaultPreload: 'intent' روتر)
 import { createFileRoute, Link } from '@tanstack/react-router'
+import { Plus } from 'reicon-react'
+import { AdminProductCard } from '#/components/admin/products/AdminProductCard'
+import { CategoryManager } from '#/components/admin/products/CategoryManager'
+import { MainCategoryManager } from '#/components/admin/products/MainCategoryManager'
+import { PackagingItemsManager } from '#/components/admin/products/PackagingItemsManager'
+import { ProductsFilterBox } from '#/components/admin/products/ProductsFilterBox'
+import { ConfirmModal } from '#/components/ConfirmModal'
+import { AdminProductsPageSkeleton } from '#/components/LoadingSkeletons'
+import { Pagination } from '#/components/Pagination'
+import { Can, PermissionGate } from '#/components/shared/PermissionGate'
 import {
 	adminProductsSearchSchema,
 	useAdminProductsPage,
 } from '#/hooks/admin/useAdminProductsPage'
-import { adminProductsOptions } from '#/utils/queryOptions'
-import { ProductsFilterBox } from '#/components/admin/products/ProductsFilterBox'
-import { AdminProductCard } from '#/components/admin/products/AdminProductCard'
-import { MainCategoryManager } from '#/components/admin/products/MainCategoryManager'
-import { CategoryManager } from '#/components/admin/products/CategoryManager'
-import { Pagination } from '#/components/Pagination'
-import { AdminProductsPageSkeleton } from '#/components/LoadingSkeletons'
-import { ConfirmModal } from '#/components/ConfirmModal'
-import { PermissionGate, Can } from '#/components/shared/PermissionGate'
 import { usePermissions } from '#/hooks/admin/usePermissions'
-import { Plus } from 'reicon-react'
+import { adminProductsOptions } from '#/utils/queryOptions'
 
 export const Route = createFileRoute('/admin/products/')({
 	ssr: false,
@@ -66,7 +67,7 @@ export const Route = createFileRoute('/admin/products/')({
 
 function AdminProductsPage() {
 	const page = useAdminProductsPage()
-	const { permissions } = usePermissions()
+	const { permissions, isMainAdmin } = usePermissions()
 
 	// در حال بررسی دسترسی → اسکلتون
 	if (page.isChecking) {
@@ -130,8 +131,8 @@ function AdminProductsPage() {
 										product={product}
 										categoryName={
 											page.categories.find((c) => c.id === product.categoryId)
-												?.name ?? ''
-												+
+												?.name ??
+											'' +
 												// stage-60 — «+N»: دسته‌های اضافه (M2M) در همین ردیف
 												(product.categoryIds && product.categoryIds.length > 1
 													? ` +${product.categoryIds.length - 1}`
@@ -176,6 +177,17 @@ function AdminProductsPage() {
 				{page.permissions.productsWrite && (
 					<CategoryManager categories={page.categories} />
 				)}
+
+				{/* stage-84 — اقلام بسته‌بندی: قیمت سراسری (ادمین اصلی +
+                                  ادمین۲ با canEditPackagingFee؛ خواندن با productsRead) */}
+				<PermissionGate
+					hasAccess={page.permissions.productsRead}
+					pageName="اقلام بسته‌بندی"
+				>
+					<PackagingItemsManager
+						canWrite={isMainAdmin || page.permissions.canEditPackagingFee}
+					/>
+				</PermissionGate>
 			</div>
 
 			<ConfirmModal

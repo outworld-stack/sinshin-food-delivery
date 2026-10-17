@@ -22,7 +22,11 @@ import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { collectDeviceSignals } from '#/utils/deviceFingerprint'
 import { isValidIranPhone, sanitizePhone } from '#/utils/phone'
-import { captureRefFromUrl, clearStoredRef, getStoredRef } from '#/utils/referralCapture'
+import {
+	captureRefFromUrl,
+	clearStoredRef,
+	getStoredRef,
+} from '#/utils/referralCapture'
 
 export const Route = createFileRoute('/login')({
 	validateSearch: z.object({ redirect: z.string().optional() }),
@@ -132,9 +136,13 @@ function LoginPage() {
 	const phoneInputRef = useRef<HTMLInputElement>(null)
 	const codeInputRef = useRef<HTMLInputElement>(null)
 	const autoSubmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-	useEffect(() => () => {
-		if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
-	}, [])
+	useEffect(
+		() => () => {
+			if (autoSubmitTimer.current !== null)
+				clearTimeout(autoSubmitTimer.current)
+		},
+		[],
+	)
 
 	const handleGoBack = useCallback(() => {
 		if (window.history.length > 1) {
@@ -170,7 +178,8 @@ function LoginPage() {
 	const otpForm = useForm({
 		defaultValues: { code: '' },
 		onSubmit: async ({ value }) => {
-			if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
+			if (autoSubmitTimer.current !== null)
+				clearTimeout(autoSubmitTimer.current)
 			if (loading || step !== 'otp') return
 			resetMutationErrors()
 			try {
@@ -223,7 +232,16 @@ function LoginPage() {
 		} catch {
 			// serverError
 		}
-	}, [loading, phone, resendIn, otpForm, showToast, sendOtpMutation, resetMutationErrors, t])
+	}, [
+		loading,
+		phone,
+		resendIn,
+		otpForm,
+		showToast,
+		sendOtpMutation,
+		resetMutationErrors,
+		t,
+	])
 
 	useEffect(() => {
 		if (step === 'phone') phoneInputRef.current?.focus()
@@ -242,7 +260,8 @@ function LoginPage() {
 
 	const handleCodeChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
-			if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
+			if (autoSubmitTimer.current !== null)
+				clearTimeout(autoSubmitTimer.current)
 			const value = sanitizePhone(e.target.value)
 			otpForm.setFieldValue('code', value)
 			if (value.length === 6) {
@@ -263,7 +282,7 @@ function LoginPage() {
 	)
 
 	return (
-		<div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#1a0a0e] p-4">
+		<div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#1a0a0e] p-4 pb-28">
 			{/* سوییچر زبان — گوشه‌ی چپ‌بالا؛ کارت وسط صفحه است و تداخلی ندارد */}
 			<LangSwitcher className="fixed top-6 left-6 z-50" />
 
@@ -342,9 +361,7 @@ function LoginPage() {
 											</div>
 										)}
 										<div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
-											<label
-												className="flex items-start gap-2.5 cursor-pointer"
-											>
+											<label className="flex items-start gap-2.5 cursor-pointer">
 												<input
 													type="checkbox"
 													checked={termsAccepted}
@@ -359,8 +376,7 @@ function LoginPage() {
 													<span className="font-DanaDemiBold">
 														{t['login.termsLabel']}
 													</span>{' '}
-													{t['login.termsRest']}
-													{' '}
+													{t['login.termsRest']}{' '}
 													{/* stage-59 — لینک مشاهده‌ی قوانین داخل برچسب؛ کلیک = باز شدن مودال (بدون اجبار اسکرول) */}
 													<button
 														type="button"
@@ -500,7 +516,8 @@ function LoginPage() {
 									type="button"
 									disabled={loading}
 									onClick={() => {
-										if (autoSubmitTimer.current !== null) clearTimeout(autoSubmitTimer.current)
+										if (autoSubmitTimer.current !== null)
+											clearTimeout(autoSubmitTimer.current)
 										setStep('phone')
 										otpForm.reset()
 										resetMutationErrors()

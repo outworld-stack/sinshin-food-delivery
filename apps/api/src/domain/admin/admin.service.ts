@@ -13,7 +13,7 @@
 // ═════════════════════════════════════════════════════════════
 
 // src/domain/admin/admin.service.ts
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import {
@@ -686,6 +686,13 @@ export class AdminService {
             sortAmount?: string
             confirmedBy?: string
             courierId?: string
+            /**
+             *  stage-84 — بازه‌ی تاریخ (ISO شروع/پایان روز — مرز را کلاینت با
+             *  timeZone Asia/Tehran حساب می‌کند تا مستقل از TZ سرور باشد).
+             *  «امروز» فرانت به این دو پارامتر تبدیل می‌شود.
+             */
+            dateFrom?: string
+            dateTo?: string
         },
         /** stage-55 — ماسک شماره‌ی مشتری برای نمای ادمین۲ */
         opts?: { maskPhones?: boolean },
@@ -708,6 +715,15 @@ export class AdminService {
         }
         if (filters.courierId && filters.courierId !== 'all') {
             conditions.push(eq(orders.courierId, asCourierId(filters.courierId)))
+        }
+        // stage-84 — بازه‌ی تاریخ (امروز/هر روز) — روی هر دو کوئری (count + rows)
+        const dateFromMs = filters.dateFrom ? Date.parse(filters.dateFrom) : Number.NaN
+        const dateToMs = filters.dateTo ? Date.parse(filters.dateTo) : Number.NaN
+        if (Number.isFinite(dateFromMs)) {
+            conditions.push(gte(orders.createdAt, new Date(dateFromMs)))
+        }
+        if (Number.isFinite(dateToMs)) {
+            conditions.push(lte(orders.createdAt, new Date(dateToMs)))
         }
 
         const where = conditions.length > 0 ? and(...conditions) : undefined

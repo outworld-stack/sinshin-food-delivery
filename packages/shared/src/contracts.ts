@@ -177,8 +177,16 @@ export interface Product {
   discountActive?: boolean
   discountStartsAt?: string | null
   discountEndsAt?: string | null
-  /** stage-10: هزینه بسته‌بندی هر واحد — فقط DELIVERY/PICKUP */
+  /** stage-10: هزینه بسته‌بندی هر واحد — فقط DELIVERY/PICKUP.
+   *  stage-84 (ترمیم اسکن — دقت متن): این فیلد همان «ستونِ دستی/legacy» است؛
+   *  «هزینه‌ی مؤثر» = اگر محصول اقلامِ فعال دارد → جمعِ قیمتِ اقلام (محاسبه‌ی
+   *  زنده در checkout/preview از junction)، وگرنه همین ستون. مشتری فقط جمعِ
+   *  کل را می‌بیند — این DTO عمومی مقدارِ دستی را می‌دهد (هیچ سطحِ عمومی
+   *  هزینه‌ی بسته‌بندی را از این فیلد نمایش نمی‌دهد). */
   packagingCost: number
+  /** stage-84 — اقلام بسته‌بندیِ انتخابیِ این محصول (فقط در پاسخِ ادمینِ
+   *  جزئیات پر می‌شود؛ فرم ویرایش از همین لیست hydrate می‌شود) */
+  packagingItemIds?: string[]
   categoryId: CategoryId
   /**
    * stage-60 — همه‌ی دسته‌های این محصول (دسته‌ی اولیه اول، بعد دسته‌های
@@ -228,6 +236,23 @@ export interface Product {
 export interface MainData {
   products: Product[]
   categories: Category[]
+}
+
+// ═══════════ stage-84 — اقلام بسته‌بندی (قیمت سراسری) ═══════════
+
+/**
+ * stage-84 — قلمِ بسته‌بندی با قیمتِ سراسری. ادمین‌ها لیست را مدیریت
+ * می‌کنند (پنل محصولات)؛ فرمِ محصول اقلام را انتخاب می‌کند و هزینه‌ی
+ * مؤثر = جمعِ قیمتِ اقلامِ فعال. مشتری فقط جمعِ کل را می‌بیند.
+ */
+export interface PackagingItemDto {
+  id: string
+  title: string
+  /** round-34 — عنوان عربی (NULL = پشتیبان فارسی؛ فقط پنل ادمین) */
+  titleAr: string | null
+  price: number
+  isActive: boolean
+  sortOrder: number
 }
 
 // ═══════════ سبد ═══════════
@@ -360,6 +385,14 @@ export interface CheckoutPreviewData {
   breakdown: OrderBreakdown
   items: CheckoutPreviewItem[]
   coupon: CheckoutPreviewCoupon | null
+  /**
+   *  stage-84 — درگاه‌های پرداختِ فعال (تنظیمات ادمین اصلی). UI چک‌اوت فقط
+   *  همین لیست را نشان می‌دهد؛ حالت mock → ['MOCK']. غایب = همه‌ی واقعی‌ها
+   *  (پشتیبانِ کلاینت‌های قدیمی).
+   */
+  gateways?: string[]
+  /** stage-84 — رستوران شلوغ است؟ (هشدار/الزامِ یادداشت در سرو در محل) */
+  restaurantBusy?: boolean
 }
 
 // ═══════════ User Order View (mapOne) ═══════════
@@ -609,6 +642,8 @@ export interface RestaurantStatusDto {
   temporaryReopenTime: string
   nextOpenTime: string
   anyClosed: boolean
+  /** stage-84 — وضعیت «شلوغ» (فقط اطلاع‌رسانی؛ سفارش‌دهی آزاد) */
+  isBusy: boolean
 }
 
 // ═══════════ مجوز ثبت‌نام ویژه (stage-79) ═══════════
@@ -638,6 +673,8 @@ export interface RestaurantStatusDisplay {
   isOpen: boolean
   nextOpenTime: string
   closeReason: string | null
+  /** stage-84 — شلوغی (برای هشدارِ زیر باکس توضیحات در سرو در محل) */
+  isBusy: boolean
 }
 
 // ═══════════ Geo (رارد ۳۷ — قفل جغرافیایی) ═══════════
@@ -917,6 +954,8 @@ export interface SubAdminPermissionsDto {
   articlesRead: boolean
   /** stage-82 — ایجاد/ویرایش مقاله با صفحه‌ساز (پیش‌فرضِ افزودن: false — فقط با مجوز صریح ادمین اصلی) */
   articlesWrite: boolean
+  /** stage-84 — اعلام وضعیت «شلوغ» رستوران (پیش‌فرضِ افزودن: false) */
+  canAnnounceBusy: boolean
 }
 
 /** رارد ۴۷ — بدنه‌ی PATCH دسترسی‌ها — به‌روزرسانی جزئی: همه‌ی کلیدها اختیاری.

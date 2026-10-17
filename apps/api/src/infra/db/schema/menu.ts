@@ -280,3 +280,52 @@ export const productCategories = pgTable(
     index('product_categories_category_idx').on(t.categoryId),
   ],
 )
+
+/**
+ * stage-84 — اقلام بسته‌بندی با قیمتِ سراسری. ادمین‌ها لیستِ سراسری را یک‌بار
+ * قیمت‌گذاری می‌کنند (مثل ناحیه‌های ارسال)؛ در فرمِ محصول، اقلامِ موردنیازِ
+ * آن محصول انتخاب می‌شوند و «هزینه بسته‌بندی مؤثر» = جمعِ قیمتِ اقلامِ فعالِ
+ * همان محصول (بدون قلم → پشتیبانِ ستونِ legacy یعنی packaging_cost).
+ * مشتری فقط جمعِ کل را در چک‌اوت/فاکتور می‌بیند — ریزِ اقلام هرگز عمومی نیست.
+ */
+export const packagingItems = pgTable(
+  'packaging_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    title: varchar('title', { length: 60 }).notNull(),
+    /** round-34 — عنوان عربی (NULL = پشتیبان فارسی؛ فقط پنل ادمین) */
+    titleAr: varchar('title_ar', { length: 60 }),
+    /** قیمت سراسری قلم (تومان) — مثل delivery_zones.fee فقط integer امن */
+    price: integer('price').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('packaging_items_active_idx').on(t.isActive, t.sortOrder)],
+)
+
+/**
+ * stage-84 — اقلامِ بسته‌بندیِ هر محصول (M2M؛ الگوی productCategories):
+ * فقط «انتخاب‌ها» را نگه می‌دارد؛ قیمت همیشه از جدولِ سراسری خوانده می‌شود
+ * (تغییرِ قیمتِ سراسری همان لحظه روی همه‌ی محصولاتِ دارایِ آن قلم اعمال می‌شود).
+ * حذف قلم/محصول → cascade لینک‌ها؛ مسیر پول (checkout/preview) جمعِ لحظه‌ای
+ * می‌خواند و در breakdown همان جمعِ کل snapshot می‌شود — مثل قبل.
+ */
+export const productPackagingItems = pgTable(
+  'product_packaging_items',
+  {
+    productId: uuid('product_id')
+      .notNull()
+      .$type<ProductId>()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    packagingItemId: uuid('packaging_item_id')
+      .notNull()
+      .references(() => packagingItems.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.productId, t.packagingItemId] }),
+    index('product_packaging_items_item_idx').on(t.packagingItemId),
+  ],
+)

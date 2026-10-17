@@ -69,6 +69,8 @@ const CHAIN_COUNT = DISK_JOURNAL.entries.length
 const CHAIN_HAS_0008 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0008'))
 /** stage-82 — همان الگو برای ۰۰۰۹ (blocks + مجوزهای مقالات ادمین۲) */
 const CHAIN_HAS_0009 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0009'))
+/** stage-84 — همان الگو برای ۰۰۱۳ (اقلام بسته‌بندی + مجوز شلوغی) */
+const CHAIN_HAS_0013 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0013'))
 
 const scratches: string[] = []
 let pass = 0
@@ -221,6 +223,10 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     alter table "admin2_profiles"
       drop column if exists "articles_read",
       drop column if exists "articles_write";
+    -- stage-84 — اشیاءِ ۰۰۱۳: اقلام بسته‌بندی + junction + مجوز شلوغی
+    drop table if exists "product_packaging_items";
+    drop table if exists "packaging_items";
+    alter table "admin2_profiles" drop column if exists "can_announce_busy";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
@@ -353,6 +359,29 @@ await withScratch('a', async (url) => {
     (articlePerms === null || Number(articlePerms) < 2) && !CHAIN_HAS_0009
       ? 'زنجیره‌ی روی دیسک هنوز ۰۰۰۹ ندارد — اول: bun run db:generate'
       : `count=${articlePerms}`,
+  )
+  // A2 — stage-84: اشیاءِ ۰۰۱۳ (اقلام بسته‌بندی + junction + مجوز شلوغی)
+  const packagingTables = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.tables where table_name in ('packaging_items','product_packaging_items')`,
+  )
+  ok(
+    'A2: جدول‌های اقلام بسته‌بندی (۰۰۱۳ stage-84) ساخته شدند',
+    packagingTables === 2,
+    packagingTables === 0 && !CHAIN_HAS_0013
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۳ ندارد — اول: bun run db:generate'
+      : `count=${packagingTables}`,
+  )
+  const busyCol = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.columns where table_name='admin2_profiles' and column_name='can_announce_busy'`,
+  )
+  ok(
+    'A2: مجوز canAnnounceBusy ادمین۲ (۰۰۱۳ stage-84) ساخته شد',
+    busyCol === 1,
+    busyCol === 0 && !CHAIN_HAS_0013
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۳ ندارد — اول: bun run db:generate'
+      : `count=${busyCol}`,
   )
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)

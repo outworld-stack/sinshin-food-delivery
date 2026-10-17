@@ -30,6 +30,8 @@ export const BLOCK_PALETTE: PaletteItem[] = [
 	{ type: 'callout', label: 'باکس نکته', hint: 'هایلایت رنگی (نکته‌ی سرآشپز…)' },
 	{ type: 'list', label: 'فهرست', hint: 'گلوله‌ای یا شماره‌دار' },
 	{ type: 'cta', label: 'دکمه اقدام', hint: 'کارت دعوت به سفارش/مشاهده' },
+	{ type: 'link', label: 'لینک', hint: 'پیوند به هر آدرس (دکمه/کارت)' },
+	{ type: 'location', label: 'موقعیت', hint: 'نقشه + آدرس مکان' },
 	{ type: 'divider', label: 'جداکننده', hint: 'خط / نقطه / فاصله' },
 ]
 
@@ -86,6 +88,24 @@ export function makeBlock(type: ArticleBlock['type']): ArticleBlock {
 				anim: 'zoom',
 				props: { title: '', text: '', label: 'سفارش بده', to: 'menu' },
 			}
+		case 'link':
+			// stage-84 — بلوک پیوند: دکمه/کارت با مقصدِ آزاد
+			return {
+				id,
+				type,
+				width: 'md',
+				anim: 'zoom',
+				props: { label: 'مشاهده', href: '' },
+			}
+		case 'location':
+			// stage-84 — بلوک موقعیت: پیش‌فرض = موقعیت رستوران
+			return {
+				id,
+				type,
+				width: 'lg',
+				anim: 'fade-up',
+				props: { lat: 37.4822056, lng: 49.4418273, title: '', address: '' },
+			}
 		case 'divider':
 			return { id, type, width: 'lg', anim: 'none', props: { variant: 'line' } }
 	}
@@ -108,11 +128,16 @@ export function plainTextToDoc(content: string): ArticleBlocksDoc {
 		.filter(Boolean)
 	// The API caps paragraph text at 5,000 characters. Split long paragraphs
 	// before migrating instead of silently truncating an existing article.
-	const chunks = paragraphs.flatMap(paragraph => {
+	const chunks = paragraphs.flatMap((paragraph) => {
 		const result: string[] = []
-		for (let start = 0; start < paragraph.length;) {
+		for (let start = 0; start < paragraph.length; ) {
 			let end = Math.min(start + 5000, paragraph.length)
-			if (end < paragraph.length && /[\uD800-\uDBFF]/.test(paragraph[end - 1]) && /[\uDC00-\uDFFF]/.test(paragraph[end])) end--
+			if (
+				end < paragraph.length &&
+				/[\uD800-\uDBFF]/.test(paragraph[end - 1]) &&
+				/[\uDC00-\uDFFF]/.test(paragraph[end])
+			)
+				end--
 			result.push(paragraph.slice(start, end))
 			start = end
 		}
@@ -141,7 +166,15 @@ export function moveBlock(
 	to: number,
 ): ArticleBlocksDoc {
 	const blocks = [...doc.blocks]
-	if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || from >= blocks.length || to < 0 || to > blocks.length)
+	if (
+		!Number.isInteger(from) ||
+		!Number.isInteger(to) ||
+		from === to ||
+		from < 0 ||
+		from >= blocks.length ||
+		to < 0 ||
+		to > blocks.length
+	)
 		return doc
 	const [moved] = blocks.splice(from, 1)
 	if (!moved) return doc

@@ -1,28 +1,49 @@
 //src/http/routes/upload.routes.ts
+// ═══════════════════════════════════════════════════════════════
+// stage-84 (مواردِ پنجره‌ی بعدی) — پایان «۴۰۳ ادمین۲ در آپلود»:
+//  FileUploader مصرف‌کننده‌ی فرمِ محصول (productsWrite) و صفحه‌سازِ
+//  مقالات (articlesWrite) است؛ ادمین۲ِ دارایِ هر یک از این دو مجوزِ نوشتن
+//  حالا آپلود می‌کند؛ ادمین اصلی مثلِ همیشه همیشه. ادمین۲ِ فقط-خواندن → 403
+//  با پیامِ صریحِ فارسی. نیازی به مجوزِ جدا نبود (مجوزِ نوشتنِ همان بخشی
+//  که تصویرِ آن را آپلود می‌کند = کمترینِ امتیازِ لازم).
+// ═══════════════════════════════════════════════════════════════
 import { Elysia, t } from 'elysia'
 
 import type { SessionService } from '#/domain/auth/session.service'
+import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { UploadService } from '#/infra/uploads/upload.service'
 import { Err } from '#/domain/shared/errors'
-import { requireAdmin } from '#/http/hooks/require-auth'
+import { requireAdmin2 } from '#/http/hooks/require-admin2'
 
 export interface UploadRoutesDeps {
   sessions: SessionService
+  admin2: Admin2Service
   uploads: UploadService
 }
 
 export const uploadRoutes = (deps: UploadRoutesDeps) => {
-  // آپلود — فقط ادمین اصلی (permission ادمین۲ در فاز ۵)
+  // آپلود — ادمین اصلی + ادمین۲ با مجوزِ نوشتنِ محصولات یا مقالات
   // قیود type/maxSize عمداً در سرویس اعمال می‌شود (پیام فارسی + کنترل کامل)؛
   // t.File با قیود در elysia 1.3 روی multipart خطای 422 می‌داد.
   const adminUpload = new Elysia()
-    .use(requireAdmin(deps.sessions))
+    .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
     .post(
       '/api/uploads',
-      ({ body }) => deps.uploads.save(body.file),
+      ({ admin2, body }) => {
+        // admin2 === null → ادمین اصلی (همیشه مجاز)
+        if (admin2 && !admin2.productsWrite && !admin2.articlesWrite) {
+          throw Err.forbidden(
+            'آپلود تصویر برای ادمین سطح ۲ نیازمند مجوز نوشتن محصولات یا مقالات است.',
+          )
+        }
+        return deps.uploads.save(body.file)
+      },
       {
         body: t.Object({ file: t.File() }),
-        detail: { summary: 'Upload image (admin, PNG/WebP, max 2MB — enforced in service)' },
+        detail: {
+          summary:
+            'Upload image (main admin or admin2 with productsWrite/articlesWrite, PNG/WebP, max 2MB — enforced in service)',
+        },
       },
     )
 

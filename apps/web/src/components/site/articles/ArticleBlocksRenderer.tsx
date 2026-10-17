@@ -21,9 +21,10 @@ import {
 	pickContrastText,
 } from '@sinshin/shared'
 
-import { Link } from '@tanstack/react-router'
+import { Link, useRouter } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
-
+import { useI18n } from '#/i18n'
+import { ArticleLocationMap } from './ArticleLocationMap'
 import { observeArticleBlocks } from './articleBlockAnimations'
 
 const cx = (...parts: Array<string | false | undefined>): string =>
@@ -87,6 +88,27 @@ const isRenderableBlock = (value: unknown): value is ArticleBlock => {
 			return (
 				typeof props.label === 'string' && optionalText('title', 'text', 'href')
 			)
+		case 'link':
+			// stage-84 — پیوند: label + href معتبر (https یا / نسبی)
+			return (
+				typeof props.label === 'string' &&
+				typeof props.href === 'string' &&
+				isArticleBlockUrl(props.href) &&
+				optionalText('title', 'text')
+			)
+		case 'location':
+			// stage-84 — موقعیت: مختصات عددی محدوده‌دار
+			return (
+				typeof props.lat === 'number' &&
+				typeof props.lng === 'number' &&
+				Number.isFinite(props.lat) &&
+				Number.isFinite(props.lng) &&
+				props.lat >= -90 &&
+				props.lat <= 90 &&
+				props.lng >= -180 &&
+				props.lng <= 180 &&
+				optionalText('title', 'address')
+			)
 		case 'divider':
 			return true
 		default:
@@ -97,6 +119,11 @@ const isRenderableBlock = (value: unknown): value is ArticleBlock => {
 // ═══════════════ رندرِ یک بلوک ═══════════════
 
 function BlockContent({ block }: { block: ArticleBlock }) {
+	// ترمیم اسکنِ استیج-۸۴ — ناوبری SPA برای پیوندهای داخلی (الگوی login.tsx:
+	// router.history.push) + برچسبِ دکمهٔ نقشه از i18n (سایت دو-زبانه است؛
+	// فارسیِ هاردکد روی UI عربی نباید بیفتد)
+	const router = useRouter()
+	const { t } = useI18n()
 	const textStyle = blockVisual(block).color ? { color: 'inherit' } : undefined
 	switch (block.type) {
 		case 'hero': {
@@ -352,6 +379,123 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 							{label}
 						</Link>
 					)}
+				</div>
+			)
+		}
+		case 'link': {
+			// stage-84 — بلوک پیوند: دکمه‌ی پر یا کارت؛ href خارجی
+			// (https) → تب جدید؛ مسیر نسبی → همان صفحه.
+			// ترمیم اسکنِ استیج-۸۴ — پیوندِ نسبی حالا SPA-ناوبری
+			// می‌کند (مثل بلوک CTA) نه رفرشِ کاملِ MPA
+			const { label, href, title, text, variant } = block.props
+			const external = href.startsWith('http')
+			const anchor = (
+				<a
+					href={href}
+					{...(external
+						? { target: '_blank', rel: 'noopener noreferrer' }
+						: {
+								onClick: (e) => {
+									if (e.metaKey || e.ctrlKey) return
+									e.preventDefault()
+									router.history.push(href)
+								},
+							})}
+					className="inline-flex items-center justify-center gap-2 px-8 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold cursor-pointer hover:opacity-90 transition"
+				>
+					{label}
+				</a>
+			)
+			if (variant === 'card') {
+				return (
+					<div
+						style={{ textAlign: block.style?.align }}
+						className={cx(
+							'rounded-3xl p-6 sm:p-8 space-y-3 border border-primary/20 dark:border-dark-primary/20 text-center',
+							!isHexColor(block.style?.bg) &&
+								'bg-linear-to-br from-[#2fd4d110] to-[#f6339a10] dark:from-[#2fd4d110] dark:to-[#f6339a0f]',
+						)}
+					>
+						{title && (
+							<p
+								style={textStyle}
+								className="font-DanaDemiBold text-base md:text-lg text-gray-800 dark:text-white"
+							>
+								{title}
+							</p>
+						)}
+						{text && (
+							<p
+								style={textStyle}
+								className="text-sm md:text-[15px] text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
+							>
+								{text}
+							</p>
+						)}
+						{anchor}
+					</div>
+				)
+			}
+			return (
+				<div style={{ textAlign: block.style?.align }} className="space-y-2">
+					{title && (
+						<p
+							style={textStyle}
+							className="font-DanaDemiBold text-base text-gray-800 dark:text-white"
+						>
+							{title}
+						</p>
+					)}
+					{text && (
+						<p
+							style={textStyle}
+							className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
+						>
+							{text}
+						</p>
+					)}
+					{anchor}
+				</div>
+			)
+		}
+		case 'location': {
+			// stage-84 — بلوک موقعیت: عنوان/آدرس + نقشه‌ی تعاملی
+			// (کلاینتی — SSR فقط متن) + دکمه‌ی بیرونی.
+			const { lat, lng, title, address } = block.props
+			const neshanUrl = `https://neshan.org/maps/@${lat},${lng},15z`
+			return (
+				<div className="space-y-3">
+					{(title || address) && (
+						<div className="space-y-1">
+							{title && (
+								<p
+									style={textStyle}
+									className="font-DanaDemiBold text-base md:text-lg text-gray-800 dark:text-white"
+								>
+									{title}
+								</p>
+							)}
+							{address && (
+								<p
+									style={textStyle}
+									className="text-sm md:text-[15px] text-gray-600 dark:text-gray-300 leading-relaxed"
+								>
+									{address}
+								</p>
+							)}
+						</div>
+					)}
+					<ArticleLocationMap lat={lat} lng={lng} />
+					<div style={{ textAlign: block.style?.align }}>
+						<a
+							href={neshanUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-primary/30 dark:border-dark-primary/30 text-primary dark:text-dark-primary font-DanaMedium text-sm cursor-pointer hover:bg-primary/5 dark:hover:bg-dark-primary/5 transition"
+						>
+							{t['article.viewMap']}
+						</a>
+					</div>
 				</div>
 			)
 		}

@@ -1,14 +1,25 @@
 // src/hooks/site/useProductsPage.ts
-import { useReducer, useCallback, useMemo } from 'react'
+
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useNavigate, useSearch } from '@tanstack/react-router'
+import { useCallback, useMemo, useReducer } from 'react'
 import { z } from 'zod'
-import { useSearch, useNavigate } from '@tanstack/react-router'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { activeMainCategoriesOptions, productsByMainOptions } from '#/utils/queryOptions'
-import type { MainCategory, Category, Product } from '#/server/products'
 import { useI18n } from '#/i18n'
+import type { Category, MainCategory, Product } from '#/server/products'
+import {
+	activeMainCategoriesOptions,
+	productsByMainOptions,
+} from '#/utils/queryOptions'
 
 // --- تایپ‌ها ---
-export const SORT_KEYS = ['newest', 'most-viewed', 'best-selling', 'fastest-prep', 'expensive', 'cheap'] as const
+export const SORT_KEYS = [
+	'newest',
+	'most-viewed',
+	'best-selling',
+	'fastest-prep',
+	'expensive',
+	'cheap',
+] as const
 export type SortKey = (typeof SORT_KEYS)[number]
 // اسکیمای مشترک با validateSearch روت — سورت شهروند URL شده
 export const sortSchema = z.enum(SORT_KEYS)
@@ -16,61 +27,82 @@ const DEFAULT_SORT: SortKey = 'newest'
 
 // Main فعلی — منطق مشترک بین loader (سرور) و هوک (کلاینت).
 // فقط همین تابع باید در دو جا یکسان اجرا شه — برای همین صادرشده
-export function resolveActiveMain(mains: MainCategory[], tab?: string): MainCategory | null {
-  if (tab) {
-    const found = mains.find(m => m.slug === tab)
-    if (found) return found
-    // تب نامعتبر → به‌جای صفحه‌ی خالی، Main پیش‌فرض (بهبود رفتار)
-  }
-  if (mains.length > 0) return mains.find(m => m.isDefault) ?? mains[0]
-  return null
+export function resolveActiveMain(
+	mains: MainCategory[],
+	tab?: string,
+): MainCategory | null {
+	if (tab) {
+		const found = mains.find((m) => m.slug === tab)
+		if (found) return found
+		// تب نامعتبر → به‌جای صفحه‌ی خالی، Main پیش‌فرض (بهبود رفتار)
+	}
+	if (mains.length > 0) return mains.find((m) => m.isDefault) ?? mains[0]
+	return null
 }
 
 // --- وضعیت: فقط UI واقعی — سورتِ اعمال‌شده از URL میاد ---
 interface ProductsState {
-  tempSortBy: SortKey      // سورت داخل مودال — قبل از اعمال
-  isFilterOpen: boolean
-  visibleCount: number
+	tempSortBy: SortKey // سورت داخل مودال — قبل از اعمال
+	isFilterOpen: boolean
+	visibleCount: number
 }
 
 type ProductsAction =
-  | { type: 'SET_TEMP_SORT'; payload: SortKey }
-  | { type: 'SYNC_TEMP_SORT'; payload: SortKey }
-  | { type: 'CLOSE_FILTER' }
-  | { type: 'APPLY_FILTERS' }
-  | { type: 'RESET_COUNT' }
-  | { type: 'LOAD_MORE' }
+	| { type: 'SET_TEMP_SORT'; payload: SortKey }
+	| { type: 'SYNC_TEMP_SORT'; payload: SortKey }
+	| { type: 'CLOSE_FILTER' }
+	| { type: 'APPLY_FILTERS' }
+	| { type: 'RESET_COUNT' }
+	| { type: 'LOAD_MORE' }
 
 const initialState: ProductsState = {
-  tempSortBy: DEFAULT_SORT,
-  isFilterOpen: false,
-  visibleCount: 9,
+	tempSortBy: DEFAULT_SORT,
+	isFilterOpen: false,
+	// stage-84 — ۱۲ = مضربِ ۶ (LCM 2,3): در موبایل ۲ ستونه و دسکتاپ ۳ ستونه
+	// هر ردیفِ قبل از دکمه‌ی «بیشتر» پُر می‌ماند (تک‌آیتمِ آخر ردیف حذف شد).
+	visibleCount: 12,
 }
 
-function productsReducer(state: ProductsState, action: ProductsAction): ProductsState {
-  switch (action.type) {
-    case 'SET_TEMP_SORT': return { ...state, tempSortBy: action.payload }
-    // سینک با سورتِ URL — مقدار ارسالی از هندلر میاد چون سورت در وضعیت نیست
-    case 'SYNC_TEMP_SORT': return { ...state, tempSortBy: action.payload, isFilterOpen: true }
-    case 'CLOSE_FILTER': return { ...state, isFilterOpen: false }
-    case 'APPLY_FILTERS': return { ...state, isFilterOpen: false }
-    case 'RESET_COUNT': return { ...state, visibleCount: 9 }
-    case 'LOAD_MORE': return { ...state, visibleCount: state.visibleCount + 9 }
-    default: return state
-  }
+function productsReducer(
+	state: ProductsState,
+	action: ProductsAction,
+): ProductsState {
+	switch (action.type) {
+		case 'SET_TEMP_SORT':
+			return { ...state, tempSortBy: action.payload }
+		// سینک با سورتِ URL — مقدار ارسالی از هندلر میاد چون سورت در وضعیت نیست
+		case 'SYNC_TEMP_SORT':
+			return { ...state, tempSortBy: action.payload, isFilterOpen: true }
+		case 'CLOSE_FILTER':
+			return { ...state, isFilterOpen: false }
+		case 'APPLY_FILTERS':
+			return { ...state, isFilterOpen: false }
+		case 'RESET_COUNT':
+			return { ...state, visibleCount: 12 }
+		case 'LOAD_MORE':
+			return { ...state, visibleCount: state.visibleCount + 6 }
+		default:
+			return state
+	}
 }
 
 // --- سورت خالص ---
 function sortProducts(products: Product[], sortBy: SortKey): Product[] {
-  const sorted = [...products]
-  switch (sortBy) {
-    case 'expensive': return sorted.sort((a, b) => b.finalPrice - a.finalPrice)
-    case 'cheap': return sorted.sort((a, b) => a.finalPrice - b.finalPrice)
-    case 'most-viewed': return sorted.sort((a, b) => b.views - a.views)
-    case 'best-selling': return sorted.sort((a, b) => b.sales - a.sales)
-    case 'fastest-prep': return sorted.sort((a, b) => a.prepTime - b.prepTime)
-    default: return sorted
-  }
+	const sorted = [...products]
+	switch (sortBy) {
+		case 'expensive':
+			return sorted.sort((a, b) => b.finalPrice - a.finalPrice)
+		case 'cheap':
+			return sorted.sort((a, b) => a.finalPrice - b.finalPrice)
+		case 'most-viewed':
+			return sorted.sort((a, b) => b.views - a.views)
+		case 'best-selling':
+			return sorted.sort((a, b) => b.sales - a.sales)
+		case 'fastest-prep':
+			return sorted.sort((a, b) => a.prepTime - b.prepTime)
+		default:
+			return sorted
+	}
 }
 
 // ═══ stage-60 — سنجاش ویژه (فلگ‌دارها جزو ۴ آیتم اول) با تصادفِ قطعی ═══
@@ -80,34 +112,34 @@ function sortProducts(products: Product[], sortBy: SortKey): Product[] {
 
 /** FNV-1a — رشته‌ی seed را به عدد ۳۲بیتی بدون علامت می‌برد */
 function hashSeed(str: string): number {
-  let h = 2166136261
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
+	let h = 2166136261
+	for (let i = 0; i < str.length; i++) {
+		h ^= str.charCodeAt(i)
+		h = Math.imul(h, 16777619)
+	}
+	return h >>> 0
 }
 
 /** mulberry32 — PRNG قطعی و سبک (همان seed ⇒ همان دنباله) */
 function mulberry32(seed: number): () => number {
-  let a = seed
-  return () => {
-    a |= 0
-    a = (a + 0x6D2B79F5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
+	let a = seed
+	return () => {
+		a |= 0
+		a = (a + 0x6d2b79f5) | 0
+		let t = Math.imul(a ^ (a >>> 15), 1 | a)
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+	}
 }
 
 /** Fischer-Yates با PRNG داده‌شده (کپی آرایه — ورودی دست‌نخورده) */
 function shuffleWithRng<T>(arr: readonly T[], rng: () => number): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
+	const a = [...arr]
+	for (let i = a.length - 1; i > 0; i--) {
+		const j = Math.floor(rng() * (i + 1))
+		;[a[i], a[j]] = [a[j], a[i]]
+	}
+	return a
 }
 
 /**
@@ -122,174 +154,231 @@ function shuffleWithRng<T>(arr: readonly T[], rng: () => number): T[] {
  * میانی از normalِ تمام‌شده «undefined» push می‌کردند (کرش رندر).
  * اکنون دامنه‌ی جایگاه‌ها = min(4, total) است.
  */
-function mergePinnedIntoSlots<T>(normal: readonly T[], pinned: readonly T[], rng: () => number): T[] {
-  if (pinned.length === 0) return [...normal]
-  const total = pinned.length + normal.length
-  const slotRange = Math.min(4, total)
-  const slots: number[] = []
-  while (slots.length < pinned.length) {
-    const s = Math.floor(rng() * slotRange)
-    if (!slots.includes(s)) slots.push(s)
-  }
-  const merged: T[] = []
-  let ni = 0
-  for (let i = 0; i < total; i++) {
-    const slotIdx = slots.indexOf(i)
-    merged.push(slotIdx !== -1 ? pinned[slotIdx] : normal[ni++])
-  }
-  return merged
+function mergePinnedIntoSlots<T>(
+	normal: readonly T[],
+	pinned: readonly T[],
+	rng: () => number,
+): T[] {
+	if (pinned.length === 0) return [...normal]
+	const total = pinned.length + normal.length
+	const slotRange = Math.min(4, total)
+	const slots: number[] = []
+	while (slots.length < pinned.length) {
+		const s = Math.floor(rng() * slotRange)
+		if (!slots.includes(s)) slots.push(s)
+	}
+	const merged: T[] = []
+	let ni = 0
+	for (let i = 0; i < total; i++) {
+		const slotIdx = slots.indexOf(i)
+		merged.push(slotIdx !== -1 ? pinned[slotIdx] : normal[ni++])
+	}
+	return merged
 }
 
 // --- گزینه‌های سورت (صادرشده — فیلترهای دسکتاپ/موبایل درون‌ریزی می‌کنن) ---
 // رارد ۳۲ — برچسب‌ها به labelKey تبدیل شدند؛ کامپوننت‌ها t[option.labelKey]
 // رندر می‌کنند تا با تعویض زبان همان لحظه عربی شوند (کلید ثابت است).
 export type ProductsSortLabelKey =
-  | 'products.sort.newest'
-  | 'products.sort.mostViewed'
-  | 'products.sort.bestSelling'
-  | 'products.sort.fastestPrep'
-  | 'products.sort.expensive'
-  | 'products.sort.cheap'
+	| 'products.sort.newest'
+	| 'products.sort.mostViewed'
+	| 'products.sort.bestSelling'
+	| 'products.sort.fastestPrep'
+	| 'products.sort.expensive'
+	| 'products.sort.cheap'
 
-export const SORT_OPTIONS: { key: SortKey; labelKey: ProductsSortLabelKey }[] = [
-  { key: 'newest', labelKey: 'products.sort.newest' },
-  { key: 'most-viewed', labelKey: 'products.sort.mostViewed' },
-  { key: 'best-selling', labelKey: 'products.sort.bestSelling' },
-  { key: 'fastest-prep', labelKey: 'products.sort.fastestPrep' },
-  { key: 'expensive', labelKey: 'products.sort.expensive' },
-  { key: 'cheap', labelKey: 'products.sort.cheap' },
-]
+export const SORT_OPTIONS: { key: SortKey; labelKey: ProductsSortLabelKey }[] =
+	[
+		{ key: 'newest', labelKey: 'products.sort.newest' },
+		{ key: 'most-viewed', labelKey: 'products.sort.mostViewed' },
+		{ key: 'best-selling', labelKey: 'products.sort.bestSelling' },
+		{ key: 'fastest-prep', labelKey: 'products.sort.fastestPrep' },
+		{ key: 'expensive', labelKey: 'products.sort.expensive' },
+		{ key: 'cheap', labelKey: 'products.sort.cheap' },
+	]
 
 // --- هوک ---
 export function useProductsPage() {
-  const [state, dispatch] = useReducer(productsReducer, initialState)
-  const search = useSearch({ from: '/products/' })
-  const navigate = useNavigate()
-  const { t } = useI18n()
+	const [state, dispatch] = useReducer(productsReducer, initialState)
+	const search = useSearch({ from: '/products/' })
+	const navigate = useNavigate()
+	const { t } = useI18n()
 
-  // ⬅ سورت اعمال‌شده = URL — رفرش/بک/اشتراک‌گذاری حفظش می‌کنه
-  const sortBy: SortKey = search.sort ?? DEFAULT_SORT
+	// ⬅ سورت اعمال‌شده = URL — رفرش/بک/اشتراک‌گذاری حفظش می‌کنه
+	const sortBy: SortKey = search.sort ?? DEFAULT_SORT
 
-  // Mainهای فعال — گزینه‌های مرکزی + کلید یکسان با Header/MainLayout
-  const { data: activeMains, isLoading: mainsLoading } = useQuery(activeMainCategoriesOptions)
+	// Mainهای فعال — گزینه‌های مرکزی + کلید یکسان با Header/MainLayout
+	const { data: activeMains, isLoading: mainsLoading } = useQuery(
+		activeMainCategoriesOptions,
+	)
 
-  // Main فعلی — همان منطق loader سرور
-  const activeMain = useMemo(
-    () => resolveActiveMain(activeMains ?? [], search.tab),
-    [activeMains, search.tab],
-  )
+	// Main فعلی — همان منطق loader سرور
+	const activeMain = useMemo(
+		() => resolveActiveMain(activeMains ?? [], search.tab),
+		[activeMains, search.tab],
+	)
 
-  const activeMainSlug = activeMain?.slug ?? null
+	const activeMainSlug = activeMain?.slug ?? null
 
-  // دیتا: محصولات + دسته‌های همون Main
-  // (loader روت این کوئری رو با کوئری پر کرده → SSR بدون فلیک)
-  const { data: mainData, isLoading: productsLoading } = useQuery({
-    ...productsByMainOptions(activeMainSlug),
-    enabled: !!activeMainSlug,
-    placeholderData: keepPreviousData,  // تعویض تب بدون فلیک
-  })
+	// دیتا: محصولات + دسته‌های همون Main
+	// (loader روت این کوئری رو با کوئری پر کرده → SSR بدون فلیک)
+	const { data: mainData, isLoading: productsLoading } = useQuery({
+		...productsByMainOptions(activeMainSlug),
+		enabled: !!activeMainSlug,
+		placeholderData: keepPreviousData, // تعویض تب بدون فلیک
+	})
 
-  // ---- مشتق‌شده‌ها ----
-  const products: Product[] = useMemo(() => mainData?.products ?? [], [mainData])
-  const tabCategories: Category[] = useMemo(() => mainData?.categories ?? [], [mainData])
+	// ---- مشتق‌شده‌ها ----
+	const products: Product[] = useMemo(
+		() => mainData?.products ?? [],
+		[mainData],
+	)
+	const tabCategories: Category[] = useMemo(
+		() => mainData?.categories ?? [],
+		[mainData],
+	)
 
-  const activeCategory: string = search.category ?? 'all'
+	const activeCategory: string = search.category ?? 'all'
 
-  // فیلتر دسته + سورت + سنجاش ویژه (stage-60)
-  const filteredProducts = useMemo(() => {
-    // فیلتر دسته (M2M): همه‌ی دسته‌های محصول، نه فقط دسته‌ی اصلی
-    // (categoryIds سرور همیشه می‌آید؛ fallback فقط برای دیتای قدیمی)
-    let res = products
-    if (activeCategory !== 'all') {
-      const cat = tabCategories.find(c => c.slug === activeCategory)
-      if (cat) {
-        res = res.filter(p => (p.categoryIds?.length ? p.categoryIds : [p.categoryId]).includes(cat.id))
-      }
-    }
-    // سنجاش ویژه: فلگ‌دارها از «لیست کاملِ Main» (فارغ از فیلتر دسته و
-    // سورت) تا ۴ نفر در جایگاه‌های تصادفی ۰..۳ می‌نشینند؛ بقیه‌ی فلگ‌دارها
-    // (بیش از ۴) مثل آیتم‌های عادی در جریان فیلتر/سورت می‌مانند.
-    const rng = mulberry32(hashSeed(`${activeMainSlug ?? 'all'}|${activeCategory}|${sortBy}`))
-    const flagged = products.filter(p => p.isFeatured === true)
-    const pinned = shuffleWithRng(flagged, rng).slice(0, 4)
-    const pinnedIds = new Set(pinned.map(p => p.id))
-    const normal = sortProducts(res.filter(p => !pinnedIds.has(p.id)), sortBy)
-    return mergePinnedIntoSlots(normal, pinned, rng)
-  }, [products, tabCategories, activeCategory, sortBy, activeMainSlug])
+	// فیلتر دسته + سورت + سنجاش ویژه (stage-60)
+	const filteredProducts = useMemo(() => {
+		// فیلتر دسته (M2M): همه‌ی دسته‌های محصول، نه فقط دسته‌ی اصلی
+		// (categoryIds سرور همیشه می‌آید؛ fallback فقط برای دیتای قدیمی)
+		let res = products
+		if (activeCategory !== 'all') {
+			const cat = tabCategories.find((c) => c.slug === activeCategory)
+			if (cat) {
+				res = res.filter((p) =>
+					(p.categoryIds?.length ? p.categoryIds : [p.categoryId]).includes(
+						cat.id,
+					),
+				)
+			}
+		}
+		// سنجاش ویژه: فلگ‌دارها از «لیست کاملِ Main» (فارغ از فیلتر دسته و
+		// سورت) تا ۴ نفر در جایگاه‌های تصادفی ۰..۳ می‌نشینند؛ بقیه‌ی فلگ‌دارها
+		// (بیش از ۴) مثل آیتم‌های عادی در جریان فیلتر/سورت می‌مانند.
+		const rng = mulberry32(
+			hashSeed(`${activeMainSlug ?? 'all'}|${activeCategory}|${sortBy}`),
+		)
+		const flagged = products.filter((p) => p.isFeatured === true)
+		const pinned = shuffleWithRng(flagged, rng).slice(0, 4)
+		const pinnedIds = new Set(pinned.map((p) => p.id))
+		const normal = sortProducts(
+			res.filter((p) => !pinnedIds.has(p.id)),
+			sortBy,
+		)
+		return mergePinnedIntoSlots(normal, pinned, rng)
+	}, [products, tabCategories, activeCategory, sortBy, activeMainSlug])
 
-  const visibleProducts = useMemo(
-    () => filteredProducts.slice(0, state.visibleCount),
-    [filteredProducts, state.visibleCount],
-  )
-  const hasMore = filteredProducts.length > state.visibleCount
+	const visibleProducts = useMemo(
+		() => filteredProducts.slice(0, state.visibleCount),
+		[filteredProducts, state.visibleCount],
+	)
+	const hasMore = filteredProducts.length > state.visibleCount
 
-  // تب‌ها فقط اگه > 1 (قانون کارفرما)
-  const showTabs = (activeMains ?? []).length > 1
+	// تب‌ها فقط اگه > 1 (قانون کارفرما)
+	const showTabs = (activeMains ?? []).length > 1
 
-  // ---- هندلرها ----
-  const handleTabChange = useCallback((slug: string) => {
-    // ...search: سورت فعلی حفظ می‌شه — سورت ذوق کاربره نه تابع تب
-    navigate({ to: '/products', search: { ...search, tab: slug, category: undefined }, replace: true })
-    dispatch({ type: 'RESET_COUNT' })
-  }, [navigate, search])
+	// ---- هندلرها ----
+	const handleTabChange = useCallback(
+		(slug: string) => {
+			// ...search: سورت فعلی حفظ می‌شه — سورت ذوق کاربره نه تابع تب
+			navigate({
+				to: '/products',
+				search: { ...search, tab: slug, category: undefined },
+				replace: true,
+			})
+			dispatch({ type: 'RESET_COUNT' })
+		},
+		[navigate, search],
+	)
 
-  const handleCategoryClick = useCallback((slug: string) => {
-    navigate({
-      to: '/products',
-      search: { ...search, category: slug !== 'all' ? slug : undefined },
-      replace: true,
-    })
-    dispatch({ type: 'RESET_COUNT' })
-  }, [navigate, search])
+	const handleCategoryClick = useCallback(
+		(slug: string) => {
+			navigate({
+				to: '/products',
+				search: { ...search, category: slug !== 'all' ? slug : undefined },
+				replace: true,
+			})
+			dispatch({ type: 'RESET_COUNT' })
+		},
+		[navigate, search],
+	)
 
-  const handleOpenFilter = useCallback(
-    () => dispatch({ type: 'SYNC_TEMP_SORT', payload: sortBy }),
-    [sortBy],
-  )
-  const handleCloseFilter = useCallback(() => dispatch({ type: 'CLOSE_FILTER' }), [])
+	const handleOpenFilter = useCallback(
+		() => dispatch({ type: 'SYNC_TEMP_SORT', payload: sortBy }),
+		[sortBy],
+	)
+	const handleCloseFilter = useCallback(
+		() => dispatch({ type: 'CLOSE_FILTER' }),
+		[],
+	)
 
-  // اعمال: سورت به URL می‌ره + مودال بسته می‌شه
-  const handleApplyFilters = useCallback(() => {
-    navigate({ to: '/products', search: { ...search, sort: state.tempSortBy }, replace: true })
-    dispatch({ type: 'APPLY_FILTERS' })
-  }, [navigate, search, state.tempSortBy])
+	// اعمال: سورت به URL می‌ره + مودال بسته می‌شه
+	const handleApplyFilters = useCallback(() => {
+		navigate({
+			to: '/products',
+			search: { ...search, sort: state.tempSortBy },
+			replace: true,
+		})
+		dispatch({ type: 'APPLY_FILTERS' })
+	}, [navigate, search, state.tempSortBy])
 
-  // سورت دسکتاپ = مستقیم URL
-  const handleDesktopSort = useCallback((key: SortKey) => {
-    navigate({ to: '/products', search: { ...search, sort: key }, replace: true })
-  }, [navigate, search])
+	// سورت دسکتاپ = مستقیم URL
+	const handleDesktopSort = useCallback(
+		(key: SortKey) => {
+			navigate({
+				to: '/products',
+				search: { ...search, sort: key },
+				replace: true,
+			})
+		},
+		[navigate, search],
+	)
 
-  const handleModalSort = useCallback((key: SortKey) => dispatch({ type: 'SET_TEMP_SORT', payload: key }), [])
-  const handleLoadMore = useCallback(() => dispatch({ type: 'LOAD_MORE' }), [])
+	const handleModalSort = useCallback(
+		(key: SortKey) => dispatch({ type: 'SET_TEMP_SORT', payload: key }),
+		[],
+	)
+	const handleLoadMore = useCallback(() => dispatch({ type: 'LOAD_MORE' }), [])
 
-  // آیتم‌های اسکرولر
-  const scrollerItems = useMemo(() => [
-    { id: 'all', label: t['common.all'], isActive: activeCategory === 'all', onClick: () => handleCategoryClick('all') },
-    ...tabCategories.map((cat: Category) => ({
-      id: cat.id,
-      label: cat.name,
-      isActive: activeCategory === cat.slug,
-      onClick: () => handleCategoryClick(cat.slug),
-    })),
-  ], [tabCategories, activeCategory, handleCategoryClick, t])
+	// آیتم‌های اسکرولر
+	const scrollerItems = useMemo(
+		() => [
+			{
+				id: 'all',
+				label: t['common.all'],
+				isActive: activeCategory === 'all',
+				onClick: () => handleCategoryClick('all'),
+			},
+			...tabCategories.map((cat: Category) => ({
+				id: cat.id,
+				label: cat.name,
+				isActive: activeCategory === cat.slug,
+				onClick: () => handleCategoryClick(cat.slug),
+			})),
+		],
+		[tabCategories, activeCategory, handleCategoryClick, t],
+	)
 
-  return {
-    // ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
-    state: { ...state, sortBy },
-    activeMains: activeMains ?? [],
-    activeMain,
-    showTabs,
-    isLoading: mainsLoading || productsLoading,
-    scrollerItems,
-    filteredProducts: visibleProducts,
-    hasMore,
-    handleTabChange,
-    handleCategoryClick,
-    handleOpenFilter,
-    handleCloseFilter,
-    handleApplyFilters,
-    handleDesktopSort,
-    handleModalSort,
-    handleLoadMore,
-  }
+	return {
+		// ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
+		state: { ...state, sortBy },
+		activeMains: activeMains ?? [],
+		activeMain,
+		showTabs,
+		isLoading: mainsLoading || productsLoading,
+		scrollerItems,
+		filteredProducts: visibleProducts,
+		hasMore,
+		handleTabChange,
+		handleCategoryClick,
+		handleOpenFilter,
+		handleCloseFilter,
+		handleApplyFilters,
+		handleDesktopSort,
+		handleModalSort,
+		handleLoadMore,
+	}
 }

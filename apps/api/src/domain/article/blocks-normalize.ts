@@ -33,6 +33,8 @@ const LIMITS = {
         heroText: 500,
         url: 500,
         alt: 200,
+        /** stage-84 — آدرس بلوک موقعیت */
+        address: 300,
 } as const
 
 const BLOCK_TYPES = new Set([
@@ -45,6 +47,8 @@ const BLOCK_TYPES = new Set([
         'callout',
         'list',
         'cta',
+        'link',
+        'location',
         'divider',
 ])
 const WIDTHS = new Set<NonNullable<ArticleBlock['width']>>(['sm', 'md', 'lg', 'full'])
@@ -73,6 +77,13 @@ const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : 
 
 const oneOf = <T extends string>(v: unknown, set: Set<T>): T | undefined =>
         typeof v === 'string' && set.has(v as T) ? (v as T) : undefined
+
+/** stage-84 — عدد جغرافیایی محدوده‌دار (±limit؛ گرد به ۶ رقم؛ نامعتبر = undefined) */
+const num01 = (v: unknown, limit: number): number | undefined => {
+        if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
+        if (v < -limit || v > limit) return undefined
+        return Math.round(v * 1e6) / 1e6
+}
 
 function normalizeStyle(raw: unknown): ArticleBlock['style'] {
         if (!isRec(raw)) return undefined
@@ -178,6 +189,35 @@ function normalizeProps(type: string, raw: unknown): Record<string, unknown> | u
                         if (title) out.title = title
                         const text = str(raw.text, LIMITS.heroText)
                         if (text) out.text = text
+                        return out
+                }
+                case 'link': {
+                        // stage-84 — بلوک پیوند: label + href معتبر هر دو اجباری
+                        // (href نامعتبر = بلوک حذف؛ فرمِ ساخت قبل از submit خودش
+                        // هشدار می‌دهد تا ادمین غافلگیر نشود).
+                        const label = str(raw.label, LIMITS.ctaLabel)
+                        const href = url(raw.href)
+                        if (!label || !href) return undefined
+                        const out: Record<string, unknown> = { label, href }
+                        const title = str(raw.title, LIMITS.calloutTitle)
+                        if (title) out.title = title
+                        const text = str(raw.text, LIMITS.heroText)
+                        if (text) out.text = text
+                        const variant = oneOf(raw.variant, new Set(['button', 'card'] as const))
+                        if (variant && variant !== 'button') out.variant = variant
+                        return out
+                }
+                case 'location': {
+                        // stage-84 — بلوک موقعیت: مختصات عددی محدوده‌دار (گرد تا ۶
+                        // رقم)؛ نامعتبر = حذف بلوک. عنوان/آدرس اختیاری.
+                        const lat = num01(raw.lat, 90)
+                        const lng = num01(raw.lng, 180)
+                        if (lat === undefined || lng === undefined) return undefined
+                        const out: Record<string, unknown> = { lat, lng }
+                        const title = str(raw.title, LIMITS.calloutTitle)
+                        if (title) out.title = title
+                        const address = str(raw.address, LIMITS.address)
+                        if (address) out.address = address
                         return out
                 }
                 case 'divider': {

@@ -11,23 +11,24 @@ import { ORDER_STATUS_CONFIG } from '#/components/shared/StatusBadge'
 /** کلاس فیلد ورودی فیلترها — یکسان در همه‌ی جعبه‌ها
  *  stage-59 — فونت فارسی Dana (متوسط) روی همه‌ی باکس‌های فیلتر ادمین */
 export const FILTER_INPUT_CLS =
-  'w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none focus:border-primary font-DanaMedium'
+	'w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-700 dark:text-gray-300 outline-none focus:border-primary font-DanaMedium'
 
 /** کلاس برچسب فیلد */
 export const FILTER_LABEL_CLS =
-  'block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium'
+	'block text-xs text-gray-400 dark:text-gray-500 mb-1 font-DanaMedium'
 
-/** گزینه‌های مرتب‌سازی تاریخ */
+/** گزینه‌های مرتب‌سازی تاریخ — stage-84: «امروز» گزینه‌ی سوم و پیش‌فرض */
 export const DATE_SORT_OPTIONS = [
-  { value: 'newest', label: 'جدیدترین' },
-  { value: 'oldest', label: 'قدیمی‌ترین' },
+	{ value: 'today', label: 'امروز' },
+	{ value: 'newest', label: 'جدیدترین' },
+	{ value: 'oldest', label: 'قدیمی‌ترین' },
 ] as const
 
 /** گزینه‌های مرتب‌سازی مبلغ */
 export const AMOUNT_SORT_OPTIONS = [
-  { value: 'none', label: 'بدون مرتب‌سازی' },
-  { value: 'highest', label: 'بیشترین' },
-  { value: 'lowest', label: 'کمترین' },
+	{ value: 'none', label: 'بدون مرتب‌سازی' },
+	{ value: 'highest', label: 'بیشترین' },
+	{ value: 'lowest', label: 'کمترین' },
 ] as const
 
 /**
@@ -39,36 +40,39 @@ export const AMOUNT_SORT_OPTIONS = [
  * یکسان‌سازی dropdown با بج کنارش.
  */
 export const ORDER_STATUS_FILTER_OPTIONS = (
-  Object.entries(ORDER_STATUS_CONFIG) as Array<
-    [keyof typeof ORDER_STATUS_CONFIG, (typeof ORDER_STATUS_CONFIG)[keyof typeof ORDER_STATUS_CONFIG]]
-  >
+	Object.entries(ORDER_STATUS_CONFIG) as Array<
+		[
+			keyof typeof ORDER_STATUS_CONFIG,
+			(typeof ORDER_STATUS_CONFIG)[keyof typeof ORDER_STATUS_CONFIG],
+		]
+	>
 )
-  .filter(([key]) => key !== 'PENDING_PAYMENT')
-  .map(([key, cfg]) => ({ value: key as string, label: cfg.admin }))
+	.filter(([key]) => key !== 'PENDING_PAYMENT')
+	.map(([key, cfg]) => ({ value: key as string, label: cfg.admin }))
 
 interface MobileFilterTriggerProps {
-  label: string
-  onClick: () => void
-  /** کلاس والد — مثلاً 'sm:hidden mb-4' یا 'md:hidden' */
-  wrapperCls?: string
+	label: string
+	onClick: () => void
+	/** کلاس والد — مثلاً 'sm:hidden mb-4' یا 'md:hidden' */
+	wrapperCls?: string
 }
 
 /** دکمه‌ی بازکردن مودال فیلتر در موبایل — همان دکمه‌ای که ۴ بار کپی شده بود */
 export const MobileFilterTrigger = memo(function MobileFilterTrigger({
-  label,
-  onClick,
-  wrapperCls = 'md:hidden',
+	label,
+	onClick,
+	wrapperCls = 'md:hidden',
 }: MobileFilterTriggerProps) {
-  return (
-    <div className={wrapperCls}>
-      <button
-        type="button"
-        onClick={onClick}
-        className="w-full flex items-center justify-between px-5 py-3 rounded-xl bg-white dark:bg-[#2a1015] text-gray-800 dark:text-white font-DanaMedium border border-gray-200 dark:border-[#3a151c] shadow-sm cursor-pointer"
-      >
-        <span>{label}</span>
-        <SliderHorizontal size={24} />
-      </button>
-    </div>
-  )
+	return (
+		<div className={wrapperCls}>
+			<button
+				type="button"
+				onClick={onClick}
+				className="w-full flex items-center justify-between px-5 py-3 rounded-xl bg-white dark:bg-[#2a1015] text-gray-800 dark:text-white font-DanaMedium border border-gray-200 dark:border-[#3a151c] shadow-sm cursor-pointer"
+			>
+				<span>{label}</span>
+				<SliderHorizontal size={24} />
+			</button>
+		</div>
+	)
 })

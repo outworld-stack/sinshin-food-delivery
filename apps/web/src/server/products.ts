@@ -15,18 +15,19 @@
 // src/server/products.ts — منوی عمومی + سبد + پنل ادمین — همه از API واقعی
 // phase-3: مرگ products-admin-mock — ویرایش‌ها دیگر با ری‌استارت نمی‌پرند
 
-import { getJson, postJson, authJson } from '#/lib/api-fetch'
-import type { ProductFormData } from '#/types/forms'
 import type {
-	ProductId,
-	MainCategory,
-	Category,
-	Product,
-	MainData,
 	CartDetails,
 	CartItemInput,
+	Category,
+	MainCategory,
+	MainData,
+	PackagingItemDto,
+	Product,
+	ProductId,
 	ProductSize,
 } from '@sinshin/shared'
+import { authJson, getJson, postJson } from '#/lib/api-fetch'
+import type { ProductFormData } from '#/types/forms'
 
 // ─── re-export تایپ‌ها برای صفحات (قرارداد قبلی حفظ) ───
 
@@ -347,6 +348,8 @@ export async function createAdminProduct(input: {
 			),
 			prepTime: input.data.prepTime,
 			packagingCost: input.data.packagingCost ?? 0,
+			// stage-84 — اقلام بسته‌بندیِ انتخابی (junction سمت سرور سینک می‌شود)
+			packagingItemIds: input.data.packagingItemIds ?? [],
 			// stage-60 — آرایه‌ی دسته‌ها (اولین = اصلی) + پرچم ویژه
 			categoryIds: input.data.categoryIds,
 			isFeatured: input.data.isFeatured ?? false,
@@ -384,6 +387,8 @@ export async function updateAdminProduct(input: {
 			),
 			prepTime: input.data.prepTime,
 			packagingCost: input.data.packagingCost ?? 0,
+			// stage-84 — اقلام بسته‌بندی: سینک کامل (undefined نمی‌فرستیم)
+			packagingItemIds: input.data.packagingItemIds ?? [],
 			// stage-60 — سینک کامل دسته‌ها (اولین = اصلی؛ دسته دیگر immutable نیست)
 			categoryIds: input.data.categoryIds,
 			isFeatured: input.data.isFeatured ?? false,
@@ -397,6 +402,57 @@ export async function updateAdminProduct(input: {
 			...productSlugPayload(input.data),
 			...ar,
 		},
+	)
+}
+
+// ═══ stage-84 — اقلام بسته‌بندی (قیمت سراسری) ═══
+
+export type PackagingItem = PackagingItemDto
+
+/** لیست کامل برای پنل ادمین (شامل غیرفعال‌ها) — گارد productsRead */
+export async function getPackagingItems(): Promise<PackagingItemDto[]> {
+	return authJson<PackagingItemDto[]>('/admin/menu/packaging-items', 'GET')
+}
+
+export async function addPackagingItem(input: {
+	data: {
+		title: string
+		price: number
+		titleAr?: string | null
+		sortOrder?: number
+	}
+}): Promise<PackagingItemDto> {
+	return authJson<PackagingItemDto>('/admin/menu/packaging-items', 'POST', {
+		title: input.data.title,
+		price: input.data.price,
+		titleAr: input.data.titleAr || null,
+		sortOrder: input.data.sortOrder,
+	})
+}
+
+export async function updatePackagingItem(input: {
+	id: string
+	data: {
+		title?: string
+		price?: number
+		titleAr?: string | null
+		isActive?: boolean
+		sortOrder?: number
+	}
+}): Promise<PackagingItemDto> {
+	return authJson<PackagingItemDto>(
+		`/admin/menu/packaging-items/${input.id}`,
+		'PATCH',
+		input.data,
+	)
+}
+
+export async function removePackagingItem(input: {
+	id: string
+}): Promise<{ success: boolean }> {
+	return authJson<{ success: boolean }>(
+		`/admin/menu/packaging-items/${input.id}`,
+		'DELETE',
 	)
 }
 

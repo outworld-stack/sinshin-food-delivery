@@ -18,110 +18,140 @@
 
 /** نوع‌های بلوک — whitelist بسته؛ رندرر بلوک ناشناخته را بی‌صدا رد می‌کند */
 export type ArticleBlockType =
-	| 'hero'
-	| 'heading'
-	| 'paragraph'
-	| 'image'
-	| 'gallery'
-	| 'quote'
-	| 'callout'
-	| 'list'
-	| 'cta'
-	| 'divider'
+        | 'hero'
+        | 'heading'
+        | 'paragraph'
+        | 'image'
+        | 'gallery'
+        | 'quote'
+        | 'callout'
+        | 'list'
+        | 'cta'
+        | 'link'
+        | 'location'
+        | 'divider'
 
 /** عرض پله‌ای (الگوی Ghost): sm≈50% · md≈70% · lg=100% ستون متن · full=خروج از حاشیه‌ی متن */
 export type ArticleBlockWidth = 'sm' | 'md' | 'lg' | 'full'
 
 /** انیمیشنِ ورود بلوک در صفحه‌ی عمومی (الگوی AOS) */
 export type ArticleBlockAnim =
-	| 'none'
-	| 'fade'
-	| 'fade-up'
-	| 'slide'
-	| 'zoom'
-	| 'blur'
+        | 'none'
+        | 'fade'
+        | 'fade-up'
+        | 'slide'
+        | 'zoom'
+        | 'blur'
 
 /** استایلِ بصری مشترک — رنگ‌ها همیشه hex خالص ۶رقمی (تایپ/سریال‌سازی ساده) */
 export interface ArticleBlockStyle {
-	/** پس‌زمینه — نبود = شفاف/وراثت تم */
-	bg?: string
-	/** متن — نبود = خودکار با کنتراستِ WCAG (pickContrastText) */
-	fg?: string
-	align?: 'start' | 'center'
-	pad?: 'sm' | 'md' | 'lg'
+        /** پس‌زمینه — نبود = شفاف/وراثت تم */
+        bg?: string
+        /** متن — نبود = خودکار با کنتراستِ WCAG (pickContrastText) */
+        fg?: string
+        align?: 'start' | 'center'
+        pad?: 'sm' | 'md' | 'lg'
 }
 
 export interface ArticleHeroProps {
-	/** تصویرِ بزرگِ سرِ صفحه (آپلودی — URL نسبی/https) */
-	src?: string
-	title?: string
-	text?: string
+        /** تصویرِ بزرگِ سرِ صفحه (آپلودی — URL نسبی/https) */
+        src?: string
+        title?: string
+        text?: string
 }
 export interface ArticleHeadingProps {
-	text: string
-	level: 2 | 3
+        text: string
+        level: 2 | 3
 }
 export interface ArticleParagraphProps {
-	text: string
+        text: string
 }
 export interface ArticleImageProps {
-	src: string
-	alt?: string
-	caption?: string
+        src: string
+        alt?: string
+        caption?: string
 }
 export interface ArticleGalleryProps {
-	images: { src: string; alt?: string }[]
-	layout: 'grid' | 'slider'
+        images: { src: string; alt?: string }[]
+        layout: 'grid' | 'slider'
 }
 export interface ArticleQuoteProps {
-	text: string
-	author?: string
+        text: string
+        author?: string
 }
 export interface ArticleCalloutProps {
-	title?: string
-	text: string
+        title?: string
+        text: string
 }
 export interface ArticleListProps {
-	items: string[]
-	ordered?: boolean
+        items: string[]
+        ordered?: boolean
 }
 export interface ArticleCtaProps {
-	title?: string
-	text?: string
-	/** متن دکمه */
-	label: string
-	/** مقصد: مسیرهای داخل اپ یا URL آزادِ https/نسبی */
-	to: 'menu' | 'articles' | 'url'
-	href?: string
+        title?: string
+        text?: string
+        /** متن دکمه */
+        label: string
+        /** مقصد: مسیرهای داخل اپ یا URL آزادِ https/نسبی */
+        to: 'menu' | 'articles' | 'url'
+        href?: string
+}
+/**
+ * stage-84 — بلوک «لینک»: پیوند آزاد (https خارجی یا / نسبیِ داخل اپ).
+ * برخلاف CTA که سه مقصدِ ثابت دارد، این بلوک دکمه/کارتِ پیوندِ خالص است.
+ * href فقط با isArticleBlockUrl معتبر پذیرفته می‌شود (لایه‌های اعتبارسنجی).
+ */
+export interface ArticleLinkProps {
+        /** متن دکمه/پیوند (اجباری) */
+        label: string
+        /** مقصد — https:// یا / نسبی */
+        href: string
+        title?: string
+        text?: string
+        /** شکل نمایش: دکمه پر یا کارت با حاشیه */
+        variant?: 'button' | 'card'
+}
+/**
+ * stage-84 — بلوک «موقعیت»: مختصات + آدرس/عنوان. رندر عمومی نقشه‌ی
+ * فقط-نمایش (کلاینتی، بعد از mount) + کارت آدرس + پیوندِ بیرونی می‌سازد؛
+ * بدون JS هم آدرس/عنوان مرئی است (SSR-سِیف مثل الگوی ab-js).
+ */
+export interface ArticleLocationProps {
+        lat: number
+        lng: number
+        title?: string
+        address?: string
 }
 export interface ArticleDividerProps {
-	variant: 'line' | 'dots' | 'space'
+        variant: 'line' | 'dots' | 'space'
 }
 
 interface ArticleBlockBase {
-	/** کلید پایدار (crypto.randomUUID) — رندر/DnD/دوبل‌کردن؛ هرگز ایندکس نیست */
-	id: string
-	width?: ArticleBlockWidth
-	anim?: ArticleBlockAnim
-	style?: ArticleBlockStyle
+        /** کلید پایدار (crypto.randomUUID) — رندر/DnD/دوبل‌کردن؛ هرگز ایندکس نیست */
+        id: string
+        width?: ArticleBlockWidth
+        anim?: ArticleBlockAnim
+        style?: ArticleBlockStyle
 }
 
 export type ArticleBlock =
-	| (ArticleBlockBase & { type: 'hero'; props: ArticleHeroProps })
-	| (ArticleBlockBase & { type: 'heading'; props: ArticleHeadingProps })
-	| (ArticleBlockBase & { type: 'paragraph'; props: ArticleParagraphProps })
-	| (ArticleBlockBase & { type: 'image'; props: ArticleImageProps })
-	| (ArticleBlockBase & { type: 'gallery'; props: ArticleGalleryProps })
-	| (ArticleBlockBase & { type: 'quote'; props: ArticleQuoteProps })
-	| (ArticleBlockBase & { type: 'callout'; props: ArticleCalloutProps })
-	| (ArticleBlockBase & { type: 'list'; props: ArticleListProps })
-	| (ArticleBlockBase & { type: 'cta'; props: ArticleCtaProps })
-	| (ArticleBlockBase & { type: 'divider'; props: ArticleDividerProps })
+        | (ArticleBlockBase & { type: 'hero'; props: ArticleHeroProps })
+        | (ArticleBlockBase & { type: 'heading'; props: ArticleHeadingProps })
+        | (ArticleBlockBase & { type: 'paragraph'; props: ArticleParagraphProps })
+        | (ArticleBlockBase & { type: 'image'; props: ArticleImageProps })
+        | (ArticleBlockBase & { type: 'gallery'; props: ArticleGalleryProps })
+        | (ArticleBlockBase & { type: 'quote'; props: ArticleQuoteProps })
+        | (ArticleBlockBase & { type: 'callout'; props: ArticleCalloutProps })
+        | (ArticleBlockBase & { type: 'list'; props: ArticleListProps })
+        | (ArticleBlockBase & { type: 'cta'; props: ArticleCtaProps })
+        | (ArticleBlockBase & { type: 'link'; props: ArticleLinkProps })
+        | (ArticleBlockBase & { type: 'location'; props: ArticleLocationProps })
+        | (ArticleBlockBase & { type: 'divider'; props: ArticleDividerProps })
 
 /** سندِ بلوکیِ مقاله — در ستون jsonb `articles.blocks` */
 export interface ArticleBlocksDoc {
-	version: 1
-	blocks: ArticleBlock[]
+        version: 1
+        blocks: ArticleBlock[]
 }
 
 // ═══════════════════ توابع خالص (فرانت + بک) ═══════════════════
@@ -131,26 +161,26 @@ const HEX_RE = /^#[0-9a-fA-F]{6}$/
 const INVALID_URL_CHARACTERS_RE = /[\s\\\u0000-\u001f\u007f]/u
 
 export function isHexColor(v: unknown): v is string {
-	return typeof v === 'string' && HEX_RE.test(v)
+        return typeof v === 'string' && HEX_RE.test(v)
 }
 
 /** HTTPS or a local root-relative path; never a protocol-relative URL. */
 export function isArticleBlockUrl(value: unknown): value is string {
-	if (
-		typeof value !== 'string' ||
-		!value ||
-		INVALID_URL_CHARACTERS_RE.test(value)
-	) {
-		return false
-	}
-	if (value.startsWith('/')) return !value.startsWith('//')
-	if (!/^https:\/\/[^/]/i.test(value)) return false
-	try {
-		const parsed = new URL(value)
-		return parsed.protocol === 'https:' && Boolean(parsed.hostname)
-	} catch {
-		return false
-	}
+        if (
+                typeof value !== 'string' ||
+                !value ||
+                INVALID_URL_CHARACTERS_RE.test(value)
+        ) {
+                return false
+        }
+        if (value.startsWith('/')) return !value.startsWith('//')
+        if (!/^https:\/\/[^/]/i.test(value)) return false
+        try {
+                const parsed = new URL(value)
+                return parsed.protocol === 'https:' && Boolean(parsed.hostname)
+        } catch {
+                return false
+        }
 }
 
 /**
@@ -159,33 +189,33 @@ export function isArticleBlockUrl(value: unknown): value is string {
  * انتخابِ بزرگ‌تر. پیش‌فرضِ `fg` بلوک‌هاست (رنگِ دستی فقط override).
  */
 export function pickContrastText(bg: string): '#000000' | '#ffffff' {
-	const hex = bg.replace('#', '')
-	const r = Number.parseInt(hex.slice(0, 2), 16) / 255
-	const g = Number.parseInt(hex.slice(2, 4), 16) / 255
-	const b = Number.parseInt(hex.slice(4, 6), 16) / 255
-	const lin = (c: number) =>
-		c <= 0.039_28 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-	const l = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
-	const withWhite = 1.05 / (l + 0.05)
-	const withBlack = (l + 0.05) / 0.05
-	return withWhite >= withBlack ? '#ffffff' : '#000000'
+        const hex = bg.replace('#', '')
+        const r = Number.parseInt(hex.slice(0, 2), 16) / 255
+        const g = Number.parseInt(hex.slice(2, 4), 16) / 255
+        const b = Number.parseInt(hex.slice(4, 6), 16) / 255
+        const lin = (c: number) =>
+                c <= 0.039_28 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+        const l = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+        const withWhite = 1.05 / (l + 0.05)
+        const withBlack = (l + 0.05) / 0.05
+        return withWhite >= withBlack ? '#ffffff' : '#000000'
 }
 
 /** نسبت کنتراست (پس‌زمینه، متن) — برای هشدارِ inline فرم (WCAG AA = ۴٫۵) */
 export function contrastRatio(a: string, b: string): number {
-	const lum = (hex: string) => {
-		const h = hex.replace('#', '')
-		const lin = (i: number) => {
-			const c = Number.parseInt(h.slice(i, i + 2), 16) / 255
-			return c <= 0.039_28 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-		}
-		return 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4)
-	}
-	const l1 = lum(a)
-	const l2 = lum(b)
-	const hi = Math.max(l1, l2)
-	const lo = Math.min(l1, l2)
-	return (hi + 0.05) / (lo + 0.05)
+        const lum = (hex: string) => {
+                const h = hex.replace('#', '')
+                const lin = (i: number) => {
+                        const c = Number.parseInt(h.slice(i, i + 2), 16) / 255
+                        return c <= 0.039_28 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+                }
+                return 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4)
+        }
+        const l1 = lum(a)
+        const l2 = lum(b)
+        const hi = Math.max(l1, l2)
+        const lo = Math.min(l1, l2)
+        return (hi + 0.05) / (lo + 0.05)
 }
 
 /**
@@ -195,47 +225,54 @@ export function contrastRatio(a: string, b: string): number {
  * ترتیب بلوک‌ها حفظ می‌شود؛ بلوک‌های تصویری/جداکننده متن نمی‌سازند.
  */
 export function blocksToPlainText(
-	doc: ArticleBlocksDoc | null | undefined,
+        doc: ArticleBlocksDoc | null | undefined,
 ): string {
-	if (!doc || !Array.isArray(doc.blocks)) return ''
-	const parts: string[] = []
-	const cleanText = (value: unknown): string =>
-		typeof value === 'string' ? value.trim() : ''
-	const append = (value: unknown): void => {
-		const text = cleanText(value)
-		if (text) parts.push(text)
-	}
-	for (const b of doc.blocks) {
-		if (!b || typeof b !== 'object') continue
-		switch (b.type) {
-			case 'hero':
-			case 'callout':
-			case 'cta':
-				append(b.props?.title)
-				append(b.props?.text)
-				break
-			case 'heading':
-			case 'paragraph':
-				append(b.props?.text)
-				break
-			case 'quote': {
-				const text = cleanText(b.props?.text)
-				const author = cleanText(b.props?.author)
-				if (text) {
-					parts.push(author ? `${text} — ${author}` : text)
-				}
-				break
-			}
-			case 'list':
-				if (Array.isArray(b.props?.items)) {
-					append(b.props.items.map(cleanText).filter(Boolean).join('\n'))
-				}
-				break
-			default:
-				break
-		}
-	}
-	return parts.join('\n\n').trim()
+        if (!doc || !Array.isArray(doc.blocks)) return ''
+        const parts: string[] = []
+        const cleanText = (value: unknown): string =>
+                typeof value === 'string' ? value.trim() : ''
+        const append = (value: unknown): void => {
+                const text = cleanText(value)
+                if (text) parts.push(text)
+        }
+        for (const b of doc.blocks) {
+                if (!b || typeof b !== 'object') continue
+                switch (b.type) {
+                        case 'hero':
+                        case 'callout':
+                        case 'cta':
+                        case 'link':
+                                append(b.props?.title)
+                                append(b.props?.text)
+                                break
+                        case 'heading':
+                        case 'paragraph':
+                                append(b.props?.text)
+                                break
+                        case 'quote': {
+                                const text = cleanText(b.props?.text)
+                                const author = cleanText(b.props?.author)
+                                if (text) {
+                                        parts.push(author ? `${text} — ${author}` : text)
+                                }
+                                break
+                        }
+                        case 'list':
+                                if (Array.isArray(b.props?.items)) {
+                                        append(b.props.items.map(cleanText).filter(Boolean).join('\n'))
+                                }
+                                break
+                        case 'location':
+                                // stage-84 — موقعیت: عنوان/آدرس محتوای واقعی‌اند
+                                // (سئو/ترجمه/گارد «حداقل یک بلوک متنی» آن‌ها را می‌شمارند)
+                                append(b.props?.title)
+                                append(b.props?.address)
+                                break
+                        default:
+                                break
+                }
+        }
+        return parts.join('\n\n').trim()
 }
 
 /** نسخه‌ی سند — الگوی Editor.js: مهاجرتِ آینده از همین عدد شروع می‌شود */

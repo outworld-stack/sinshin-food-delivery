@@ -35,6 +35,8 @@ export async function getRestaurantStatus(): Promise<RestaurantStatus> {
 				? s.temporaryReopenTime
 				: s.nextOpenTime,
 		closeReason: s.temporarilyClosed ? s.temporaryCloseReason : null,
+		// stage-84 — شلوغی: جدا از بسته‌بودن (هشدارِ یادداشت سرو در محل)
+		isBusy: s.isBusy === true,
 	}
 }
 

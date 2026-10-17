@@ -6,7 +6,7 @@
 
 // src/hooks/site/useCheckoutPage.ts
 
-import { normalizeCouponCode, type CheckoutItemInput } from '@sinshin/shared'
+import { type CheckoutItemInput, normalizeCouponCode } from '@sinshin/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -19,6 +19,8 @@ import {
 } from 'react'
 import { useMenuLive } from '#/hooks/shared/useMenuLive'
 import { tpl, useI18n } from '#/i18n'
+import { checkoutIntentKey, clearCheckoutIntent } from '#/lib/checkout-intent'
+import { rememberPendingCheckout } from '#/lib/pending-checkout'
 import { mockPay, processCheckout } from '#/server/checkout'
 import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
@@ -28,8 +30,6 @@ import type {
 	CouponStatus,
 	DeliveryType,
 } from '#/types/site/checkout'
-import { rememberPendingCheckout } from '#/lib/pending-checkout'
-import { checkoutIntentKey, clearCheckoutIntent } from '#/lib/checkout-intent'
 import { qk } from '#/utils/queryKeys'
 import { checkoutPreviewOptions } from '#/utils/queryOptions'
 
@@ -252,6 +252,28 @@ export function useCheckoutPage(deps: {
 
 	const couponApplied = previewData?.coupon?.valid === true
 	const isGatewayDisabled = calc.amountPaidOnline === 0
+	// stage-84 — درگاه‌های فعال از preview (سوئیچ‌های ادمین اصلی).
+	// ترمیم اسکنِ استیج-۸۴: «آرایه‌ی خالی» (همه‌ی درگاه‌ها خاموش) دیگر با
+	// «غایب» (کلاینت قدیمی → همه فعال) اشتباه نمی‌شود — قبلاً [] هم به
+	// پشتیبانِ هر-سه می‌رفت و رادیوها نمایش داده می‌شدند و پیامِ
+	// gatewaysUnavailable مرده بود؛ سرور ۴۲۲ می‌داد.
+	const availableGateways = import.meta.env.DEV
+		? ['MOCK']
+		: previewData?.gateways !== undefined
+			? previewData.gateways
+			: ['MELLAT', 'ZARINPAL', 'SEP']
+	// stage-84 — درگاهِ انتخابی که غیرفعال شد → ریست (رادیوی مرده نه)
+	useEffect(() => {
+		if (
+			state.selectedGateway !== '' &&
+			!availableGateways.includes(state.selectedGateway)
+		) {
+			dispatch({ type: 'SET_GATEWAY', payload: '' })
+		}
+	}, [availableGateways, state.selectedGateway])
+	// stage-84 — شلوغی: سرو در محل + رستوران شلوغ → یادداشت الزامی
+	const restaurantBusy = previewData?.restaurantBusy === true
+	const busyDineIn = restaurantBusy && state.deliveryType === 'DINE_IN'
 	// stage-48 — قفل‌های سروری: آیتم ناموجود یا حالت تحویلِ انتخابیِ مسدود
 	const deliveryBlockedFor =
 		state.deliveryType === 'DELIVERY'
@@ -261,7 +283,8 @@ export function useCheckoutPage(deps: {
 				: blocked.dineInBlockedNames
 	const isDeliveryBlocked = deliveryBlockedFor.length > 0
 	const isSubmitBlocked =
-		!previewData || isPreviewFetching ||
+		!previewData ||
+		isPreviewFetching ||
 		(state.couponStatus === 'HAVE' && !couponApplied) ||
 		isPreviewError ||
 		hasUnavailableItems ||
@@ -377,7 +400,10 @@ export function useCheckoutPage(deps: {
 						if (res.orderId) {
 							rememberPendingCheckout(res.orderId)
 							setActiveOrderId(res.orderId)
-							void navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
+							void navigate({
+								to: '/dashboard/orders/$orderId',
+								params: { orderId: res.orderId },
+							})
 						}
 						showToast(
 							err instanceof Error ? err.message : t['checkout.payError'],
@@ -392,8 +418,7 @@ export function useCheckoutPage(deps: {
 				// ── درگاه واقعی (URL مطلق) — ریدایرکت؛ سبد پاک «نمی‌شود» ──
 				// برگشت از درگاه → /dashboard/orders/:orderId → پول →
 				// اولین SUCCESS با پرچمِ همین سفارش → سبد پاک می‌شود
-				if (res.orderId)
-					rememberPendingCheckout(res.orderId)
+				if (res.orderId) rememberPendingCheckout(res.orderId)
 				window.location.href = res.paymentUrl
 				return
 			}
@@ -401,7 +426,10 @@ export function useCheckoutPage(deps: {
 			if (res.orderId) {
 				rememberPendingCheckout(res.orderId)
 				setActiveOrderId(res.orderId)
-				void navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
+				void navigate({
+					to: '/dashboard/orders/$orderId',
+					params: { orderId: res.orderId },
+				})
 				return
 			}
 			showToast(t['checkout.orderProcessFail'], 'error')
@@ -413,7 +441,13 @@ export function useCheckoutPage(deps: {
 	})
 
 	const handleFinalSubmit = useCallback(() => {
-		if (checkoutMutation.isPending || mockPayPending || isPreviewFetching || !previewData) return
+		if (
+			checkoutMutation.isPending ||
+			mockPayPending ||
+			isPreviewFetching ||
+			!previewData
+		)
+			return
 		// stage-48 — گارد ناموجودی (سروری): پرداخت قفل تا رفع/حذف آیتم
 		if (hasUnavailableItems) {
 			showToast(
@@ -434,6 +468,12 @@ export function useCheckoutPage(deps: {
 		}
 		if (state.deliveryType === 'DELIVERY' && !state.selectedAddressId) {
 			showToast(t['checkout.pickAddress'], 'error')
+			return
+		}
+		// stage-84 — شلوغی: سرو در محل بدونِ یادداشت (اسم و میز) ثبت نمی‌شود.
+		// گاردِ سروری هم داخل tx چک‌اوت هست (خطای ۴۲۲ فارسی) — این توستِ اول.
+		if (busyDineIn && !state.customerNote.trim()) {
+			showToast(t['checkout.busyNoteRequired'], 'error')
 			return
 		}
 		// رارد L15 — درگاهِ انتخاب‌نشده = ثبت قفل شود (نه اینکه حدسِ MELLAT
@@ -476,6 +516,7 @@ export function useCheckoutPage(deps: {
 		isDeliveryBlocked,
 		blocked,
 		deliveryBlockedFor,
+		busyDineIn,
 	])
 
 	return {
@@ -492,6 +533,10 @@ export function useCheckoutPage(deps: {
 		hasUnavailableItems,
 		isDeliveryBlocked,
 		deliveryBlockedFor,
+		/** stage-84 — درگاه‌های فعال + شلوغی (از preview) */
+		availableGateways,
+		restaurantBusy,
+		busyDineIn,
 		checkoutMutation,
 		// stage-77 (P3-16) — قفلِ دکمه در پنجره‌ی mockPay (isPendingِ میوتیشن تم شده)
 		mockPayPending,

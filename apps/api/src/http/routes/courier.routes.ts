@@ -37,7 +37,7 @@ export const courierRoutes = (deps: CourierRoutesDeps) => {
         detail: {
           summary: 'Courier OTP (for QR-auth orders)',
           description:
-            'Only registered courier phones. IP: 10/min. Per-phone: 60s cooldown, 5/hour. Code TTL 2min, max 5 verify attempts.',
+            'Only registered courier phones. IP: 10/min. Per-phone: 60s cooldown, 5/hour. Code TTL 2min, max 5 verify attempts. Token TTL 3h (stage-84).',
         },
       },
     )
@@ -58,7 +58,7 @@ export const courierRoutes = (deps: CourierRoutesDeps) => {
           limit: 30,
           windowSeconds: 60,
         }),
-        detail: { summary: 'Verify courier OTP → 1-hour courier token' },
+        detail: { summary: 'Verify courier OTP → 3-hour courier token (stage-84)' },
       },
     )
 

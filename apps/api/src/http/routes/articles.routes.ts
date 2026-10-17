@@ -61,6 +61,8 @@ const blockSchema = t.Object({
     t.Literal('callout'),
     t.Literal('list'),
     t.Literal('cta'),
+    t.Literal('link'),
+    t.Literal('location'),
     t.Literal('divider'),
   ]),
   width: t.Optional(t.Union([t.Literal('sm'), t.Literal('md'), t.Literal('lg'), t.Literal('full')])),

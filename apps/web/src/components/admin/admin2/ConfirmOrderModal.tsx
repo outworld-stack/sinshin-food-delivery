@@ -1,325 +1,300 @@
 // src/components/admin/admin2/ConfirmOrderModal.tsx
 
+import type { LiveOrderDto } from '@sinshin/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useEffect, useState } from 'react'
 import { Bicycle, Check, Printer, ShieldCheck } from 'reicon-react'
 import { Toggle } from '#/components/shared/Toggle'
-import {
-        confirmLiveOrder,
-        getStaffOrderInvoice,
-        reassignCourier,
-} from '#/server/admin'
-import type { LiveOrderDto } from '@sinshin/shared'
+import { confirmLiveOrder, reassignCourier } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
-import { printOrderInvoices } from '#/utils/invoicePrint'
 import { qk } from '#/utils/queryKeys'
 import { couriersAssignmentOptions } from '#/utils/queryOptions'
 
 const MISC_OPTION = '__misc__'
 
 interface ConfirmOrderModalProps {
-        orderId: string
-        courierId: string | null
-        isReassign: boolean
-        /** round-26 — نوع تحویل سفارش: سلکت پیک و سوییچ QR فقط برای DELIVERY */
-        deliveryType: LiveOrderDto['deliveryType']
-        onDone: () => void
-        onCancel: () => void
+	orderId: string
+	courierId: string | null
+	isReassign: boolean
+	/** round-26 — نوع تحویل سفارش: سلکت پیک و سوییچ QR فقط برای DELIVERY */
+	deliveryType: LiveOrderDto['deliveryType']
+	onDone: () => void
+	onCancel: () => void
 }
 
 // فرم واحد
 interface ConfirmOrderForm {
-        selected: string
-        miscNote: string
-        /** round-14 — یادداشت روی فاکتور فروش (بیرون‌بر) چاپ شود؟ */
-        notePrintOnInvoice: boolean
-        securityEnabled: boolean
+	selected: string
+	miscNote: string
+	/** round-14 — یادداشت روی فاکتور فروش (بیرون‌بر) چاپ شود؟ */
+	notePrintOnInvoice: boolean
+	securityEnabled: boolean
 }
 
 const initialForm = (courierId: string | null): ConfirmOrderForm => ({
-        selected: courierId ?? MISC_OPTION,
-        miscNote: '',
-        notePrintOnInvoice: false,
-        securityEnabled: false,
+	selected: courierId ?? MISC_OPTION,
+	miscNote: '',
+	notePrintOnInvoice: false,
+	securityEnabled: false,
 })
 
 export const ConfirmOrderModal = memo(function ConfirmOrderModal({
-        orderId,
-        courierId,
-        onDone,
-        onCancel,
-        isReassign,
-        deliveryType,
+	orderId,
+	courierId,
+	onDone,
+	onCancel,
+	isReassign,
+	deliveryType,
 }: ConfirmOrderModalProps) {
-        const queryClient = useQueryClient()
-        const showToast = useToastStore((s) => s.showToast)
-        // round-26 — پیک فقط برای «ارسال پیک»؛ سرو در محل / تحویل حضوری
-        // نه سلکت پیک دارند، نه سوییچ امنیت QR
-        const isDelivery = deliveryType === 'DELIVERY'
+	const queryClient = useQueryClient()
+	const showToast = useToastStore((s) => s.showToast)
+	// round-26 — پیک فقط برای «ارسال پیک»؛ سرو در محل / تحویل حضوری
+	// نه سلکت پیک دارند، نه سوییچ امنیت QR
+	const isDelivery = deliveryType === 'DELIVERY'
 
-        const [form, setForm] = useState<ConfirmOrderForm>(() =>
-                initialForm(courierId),
-        )
-        const set = useCallback((partial: Partial<ConfirmOrderForm>) => {
-                setForm((f) => ({ ...f, ...partial }))
-        }, [])
+	const [form, setForm] = useState<ConfirmOrderForm>(() =>
+		initialForm(courierId),
+	)
+	const set = useCallback((partial: Partial<ConfirmOrderForm>) => {
+		setForm((f) => ({ ...f, ...partial }))
+	}, [])
 
-        // ⬅ NEW: کوئری از فکتوری مرکزی — قبلاً کلید خام ['couriers-assignment'] بود (هم‌hash)
-        const { data: couriers } = useQuery(couriersAssignmentOptions)
+	// ⬅ NEW: کوئری از فکتوری مرکزی — قبلاً کلید خام ['couriers-assignment'] بود (هم‌hash)
+	const { data: couriers } = useQuery(couriersAssignmentOptions)
 
-        // سینک انتخاب با پیکِ فعلی سفارش
-        useEffect(() => {
-                set({ selected: courierId ?? MISC_OPTION })
-        }, [courierId, set])
+	// سینک انتخاب با پیکِ فعلی سفارش
+	useEffect(() => {
+		set({ selected: courierId ?? MISC_OPTION })
+	}, [courierId, set])
 
-        // round-12 — چاپ واقعی فاکتورها (قبلاً فقط ادعای متنی بود): پس از موفقیت،
-        // دیتای فاکتور گرفته می‌شود و سند مستقل (printDocument) چاپ می‌شود.
-        // خطای چاپ جریان تایید را نمی‌شکند — فقط پیام شناور.
-        // round-14 — فرمت رسیدی 80mm (پرینتر ستونی مغازه).
-        const printInvoices = useCallback(
-                async (orderId: string, kinds: ('kitchen' | 'sales')[]) => {
-                        try {
-                                const inv = await getStaffOrderInvoice(orderId)
-                                await printOrderInvoices(inv, kinds)
-                        } catch (err) {
-                                showToast(
-                                        err instanceof Error
-                                                ? `چاپ فاکتور ناموفق بود: ${err.message}`
-                                                : 'چاپ فاکتور ناموفق بود',
-                                        'error',
-                                )
-                        }
-                },
-                [showToast],
-        )
+	// stage-84 — «خدمت چاپ سفارشی» جایگزین چاپِ خودکار شد: تایید فقط وضعیت
+	// را عوض می‌کند؛ فاکتورها از دکمه‌ی «چاپ فاکتور» روی کارت سفارش (هر
+	// زمان، با انتخاب نوع فاکتور و پرینتر در پنجره‌ی چاپ) گرفته می‌شوند.
 
-        const confirmMutation = useMutation({
-                mutationFn: (payload: {
-                        orderId: string
-                        courierId: string | null
-                        courierNote: string | null
-                        notePrintOnInvoice: boolean
-                        securityEnabled: boolean
-                }) => confirmLiveOrder(payload),
-                onSuccess: (res) => {
-                        if (!res.success) {
-                                showToast(res.message ?? 'خطا', 'error')
-                                return
-                        }
-                        // ⬅ NEW: کلیدها از فکتوری + رفرش بین-کشی:
-                        // پنل زنده + لیست سفارشات ادمین + صفحات جزئیات باز (تایید = تغییر وضعیت/پیک)
-                        queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
-                        queryClient.invalidateQueries({ queryKey: qk.adminOrdersAll })
-                        queryClient.invalidateQueries({ queryKey: qk.adminOrderDetailsAll })
-                        showToast(
-                                'سفارش تایید شد — فاکتور اشپزخانه برای چاپ ارسال شد؛ پس از بسته‌شدن پنجره، فاکتور فروش می‌آید',
-                        )
-                        onDone()
-                        void printInvoices(orderId, ['kitchen', 'sales'])
-                },
-        })
+	const confirmMutation = useMutation({
+		mutationFn: (payload: {
+			orderId: string
+			courierId: string | null
+			courierNote: string | null
+			notePrintOnInvoice: boolean
+			securityEnabled: boolean
+		}) => confirmLiveOrder(payload),
+		onSuccess: (res) => {
+			if (!res.success) {
+				showToast(res.message ?? 'خطا', 'error')
+				return
+			}
+			// ⬅ NEW: کلیدها از فکتوری + رفرش بین-کشی:
+			// پنل زنده + لیست سفارشات ادمین + صفحات جزئیات باز (تایید = تغییر وضعیت/پیک)
+			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
+			queryClient.invalidateQueries({ queryKey: qk.adminOrdersAll })
+			queryClient.invalidateQueries({ queryKey: qk.adminOrderDetailsAll })
+			showToast(
+				'سفارش تایید شد — فاکتورها را هر زمان از دکمه‌ی «چاپ فاکتور» کارت سفارش بگیرید',
+			)
+			onDone()
+		},
+	})
 
-        const reassignMutation = useMutation({
-                mutationFn: (payload: { orderId: string; newCourierId: string | null }) =>
-                        reassignCourier(payload),
-                onSuccess: (res) => {
-                        if (!res.success) {
-                                showToast(res.message ?? 'خطا', 'error')
-                                return
-                        }
-                        // ⬅ NEW: مثل تایید — پنل زنده + لیست + جزئیات باز هم‌تراز می‌شوند
-                        queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
-                        queryClient.invalidateQueries({ queryKey: qk.adminOrdersAll })
-                        queryClient.invalidateQueries({ queryKey: qk.adminOrderDetailsAll })
-                        showToast('پیک سفارش تغییر کرد — فاکتور فروش برای چاپ مجدد آماده است')
-                        onDone()
-                        void printInvoices(orderId, ['sales'])
-                },
-        })
+	const reassignMutation = useMutation({
+		mutationFn: (payload: { orderId: string; newCourierId: string | null }) =>
+			reassignCourier(payload),
+		onSuccess: (res) => {
+			if (!res.success) {
+				showToast(res.message ?? 'خطا', 'error')
+				return
+			}
+			// ⬅ NEW: مثل تایید — پنل زنده + لیست + جزئیات باز هم‌تراز می‌شوند
+			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
+			queryClient.invalidateQueries({ queryKey: qk.adminOrdersAll })
+			queryClient.invalidateQueries({ queryKey: qk.adminOrderDetailsAll })
+			showToast('پیک سفارش تغییر کرد')
+			onDone()
+		},
+	})
 
-        const handleConfirm = useCallback(() => {
-                if (isReassign) {
-                        reassignMutation.mutate({
-                                orderId,
-                                newCourierId: form.selected === MISC_OPTION ? null : form.selected,
-                        })
-                } else {
-                        confirmMutation.mutate({
-                                orderId,
-                                // round-26 — پیک فقط برای DELIVERY — دفاع دوم کنار بک‌اند
-                                courierId:
-                                        isDelivery && form.selected !== MISC_OPTION ? form.selected : null,
-                                // round-14 — یادداشت اختیاری برای هر تاییدی (نه فقط متفرقه)؛
-                                // اگر خالی بود، پرچم چاپ بی‌اثر است (سرور هم گارد دارد)
-                                courierNote: form.miscNote.trim() || null,
-                                notePrintOnInvoice: form.notePrintOnInvoice,
-                                securityEnabled: isDelivery && form.securityEnabled,
-                        })
-                }
-        }, [isReassign, isDelivery, form, orderId, confirmMutation, reassignMutation])
+	const handleConfirm = useCallback(() => {
+		if (isReassign) {
+			reassignMutation.mutate({
+				orderId,
+				newCourierId: form.selected === MISC_OPTION ? null : form.selected,
+			})
+		} else {
+			confirmMutation.mutate({
+				orderId,
+				// round-26 — پیک فقط برای DELIVERY — دفاع دوم کنار بک‌اند
+				courierId:
+					isDelivery && form.selected !== MISC_OPTION ? form.selected : null,
+				// round-14 — یادداشت اختیاری برای هر تاییدی (نه فقط متفرقه)؛
+				// اگر خالی بود، پرچم چاپ بی‌اثر است (سرور هم گارد دارد)
+				courierNote: form.miscNote.trim() || null,
+				notePrintOnInvoice: form.notePrintOnInvoice,
+				securityEnabled: isDelivery && form.securityEnabled,
+			})
+		}
+	}, [isReassign, isDelivery, form, orderId, confirmMutation, reassignMutation])
 
-        const hasNote = form.miscNote.trim().length > 0
+	const hasNote = form.miscNote.trim().length > 0
 
-        return (
-                <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
-                        <div
-                                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                                onClick={onCancel}
-                        ></div>
-                        <div className="relative bg-white dark:bg-[#2a1015] p-6 rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-                                <h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-1">
-                                        {isReassign ? `تغییر پیک سفارش ${orderId}` : `تایید سفارش ${orderId}`}
-                                </h3>
-                                {!isReassign && (
-                                        <p className="text-xs text-gray-400 font-DanaMedium mb-5 leading-relaxed">
-                                                با تایید، ابتدا فاکتور اشپزخانه و پس از بسته‌شدن پنجرهٔ چاپ آن، فاکتور
-                                                فروش ارسال می‌شود — هر فاکتور پنجرهٔ چاپ جداگانه دارد تا هر کدام روی
-                                                پرینتر خودش (اشپزخانه / میز بیرون‌بر) چاپ شود. فرمت هر دو فاکتور
-                                                رسیدی (ستونی) است.
-                                        </p>
-                                )}
-                                {isReassign && (
-                                        <p className="text-xs text-gray-400 font-DanaMedium mb-5">
-                                                فاکتور پیک (فروش) با اطلاعات جدید دوباره چاپ می‌شود.
-                                        </p>
-                                )}
+	return (
+		<div className="fixed inset-0 z-100 flex items-center justify-center p-4">
+			<div
+				className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+				onClick={onCancel}
+			></div>
+			<div className="relative bg-white dark:bg-[#2a1015] p-6 rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+				<h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-1">
+					{isReassign ? `تغییر پیک سفارش ${orderId}` : `تایید سفارش ${orderId}`}
+				</h3>
+				{!isReassign && (
+					<p className="text-xs text-gray-400 font-DanaMedium mb-5 leading-relaxed">
+						با تایید، سفارش وارد جریان آماده‌سازی/ارسال می‌شود. چاپ فاکتورها
+						خودکار نیست — از دکمه‌ی «چاپ فاکتور» روی کارت سفارش، هر زمان و با
+						انتخاب فاکتور سالن/آشپزخانه و پرینتر مقصد، چاپ بگیرید.
+					</p>
+				)}
+				{isReassign && (
+					<p className="text-xs text-gray-400 font-DanaMedium mb-5">
+						فاکتور فروش با QR پیکِ جدید را بعداً از دکمه‌ی «چاپ فاکتور» بگیرید.
+					</p>
+				)}
 
-                                {/* round-26 — سلکت پیک فقط برای ارسال پیک؛ حضوری‌ها فقط چاپ */}
-                                {isDelivery && (
-                                        <div className="mb-4">
-                                                <label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
-                                                        انتخاب پیک
-                                                </label>
-                                                <div className="relative">
-                                                        <select
-                                                                value={form.selected}
-                                                                onChange={(e) => set({ selected: e.target.value })}
-                                                                className="w-full appearance-none px-4 py-3 pl-10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm cursor-pointer"
-                                                        >
-                                                                <option value={MISC_OPTION}>متفرقه (تخصیص در محل)</option>
-                                                                {(couriers ?? []).map((c) => (
-                                                                        <option key={c.id} value={c.id}>
-                                                                                {c.name} — {c.phone}
-                                                                        </option>
-                                                                ))}
-                                                        </select>
-                                                        <Bicycle
-                                                                size={16}
-                                                                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-                                                        />
-                                                </div>
-                                        </div>
-                                )}
-                                {!isDelivery && (
-                                        <div className="mb-4 flex items-center gap-2 p-3.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
-                                                <span className="text-[13px] text-gray-500 dark:text-gray-400 font-DanaMedium">
-                                                        {deliveryType === 'DINE_IN'
-                                                                ? 'سرو در محل — پیک و QR ندارد'
-                                                                : 'تحویل حضوری — پیک و QR ندارد'}
-                                                </span>
-                                        </div>
-                                )}
+				{/* round-26 — سلکت پیک فقط برای ارسال پیک؛ حضوری‌ها فقط چاپ */}
+				{isDelivery && (
+					<div className="mb-4">
+						<label className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+							انتخاب پیک
+						</label>
+						<div className="relative">
+							<select
+								value={form.selected}
+								onChange={(e) => set({ selected: e.target.value })}
+								className="w-full appearance-none px-4 py-3 pl-10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm cursor-pointer"
+							>
+								<option value={MISC_OPTION}>متفرقه (تخصیص در محل)</option>
+								{(couriers ?? []).map((c) => (
+									<option key={c.id} value={c.id}>
+										{c.name} — {c.phone}
+									</option>
+								))}
+							</select>
+							<Bicycle
+								size={16}
+								className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+							/>
+						</div>
+					</div>
+				)}
+				{!isDelivery && (
+					<div className="mb-4 flex items-center gap-2 p-3.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
+						<span className="text-[13px] text-gray-500 dark:text-gray-400 font-DanaMedium">
+							{deliveryType === 'DINE_IN'
+								? 'سرو در محل — پیک و QR ندارد'
+								: 'تحویل حضوری — پیک و QR ندارد'}
+						</span>
+					</div>
+				)}
 
-                                {/* round-14 — یادداشت تاییدکننده: همیشه (نه فقط متفرقه) + انتخاب چاپ در فاکتور بیرون‌بر */}
-                                {!isReassign && (
-                                        <div className="mb-4">
-                                                <label
-                                                        htmlFor="confirm-order-note"
-                                                        className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
-                                                >
-                                                        یادداشت (اختیاری)
-                                                </label>
-                                                <textarea
-                                                        id="confirm-order-note"
-                                                        value={form.miscNote}
-                                                        onChange={(e) => set({ miscNote: e.target.value.slice(0, 300) })}
-                                                        rows={2}
-                                                        className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm resize-none font-DanaMedium"
-                                                        placeholder="مثلاً: بدون پیاز، تحویل به پاسدار ساختمان..."
-                                                />
-                                                <p className="text-[10px] text-gray-400 mt-1 font-DanaMedium">
-                                                        این یادداشت برای ادمین‌ها و در صفحه سفارش قابل رویت است.
-                                                </p>
+				{/* round-14 — یادداشت تاییدکننده: همیشه (نه فقط متفرقه) + انتخاب چاپ در فاکتور بیرون‌بر */}
+				{!isReassign && (
+					<div className="mb-4">
+						<label
+							htmlFor="confirm-order-note"
+							className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
+						>
+							یادداشت (اختیاری)
+						</label>
+						<textarea
+							id="confirm-order-note"
+							value={form.miscNote}
+							onChange={(e) => set({ miscNote: e.target.value.slice(0, 300) })}
+							rows={2}
+							className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm resize-none font-DanaMedium"
+							placeholder="مثلاً: بدون پیاز، تحویل به پاسدار ساختمان..."
+						/>
+						<p className="text-[10px] text-gray-400 mt-1 font-DanaMedium">
+							این یادداشت برای ادمین‌ها و در صفحه سفارش قابل رویت است.
+						</p>
 
-                                                {/* سوییچ چاپ یادداشت — فقط وقتی یادداشتی نوشته شده */}
-                                                {hasNote && (
-                                                        <div className="mt-3 flex items-center justify-between p-3.5 rounded-xl border-2 border-gray-200 dark:border-[#3a151c]">
-                                                                <div className="flex items-center gap-3">
-                                                                        <span className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
-                                                                                <Printer size={16} />
-                                                                        </span>
-                                                                        <div>
-                                                                                <p className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-                                                                                        چاپ یادداشت در فاکتور بیرون‌بر
-                                                                                </p>
-                                                                                <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">
-                                                                                        روشن: یادداشت روی فاکتور فروش (نسخهٔ بیرون‌بر) چاپ می‌شود.
-                                                                                        خاموش: فقط داخل پنل دیده می‌شود.
-                                                                                </p>
-                                                                        </div>
-                                                                </div>
-                                                                <Toggle
-                                                                        isOn={form.notePrintOnInvoice}
-                                                                        onToggle={() =>
-                                                                                set({ notePrintOnInvoice: !form.notePrintOnInvoice })
-                                                                        }
-                                                                        label="چاپ یادداشت در فاکتور بیرون‌بر"
-                                                                />
-                                                        </div>
-                                                )}
-                                        </div>
-                                )}
+						{/* سوییچ چاپ یادداشت — فقط وقتی یادداشتی نوشته شده */}
+						{hasNote && (
+							<div className="mt-3 flex items-center justify-between p-3.5 rounded-xl border-2 border-gray-200 dark:border-[#3a151c]">
+								<div className="flex items-center gap-3">
+									<span className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
+										<Printer size={16} />
+									</span>
+									<div>
+										<p className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">
+											چاپ یادداشت در فاکتور بیرون‌بر
+										</p>
+										<p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">
+											روشن: یادداشت روی فاکتور فروش (نسخهٔ بیرون‌بر) چاپ می‌شود.
+											خاموش: فقط داخل پنل دیده می‌شود.
+										</p>
+									</div>
+								</div>
+								<Toggle
+									isOn={form.notePrintOnInvoice}
+									onToggle={() =>
+										set({ notePrintOnInvoice: !form.notePrintOnInvoice })
+									}
+									label="چاپ یادداشت در فاکتور بیرون‌بر"
+								/>
+							</div>
+						)}
+					</div>
+				)}
 
-                                {/* سوئیچ امنیت QR — فقط تایید اولیه‌ی سفارش ارسال پیک — round-26 */}
-                                {!isReassign && isDelivery && (
-                                        <div className="flex items-center justify-between p-4 rounded-xl border-2 border-gray-200 dark:border-[#3a151c] mb-5">
-                                                <div className="flex items-center gap-3">
-                                                        <span className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
-                                                                <ShieldCheck size={20} />
-                                                        </span>
-                                                        <div>
-                                                                <p className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-                                                                        امنیت احراز پیک (QR)
-                                                                </p>
-                                                                <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed max-w-55">
-                                                                        فعال: فقط پیک تخصیص‌یافته می‌تواند QR را اسکن کند. خاموش: هر پکی
-                                                                        مجاز است.
-                                                                </p>
-                                                        </div>
-                                                </div>
-                                                <Toggle
-                                                        isOn={form.securityEnabled}
-                                                        onToggle={() => set({ securityEnabled: !form.securityEnabled })}
-                                                        label="امنیت احراز پیک (QR)"
-                                                />
-                                        </div>
-                                )}
+				{/* سوئیچ امنیت QR — فقط تایید اولیه‌ی سفارش ارسال پیک — round-26 */}
+				{!isReassign && isDelivery && (
+					<div className="flex items-center justify-between p-4 rounded-xl border-2 border-gray-200 dark:border-[#3a151c] mb-5">
+						<div className="flex items-center gap-3">
+							<span className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+								<ShieldCheck size={20} />
+							</span>
+							<div>
+								<p className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">
+									امنیت احراز پیک (QR)
+								</p>
+								<p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed max-w-55">
+									فعال: فقط پیک تخصیص‌یافته می‌تواند QR را اسکن کند. خاموش: هر پکی
+									مجاز است.
+								</p>
+							</div>
+						</div>
+						<Toggle
+							isOn={form.securityEnabled}
+							onToggle={() => set({ securityEnabled: !form.securityEnabled })}
+							label="امنیت احراز پیک (QR)"
+						/>
+					</div>
+				)}
 
-                                <div className="flex gap-3">
-                                        <button
-                                                type="button"
-                                                onClick={onCancel}
-                                                className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium cursor-pointer"
-                                        >
-                                                انصراف
-                                        </button>
-                                        <button
-                                                type="button"
-                                                onClick={handleConfirm}
-                                                disabled={confirmMutation.isPending || reassignMutation.isPending}
-                                                className="flex-1 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-                                        >
-                                                {isReassign ? <Check size={16} /> : <Printer size={16} />}
-                                                {isReassign
-                                                        ? reassignMutation.isPending
-                                                                ? 'در حال تغییر...'
-                                                                : 'ثبت تغییر پیک'
-                                                        : confirmMutation.isPending
-                                                                ? 'در حال تایید...'
-                                                                : 'تایید و چاپ'}
-                                        </button>
-                                </div>
-                        </div>
-                </div>
-        )
+				<div className="flex gap-3">
+					<button
+						type="button"
+						onClick={onCancel}
+						className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium cursor-pointer"
+					>
+						انصراف
+					</button>
+					<button
+						type="button"
+						onClick={handleConfirm}
+						disabled={confirmMutation.isPending || reassignMutation.isPending}
+						className="flex-1 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+					>
+						{isReassign ? <Check size={16} /> : <Printer size={16} />}
+						{isReassign
+							? reassignMutation.isPending
+								? 'در حال تغییر...'
+								: 'ثبت تغییر پیک'
+							: confirmMutation.isPending
+								? 'در حال تایید...'
+								: 'تایید سفارش'}
+					</button>
+				</div>
+			</div>
+		</div>
+	)
 })
