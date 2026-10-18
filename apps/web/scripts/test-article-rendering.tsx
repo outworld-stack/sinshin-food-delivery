@@ -4,11 +4,16 @@ import { createElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { blocksToPlainText, isArticleBlockUrl, type ArticleBlocksDoc } from '@sinshin/shared'
 import { observeArticleBlocks } from '../src/components/site/articles/articleBlockAnimations'
+import { defaultParseSearch } from '@tanstack/react-router'
 
 mock.module('@tanstack/react-router', () => ({
-	Link: ({ to, children, ...props }: { to: string; children: ReactNode }) =>
-		createElement('a', { ...props, href: to }, children),
+	defaultParseSearch,
+	Link: ({ to, children, search, hash, ...props }: { to: string; children: ReactNode; search?: Record<string, string>; hash?: string }) => {
+		const query = search ? new URLSearchParams(search).toString() : ''
+		return createElement('a', { ...props, href: to + (query ? `?${query}` : '') + (hash ? `#${hash}` : '') }, children)
+	},
 }))
+mock.module('#/i18n', () => ({ useI18n: () => ({ t: { 'article.viewMap': 'View map' } }) }))
 const { ArticleBlocksRenderer } = await import('../src/components/site/articles/ArticleBlocksRenderer')
 const render = (blocks: unknown[]) => renderToStaticMarkup(createElement(ArticleBlocksRenderer, {
 	doc: { version: 1, blocks } as ArticleBlocksDoc,
@@ -59,6 +64,19 @@ assert.equal(blocksToPlainText({ version: 1, blocks: [
 	{ id: 'quote', type: 'quote', props: { text: ' quote ', author: 123 } },
 	{ id: 'list', type: 'list', props: { items: [42, null, ' item ', {}, ''] } },
 ] } as ArticleBlocksDoc), 'Remaining article <script>alert(1)</script>\n\nquote\n\nitem')
+
+const linked = render([
+	{ id: 'link', type: 'link', props: { label: 'Article', href: '/articles/test?lang=ar#location' } },
+	{ id: 'external', type: 'link', props: { label: 'External', href: 'https://example.com/path' } },
+	{ id: 'invalid-link', type: 'link', props: { label: 'Unsafe', href: 'javascript:alert(1)' } },
+	{ id: 'location', type: 'location', props: { lat: 37, lng: 49, address: 'Test address' } },
+	{ id: 'invalid-location', type: 'location', props: { lat: 91, lng: 49 } },
+])
+assert(linked.includes('href="/articles/test?lang=ar#location"'))
+assert(linked.includes('target="_blank" rel="noopener noreferrer"'))
+assert(!linked.includes('Unsafe'))
+assert(linked.includes('Test address') && linked.includes('View map'))
+assert.equal((linked.match(/neshan.org\/maps/g) ?? []).length, 1)
 
 class FakeElement {
 	classes = new Set<string>()

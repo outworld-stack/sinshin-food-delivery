@@ -21,7 +21,7 @@ import {
 	pickContrastText,
 } from '@sinshin/shared'
 
-import { Link, useRouter } from '@tanstack/react-router'
+import { defaultParseSearch, Link } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
 import { useI18n } from '#/i18n'
 import { ArticleLocationMap } from './ArticleLocationMap'
@@ -119,10 +119,6 @@ const isRenderableBlock = (value: unknown): value is ArticleBlock => {
 // ═══════════════ رندرِ یک بلوک ═══════════════
 
 function BlockContent({ block }: { block: ArticleBlock }) {
-	// ترمیم اسکنِ استیج-۸۴ — ناوبری SPA برای پیوندهای داخلی (الگوی login.tsx:
-	// router.history.push) + برچسبِ دکمهٔ نقشه از i18n (سایت دو-زبانه است؛
-	// فارسیِ هاردکد روی UI عربی نباید بیفتد)
-	const router = useRouter()
 	const { t } = useI18n()
 	const textStyle = blockVisual(block).color ? { color: 'inherit' } : undefined
 	switch (block.type) {
@@ -385,26 +381,33 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 		case 'link': {
 			// stage-84 — بلوک پیوند: دکمه‌ی پر یا کارت؛ href خارجی
 			// (https) → تب جدید؛ مسیر نسبی → همان صفحه.
-			// ترمیم اسکنِ استیج-۸۴ — پیوندِ نسبی حالا SPA-ناوبری
-			// می‌کند (مثل بلوک CTA) نه رفرشِ کاملِ MPA
 			const { label, href, title, text, variant } = block.props
 			const external = href.startsWith('http')
-			const anchor = (
+			const destination = new URL(href, 'https://article.invalid')
+			const className =
+				'inline-flex items-center justify-center gap-2 px-8 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold cursor-pointer hover:opacity-90 transition'
+			const anchor = external ? (
 				<a
 					href={href}
-					{...(external
-						? { target: '_blank', rel: 'noopener noreferrer' }
-						: {
-								onClick: (e) => {
-									if (e.metaKey || e.ctrlKey) return
-									e.preventDefault()
-									router.history.push(href)
-								},
-							})}
-					className="inline-flex items-center justify-center gap-2 px-8 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold cursor-pointer hover:opacity-90 transition"
+					target="_blank"
+					rel="noopener noreferrer"
+					className={className}
 				>
 					{label}
 				</a>
+			) : href.startsWith('/uploads/') ? (
+				<a href={href} className={className}>
+					{label}
+				</a>
+			) : (
+				<Link
+					to={destination.pathname}
+					search={defaultParseSearch(destination.search)}
+					hash={destination.hash.slice(1)}
+					className={className}
+				>
+					{label}
+				</Link>
 			)
 			if (variant === 'card') {
 				return (

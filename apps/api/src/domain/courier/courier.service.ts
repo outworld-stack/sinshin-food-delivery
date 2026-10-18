@@ -217,6 +217,14 @@ export class CourierService {
       durationSeconds: number | null
     }
   }> {
+    return this.scanArrivalOnce(displayId, courierToken, true)
+  }
+
+  private async scanArrivalOnce(
+    displayId: string,
+    courierToken: string | null,
+    allowRetry: boolean,
+  ): ReturnType<CourierService['scanArrival']> {
     let row: OrderRow
     try {
       row = await this.mustGet(displayId)
@@ -246,8 +254,8 @@ export class CourierService {
     if (row.status === 'ON_THE_WAY') {
       const arrivedAt = row.courierArrivedAt?.getTime() ?? 0
       if (
-        arrivedAt > 0 &&
-        Date.now() - arrivedAt > CourierService.QR_RESCAN_WINDOW_MS
+        !Number.isFinite(arrivedAt) || arrivedAt <= 0 ||
+        Date.now() - arrivedAt >= CourierService.QR_RESCAN_WINDOW_MS
       ) {
         return { success: false, message: CourierService.QR_EXPIRED }
       }
@@ -268,7 +276,12 @@ export class CourierService {
       })
       .where(and(eq(orders.id, row.id), eq(orders.status, 'CONFIRMED')))
       .returning()
-    if (!updated) return { success: false, message: CourierService.SCAN_FAILED }
+    if (!updated) {
+      // Another scan may have won the conditional update. Recheck security
+      // and return the same rescan response instead of reporting a failure.
+      if (allowRetry) return this.scanArrivalOnce(displayId, courierToken, false)
+      return { success: false, message: CourierService.SCAN_FAILED }
+    }
 
     // سفرِ پیک — باز کن اگر سشنِ بازی نیست، تحویل ثبت در confirmDelivery
     // stage-84 — مسیر رستوران→مشتری همراه پاسخ (نقشه‌ی صفحه‌ی اسکن)

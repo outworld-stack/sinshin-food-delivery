@@ -97,12 +97,10 @@ export const ProductCard = memo(function ProductCard({
 	const [selectedSizeId, setSelectedSizeId] = useState<string | null>(null)
 	// stage-55 — bump لمسی دکمه‌ی افزودن به سبد (CSS-only — animate-cart-bump)
 	const [cartBump, setCartBump] = useState(false)
-	const effectiveSizeId = hasSizes
-		? (selectedSizeId ?? product.sizes[0].id)
-		: null
 	const selectedSize = hasSizes
-		? product.sizes.find((s) => s.id === effectiveSizeId)
+		? (product.sizes.find((s) => s.id === selectedSizeId) ?? product.sizes[0])
 		: null
+	const effectiveSizeId = selectedSize?.id ?? null
 
 	// stage-47 — سطح فعال تخفیف: سایزِ انتخاب‌شده یا خود محصول
 	const sizeEff = selectedSize ? sizeEffective(selectedSize) : null

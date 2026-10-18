@@ -15,6 +15,8 @@
     "format": "biome format",
     "lint": "biome lint",
     "check": "biome check",
+    "test:admin-day": "bun scripts/test-admin-day.ts",
+    "test:printing": "bun scripts/test-print-agent.ts && bun scripts/test-print-document.ts",
     "test:device": "bun scripts/test-device-fingerprint.ts",
     "test:fetch-timeout": "bun scripts/test-fetch-timeout.ts",
     "test:auth-session": "bun scripts/test-auth-session.ts",
@@ -30,6 +32,7 @@
     "test:referral-client": "bun scripts/test-referral-client.ts",
     "test:wallet-client": "bun scripts/test-wallet-client.tsx",
     "test:order-money-cache": "bun scripts/test-order-money-cache.ts",
+    "test:products": "bun scripts/test-products-client.tsx",
     "test:articles": "bun scripts/test-articles-client.tsx && bun scripts/test-articles-api-client.ts && bun scripts/test-articles-admin.tsx && bun scripts/test-article-rendering.tsx"
   },
   "dependencies": {

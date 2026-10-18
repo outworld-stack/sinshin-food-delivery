@@ -14,7 +14,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { useCallback, useEffect, useReducer } from 'react'
+import { useCallback, useEffect, useReducer, useState } from 'react'
 import { z } from 'zod'
 import { useAuthStore } from '#/stores/authStore'
 import {
@@ -23,6 +23,7 @@ import {
 	courierFilterOptions,
 } from '#/utils/queryOptions'
 import { limitField, pageField, searchTextField } from '#/utils/searchSchema'
+import { nextTehranDayDelay, tehranDay } from '#/utils/tehranDay'
 
 // --- اسکیمای search — فیلترها شهروند URL شدن ---
 // catch: URL دستکاری‌شده با مقدار خراب → پیش‌فرض جایگزین، نه خطای روت
@@ -145,6 +146,16 @@ export function useAdminOrdersPage() {
 	const [state, dispatch] = useReducer(adminOrdersReducer, initialUiState)
 	const navigate = useNavigate({ from: '/admin/orders/' })
 	const search = useSearch({ from: '/admin/orders/' })
+	const [todayDay, setTodayDay] = useState(tehranDay)
+	useEffect(() => {
+		const refreshDay = () => setTodayDay(tehranDay())
+		const timer = setTimeout(refreshDay, nextTehranDayDelay(todayDay))
+		window.addEventListener('focus', refreshDay)
+		return () => {
+			clearTimeout(timer)
+			window.removeEventListener('focus', refreshDay)
+		}
+	}, [todayDay])
 
 	// ⬅ NEW: سینک درَفت‌ها با URL — سوار شدن اولیه (deep-link/رفرش) و back/forward.
 	// بدون این، باکس فیلتر دسکتاپ بعد از رفرش پیش‌فرض‌ها را نشان می‌داد.
@@ -188,6 +199,7 @@ export function useAdminOrdersPage() {
 			courier: search.courier,
 			role,
 			admin2Id,
+			todayDay,
 		}),
 	)
 

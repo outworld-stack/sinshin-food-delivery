@@ -26,7 +26,11 @@ import {
 	type PrintAgentStatus,
 	subscribePrintAgentStatus,
 } from '#/lib/printAgent'
-import { buildPrintDocumentHtml, RECEIPT_PROBE_PX } from '#/lib/printDocument'
+import {
+	buildPrintDocumentHtml,
+	measureReceiptHtmlHeightPx,
+	RECEIPT_PROBE_PX,
+} from '#/lib/printDocument'
 import { getStaffOrderInvoice, type StaffInvoice } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import {
@@ -86,7 +90,6 @@ function loadDefaultPrinters(): { sales: string; kitchen: string } {
  *  لود (و آماده‌شدنِ فونت‌ها) اندازه‌گیری می‌شود؛ در عرض‌های باریک
  *  scale می‌خورد تا کلِ کاغذ جا شود (بدونِ برشِ افقی). */
 function ReceiptPreviewPane({ html }: { html: string | null }) {
-	const frameRef = useRef<HTMLIFrameElement | null>(null)
 	const wrapRef = useRef<HTMLDivElement | null>(null)
 	const [contentH, setContentH] = useState(360)
 	const [scale, setScale] = useState(1)
@@ -99,19 +102,18 @@ function ReceiptPreviewPane({ html }: { html: string | null }) {
 		update()
 		window.addEventListener('resize', update)
 		return () => window.removeEventListener('resize', update)
-	}, [])
+	}, [html])
 
-	const handleLoad = useCallback(() => {
-		const doc = frameRef.current?.contentDocument
-		if (!doc?.body) return
-		const measure = () => {
-			const h = doc.body.scrollHeight
-			if (h > 0) setContentH(h)
+	useEffect(() => {
+		if (html === null) return
+		let cancelled = false
+		void measureReceiptHtmlHeightPx(html).then((height) => {
+			if (!cancelled && height !== null) setContentH(height)
+		})
+		return () => {
+			cancelled = true
 		}
-		const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts
-		if (fonts) void fonts.ready.then(measure)
-		else measure()
-	}, [])
+	}, [html])
 
 	if (html === null) {
 		return (
@@ -139,10 +141,8 @@ function ReceiptPreviewPane({ html }: { html: string | null }) {
 				}}
 			>
 				<iframe
-					ref={frameRef}
 					title="پیش‌نمایش فاکتور چاپی"
 					srcDoc={html}
-					onLoad={handleLoad}
 					className="block mx-auto border-0"
 					style={{ width: RECEIPT_PROBE_PX, height: '100%' }}
 				/>
@@ -183,6 +183,11 @@ function PrinterSelect({
 				className="flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed truncate"
 			>
 				<option value="">دیالوگ مرورگر (پیش‌فرض)</option>
+				{value && !options.includes(value) && (
+					<option value={value} disabled>
+						{value} — در دسترس نیست
+					</option>
+				)}
 				{options.map((name) => (
 					<option key={name} value={name}>
 						{name}
@@ -201,6 +206,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	const showToast = useToastStore((s) => s.showToast)
 	const [kinds, setKinds] = useState(loadDefaultKinds)
 	const [printing, setPrinting] = useState(false)
+	const printingRef = useRef(false)
 	// ترمیم اسکنِ استیج-۸۴ — فاکتور هنگامِ «باز شدنِ» مودال پیش‌واکشی می‌شود:
 	// کلیکِ چاپ دیگر منتظرِ شبکه نمی‌ماند و چاپِ مجدد آنی است
 	const [invoice, setInvoice] = useState<StaffInvoice | null>(null)
@@ -220,6 +226,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	// اتصال به سرویس چاپ مستقیم — یک بار در هر باز شدن؛ دکمهٔ «تلاش
 	// مجدد» همین را صدا می‌زند (بدونِ ری‌رانِ کلِ افکت‌ها)
 	const reconnectAgent = useCallback(async () => {
+		setAgentPrinters([])
 		let ok = false
 		try {
 			ok = await connectPrintAgent()
@@ -241,6 +248,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	useEffect(() => {
 		let cancelled = false
 		setInvoice(null)
+		setPreviewHtmls({})
 		getStaffOrderInvoice(orderId)
 			.then((inv) => {
 				if (!cancelled) setInvoice(inv)
@@ -307,6 +315,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	}, [])
 
 	const handlePrint = useCallback(async () => {
+		if (printingRef.current) return
 		const selected: InvoiceKind[] = [
 			...(kinds.kitchen ? (['kitchen'] as const) : []),
 			...(kinds.sales ? (['sales'] as const) : []),
@@ -316,6 +325,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 			return
 		}
 		saveKinds(kinds)
+		printingRef.current = true
 		setPrinting(true)
 		try {
 			const inv = invoice ?? (await getStaffOrderInvoice(orderId))
@@ -326,7 +336,8 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 			if (agentStatus === 'ready') {
 				for (const kind of selected) {
 					const name = kind === 'kitchen' ? printers.kitchen : printers.sales
-					if (name) agentPrintersMap[kind] = name
+					if (name && agentPrinters.includes(name))
+						agentPrintersMap[kind] = name
 				}
 			}
 			const result = await printOrderInvoices(
@@ -354,9 +365,19 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 				'error',
 			)
 		} finally {
+			printingRef.current = false
 			setPrinting(false)
 		}
-	}, [agentStatus, invoice, kinds, orderId, printers, saveKinds, showToast])
+	}, [
+		agentPrinters,
+		agentStatus,
+		invoice,
+		kinds,
+		orderId,
+		printers,
+		saveKinds,
+		showToast,
+	])
 
 	const toggle = (key: 'kitchen' | 'sales') =>
 		setKinds((prev) => {
@@ -404,7 +425,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 							className="flex items-center gap-2 text-[11px] text-green-600 dark:text-green-400 font-DanaMedium"
 						>
 							<span className="w-2 h-2 rounded-full bg-green-500 dark:bg-green-400 shrink-0" />
-							چاپ مستقیم فعال — پرینترِ پیش‌فرضِ هر فاکتور را یک بار انتخاب کنید
+							چاپ مستقیم فعال — درخواست‌ها را در QZ Tray تأیید کنید
 						</div>
 					) : agentStatus === 'connecting' ? (
 						<div className="text-[11px] text-gray-400 font-DanaMedium">
@@ -412,7 +433,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 						</div>
 					) : (
 						<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium">
-							<span>چاپ مستقیم (بدون دیالوگ پرینتر): QZ Tray را از</span>
+							<span>چاپ مستقیم با تأیید QZ Tray: نرم‌افزار را از</span>
 							<a
 								href="https://qz.io"
 								target="_blank"

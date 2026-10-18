@@ -93,6 +93,8 @@ const SettingsContent = memo(function SettingsContent() {
 			setRestaurantOpen({ data: { isOpen, nextOpenTime } }),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: qk.settingsRestaurant })
+			queryClient.invalidateQueries({ queryKey: qk.settingsRestaurantStatus })
+			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
 			// وضعیت رستوران در چک‌اوت هم از همین دیتا می‌آد — بلافاصله تازه شه
 			queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
 			showToast('وضعیت رستوران ذخیره شد')

@@ -22,7 +22,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
 	Bag,
 	Bicycle,
@@ -315,18 +315,24 @@ export function ProductForm({
 	// stage-84 — اقلام بسته‌بندی سراسری (چیپ‌های انتخاب + جمعِ زنده)
 	const { data: packagingItems } = useQuery(packagingItemsOptions)
 	/** stage-84 — انتخاب/حذف قلم بسته‌بندی (سقف ۱۲ — قرارداد سرور) */
-	const handleTogglePackagingItem = useCallback((itemId: string) => {
-		setFormData((prev) => {
-			if (prev.packagingItemIds.includes(itemId)) {
-				return {
-					...prev,
-					packagingItemIds: prev.packagingItemIds.filter((id) => id !== itemId),
+	const handleTogglePackagingItem = useCallback(
+		(itemId: string) => {
+			if (!canPickPackagingItems) return
+			setFormData((prev) => {
+				if (prev.packagingItemIds.includes(itemId)) {
+					return {
+						...prev,
+						packagingItemIds: prev.packagingItemIds.filter(
+							(id) => id !== itemId,
+						),
+					}
 				}
-			}
-			if (prev.packagingItemIds.length >= 12) return prev
-			return { ...prev, packagingItemIds: [...prev.packagingItemIds, itemId] }
-		})
-	}, [])
+				if (prev.packagingItemIds.length >= 12) return prev
+				return { ...prev, packagingItemIds: [...prev.packagingItemIds, itemId] }
+			})
+		},
+		[canPickPackagingItems],
+	)
 	const showToast = useToastStore((s) => s.showToast)
 
 	const [formData, setFormData] = useState<ProductFormData>({
@@ -364,15 +370,32 @@ export function ProductForm({
 	})
 
 	const [ingredientInput, setIngredientInput] = useState('')
+	const initializedProductId = useRef<string | null>(null)
 
 	// stage-84 — مشتقات اقلام بسته‌بندی (بعد از formData — ترتیب هوک‌ها)
-	const activeItems = (packagingItems ?? []).filter((i) => i.isActive)
-	const selectedItemsTotal = activeItems
-		.filter((i) => formData.packagingItemIds.includes(i.id))
+	const selectableItems = (packagingItems ?? [])
+		.filter((i) => i.isActive || formData.packagingItemIds.includes(i.id))
+		.map(({ id, title, price, isActive }) => ({ id, title, price, isActive }))
+	// Preserve a removal control when an item was deleted while this draft was open.
+	if (packagingItems) {
+		for (const id of formData.packagingItemIds) {
+			if (!packagingItems.some((item) => item.id === id)) {
+				selectableItems.push({
+					id,
+					title: 'قلم حذف‌شده',
+					price: 0,
+					isActive: false,
+				})
+			}
+		}
+	}
+	const selectedItemsTotal = selectableItems
+		.filter((i) => i.isActive && formData.packagingItemIds.includes(i.id))
 		.reduce((sum, i) => sum + i.price, 0)
 
 	useEffect(() => {
-		if (initialData) {
+		if (initialData && initializedProductId.current !== initialData.id) {
+			initializedProductId.current = initialData.id
 			setFormData({
 				name: initialData.name || '',
 				description: initialData.description || '',
@@ -600,6 +623,7 @@ export function ProductForm({
 	// --- اعتبارسنجی و ارسال ---
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault()
+		if (isSubmitting) return
 
 		// stage-60 — حداقل یک دسته لازم است (چیپ‌های چند-دسته‌ای)
 		if (formData.categoryIds.length === 0) {
@@ -1194,7 +1218,7 @@ export function ProductForm({
 					<p className="text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
 						اقلام بسته‌بندی
 					</p>
-					{activeItems.length === 0 ? (
+					{selectableItems.length === 0 ? (
 						<p className="text-[11px] text-gray-400 leading-relaxed">
 							هنوز قلمی ثبت نشده — از «مدیریت اقلام بسته‌بندی» در صفحه‌ی محصولات،
 							قلم‌ها و قیمت‌های سراسری را بسازید.
@@ -1202,15 +1226,17 @@ export function ProductForm({
 					) : (
 						<>
 							<div className="flex flex-wrap gap-2">
-								{activeItems.map((item) => {
+								{selectableItems.map((item) => {
 									const selected = formData.packagingItemIds.includes(item.id)
+									const atLimit =
+										!selected && formData.packagingItemIds.length >= 12
 									return (
 										<button
 											key={item.id}
 											type="button"
 											aria-pressed={selected}
 											onClick={() => handleTogglePackagingItem(item.id)}
-											disabled={!canPickPackagingItems}
+											disabled={!canPickPackagingItems || atLimit}
 											title={
 												canPickPackagingItems
 													? undefined
@@ -1227,6 +1253,9 @@ export function ProductForm({
 											}`}
 										>
 											{item.title}
+											{!item.isActive && (
+												<span className="opacity-70 mr-1">(غیرفعال)</span>
+											)}
 											<span className="opacity-70 mr-1">
 												({formatPrice(item.price)})
 											</span>
@@ -1234,7 +1263,7 @@ export function ProductForm({
 									)
 								})}
 							</div>
-							{selectedItemsTotal > 0 && (
+							{formData.packagingItemIds.length > 0 && (
 								<p className="text-xs text-primary dark:text-dark-primary font-DanaDemiBold mt-2">
 									جمع بسته‌بندی این محصول: {formatPrice(selectedItemsTotal)}{' '}
 									تومان

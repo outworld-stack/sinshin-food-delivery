@@ -249,7 +249,8 @@ body.mono .stat .l { color: #000; font-weight: bold; }
 body.mono .stat .v { color: #000; font-weight: bold; }
 body.mono .tbl-title { color: #000; font-weight: bold; }
 body.mono table.tbl th { background: #000; color: #fff; }
-body.mono table.tbl th, body.mono table.tbl td { border: 1px solid #000; color: #000; font-weight: bold; }
+body.mono table.tbl th, body.mono table.tbl td { border: 1px solid #000; font-weight: bold; }
+body.mono table.tbl td { color: #000; }
 body.mono table.tbl tbody tr:nth-child(even) { background: #fff; }
 body.mono .note { border: 2px solid #000; color: #000; font-weight: bold; }
 body.mono .qr-box { border: 2px solid #000; }
@@ -375,23 +376,41 @@ async function fitReceiptHeight(
 async function measureDocHeightPx(
 	doc: Document | null | undefined,
 ): Promise<number | null> {
+	let probe: HTMLStyleElement | null = null
 	try {
 		if (!doc?.body) return null
-		const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts
-		if (fonts) await fonts.ready
 		// ترمیم اسکنِ استیج-۸۴ — اندازه‌گیری باید در «عرضِ مؤثرِ کاغذ» انجام
 		// شود: فریمِ چاپِ صفر-پیکسلی یا پنجرهٔ موبایلِ iOS متن را در عرضِ
 		// غلط می‌شکند و ارتفاع را چند برابر می‌کند (آزمون کروم: ۸۶۵px در
 		// عرض ۰ در برابر ۲۷۷px در ۳۰۲px). با probe عرضِ ثابت، مستقل از
 		// viewport درست اندازه می‌گیریم؛ بعد از اندازه‌گیری حذف می‌شود.
-		const probe = doc.createElement('style')
+		probe = doc.createElement('style')
 		probe.textContent = `html,body{width:${RECEIPT_PROBE_PX}px !important;margin:0 !important;}`
 		doc.head?.appendChild(probe)
+		await waitForPrintFonts(doc)
 		const px = doc.body.scrollHeight
-		probe.remove()
 		return px > 0 ? px : null
 	} catch {
 		return null
+	} finally {
+		probe?.remove()
+	}
+}
+
+async function waitForPrintFonts(doc: Document): Promise<void> {
+	if (!doc.fonts) return
+	let timer: ReturnType<typeof setTimeout> | undefined
+	try {
+		await Promise.race([
+			doc.fonts.ready,
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, 2_500)
+			}),
+		])
+	} catch {
+		// A missing font must not prevent printing with the fallback font.
+	} finally {
+		clearTimeout(timer)
 	}
 }
 
@@ -431,106 +450,163 @@ export function measureReceiptHtmlHeightPx(
 	})
 }
 
+let activeDocumentPrint: Promise<void> | null = null
+
 export function printHtmlDocumentAsync(spec: PrintDocumentSpec): Promise<void> {
+	const next = activeDocumentPrint
+		? activeDocumentPrint.catch(() => {}).then(() => performDocumentPrint(spec))
+		: performDocumentPrint(spec)
+	const task = next.finally(() => {
+		if (activeDocumentPrint === task) activeDocumentPrint = null
+	})
+	activeDocumentPrint = task
+	return task
+}
+
+async function performDocumentPrint(spec: PrintDocumentSpec): Promise<void> {
 	const html = documentHtml(spec)
 	const prevTitle = document.title
 	document.title = spec.fileName
 
 	const restore = () => {
 		document.title = prevTitle
-		window.focus() // فوکوس به سند اپ — نه لیمبوی فریم مخفی
+		try {
+			window.focus() // فوکوس به سند اپ — نه لیمبوی فریم مخفی
+		} catch {
+			// Focus restoration is optional in embedded browsers.
+		}
 	}
 
-	// iOS Safari — چاپ iframe را پشتیبانی نمی‌کند؛ سند در پنجرهٔ جدید
-	// (زنجیره‌ی afterprint اینجا قابل اعتماد نیست؛ فراخواننده مقصد بعدی را
-	// با تأخیر کوتاه می‌فرستد)
-	if (isIOS()) {
-		return new Promise<void>((resolve, reject) => {
-			const win = window.open('', '_blank')
-			if (!win) {
-				restore()
-				// ترمیم اسکنِ استیج-۸۴ — بلاکِ پاپ‌آپ دیگر «موفقِ بی‌چاپ»
-				// نیست؛ خطا می‌دهد تا توستِ واقعی دیده شود
-				reject(
-					new Error(
-						'پنجرهٔ چاپ توسط مرورگر بلاک شد — لطفاً پاپ‌آپ را مجاز کنید و دوباره بزنید',
+	try {
+		// iOS Safari — چاپ iframe را پشتیبانی نمی‌کند؛ سند در پنجرهٔ جدید
+		// (زنجیره‌ی afterprint اینجا قابل اعتماد نیست؛ فراخواننده مقصد بعدی را
+		// با تأخیر کوتاه می‌فرستد)
+		if (isIOS()) {
+			return await new Promise<void>((resolve, reject) => {
+				const win = window.open('', '_blank')
+				if (!win) {
+					// ترمیم اسکنِ استیج-۸۴ — بلاکِ پاپ‌آپ دیگر «موفقِ بی‌چاپ»
+					// نیست؛ خطا می‌دهد تا توستِ واقعی دیده شود
+					reject(
+						new Error(
+							'پنجرهٔ چاپ توسط مرورگر بلاک شد — لطفاً پاپ‌آپ را مجاز کنید و دوباره بزنید',
+						),
+					)
+					return
+				}
+				win.document.open()
+				win.document.write(html)
+				win.document.close()
+				let settled = false
+				let timer: ReturnType<typeof setTimeout> | undefined
+				const finish = (error?: unknown) => {
+					if (settled) return
+					settled = true
+					clearTimeout(timer)
+					win.removeEventListener('afterprint', onAfterPrint)
+					if (error !== undefined) reject(error)
+					else resolve()
+				}
+				const onAfterPrint = () => finish()
+				win.addEventListener('afterprint', onAfterPrint)
+				const printNow = async () => {
+					try {
+						if (spec.paper === 'receipt' && spec.fitHeight)
+							await fitReceiptHeight(win.document)
+						else await waitForPrintFonts(win.document)
+						win.focus()
+						win.print()
+						// Safari does not reliably dispatch afterprint on popup windows.
+						if (!settled) timer = setTimeout(() => finish(), 1_500)
+					} catch (error) {
+						finish(error)
+					}
+				}
+				void printNow()
+			})
+		}
+
+		return await new Promise<void>((resolve, reject) => {
+			const iframe = getPrintFrame()
+			let settled = false
+			let started = false
+			let attemptedPrint = false
+			let printingWindow: Window | null = null
+			let timeoutId: ReturnType<typeof setTimeout> | null = null
+			// stage-85 — ترمیمِ «گیرکردن»: اگر afterprint هرگز نیاید (بعضی
+			// نسخه‌های کروم/اندروید بعد از لغوِ دیالوگ)، مودال تا ۹۰ ثانیه
+			// «در حال چاپ» می‌ماند. کروم/فایرفاکس هنگامِ بازشدنِ دیالوگ
+			// مدیاکوئری «print» را روی صفحه فعال و بعدِ بستن غیرفعال
+			// می‌کنند — همان لحظهٔ خروج از چاپ، سیگنالِ اتمام است.
+			const printMedia = window.matchMedia('print')
+			let enteredPrint = false
+			const onPrintMedia = (e: MediaQueryListEvent) => {
+				if (e.matches) enteredPrint = true
+				else if (enteredPrint) done()
+			}
+			const done = (error?: unknown) => {
+				if (settled) return
+				settled = true
+				// ترمیم اسکنِ استیج-۸۴ — تایمرِ سقفِ ۹۰ثانیه‌ای هم پاک شود
+				if (timeoutId !== null) clearTimeout(timeoutId)
+				printMedia.removeEventListener('change', onPrintMedia)
+				window.removeEventListener('afterprint', onAfterPrint)
+				printingWindow?.removeEventListener('afterprint', onAfterPrint)
+				iframe.onload = null
+				if (error !== undefined) reject(error)
+				else resolve()
+			}
+			const onAfterPrint = () => done()
+
+			iframe.onload = () => {
+				if (started || settled) return
+				started = true
+				const fire = async () => {
+					try {
+						if (spec.paper === 'receipt' && spec.fitHeight)
+							await fitReceiptHeight(iframe.contentDocument)
+						else if (iframe.contentDocument)
+							await waitForPrintFonts(iframe.contentDocument)
+						if (settled) return
+						printingWindow = iframe.contentWindow
+						if (!printingWindow)
+							throw new Error('پنجرهٔ چاپ آماده نیست — دوباره تلاش کنید')
+						// Blocking browsers dispatch afterprint before print() returns.
+						window.addEventListener('afterprint', onAfterPrint)
+						printingWindow.addEventListener('afterprint', onAfterPrint)
+						printMedia.addEventListener('change', onPrintMedia)
+						// توجه: focus() روی فریم زده نمی‌شود — صفحهٔ اصلی فوکوس را
+						// نگه می‌دارد و بعد از دیالوگ پاک برمی‌گردد (رفع باگ قفل‌شدن)
+						attemptedPrint = true
+						printingWindow.print()
+					} catch (error) {
+						done(error)
+					}
+				}
+				void fire()
+			}
+
+			// Also bound iframe/font loading, which can fail before printing starts.
+			timeoutId = setTimeout(
+				() =>
+					done(
+						attemptedPrint
+							? undefined
+							: new Error('آماده‌سازی چاپ طولانی شد — دوباره تلاش کنید'),
 					),
-				)
-				return
-			}
-			win.document.open()
-			win.document.write(html)
-			win.document.close()
-			const printNow = () => {
-				win.focus()
-				win.print()
-				setTimeout(resolve, 1_500)
-			}
-			if (spec.paper === 'receipt' && spec.fitHeight) {
-				// ترمیم اسکنِ استیج-۸۴ — اندازه‌گیری/تزریق @page باید
-				// «قبل» از دیالوگ چاپ تمام شود (قبلاً بعد از print
-				// بی‌اثر می‌شد)؛ probe عرضِ کاغذ محاسبه را مستقل از
-				// عرضِ پنجرهٔ موبایل درست می‌کند
-				void fitReceiptHeight(win.document).then(printNow)
-			} else {
-				printNow()
+				90_000,
+			)
+			// سند جدید در همان فریم پایدار — تعویض srcdoc فقط وقتی امن است
+			// که دیالوگ قبلی بسته شده (صف چاپ await می‌کند)
+			try {
+				iframe.srcdoc = html
+			} catch (error) {
+				done(error)
 			}
 		})
+	} finally {
+		restore()
 	}
-
-	return new Promise<void>((resolve) => {
-		const iframe = getPrintFrame()
-		let settled = false
-		let timeoutId: ReturnType<typeof setTimeout> | null = null
-		// stage-85 — ترمیمِ «گیرکردن»: اگر afterprint هرگز نیاید (بعضی
-		// نسخه‌های کروم/اندروید بعد از لغوِ دیالوگ)، مودال تا ۹۰ ثانیه
-		// «در حال چاپ» می‌ماند. کروم/فایرفاکس هنگامِ بازشدنِ دیالوگ
-		// مدیاکوئری «print» را روی صفحه فعال و بعدِ بستن غیرفعال
-		// می‌کنند — همان لحظهٔ خروج از چاپ، سیگنالِ اتمام است.
-		const printMedia = window.matchMedia('print')
-		const onPrintMedia = (e: MediaQueryListEvent) => {
-			if (!e.matches) done()
-		}
-		const done = () => {
-			if (settled) return
-			settled = true
-			// ترمیم اسکنِ استیج-۸۴ — تایمرِ سقفِ ۹۰ثانیه‌ای هم پاک شود
-			if (timeoutId !== null) clearTimeout(timeoutId)
-			printMedia.removeEventListener('change', onPrintMedia)
-			restore()
-			resolve()
-		}
-
-		iframe.onload = () => {
-			const fire = () => {
-				try {
-					// توجه: focus() روی فریم زده نمی‌شود — صفحهٔ اصلی فوکوس را
-					// نگه می‌دارد و بعد از دیالوگ پاک برمی‌گردد (رفع باگ قفل‌شدن)
-					iframe.contentWindow?.print()
-				} finally {
-					// afterprint روی هر دو پنجره (iframe + والد) گوش می‌دهیم —
-					// کدام زودتر اجرا شد همان ملاک است؛ سقف ۹۰ ثانیه هم برای
-					// مرورگرهایی که اصلاً afterprint ندارند.
-					window.addEventListener('afterprint', done, { once: true })
-					iframe.contentWindow?.addEventListener('afterprint', done, {
-						once: true,
-					})
-					printMedia.addEventListener('change', onPrintMedia)
-					timeoutId = setTimeout(done, 90_000)
-				}
-			}
-			if (spec.paper === 'receipt' && spec.fitHeight) {
-				// stage-84 — اول اندازه‌گیری + تزریق @page، بعد دیالوگ چاپ
-				void fitReceiptHeight(iframe.contentDocument).then(fire)
-			} else {
-				fire()
-			}
-		}
-
-		// سند جدید در همان فریم پایدار — تعویض srcdoc فقط وقتی امن است
-		// که دیالوگ قبلی بسته شده (صف چاپ await می‌کند)
-		iframe.srcdoc = html
-	})
 }
 
 /**

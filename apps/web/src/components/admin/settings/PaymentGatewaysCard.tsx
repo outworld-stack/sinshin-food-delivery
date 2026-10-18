@@ -41,8 +41,11 @@ export const PaymentGatewaysCard = memo(function PaymentGatewaysCard({
 
 	const mutation = useMutation({
 		mutationFn: (data: PaymentGateways) => setPaymentGateways({ data }),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: qk.settingsGateways })
+		onSuccess: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: qk.settingsGateways }),
+				queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix }),
+			])
 			showToast('درگاه‌های پرداخت ذخیره شد')
 		},
 		onError: (err: Error) =>
@@ -62,7 +65,7 @@ export const PaymentGatewaysCard = memo(function PaymentGatewaysCard({
 	}
 
 	const handleToggle = (key: keyof PaymentGateways) => {
-		if (gatewaysLoading) return
+		if (gatewaysLoading || mutation.isPending) return
 		const next = { ...current, [key]: !current[key] }
 		mutation.mutate(next)
 	}
@@ -94,7 +97,7 @@ export const PaymentGatewaysCard = memo(function PaymentGatewaysCard({
 						<Toggle
 							isOn={current[key]}
 							onToggle={() => handleToggle(key)}
-							disabled={gatewaysLoading}
+							disabled={gatewaysLoading || mutation.isPending}
 							label={`فعال بودن درگاه ${label}`}
 						/>
 					</div>

@@ -45,7 +45,7 @@ export class CartService {
     items: CartItemInput[],
     lang: Lang = 'fa',
   ): Promise<CartDetails> {
-    const { productMap, sizesByProduct } = await loadPricingBases(this.deps.db, items)
+    const { productMap, sizesByProduct } = await loadPricingBases(this.deps.db, items, { includePackaging: false })
 
     // stage-48 — حالت‌های دسته‌ی همه‌ی محصولات سبد (یک کوئری)
     const categoryIds = [...new Set([...productMap.values()].map((p) => p.categoryId))]

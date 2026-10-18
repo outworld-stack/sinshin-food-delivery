@@ -284,10 +284,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         // یا ادمین اصلی؛ create بدون مجوز ⇒ بدون قلم (پشتیبانِ packaging_cost)
         if (
           user.role !== 'admin' &&
-          !admin2Perms?.canEditPackagingFee &&
-          body.packagingItemIds !== undefined
+          !admin2Perms?.canEditPackagingFee
         ) {
           delete body.packagingItemIds
+          delete body.packagingCost
         }
         const res = await deps.menu.createProduct(body)
         // stage-10: ممیزی فقط برای ادمین اصلی — ادمین۲ activities خودش را دارد
@@ -359,10 +359,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         // اقلام حذف می‌شود ⇒ undefined ⇒ انتخابِ ذخیره‌شده دست‌نخورده می‌ماند
         if (
           user.role !== 'admin' &&
-          !admin2Perms?.canEditPackagingFee &&
-          body.packagingItemIds !== undefined
+          !admin2Perms?.canEditPackagingFee
         ) {
           delete body.packagingItemIds
+          delete body.packagingCost
         }
         // stage-56 — نتیجه‌ی پیام‌دار (clashِ slug → پیام دوستانه در پاسخ)
         const res = await deps.menu.updateProduct({ id: params.id, ...body })
@@ -474,6 +474,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       '/packaging-items',
       async ({ body, user }) => {
         const item = await deps.packaging.add(body)
+        await deps.menu.notifyPackagingChanged()
         if (user.role === 'admin') {
           await deps.audit.log({
             actorId: user.id,
@@ -505,6 +506,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           isActive: body.isActive,
           sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
         })
+        await deps.menu.notifyPackagingChanged()
         if (user.role === 'admin') {
           await deps.audit.log({
             actorId: user.id,
@@ -534,6 +536,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       '/packaging-items/:id',
       async ({ params, user }) => {
         await deps.packaging.remove(params.id)
+        await deps.menu.notifyPackagingChanged()
         if (user.role === 'admin') {
           await deps.audit.log({
             actorId: user.id,

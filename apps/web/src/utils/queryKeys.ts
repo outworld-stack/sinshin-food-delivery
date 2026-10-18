@@ -146,6 +146,7 @@ export const qk = {
 	// جزئیات محصول برای فرم ویرایش (new/edit)
 	adminProductDetails: (productId: string) =>
 		['admin-product-details', productId] as const,
+	adminProductDetailsAll: ['admin-product-details'] as const,
 
 	// --- تنظیمات پنل ---
 	// پرچم‌های صفحه‌ی تنظیمات — بعد از ذخیره نامعتبرسازی می‌شن

@@ -117,9 +117,7 @@ export function useProductPage(product: Product) {
 		? (product.sizes.find((s) => s.id === state.selectedSizeId) ??
 			product.sizes[0])
 		: null
-	const selectedSizeId = hasSizes
-		? (state.selectedSizeId ?? product.sizes[0].id)
-		: null
+	const selectedSizeId = selectedSize?.id ?? null
 
 	// --- قیمت واحد ---
 	// stage-47 — سایز انتخاب‌شده: قیمت مؤثر با تخفیف مستقلِ همان سایز.

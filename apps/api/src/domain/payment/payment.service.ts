@@ -25,6 +25,7 @@ import type { AppConfig } from '#/infra/config/env'
 import { AppError, Err } from '#/domain/shared/errors'
 import { lockWalletAccounts } from '#/domain/shared/wallet-sql'
 import type { OrderService } from '#/domain/order/order.service'
+import { SettingsService } from '#/domain/settings/settings.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import type { NotificationService } from '#/domain/notification/notification.service'
 import { signState, verifyState } from './state'
@@ -389,6 +390,13 @@ export class PaymentService {
         return !checked || checked.gatewayRef !== p.gatewayRef || checked.updatedAt.getTime() !== p.updatedAt.getTime()
       })) {
         throw Err.conflict('وضعیت پرداخت تغییر کرد؛ صفحه سفارش را به‌روز کنید.')
+      }
+      // A retry creates a new payment attempt. Existing attempts can still
+      // settle after a switch is disabled, but new attempts must respect it.
+      const enabled = await new SettingsService({ db }).enabledGateways(tx)
+      const key = gwId.toLowerCase() as keyof typeof enabled
+      if (key in enabled && !enabled[key]) {
+        throw Err.validation('درگاه پرداخت انتخابی در حال حاضر غیرفعال است.')
       }
       for (const p of currentPending) await this.supersedePending(tx, p)
       const [created] = await tx.insert(payments).values({

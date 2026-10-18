@@ -75,6 +75,7 @@ import {
 } from '#/domain/shared/brand'
 import { nullIfEmpty, pickAr, pickArArr, type Lang } from '#/domain/shared/lang'
 import { isUniqueViolation, likePattern } from '#/domain/shared/pg'
+import { Err } from '#/domain/shared/errors'
 import { UUID_RE } from '#/domain/shared/ids'
 // stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
 import { faNum } from '#/domain/report/format'
@@ -345,6 +346,7 @@ export interface PricingBases {
 export async function loadPricingBases(
   db: DbOrTx,
   items: readonly { productId: string }[],
+  options: { includePackaging?: boolean } = {},
 ): Promise<PricingBases> {
   const ids = [...new Set(items.map((i) => asProductId(i.productId)))]
   const rows = ids.length
@@ -370,7 +372,7 @@ export async function loadPricingBases(
   // stage-84 — اقلام بسته‌بندی انتخابی + قیمت سراسری‌شان (join روی junction).
   // «undefined» عمدی است: محصولِ بدون لینک → پشتیبانِ ستونِ legacy (بالای فایل).
   const packagingByProduct = new Map<ProductId, number | undefined>()
-  if (ids.length > 0) {
+  if (ids.length > 0 && options.includePackaging !== false) {
     const itemRows = await db
       .select({
         productId: productPackagingItems.productId,
@@ -433,6 +435,12 @@ export class MenuService {
    */
   async bustCache(): Promise<void> {
     await this.cache.invalidate()
+  }
+
+  /** Global packaging changes affect every open checkout that uses these items. */
+  async notifyPackagingChanged(): Promise<void> {
+    await this.cache.invalidate()
+    await this.publishMenuLive({ productId: null, reason: 'packaging' })
   }
 
   // ── عمومی ──
@@ -1192,69 +1200,72 @@ export class MenuService {
     )
     let created: typeof products.$inferSelect | undefined
     try {
-      ;[created] = await this.deps.db
-        .insert(products)
-        .values({
-          name: input.name,
-          description: input.description,
-          // round-34 — ذخیره‌ی دستی ادمین: arAuto=false (بج «دستی»)
-          nameAr,
-          descriptionAr,
-          // stage-56 — slug سئوپسند (null = URL با UUID)
-          slug,
-          ingredientsAr: input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null,
-          arAuto: false,
-          originalPrice: input.originalPrice,
-          discountPercentage: pct,
-          discountStartsAt: hasWindow ? asDiscountDate(input.discountStartsAt) : null,
-          discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
-          prepTime: input.prepTime,
-          packagingCost: input.packagingCost ?? 0,
-          categoryId: primaryCat,
-          profileImage: input.profileImage ?? null,
-          galleryImages: input.galleryImages ?? [],
-          sizesEnabled: input.sizesEnabled ?? false,
-          ingredients: input.ingredients ?? [],
-          status: 'ACTIVE',
-          // stage-48 — موجودی + حالت‌های سفارش (پیش‌فرض روشن = ارث از دسته)
-          isAvailable: input.isAvailable ?? true,
-          courierAllowed: input.courierAllowed ?? true,
-          takeawayAllowed: input.takeawayAllowed ?? true,
-          dineInAllowed: input.dineInAllowed ?? true,
-          // stage-60 — پرچم ویژه/سنجاق
-          isFeatured: input.isFeatured ?? false,
-        } as typeof products.$inferInsert)
-        .returning()
+      await this.deps.db.transaction(async (tx) => {
+        await this.validatePackagingItems(tx, input.packagingItemIds)
+        ;[created] = await tx
+          .insert(products)
+          .values({
+            name: input.name,
+            description: input.description,
+            // round-34 — ذخیره‌ی دستی ادمین: arAuto=false (بج «دستی»)
+            nameAr,
+            descriptionAr,
+            // stage-56 — slug سئوپسند (null = URL با UUID)
+            slug,
+            ingredientsAr: input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null,
+            arAuto: false,
+            originalPrice: input.originalPrice,
+            discountPercentage: pct,
+            discountStartsAt: hasWindow ? asDiscountDate(input.discountStartsAt) : null,
+            discountEndsAt: hasWindow ? asDiscountDate(input.discountEndsAt) : null,
+            prepTime: input.prepTime,
+            packagingCost: input.packagingCost ?? 0,
+            categoryId: primaryCat,
+            profileImage: input.profileImage ?? null,
+            galleryImages: input.galleryImages ?? [],
+            sizesEnabled: input.sizesEnabled ?? false,
+            ingredients: input.ingredients ?? [],
+            status: 'ACTIVE',
+            // stage-48 — موجودی + حالت‌های سفارش (پیش‌فرض روشن = ارث از دسته)
+            isAvailable: input.isAvailable ?? true,
+            courierAllowed: input.courierAllowed ?? true,
+            takeawayAllowed: input.takeawayAllowed ?? true,
+            dineInAllowed: input.dineInAllowed ?? true,
+            // stage-60 — پرچم ویژه/سنجاق
+            isFeatured: input.isFeatured ?? false,
+          } as typeof products.$inferInsert)
+          .returning()
+
+        if (!created) return
+        if (input.sizesEnabled && input.sizes?.length) {
+          await this.insertSizes(created.id, input.sizes, tx)
+        }
+        if (extraCats.length > 0) {
+          await tx
+            .insert(productCategories)
+            .values(extraCats.map((categoryId) => ({ productId: created!.id, categoryId })))
+        }
+        if (input.packagingItemIds?.length) {
+          await tx
+            .insert(productPackagingItems)
+            .values(
+              [...new Set(input.packagingItemIds)].map((packagingItemId) => ({
+                productId: created!.id,
+                packagingItemId,
+              })),
+            )
+            .onConflictDoNothing()
+        }
+      })
     } catch (e) {
       // stage-56 — رقابت همزمان روی slug (۲۳۵۰۵) → پیام دوستانه، نه 500
       if (isUniqueViolation(e)) {
-        return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
+        return { success: false, message: 'این slug یا نام سایز قبلاً ثبت شده' }
       }
       throw e
     }
     if (!created) return { success: false, message: 'ذخیره‌سازی ناموفق بود' }
 
-    if (input.sizesEnabled && input.sizes?.length) {
-      await this.insertSizes(created.id, input.sizes)
-    }
-    // stage-60 — لینک دسته‌های اضافه (M2M) — فقط دسته‌های اضافه در جدول
-    if (extraCats.length > 0) {
-      await this.deps.db
-        .insert(productCategories)
-        .values(extraCats.map((categoryId) => ({ productId: created.id, categoryId })))
-    }
-    // stage-84 — اقلام بسته‌بندیِ انتخابی (junction؛ الگوی دسته‌های اضافه)
-    if (input.packagingItemIds?.length) {
-      await this.deps.db
-        .insert(productPackagingItems)
-        .values(
-          [...new Set(input.packagingItemIds)].map((packagingItemId) => ({
-            productId: created.id,
-            packagingItemId,
-          })),
-        )
-        .onConflictDoNothing()
-    }
     await this.cache.invalidate()
 
     // stage-48 — تخفیف فعال هنگام ساخت ⇒ پخش فوری به همه (بدون کرون)
@@ -1312,6 +1323,7 @@ export class MenuService {
     const before = await this.deps.db.query.products.findFirst({
       where: eq(products.id, pid),
     })
+    if (!before) return { success: false, message: 'محصول پیدا نشد' }
     // stage-64 — عکسِ فوریِ «بهترین تخفیف فعالِ قبل» — قبل از هر تغییر در DB:
     // تراکنش سایزها پایین‌تر اجرا می‌شود و بعداً bestActiveDiscountPct(before)
     // دیگر سایزهای «قدیم» را نمی‌خواند (باگ ممیزی: ویرایش تخفیفِ سایز هرگز
@@ -1357,176 +1369,183 @@ export class MenuService {
           (c) => c !== primaryCat,
         )
       : undefined
+    let saved = false
     try {
-      await this.deps.db
-        .update(products)
-        .set({
-          name: input.name,
-          description: input.description,
-          // round-34 — ذخیره‌ی دستی ادمین همیشه پرچم «خودکار» را برمی‌گرداند:
-          // مقدار عربی دارد → «دستی»؛ همه خالی → بدون ترجمه (NULL ها بالا مشخص شدند)
-          nameAr,
-          descriptionAr,
-          ingredientsAr,
-          arAuto: false,
-          originalPrice: input.originalPrice,
-          discountPercentage: pct,
-          ...windowFields,
-          prepTime: input.prepTime,
-          // round-11 (اسکن M-3): undefined یعنی «فیلد نیامده» (کلاینت قدیمی/اسکریپت)
-          // → مقدار موجود حفظ می‌شود، نه صفرِ بی‌صدا (درآمد بسته‌بندی از دست نمی‌رود).
-          // drizzle مقدار undefined را از SET حذف می‌کند.
-          ...(input.packagingCost !== undefined ? { packagingCost: input.packagingCost } : {}),
-          // stage-56 — slug: undefined = حفظ؛ رشته/خالی = تنظیم/پاک‌سازی
-          ...(slug !== undefined ? { slug } : {}),
-          // stage-60 — دسته‌ی اولیه (undefined = حفظ) + پرچم ویژه/سنجاق
-          ...(primaryCat !== undefined ? { categoryId: primaryCat } : {}),
-          ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
-          profileImage: input.profileImage ?? null,
-          galleryImages: input.galleryImages ?? [],
-          sizesEnabled: input.sizesEnabled ?? false,
-          ingredients: input.ingredients ?? [],
-          // stage-48 — موجودی/حالت‌ها: undefined = حفظ مقدار قبلی (دراپ Removes undefined از SET)
-          ...(input.isAvailable !== undefined ? { isAvailable: input.isAvailable } : {}),
-          ...(input.courierAllowed !== undefined ? { courierAllowed: input.courierAllowed } : {}),
-          ...(input.takeawayAllowed !== undefined ? { takeawayAllowed: input.takeawayAllowed } : {}),
-          ...(input.dineInAllowed !== undefined ? { dineInAllowed: input.dineInAllowed } : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(products.id, pid))
+      saved = await this.deps.db.transaction(async (tx) => {
+        await this.validatePackagingItems(tx, input.packagingItemIds)
+        const [updated] = await tx
+          .update(products)
+          .set({
+            name: input.name,
+            description: input.description,
+            // round-34 — ذخیره‌ی دستی ادمین همیشه پرچم «خودکار» را برمی‌گرداند:
+            // مقدار عربی دارد → «دستی»؛ همه خالی → بدون ترجمه (NULL ها بالا مشخص شدند)
+            nameAr,
+            descriptionAr,
+            ingredientsAr,
+            arAuto: false,
+            originalPrice: input.originalPrice,
+            discountPercentage: pct,
+            ...windowFields,
+            prepTime: input.prepTime,
+            // round-11 (اسکن M-3): undefined یعنی «فیلد نیامده» (کلاینت قدیمی/اسکریپت)
+            // → مقدار موجود حفظ می‌شود، نه صفرِ بی‌صدا (درآمد بسته‌بندی از دست نمی‌رود).
+            // drizzle مقدار undefined را از SET حذف می‌کند.
+            ...(input.packagingCost !== undefined ? { packagingCost: input.packagingCost } : {}),
+            // stage-56 — slug: undefined = حفظ؛ رشته/خالی = تنظیم/پاک‌سازی
+            ...(slug !== undefined ? { slug } : {}),
+            // stage-60 — دسته‌ی اولیه (undefined = حفظ) + پرچم ویژه/سنجاق
+            ...(primaryCat !== undefined ? { categoryId: primaryCat } : {}),
+            ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
+            profileImage: input.profileImage ?? null,
+            galleryImages: input.galleryImages ?? [],
+            sizesEnabled: input.sizesEnabled ?? false,
+            ingredients: input.ingredients ?? [],
+            // stage-48 — موجودی/حالت‌ها: undefined = حفظ مقدار قبلی (دراپ Removes undefined از SET)
+            ...(input.isAvailable !== undefined ? { isAvailable: input.isAvailable } : {}),
+            ...(input.courierAllowed !== undefined ? { courierAllowed: input.courierAllowed } : {}),
+            ...(input.takeawayAllowed !== undefined ? { takeawayAllowed: input.takeawayAllowed } : {}),
+            ...(input.dineInAllowed !== undefined ? { dineInAllowed: input.dineInAllowed } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(products.id, pid))
+          .returning({ id: products.id })
+        if (!updated) return false
+
+        // ── stage-60: همگام‌سازی دسته‌های اضافه (M2M) ──
+        // حذفِ خارج از لیست + درجِ جدید؛ جدول فقط دسته‌های اضافه را دارد.
+        if (extraCats) {
+          const existing = await tx
+            .select()
+            .from(productCategories)
+            .where(eq(productCategories.productId, pid))
+          const keep = new Set(extraCats)
+          const staleCats = existing.filter((l) => !keep.has(l.categoryId)).map((l) => l.categoryId)
+          if (staleCats.length > 0) {
+            await tx
+              .delete(productCategories)
+              .where(
+                and(eq(productCategories.productId, pid), inArray(productCategories.categoryId, staleCats)),
+              )
+          }
+          const have = new Set(existing.map((l) => l.categoryId))
+          const missing = extraCats.filter((c) => !have.has(c))
+          if (missing.length > 0) {
+            await tx
+              .insert(productCategories)
+              .values(missing.map((categoryId) => ({ productId: pid, categoryId })))
+          }
+        }
+
+        // ── stage-84: همگام‌سازی اقلام بسته‌بندی (junction) ──
+        // undefined = دست‌نخورده (کلاینت قدیمی)؛ آرایه (حتی خالی) = همگام‌سازی کامل.
+        if (input.packagingItemIds) {
+          const keepItems = [...new Set(input.packagingItemIds)].slice(0, 12)
+          const existingItems = await tx
+            .select()
+            .from(productPackagingItems)
+            .where(eq(productPackagingItems.productId, pid))
+          const keepSet = new Set(keepItems)
+          const staleItems = existingItems
+            .filter((l) => !keepSet.has(l.packagingItemId))
+            .map((l) => l.packagingItemId)
+          if (staleItems.length > 0) {
+            await tx
+              .delete(productPackagingItems)
+              .where(
+                and(
+                  eq(productPackagingItems.productId, pid),
+                  inArray(productPackagingItems.packagingItemId, staleItems),
+                ),
+              )
+          }
+          const haveSet = new Set(existingItems.map((l) => l.packagingItemId))
+          const missingItems = keepItems.filter((c) => !haveSet.has(c))
+          if (missingItems.length > 0) {
+            await tx
+              .insert(productPackagingItems)
+              .values(missingItems.map((packagingItemId) => ({ productId: pid, packagingItemId })))
+              .onConflictDoNothing()
+          }
+        }
+
+        // ── phase-2: آیدی پایدار سایزها ──
+        // قبلاً: حذف همه + اینسرت با UUID جدید → سبدِ مشتری که sizeId قدیمی
+        // داشت یا خطا می‌خورد یا بی‌سروصدا اولین سایز قیمت می‌شد. الان:
+        //   • نام موجود → همان ردیف، فقط price/sortOrder/nameAr آپدیت (id ثابت)
+        //   • نام جدید → insert | نام حذف‌شده → delete
+        //   • sizesEnabled=false → دست نمی‌زنیم (برای فعال‌سازی مجدد حفظ می‌شوند)
+        if (input.sizesEnabled && input.sizes) {
+          const sizes = input.sizes // ← رفع خطای TS: narrowing برای داخل callback
+          this.validateSizeNames(sizes)
+          const existing = await tx
+            .select()
+            .from(productSizes)
+            .where(eq(productSizes.productId, pid))
+          const byName = new Map(existing.map((s) => [s.name, s]))
+
+          const keepIds = new Set<string>()
+          let order = 0
+          for (const s of sizes) {
+            // stage-47 — تخفیف مستقل هر سایز (نرمال + قیچی)
+            const sizePct = clampPercent(s.discountPercentage ?? 0)
+            const sizeWindow =
+              sizePct > 0
+                ? {
+                    discountPercentage: sizePct,
+                    discountStartsAt: asDiscountDate(s.discountStartsAt),
+                    discountEndsAt: asDiscountDate(s.discountEndsAt),
+                  }
+                : { discountPercentage: 0, discountStartsAt: null, discountEndsAt: null }
+            const match = byName.get(s.name)
+            if (match) {
+              await tx
+                .update(productSizes)
+                .set({
+                  price: s.price,
+                  sortOrder: order,
+                  nameAr: nullIfEmpty(s.nameAr),
+                  ...sizeWindow,
+                  // stage-56 — تصویر variant: undefined = دست‌نخورده؛
+                  // رشته/خالی = تنظیم/پاک‌سازی
+                  ...(s.image !== undefined ? { image: nullIfEmpty(s.image) } : {}),
+                })
+                .where(eq(productSizes.id, match.id))
+              keepIds.add(match.id)
+            } else {
+              const [ins] = await tx
+                .insert(productSizes)
+                .values({
+                  productId: pid,
+                  name: s.name,
+                  nameAr: nullIfEmpty(s.nameAr),
+                  price: s.price,
+                  sortOrder: order,
+                  // stage-56 — تصویر مستقل این variant
+                  image: nullIfEmpty(s.image),
+                  ...sizeWindow,
+                })
+                .returning({ id: productSizes.id })
+              if (ins) keepIds.add(ins.id)
+            }
+            order++
+          }
+
+          const stale = existing.filter((s) => !keepIds.has(s.id)).map((s) => s.id)
+          if (stale.length > 0) {
+            await tx.delete(productSizes).where(inArray(productSizes.id, stale))
+          }
+        }
+
+        return true
+      })
     } catch (e) {
-      // stage-56 — رقابت همزمان روی slug (۲۳۵۰۵) → پیام دوستانه، نه 500
       if (isUniqueViolation(e)) {
-        return { success: false, message: 'این slug قبلاً برای محصول دیگری ثبت شده' }
+        return { success: false, message: 'این slug یا نام سایز قبلاً ثبت شده' }
       }
       throw e
     }
-
-    // ── stage-60: همگام‌سازی دسته‌های اضافه (M2M) ──
-    // حذفِ خارج از لیست + درجِ جدید؛ جدول فقط دسته‌های اضافه را دارد.
-    if (extraCats) {
-      const existing = await this.deps.db
-        .select()
-        .from(productCategories)
-        .where(eq(productCategories.productId, pid))
-      const keep = new Set(extraCats)
-      const staleCats = existing.filter((l) => !keep.has(l.categoryId)).map((l) => l.categoryId)
-      if (staleCats.length > 0) {
-        await this.deps.db
-          .delete(productCategories)
-          .where(
-            and(eq(productCategories.productId, pid), inArray(productCategories.categoryId, staleCats)),
-          )
-      }
-      const have = new Set(existing.map((l) => l.categoryId))
-      const missing = extraCats.filter((c) => !have.has(c))
-      if (missing.length > 0) {
-        await this.deps.db
-          .insert(productCategories)
-          .values(missing.map((categoryId) => ({ productId: pid, categoryId })))
-      }
-    }
-
-    // ── stage-84: همگام‌سازی اقلام بسته‌بندی (junction) ──
-    // undefined = دست‌نخورده (کلاینت قدیمی)؛ آرایه (حتی خالی) = همگام‌سازی کامل.
-    if (input.packagingItemIds) {
-      const keepItems = [...new Set(input.packagingItemIds)].slice(0, 12)
-      const existingItems = await this.deps.db
-        .select()
-        .from(productPackagingItems)
-        .where(eq(productPackagingItems.productId, pid))
-      const keepSet = new Set(keepItems)
-      const staleItems = existingItems
-        .filter((l) => !keepSet.has(l.packagingItemId))
-        .map((l) => l.packagingItemId)
-      if (staleItems.length > 0) {
-        await this.deps.db
-          .delete(productPackagingItems)
-          .where(
-            and(
-              eq(productPackagingItems.productId, pid),
-              inArray(productPackagingItems.packagingItemId, staleItems),
-            ),
-          )
-      }
-      const haveSet = new Set(existingItems.map((l) => l.packagingItemId))
-      const missingItems = keepItems.filter((c) => !haveSet.has(c))
-      if (missingItems.length > 0) {
-        await this.deps.db
-          .insert(productPackagingItems)
-          .values(missingItems.map((packagingItemId) => ({ productId: pid, packagingItemId })))
-          .onConflictDoNothing()
-      }
-    }
-
-    // ── phase-2: آیدی پایدار سایزها ──
-    // قبلاً: حذف همه + اینسرت با UUID جدید → سبدِ مشتری که sizeId قدیمی
-    // داشت یا خطا می‌خورد یا بی‌سروصدا اولین سایز قیمت می‌شد. الان:
-    //   • نام موجود → همان ردیف، فقط price/sortOrder/nameAr آپدیت (id ثابت)
-    //   • نام جدید → insert | نام حذف‌شده → delete
-    //   • sizesEnabled=false → دست نمی‌زنیم (برای فعال‌سازی مجدد حفظ می‌شوند)
-    if (input.sizesEnabled && input.sizes) {
-      const sizes = input.sizes // ← رفع خطای TS: narrowing برای داخل callback
-      await this.deps.db.transaction(async (tx) => {
-        const existing = await tx
-          .select()
-          .from(productSizes)
-          .where(eq(productSizes.productId, pid))
-        const byName = new Map(existing.map((s) => [s.name, s]))
-
-        const keepIds = new Set<string>()
-        let order = 0
-        for (const s of sizes) {
-          // stage-47 — تخفیف مستقل هر سایز (نرمال + قیچی)
-          const sizePct = clampPercent(s.discountPercentage ?? 0)
-          const sizeWindow =
-            sizePct > 0
-              ? {
-                  discountPercentage: sizePct,
-                  discountStartsAt: asDiscountDate(s.discountStartsAt),
-                  discountEndsAt: asDiscountDate(s.discountEndsAt),
-                }
-              : { discountPercentage: 0, discountStartsAt: null, discountEndsAt: null }
-          const match = byName.get(s.name)
-          if (match) {
-            await tx
-              .update(productSizes)
-              .set({
-                price: s.price,
-                sortOrder: order,
-                nameAr: nullIfEmpty(s.nameAr),
-                ...sizeWindow,
-                // stage-56 — تصویر variant: undefined = دست‌نخورده؛
-                // رشته/خالی = تنظیم/پاک‌سازی
-                ...(s.image !== undefined ? { image: nullIfEmpty(s.image) } : {}),
-              })
-              .where(eq(productSizes.id, match.id))
-            keepIds.add(match.id)
-          } else {
-            const [ins] = await tx
-              .insert(productSizes)
-              .values({
-                productId: pid,
-                name: s.name,
-                nameAr: nullIfEmpty(s.nameAr),
-                price: s.price,
-                sortOrder: order,
-                // stage-56 — تصویر مستقل این variant
-                image: nullIfEmpty(s.image),
-                ...sizeWindow,
-              })
-              .returning({ id: productSizes.id })
-            if (ins) keepIds.add(ins.id)
-          }
-          order++
-        }
-
-        const stale = existing.filter((s) => !keepIds.has(s.id)).map((s) => s.id)
-        if (stale.length > 0) {
-          await tx.delete(productSizes).where(inArray(productSizes.id, stale))
-        }
-      })
-    }
+    if (!saved) return { success: false, message: 'محصول پیدا نشد' }
 
     await this.cache.invalidate()
 
@@ -1544,6 +1563,9 @@ export class MenuService {
         before?.status !== after.status
       if (modesOrStatusChanged) {
         await this.publishProductLive(after)
+      }
+      if (input.packagingItemIds !== undefined || input.packagingCost !== undefined) {
+        await this.publishMenuLive({ productId: pid, reason: 'packaging' })
       }
       // ۲) تخفیف مادی/جدید فعال شد ⇒ پخش فوری نوتیفیکیشن به همه
       // stage-64 — عکسِ فوریِ قبل پاس می‌شود (توضیح بالا)
@@ -1622,11 +1644,33 @@ export class MenuService {
 
   // ── داخلی ──
 
+  private validateSizeNames(sizes: SizeInput[]): void {
+    if (new Set(sizes.map((size) => size.name)).size !== sizes.length) {
+      throw Err.validation('نام سایزهای محصول نباید تکراری باشد.')
+    }
+  }
+
+  private async validatePackagingItems(db: DbOrTx, ids?: string[]): Promise<void> {
+    if (!ids?.length) return
+    const clean = [...new Set(ids)]
+    if (clean.length > 12 || clean.some((id) => !UUID_RE.test(id))) {
+      throw Err.validation('انتخاب اقلام بسته‌بندی نامعتبر است.')
+    }
+    // Keep selected items alive until the complete product save commits.
+    const rows = await db.select({ id: packagingItems.id }).from(packagingItems)
+      .where(inArray(packagingItems.id, clean)).for('key share')
+    if (rows.length !== clean.length) {
+      throw Err.validation('یکی از اقلام بسته‌بندی حذف شده است — فهرست اقلام را به‌روز کنید.')
+    }
+  }
+
   private async insertSizes(
     productId: ProductId,
     sizes: SizeInput[],
+    db: DbOrTx = this.deps.db,
   ) {
-    await this.deps.db.insert(productSizes).values(
+    this.validateSizeNames(sizes)
+    await db.insert(productSizes).values(
       sizes.map((s, i) => {
         // stage-47 — تخفیف مستقل هر سایز (نرمال + قیچی)
         const sizePct = clampPercent(s.discountPercentage ?? 0)

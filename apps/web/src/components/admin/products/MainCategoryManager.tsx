@@ -21,7 +21,7 @@ import {
 	toggleMainCategory,
 } from '#/server/products'
 import { useToastStore } from '#/stores/toastStore'
-import { qk } from '#/utils/queryKeys'
+import { invalidateCategoryQueries } from '#/utils/productCache'
 import { adminMainCategoriesOptions } from '#/utils/queryOptions'
 
 // --- مودال ساخت ---
@@ -44,13 +44,12 @@ const AddMainModal = memo(function AddMainModal({
 			nameAr?: string | null
 			slug: string
 		}) => createMainCategory({ data }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				setError(res.message ?? 'خطا')
 				return
 			}
-			queryClient.invalidateQueries({ queryKey: qk.adminMainCategories })
-			queryClient.invalidateQueries({ queryKey: qk.activeMainCategories })
+			await invalidateCategoryQueries(queryClient)
 			showToast('دسته اصلی ساخته شد — برای نمایش فعالش کنید')
 			onClose()
 		},
@@ -178,29 +177,27 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 	// دسته‌های اصلی از فکتوری مشترک — همون کش فرم دسته‌بندی
 	const { data: mains, isLoading } = useQuery(adminMainCategoriesOptions)
 
-	const invalidateAll = useCallback(() => {
-		queryClient.invalidateQueries({ queryKey: qk.adminMainCategories })
-		queryClient.invalidateQueries({ queryKey: qk.activeMainCategories })
-		// لیست محصولات همه‌ی تب‌ها وابسته به دسته‌های فعاله — همه رفرش می‌شن
-		queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
-	}, [queryClient])
+	const invalidateAll = useCallback(
+		() => invalidateCategoryQueries(queryClient),
+		[queryClient],
+	)
 
 	const toggleMutation = useMutation({
 		mutationFn: (id: string) => toggleMainCategory({ data: { id } }),
-		onSuccess: () => {
-			invalidateAll()
+		onSuccess: async () => {
+			await invalidateAll()
 			showToast('وضعیت تغییر کرد')
 		},
 	})
 
 	const defaultMutation = useMutation({
 		mutationFn: (id: string) => setDefaultMainCategory({ data: { id } }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			invalidateAll()
+			await invalidateAll()
 			showToast('پیش‌فرض تغییر کرد')
 		},
 	})
@@ -213,12 +210,12 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 
 	const deleteMutation = useMutation({
 		mutationFn: (id: string) => deleteMainCategory({ data: { id } }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			invalidateAll()
+			await invalidateAll()
 			showToast('حذف شد')
 			setConfirmDelete(null)
 		},
@@ -395,6 +392,7 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 
 			<ConfirmModal
 				isOpen={!!confirmDelete}
+				isPending={deleteMutation.isPending}
 				title="حذف دسته اصلی"
 				message="آیا از حذف این دسته اصلی مطمئن هستید؟ (دسته‌های زیرمجموعه باید خالی باشند)"
 				onConfirm={() => confirmDelete && deleteMutation.mutate(confirmDelete)}

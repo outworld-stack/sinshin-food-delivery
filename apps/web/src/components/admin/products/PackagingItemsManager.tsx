@@ -26,7 +26,7 @@ import {
 } from '#/server/products'
 import { useToastStore } from '#/stores/toastStore'
 import { formatPrice } from '#/utils/format'
-import { qk } from '#/utils/queryKeys'
+import { invalidatePackagingQueries } from '#/utils/productCache'
 import { packagingItemsOptions } from '#/utils/queryOptions'
 
 interface PackagingItemsManagerProps {
@@ -51,15 +51,13 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 	)
 	const [editingPrice, setEditingPrice] = useState<Record<string, string>>({})
 
-	const invalidate = () => {
-		queryClient.invalidateQueries({ queryKey: qk.packagingItems })
-	}
+	const invalidate = () => invalidatePackagingQueries(queryClient)
 
 	const addMutation = useMutation({
 		mutationFn: (data: { title: string; price: number }) =>
 			addPackagingItem({ data }),
-		onSuccess: () => {
-			invalidate()
+		onSuccess: async () => {
+			await invalidate()
 			setTitleDraft('')
 			setPriceDraft('')
 			showToast('قلم بسته‌بندی افزوده شد')
@@ -80,8 +78,8 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 
 	const removeMutation = useMutation({
 		mutationFn: (id: string) => removePackagingItem({ id }),
-		onSuccess: () => {
-			invalidate()
+		onSuccess: async () => {
+			await invalidate()
 			setConfirmRemove(null)
 			showToast('قلم حذف شد — محصولاتِ وابسته به هزینه دستی برمی‌گردند')
 		},
@@ -92,11 +90,16 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 	const handleAdd = () => {
 		const title = titleDraft.trim()
 		const price = Number(priceDraft)
+		if (!canWrite || addMutation.isPending) return
 		if (!title) {
 			showToast('عنوان قلم را وارد کنید', 'error')
 			return
 		}
-		if (!Number.isFinite(price) || price < 0) {
+		if (
+			!priceDraft.trim() ||
+			!Number.isSafeInteger(Math.round(price)) ||
+			price < 0
+		) {
 			showToast('قیمت معتبر وارد کنید', 'error')
 			return
 		}
@@ -104,6 +107,7 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 	}
 
 	const commitPrice = (item: PackagingItemDto) => {
+		if (!canWrite) return
 		const raw = editingPrice[item.id]
 		if (raw === undefined) return
 		// ترمیم اسکنِ استیج-۸۴ — خالی‌کردنِ فیلد قیمت دیگر «صفرِ سراسری»
@@ -237,6 +241,9 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 									<div className="flex items-center gap-3">
 										<Toggle
 											isOn={item.isActive}
+											disabled={
+												updateMutation.isPending || removeMutation.isPending
+											}
 											onToggle={() =>
 												updateMutation.mutate({
 													id: item.id,
@@ -249,6 +256,9 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 											type="button"
 											onClick={() => setConfirmRemove(item)}
 											aria-label={`حذف ${item.title}`}
+											disabled={
+												removeMutation.isPending || updateMutation.isPending
+											}
 											title="حذف قلم"
 											className="text-red-500 hover:text-red-600 transition cursor-pointer shrink-0"
 										>
@@ -264,10 +274,12 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 
 			<ConfirmModal
 				isOpen={!!confirmRemove}
+				isPending={removeMutation.isPending}
 				title="حذف قلم بسته‌بندی"
 				message={`قلم «${confirmRemove?.title ?? ''}» حذف شود؟ محصولاتِ دارای این قلم به هزینه‌ی دستیِ خود برمی‌گردند.`}
 				onConfirm={() => {
-					if (confirmRemove) removeMutation.mutate(confirmRemove.id)
+					if (canWrite && confirmRemove && !removeMutation.isPending)
+						removeMutation.mutate(confirmRemove.id)
 				}}
 				onCancel={() => setConfirmRemove(null)}
 			/>

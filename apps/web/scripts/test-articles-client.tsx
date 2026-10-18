@@ -100,8 +100,8 @@ for (let count = 1; count <= 6; count++) {
 }
 articles = Array.from({ length: 18 }, (_, i) => article(String(i), i))
 allArticles = []
-assert.equal(interact().visibleArticles.length, 8)
-assert.equal(interact([p => p.handleLoadMore()]).visibleArticles.length, 16)
+assert.equal(interact().visibleArticles.length, 12)
+assert.equal(interact([p => p.handleLoadMore()]).visibleArticles.length, 18)
 
 const filterProps = { hasSubCategories: true, subCategories: categories[0].subCategories,
   tempSubCategory: 'recipes', tempSortBy: 'most-viewed' as const,

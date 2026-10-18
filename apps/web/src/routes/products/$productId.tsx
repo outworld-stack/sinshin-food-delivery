@@ -40,6 +40,7 @@ import {
 	withBrand,
 } from '#/lib/seo'
 import { absoluteUrl, DEFAULT_OG_IMAGE } from '#/lib/site'
+import type { Product } from '#/server/products'
 import { productByIdOptions, productReviewsOptions } from '#/utils/queryOptions'
 
 export const Route = createFileRoute('/products/$productId')({
@@ -108,7 +109,16 @@ export const Route = createFileRoute('/products/$productId')({
 })
 
 function ProductDetailPage() {
-	const product = Route.useLoaderData()
+	const loadedProduct = Route.useLoaderData()
+	const { productId } = Route.useParams()
+	const { data: product = loadedProduct } = useQuery(
+		productByIdOptions(productId),
+	)
+	if (!product) return <RouteNotFound />
+	return <ProductDetailContent key={product.id} product={product} />
+}
+
+function ProductDetailContent({ product }: { product: Product }) {
 	const back = useBack('/products')
 	const page = useProductPage(product)
 	const { t } = useI18n()

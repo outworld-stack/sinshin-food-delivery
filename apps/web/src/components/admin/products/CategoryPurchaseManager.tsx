@@ -23,7 +23,7 @@ import {
 	setMainPurchaseState,
 } from '#/server/products'
 import { useToastStore } from '#/stores/toastStore'
-import { qk } from '#/utils/queryKeys'
+import { invalidateCategoryQueries } from '#/utils/productCache'
 import { adminPurchaseStateOptions } from '#/utils/queryOptions'
 
 interface CategoryPurchaseManagerProps {
@@ -40,24 +40,20 @@ export const CategoryPurchaseManager = memo(function CategoryPurchaseManager({
 
 	// تغییرِ خریدِ دسته، همه‌ی لایه‌های وابسته را تازه می‌کند: لیست منوها،
 	// صفحه‌ی جزئیات، کش دسته‌ها و سبد/چک‌اوتِ باز (مثل ویرایشِ دسته از قبل)
-	const invalidateAll = useCallback(() => {
-		queryClient.invalidateQueries({ queryKey: qk.adminPurchaseState })
-		queryClient.invalidateQueries({ queryKey: qk.categories })
-		queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
-		queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
-		queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
-		queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
-	}, [queryClient])
+	const invalidateAll = useCallback(
+		() => invalidateCategoryQueries(queryClient),
+		[queryClient],
+	)
 
 	const mainMutation = useMutation({
 		mutationFn: (data: { id: string; purchaseEnabled: boolean }) =>
 			setMainPurchaseState({ data }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			invalidateAll()
+			await invalidateAll()
 			showToast('وضعیت خرید دسته‌ی اصلی تغییر کرد')
 		},
 		onError: (err: Error) =>
@@ -67,12 +63,12 @@ export const CategoryPurchaseManager = memo(function CategoryPurchaseManager({
 	const categoryMutation = useMutation({
 		mutationFn: (data: { id: string; purchaseEnabled: boolean }) =>
 			setCategoryPurchaseState({ data }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			invalidateAll()
+			await invalidateAll()
 			showToast('وضعیت خرید دسته‌بندی تغییر کرد')
 		},
 		onError: (err: Error) =>

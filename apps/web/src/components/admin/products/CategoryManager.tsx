@@ -22,7 +22,7 @@ import {
 	updateCategory,
 } from '#/server/products'
 import { useToastStore } from '#/stores/toastStore'
-import { qk } from '#/utils/queryKeys'
+import { invalidateCategoryQueries } from '#/utils/productCache'
 import { adminMainCategoriesOptions } from '#/utils/queryOptions'
 
 // فرم واحد به‌جای استیت‌های پراکنده
@@ -102,12 +102,12 @@ export const CategoryManager = memo(function CategoryManager({
 			takeawayEnabled: boolean
 			dineInEnabled: boolean
 		}) => createCategory({ data }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			queryClient.invalidateQueries({ queryKey: qk.categories })
+			await invalidateCategoryQueries(queryClient)
 			set({ isModalOpen: false })
 			showToast('دسته‌بندی افزوده شد')
 		},
@@ -123,19 +123,12 @@ export const CategoryManager = memo(function CategoryManager({
 			takeawayEnabled: boolean
 			dineInEnabled: boolean
 		}) => updateCategory({ data }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			queryClient.invalidateQueries({ queryKey: qk.categories })
-			// phase-3: جابه‌جایی والد دسته → محصولات بین main ها حرکت می‌کنند
-			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
-			// stage-48: تغییر حالت‌های دسته → حالت مؤثر محصولات عوض می‌شود؛
-			// سبد/چک‌اوت‌های باز باید کشِ تازه ببینند
-			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
-			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
-			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
+			await invalidateCategoryQueries(queryClient)
 			set({ isModalOpen: false })
 			showToast('دسته‌بندی ویرایش شد')
 		},
@@ -143,19 +136,12 @@ export const CategoryManager = memo(function CategoryManager({
 
 	const deleteMut = useMutation({
 		mutationFn: (id: string) => deleteCategory({ data: { id } }),
-		onSuccess: (res) => {
+		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			queryClient.invalidateQueries({ queryKey: qk.categories })
-			// stage-63 — حذف آبشاری: محصولاتِ این دسته هم رفته‌اند؛ کش‌های
-			// منو/لیست ادمین/سبد/چک‌اوت باید همان لحظه تازه شوند
-			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
-			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
-			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
-			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
-			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
+			await invalidateCategoryQueries(queryClient)
 			showToast(res.message ?? 'دسته‌بندی حذف شد')
 			set({ confirmDeleteId: null })
 		},
@@ -198,6 +184,7 @@ export const CategoryManager = memo(function CategoryManager({
 	const closeModal = useCallback(() => set({ isModalOpen: false }), [set])
 
 	const handleSave = useCallback(() => {
+		if (createMut.isPending || updateMut.isPending) return
 		if (!form.name.trim()) {
 			showToast('لطفا نام دسته را وارد کنید', 'error')
 			return
@@ -447,6 +434,7 @@ export const CategoryManager = memo(function CategoryManager({
 							</button>
 							<button
 								onClick={handleSave}
+								disabled={createMut.isPending || updateMut.isPending}
 								className="flex-1 py-2 rounded-lg bg-primary dark:bg-dark-primary text-white text-sm cursor-pointer"
 							>
 								ذخیره
@@ -458,10 +446,12 @@ export const CategoryManager = memo(function CategoryManager({
 
 			<ConfirmModal
 				isOpen={form.confirmDeleteId !== null}
+				isPending={deleteMut.isPending}
 				title="حذف دسته‌بندی"
 				message="آیا از حذف این دسته‌بندی مطمئن هستید؟ تمام محصولاتِ زیر آن هم حذف می‌شوند. این عملیات قابل بازگشت نیست."
 				onConfirm={() => {
-					if (form.confirmDeleteId) deleteMut.mutate(form.confirmDeleteId)
+					if (form.confirmDeleteId && !deleteMut.isPending)
+						deleteMut.mutate(form.confirmDeleteId)
 				}}
 				onCancel={() => set({ confirmDeleteId: null })}
 			/>

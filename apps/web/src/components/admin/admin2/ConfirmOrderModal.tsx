@@ -60,7 +60,10 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 	}, [])
 
 	// ⬅ NEW: کوئری از فکتوری مرکزی — قبلاً کلید خام ['couriers-assignment'] بود (هم‌hash)
-	const { data: couriers } = useQuery(couriersAssignmentOptions)
+	const { data: couriers } = useQuery({
+		...couriersAssignmentOptions,
+		enabled: isDelivery,
+	})
 
 	// سینک انتخاب با پیکِ فعلی سفارش
 	useEffect(() => {
@@ -79,6 +82,11 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 			notePrintOnInvoice: boolean
 			securityEnabled: boolean
 		}) => confirmLiveOrder(payload),
+		onError: (error) =>
+			showToast(
+				error instanceof Error ? error.message : 'تایید سفارش ناموفق بود',
+				'error',
+			),
 		onSuccess: (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
@@ -99,6 +107,11 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 	const reassignMutation = useMutation({
 		mutationFn: (payload: { orderId: string; newCourierId: string | null }) =>
 			reassignCourier(payload),
+		onError: (error) =>
+			showToast(
+				error instanceof Error ? error.message : 'تغییر پیک ناموفق بود',
+				'error',
+			),
 		onSuccess: (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
@@ -114,6 +127,7 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 	})
 
 	const handleConfirm = useCallback(() => {
+		if (confirmMutation.isPending || reassignMutation.isPending) return
 		if (isReassign) {
 			reassignMutation.mutate({
 				orderId,
@@ -135,12 +149,13 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 	}, [isReassign, isDelivery, form, orderId, confirmMutation, reassignMutation])
 
 	const hasNote = form.miscNote.trim().length > 0
+	const isPending = confirmMutation.isPending || reassignMutation.isPending
 
 	return (
 		<div className="fixed inset-0 z-100 flex items-center justify-center p-4">
 			<div
 				className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-				onClick={onCancel}
+				onClick={() => !isPending && onCancel()}
 			></div>
 			<div className="relative bg-white dark:bg-[#2a1015] p-6 rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
 				<h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white mb-1">
@@ -168,6 +183,7 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 						<div className="relative">
 							<select
 								value={form.selected}
+								disabled={isPending}
 								onChange={(e) => set({ selected: e.target.value })}
 								className="w-full appearance-none px-4 py-3 pl-10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm cursor-pointer"
 							>
@@ -274,6 +290,7 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 					<button
 						type="button"
 						onClick={onCancel}
+						disabled={isPending}
 						className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium cursor-pointer"
 					>
 						انصراف

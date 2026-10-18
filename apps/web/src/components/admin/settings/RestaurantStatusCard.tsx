@@ -62,10 +62,15 @@ export const RestaurantStatusCard = memo(function RestaurantStatusCard({
 
 	const busyMutation = useMutation({
 		mutationFn: (next: boolean) => setRestaurantBusy({ data: { busy: next } }),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: qk.settingsBusy })
-			// چک‌اوت همیشه وضعیت تازه ببیند (هشدارِ سرو در محل)
-			queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
+		onSuccess: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: qk.settingsBusy }),
+				queryClient.invalidateQueries({
+					queryKey: qk.settingsRestaurantStatus,
+				}),
+				queryClient.invalidateQueries({ queryKey: qk.restaurantStatus }),
+				queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix }),
+			])
 			showToast('وضعیت شلوغی رستوران ثبت شد')
 		},
 		onError: (err: Error) =>

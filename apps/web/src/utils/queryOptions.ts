@@ -26,6 +26,7 @@ import type {
 // مزیت: loader سرور و useQuery کلاینت از همین تعریف استفاده می‌کنن؛
 // staleTime/کلید/queryFn هیچ‌وقت از هم دیگه جدا نمی‌شن
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
+import { tehranDay } from './tehranDay'
 import { getAboutContent } from '#/server/about'
 import {
 	getAdmin2Options,
@@ -599,11 +600,13 @@ export interface AdminOrdersFilters {
 	courier: string
 	role: string | null
 	admin2Id: string | null
+	todayDay?: string
 }
 
-export const adminOrdersOptions = (f: AdminOrdersFilters) =>
-	queryOptions({
-		queryKey: qk.adminOrders(f),
+export const adminOrdersOptions = (f: AdminOrdersFilters) => {
+	const day = f.sortDate === 'today' ? (f.todayDay ?? tehranDay()) : undefined
+	return queryOptions({
+		queryKey: day ? [...qk.adminOrders(f), day] : qk.adminOrders(f),
 		queryFn: async (): Promise<AdminOrdersData> => {
 			// stage-84 — «امروز»: مرزِ روزِ تقویمیِ تهران (مستقل از TZ سرور/کلاینت)
 			// با Intl حساب و ISO فرستاده می‌شود؛ sort عملاً جدیدترین است.
@@ -611,13 +614,6 @@ export const adminOrdersOptions = (f: AdminOrdersFilters) =>
 			let dateFrom: string | undefined
 			let dateTo: string | undefined
 			if (today) {
-				const fmt = new Intl.DateTimeFormat('en-CA', {
-					timeZone: 'Asia/Tehran',
-					year: 'numeric',
-					month: '2-digit',
-					day: '2-digit',
-				})
-				const day = fmt.format(new Date()) // YYYY-MM-DD (en-CA)
 				dateFrom = `${day}T00:00:00+03:30`
 				dateTo = `${day}T23:59:59.999+03:30`
 			}
@@ -653,6 +649,7 @@ export const adminOrdersOptions = (f: AdminOrdersFilters) =>
 		},
 		placeholderData: keepPreviousData,
 	})
+}
 
 // --- پیک‌ها ---
 export interface AdminCouriersFilters {

@@ -39,17 +39,27 @@ function CourierScanPage() {
 
 	const watchIdRef = useRef<number | null>(null)
 	const lastSentRef = useRef(0)
+	const runIdRef = useRef(0)
 
 	// پاک‌سازی وقتی صفحه بسته می‌شود
 	useEffect(() => {
+		setPhase('idle')
+		setMessage('')
+		setPosition(null)
+		setRoute(null)
+		setSentCount(0)
+		lastSentRef.current = 0
 		return () => {
+			runIdRef.current += 1
 			if (watchIdRef.current !== null)
 				navigator.geolocation.clearWatch(watchIdRef.current)
+			watchIdRef.current = null
 		}
-	}, [])
+	}, [orderId])
 
 	// شروع: ثبت رسیدن + روشن‌کردن استریم موقعیت
 	const handleStart = useCallback(async () => {
+		const runId = ++runIdRef.current
 		setPhase('scanning')
 		setMessage('')
 		// ترمیم اسکنِ استیج-۸۴ — قبل از استریمِ جدید، استریمِ قبلی پاک شود
@@ -65,6 +75,7 @@ function CourierScanPage() {
 				orderId,
 				courierToken: getCourierToken(),
 			})
+			if (runId !== runIdRef.current) return
 			if (!res.success) {
 				setPhase('error')
 				setMessage(res.message ?? 'اسکن ناموفق بود')
@@ -87,6 +98,7 @@ function CourierScanPage() {
 			}
 			watchIdRef.current = navigator.geolocation.watchPosition(
 				async (pos) => {
+					if (runId !== runIdRef.current) return
 					const { latitude, longitude } = pos.coords
 					setPosition({ lat: latitude, lng: longitude })
 					// ارسال حداکثر هر ۵ ثانیه
@@ -94,14 +106,21 @@ function CourierScanPage() {
 					if (now - lastSentRef.current > 5000) {
 						lastSentRef.current = now
 						try {
-							await updateCourierLocation({
+							const result = await updateCourierLocation({
 								orderId,
 								courierToken: getCourierToken() ?? '',
 								lat: latitude,
 								lng: longitude,
 							})
-							setSentCount((c) => c + 1)
+							if (runId !== runIdRef.current) return
+							if (result.success) {
+								setSentCount((c) => c + 1)
+								setMessage('')
+							} else {
+								setMessage(result.message ?? 'ارسال موقعیت انجام نشد')
+							}
 						} catch (err) {
+							if (runId !== runIdRef.current) return
 							// phase-5: خطای ارسال موقعیت دیگر بی‌صدا نیست —
 							// «نشست پیک منقضی شده» باید دیده شود تا پیک بداند دوباره وارد شود
 							setMessage(
@@ -111,11 +130,13 @@ function CourierScanPage() {
 					}
 				},
 				(err) => {
+					if (runId !== runIdRef.current) return
 					setMessage('دسترسی به موقعیت رد شد: ' + err.message)
 				},
 				{ enableHighAccuracy: true, maximumAge: 3000 },
 			)
 		} catch (err: unknown) {
+			if (runId !== runIdRef.current) return
 			setPhase('error')
 			setMessage(err instanceof Error ? err.message : 'خطا')
 		}
@@ -123,6 +144,7 @@ function CourierScanPage() {
 
 	// توقف ارسال
 	const handleStop = useCallback(() => {
+		runIdRef.current += 1
 		if (watchIdRef.current !== null) {
 			navigator.geolocation.clearWatch(watchIdRef.current)
 			watchIdRef.current = null

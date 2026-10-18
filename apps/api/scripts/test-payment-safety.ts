@@ -9,6 +9,7 @@ import { AppConfig } from '../src/infra/config/env'
 import { CouponService } from '../src/domain/coupon/coupon.service'
 import { OrderService } from '../src/domain/order/order.service'
 import { PaymentService } from '../src/domain/payment/payment.service'
+import { SettingsService } from '../src/domain/settings/settings.service'
 import { SepAdapter } from '../src/domain/payment/sep.adapter'
 import { ZarinpalAdapter } from '../src/domain/payment/zarinpal.adapter'
 import { MellatAdapter } from '../src/domain/payment/mellat.adapter'
@@ -269,6 +270,34 @@ try {
     query: { ResCode: '0', RefId: 'REF123', SaleOrderId: 'wrong-order', SaleReferenceId: '123456' } })
   assert.equal(swapped.indeterminate, true)
   passed('Mellat cancellation or mismatched sale order cannot release a hold')
+
+  const settingsService = new SettingsService({ db })
+  const gatewayMap = (service as unknown as { gateways: Map<string, PaymentGateway> }).gateways
+  const realSep = gatewayMap.get('SEP')!
+  gatewayMap.set('SEP', { ...fake, id: 'SEP' })
+  verifyHook = async input => ({ success: true, gatewayRef: input.gatewayRef })
+  await settingsService.setGateways({ mellat: true, zarinpal: true, sep: false })
+  const disabledRetry = await make('SEP', null)
+  await db.update(payments).set({ status: 'FAILED' }).where(eq(payments.id, disabledRetry.payment.id))
+  const beforeDisabledInit = initCalls
+  await assert.rejects(() => service.retryInitiation(disabledRetry.user.id, disabledRetry.order.displayId, 'SEP'), /غیرفعال/)
+  assert.equal(initCalls, beforeDisabledInit)
+  assert.equal((await db.select().from(payments).where(eq(payments.orderId, disabledRetry.order.id))).length, 1)
+  assert.equal(await orderService.walletBalance(db, disabledRetry.user.id), 80_000)
+  passed('disabled gateways reject new retries without creating an attempt or changing the wallet')
+
+  const acceptedBeforeSwitch = await make('SEP', null)
+  await service.initiate(acceptedBeforeSwitch.payment.id, 'SEP', { displayId: acceptedBeforeSwitch.order.displayId, amount: 80_000 })
+  await callback(acceptedBeforeSwitch)
+  assert.equal((await readPayment(acceptedBeforeSwitch.payment.id)).status, 'SUCCESS')
+  assert.equal((await readOrder(acceptedBeforeSwitch.order.id)).paymentStatus, 'SUCCESS')
+  passed('accepted payment attempts can initialize and settle while their gateway is disabled')
+
+  await settingsService.setGateways({ mellat: true, zarinpal: true, sep: true })
+  await service.retryInitiation(disabledRetry.user.id, disabledRetry.order.displayId, 'SEP')
+  assert.equal((await db.select().from(payments).where(eq(payments.orderId, disabledRetry.order.id))).length, 2)
+  gatewayMap.set('SEP', realSep)
+  passed('re-enabling a gateway allows a fresh retry')
 
   const findings = await db.select().from(reconcileFindings)
   assert(findings.length >= 5)
