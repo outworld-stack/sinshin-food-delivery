@@ -321,6 +321,14 @@ try {
   assert(totals[0]!.count > 0)
   const invalidRefs = await db.select().from(orders).where(and(eq(orders.couponId, disappearing.id), eq(orders.userId, another.id)))
   assert.equal(invalidRefs.length, 0)
+
+  // stage-91 — فاکتور چاپی کارکنه باید شمارهٔ «کاملِ» مشتری را داشته باشد:
+  // آشپزخانه/پیک برای تماس با مشتری به شمارهٔ واقعی نیاز دارند. ماسکِ
+  // stage-55 از invoiceForStaff حذف شد (لیست‌های ادمین۲ ماسک می‌مانند).
+  const staffInvoice = await orderService.invoiceForStaff(paid.displayId)
+  assert.equal(staffInvoice.userPhone, buyer.phone)
+  assert.ok(!staffInvoice.userPhone!.includes('*'))
+  passed('printed staff invoice carries the full customer phone number (stage-91)')
   console.log(`Order safety: ${count} passed`)
 } finally {
   globalThis.fetch = savedFetch

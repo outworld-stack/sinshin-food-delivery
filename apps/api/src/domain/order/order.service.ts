@@ -71,7 +71,6 @@ import {
 } from "#/domain/shared/brand";
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
-import { maskPhone } from "#/domain/shared/pg";
 import { lockWalletAccounts, signedWalletAmount } from "#/domain/shared/wallet-sql";
 import {
         finalPriceOf,
@@ -1353,8 +1352,11 @@ export class OrderService {
                         date: row.createdAt,
                         status: row.status,
                         userName: user[0]?.name ?? null,
-                        // stage-55 — ماسک شماره‌ی مشتری در فاکتور کارکنه (ادمین۲)
-                        userPhone: buyerPhone ? maskPhone(buyerPhone) : null,
+                        // stage-91 — شمارهٔ «کاملِ» مشتری (حذفِ ماسکِ stage-55):
+                        // فاکتورِ چاپی سندِ عملیاتیِ آشپزخانه/پیک است — باید بتوانند
+                        // به مشتری زنگ بزنند. ماسکِ stage-55 برای «لیست‌های» ادمین۲
+                        // (نمایِ زنده/آمار/جست‌وجو) سرِ جای خود باقی است.
+                        userPhone: buyerPhone ?? null,
                         deliveryType: row.deliveryType,
                         address: row.addressSnapshot,
                         customerNote: row.customerNote,
