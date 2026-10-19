@@ -40,6 +40,7 @@
     "db:test:articles": "bun scripts/test-articles.ts",
     "db:test:purchase": "bun scripts/test-category-purchase.ts",
     "db:test:print": "bun scripts/test-print-service.ts",
+    "test:print-transport": "bun scripts/test-print-transport.ts",
     "db:test:menu": "bun scripts/test-menu-safety.ts"
   },
   "dependencies": {

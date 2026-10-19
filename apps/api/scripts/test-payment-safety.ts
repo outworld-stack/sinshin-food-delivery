@@ -95,11 +95,98 @@ try {
 
   const sepSession = await make('SEP', null)
   fetchHandler = async () => json({ IsSuccess: true, Token: 'live-sep-token' })
-  await service.initiate(sepSession.payment.id, 'SEP', { displayId: sepSession.order.displayId, amount: 1 })
+  const sepInit = await service.initiate(sepSession.payment.id, 'SEP', { displayId: sepSession.order.displayId, amount: 1 })
   await db.update(payments).set({ updatedAt: new Date(Date.now() - 60 * 60_000) }).where(eq(payments.id, sepSession.payment.id))
-  await assert.rejects(() => service.retryInitiation(sepSession.user.id, sepSession.order.displayId, 'SEP'))
+  fetchHandler = async () => { throw new Error('Resuming SEP must not initialize a second session') }
+  const sepRetries = await Promise.all([
+    service.retryInitiation(sepSession.user.id, sepSession.order.displayId),
+    service.retryInitiation(sepSession.user.id, sepSession.order.displayId),
+  ])
+  assert(sepRetries.every(result => result.paymentUrl === sepInit.paymentUrl && result.displayId === sepSession.order.displayId))
+  assert.equal((await db.select().from(payments).where(eq(payments.orderId, sepSession.order.id))).length, 1)
   assert.equal((await readPayment(sepSession.payment.id)).status, 'PENDING')
-  passed('a live SEP session cannot be replaced merely because its RefNum is still null')
+  assert.equal(await orderService.walletBalance(db, sepSession.user.id), 80_000)
+  await assert.rejects(() => service.retryInitiation(initiating.user.id, sepSession.order.displayId))
+  await assert.rejects(() => service.retryInitiation(sepSession.user.id, sepSession.order.displayId, 'FAKE'))
+  passed('concurrent owner retries reopen the same SEP session without a new charge or wallet movement; other users and gateway switches are rejected')
+
+  const resumable = await make('FAKE', null)
+  const resumableInit = await service.initiate(resumable.payment.id, 'FAKE', { displayId: resumable.order.displayId, amount: 80_000 })
+  const beforeResumeInit = initCalls
+  verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+  assert.equal((await service.retryInitiation(resumable.user.id, resumable.order.displayId)).paymentUrl, resumableInit.paymentUrl)
+  verifyHook = async () => { throw new Error('PSP unavailable') }
+  assert.equal((await service.retryInitiation(resumable.user.id, resumable.order.displayId)).paymentUrl, resumableInit.paymentUrl)
+  assert.equal(initCalls, beforeResumeInit)
+  assert.equal((await readPayment(resumable.payment.id)).status, 'PENDING')
+  assert.equal(await orderService.walletBalance(db, resumable.user.id), 80_000)
+  passed('inconclusive verification and a PSP outage still allow resuming an existing gateway URL')
+
+  const unknownWithoutUrl = await make()
+  await assert.rejects(() => service.retryInitiation(unknownWithoutUrl.user.id, unknownWithoutUrl.order.displayId))
+  assert.equal(initCalls, beforeResumeInit)
+  passed('an unresolved payment without a resumable URL cannot create a second charge')
+
+  verifyHook = async input => ({ success: true, gatewayRef: input.gatewayRef })
+  await assert.rejects(() => service.retryInitiation(resumable.user.id, resumable.order.displayId))
+  assert.equal((await readOrder(resumable.order.id)).status, 'PAID')
+  assert.equal(initCalls, beforeResumeInit)
+  passed('retry settles an already successful bank payment without starting another')
+
+  const replaceable = await make('FAKE', null)
+  await service.initiate(replaceable.payment.id, 'FAKE', { displayId: replaceable.order.displayId, amount: 80_000 })
+  const beforeReplaceInit = initCalls
+  verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: input.paymentId !== replaceable.payment.id })
+  const replacements = await Promise.allSettled([
+    service.retryInitiation(replaceable.user.id, replaceable.order.displayId),
+    service.retryInitiation(replaceable.user.id, replaceable.order.displayId),
+  ])
+  assert(replacements.some(result => result.status === 'fulfilled'))
+  assert.equal(initCalls, beforeReplaceInit + 1)
+  assert.equal((await readPayment(replaceable.payment.id)).status, 'FAILED')
+  assert.equal((await db.select().from(payments).where(eq(payments.orderId, replaceable.order.id))).length, 2)
+  assert.equal(await orderService.walletBalance(db, replaceable.user.id), 80_000)
+  passed('definitive bank failure permits one fresh gateway session even with concurrent retries')
+
+  const racingResume = await make('FAKE', null)
+  await service.initiate(racingResume.payment.id, 'FAKE', { displayId: racingResume.order.displayId, amount: 80_000 })
+  const resumeEntered = gate(), resumeContinue = gate()
+  verifyHook = async input => {
+    resumeEntered.release(); await resumeContinue.promise
+    return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+  }
+  const racingRetry = service.retryInitiation(racingResume.user.id, racingResume.order.displayId)
+  const racingRejected = assert.rejects(racingRetry)
+  await resumeEntered.promise
+  verifyHook = async input => ({ success: true, gatewayRef: input.gatewayRef })
+  await callback(racingResume)
+  resumeContinue.release()
+  await racingRejected
+  assert.equal((await readOrder(racingResume.order.id)).status, 'PAID')
+  passed('a successful callback during retry prevents returning a stale gateway session')
+
+  const withSibling = await make('FAKE', null)
+  const siblingInit = await service.initiate(withSibling.payment.id, 'FAKE', { displayId: withSibling.order.displayId, amount: 80_000 })
+  const [declinedSibling] = await db.insert(payments).values({
+    userId: withSibling.user.id, orderId: withSibling.order.id, gateway: 'FAKE', mode: 'direct',
+    amount: 80_000, gatewayRef: 'declined-sibling', createdAt: new Date(Date.now() - 60_000),
+  }).returning()
+  verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: input.paymentId !== declinedSibling!.id })
+  assert.equal((await service.retryInitiation(withSibling.user.id, withSibling.order.displayId)).paymentUrl, siblingInit.paymentUrl)
+  assert.equal((await readPayment(declinedSibling!.id)).status, 'FAILED')
+  await service.handleCallback('FAKE', { state: signState(declinedSibling!.id, config.jwtSecret) })
+  assert.equal((await readOrder(withSibling.order.id)).status, 'PENDING_PAYMENT')
+  assert.equal((await readPayment(withSibling.payment.id)).status, 'PENDING')
+  assert.equal(await orderService.walletBalance(db, withSibling.user.id), 80_000)
+  passed('resuming a session retires definitively failed sibling attempts so they cannot later cancel the order')
+
+  await db.update(payments).set({ status: 'PENDING', metadata: { paymentUrl: 'https://example.test/pay/other-live-session' } })
+    .where(eq(payments.id, declinedSibling!.id))
+  verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+  await assert.rejects(() => service.retryInitiation(withSibling.user.id, withSibling.order.displayId))
+  assert.equal((await readPayment(declinedSibling!.id)).status, 'PENDING')
+  verifyHook = async input => ({ success: true, gatewayRef: input.gatewayRef })
+  passed('multiple unresolved payable sessions require review instead of arbitrarily resuming either one')
 
   const noCapture = async () => { throw new Error('Callback must not contact PSP without its receipt') }
   fetchHandler = noCapture

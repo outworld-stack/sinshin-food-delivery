@@ -37,18 +37,24 @@ const FONT_BOLD = 'DanaDemiBold'
 const FONT_BRAND = 'MorabbaBold'
 
 async function ensurePrintFonts(): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined
 	try {
-		await Promise.all([
-			document.fonts.load(`32px '${FONT_BRAND}'`),
-			document.fonts.load(`24px '${FONT_BOLD}'`),
-			document.fonts.load(`20px '${FONT_BODY}'`),
-		])
+		// A stalled font request must not block this receipt and every queued one.
 		await Promise.race([
-			document.fonts.ready,
-			new Promise<void>((r) => setTimeout(r, 1_500)),
+			Promise.all([
+				document.fonts.load(`32px '${FONT_BRAND}'`),
+				document.fonts.load(`24px '${FONT_BOLD}'`),
+				document.fonts.load(`20px '${FONT_BODY}'`),
+				document.fonts.ready,
+			]),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, 1_500)
+			}),
 		])
 	} catch {
 		// فونتِ غایب = Tahoma سیستم (شکل‌گیریِ فارسی را سیستم انجام می‌دهد)
+	} finally {
+		clearTimeout(timer)
 	}
 }
 
@@ -64,7 +70,16 @@ async function svgToImage(svg: string): Promise<HTMLImageElement | null> {
 			clearTimeout(timer)
 			resolve(null)
 		}
-		img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+		// outerHTML from an inline HTML SVG omits its XML namespace. An Image
+		// data URL is a standalone XML document and needs the SVG namespace.
+		const standaloneSvg = svg.replace(
+			/<svg\b([^>]*)>/i,
+			(root, attributes: string) =>
+				/\sxmlns\s*=/.test(attributes)
+					? root
+					: `<svg xmlns="http://www.w3.org/2000/svg"${attributes}>`,
+		)
+		img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(standaloneSvg)}`
 	})
 }
 
@@ -80,11 +95,20 @@ function wrapText(
 	let line = ''
 	for (const w of words) {
 		const candidate = line ? `${line} ${w}` : w
-		if (ctx.measureText(candidate).width <= maxW || !line) {
+		if (ctx.measureText(candidate).width <= maxW) {
 			line = candidate
 		} else {
-			lines.push(line)
-			line = w
+			if (line) lines.push(line)
+			line = ''
+			// Product names, phone numbers and amounts can contain no spaces.
+			// Keep every character instead of clipping the end of a long token.
+			for (const character of w) {
+				if (line && ctx.measureText(line + character).width > maxW) {
+					lines.push(line)
+					line = ''
+				}
+				line += character
+			}
 		}
 	}
 	if (line) lines.push(line)
@@ -398,7 +422,9 @@ async function drawQr(
 		ctx.drawImage(img, (m.w - size) / 2, top, size, size)
 		ctx.imageSmoothingEnabled = true
 	} else {
-		ctx.strokeRect((m.w - size) / 2 + 0.5, top + 0.5, size - 1, size - 1)
+		// Let the invoice print flow use its browser fallback. An empty square
+		// must never be reported as a successfully printed courier QR code.
+		throw new Error('رندر QR فاکتور ناموفق بود.')
 	}
 	let ly = top + size + Math.round(6 * m.u)
 	const prevAlign = ctx.textAlign

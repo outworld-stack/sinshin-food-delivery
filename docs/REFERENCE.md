@@ -1727,7 +1727,7 @@ stage-84: **۷۳ فایل (۱۰ جدید + ۶۳ جایگزینی)**.
     سخت‌افزار کارِ رئیس (الگوی ناحیه‌ها/درگاه‌ها). ممیزی:
     PRINTER_ADD/UPDATE/REMOVE/TEST/DISCOVER/ASSIGN.
 
-### ۲) مایگریشن ۰۰۱۵ (`0015_nervous_ultron.sql`)
+### ۲) مایگریشن ۰۰۱۵ (`0015_amusing_ben_parker.sql`)
 
 - جدول `printers` (id/name/host/port/width_dots/auto_cut/last_status/
   last_status_detail/last_status_at/timestamps) + `unique(host,port)` +
@@ -1785,7 +1785,7 @@ stage-84: **۷۳ فایل (۱۰ جدید + ۶۳ جایگزینی)**.
 
 ### ۶) راه‌اندازی در رستوران (بدونِ هیچ نصبِ اضافه)
 
-1. جای‌گذاری فایل‌ها → `bun run db:migrate` (۰۰۱۵)
+1. جای‌گذاری فایل‌ها → از ریشهٔ پروژه: `bun --cwd apps/api run db:migrate` (۰۰۱۵)
 2. `docker compose up -d --build api web` (+ اختیاری:
    `PRINT_SCAN_CIDRS=192.168.1.0/24` در `.env`)
 3. پنل سفارشات → مودالِ چاپ → «مدیریت چاپگرهای شبکه» → اسکن یا ورودِ
@@ -1799,7 +1799,7 @@ stage-84: **۷۳ فایل (۱۰ جدید + ۶۳ جایگزینی)**.
 
 ### فایل‌ها (۱۸: ۷ جدید + ۱۱ جایگزینی)
 
-- **جدید**: `infra/db/schema/print.ts` · `drizzle/0015_nervous_ultron.sql`
+- **جدید**: `infra/db/schema/print.ts` · `drizzle/0015_amusing_ben_parker.sql`
   (+meta) · `domain/print/escpos.ts` · `domain/print/print.service.ts` ·
   `http/routes/print.routes.ts` · `scripts/test-print-service.ts` ·
   `web/src/lib/receiptCanvas.ts` · `web/.../PrinterManager.tsx` (۸)
@@ -1876,9 +1876,12 @@ stage-84: **۷۳ فایل (۱۰ جدید + ۶۳ جایگزینی)**.
   network/broadcast را با ماسکِ کاملِ ۳۲ بیتی می‌سازد؛ میزبان‌ها =
   `network+1 .. broadcast-1`. تستِ رگرسیون: `192.168.1.128/25 →
   129..254` (نیمهٔ بالایی).
-- **پیش‌فرضِ اسکن**: از **ماسکِ واقعیِ کارتِ شبکه** (`prefixFromNetmask`)
-  ساخته می‌شود — نه فرضِ /24 برای هر رابط. کارت‌های internal و /31-/32
-  رد می‌شوند.
+- **پیش‌فرضِ اسکن**: فقط کارت‌های خصوصیِ شبکه؛ بازه‌های /23 تا /30 با
+  ماسک واقعی اسکن می‌شوند و بازه‌های بزرگ‌تر به /24 محلِ IP کارت محدود
+  می‌شوند تا شبکه‌های Docker/VPN از سقف میزبان عبور نکنند. گزارش توپولوژی
+  همچنان ماسک واقعی را نشان می‌دهد. کارت‌های internal، عمومی و /31-/32
+  اسکن نمی‌شوند. مقدار صریح `PRINT_SCAN_CIDRS` باید کامل در محدودهٔ مجاز
+  و سقف ۵۱۲ میزبان باشد؛ بازهٔ نامعتبر به‌صورت جزئی اسکن نمی‌شود.
 
 ### ۳) P4 — اسکن فقط پورتِ 9100
 
@@ -1950,7 +1953,7 @@ listener فیکِ 631 در کنارِ چاپگرِ واقعیِ فیک؛ اسک�
 
 ### ۸) اعمال (Apply)
 
-1. مایگریشن: `bun run db:migrate` (۰۰۱۶ — فقط `ALTER TABLE
+1. مایگریشن از ریشهٔ پروژه: `bun --cwd apps/api run db:migrate` (۰۰۱۶ — فقط `ALTER TABLE
    admin2_profiles ADD COLUMN printing_manage boolean NOT NULL DEFAULT
    false`؛ بی‌خطر، بدونِ تغییرِ مخرب).
 2. تست‌ها: `db:test:print` + `db:test:migrations` + (وب)
@@ -1964,7 +1967,7 @@ listener فیکِ 631 در کنارِ چاپگرِ واقعیِ فیک؛ اسک�
 ### فایل‌ها (۲۳: ۴ جدید + ۱۹ جایگزینی)
 
 - **جدید**: `apps/api/src/domain/print/printNet.ts` ·
-  `apps/api/drizzle/0016_fresh_zarda.sql` (+meta) ·
+  `apps/api/drizzle/0016_icy_purifiers.sql` (+meta) ·
   `apps/web/scripts/test-receipt-canvas.ts` · (+) در بسته نیست ولی
   devDeps: @napi-rs/canvas · @resvg/resvg-js · jsqr
 - **بک**: `print.service.ts` (P1..P5) · `print.routes.ts` (مجوز + روتِ

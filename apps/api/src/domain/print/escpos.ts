@@ -12,7 +12,7 @@
 //    جزئی؛ فقط ابتدایِ خط اجرا می‌شود ⇒ قبلش LF.
 //  · وضعیت لحظه‌ای: DLE EOT (10 04 n) — حتی وقتی بافر پر است پاسخ
 //    می‌دهد؛ n=1 وضعیت پرینتر · n=4 سنسور کاغذ.
-//  · قطعه‌بندیِ تصویر ≤ 960 dot (پیش‌فرضِ python-escpos) + LF بین
+//  · قطعه‌بندیِ تصویر ≤ 960 dot (پیش‌فرضِ python-escpos) بدون LF بین
 //    قطعه‌ها — بافر دریافتی چاپگرهای ارزان با تصویرِ یکپارچهٔ بزرگ
 //    سرریز می‌شود.
 //  · متنِ اسکی برای «صفحهٔ تست»: ESC t 0 (کدپیج PC437) — فارسی در
@@ -108,7 +108,7 @@ export interface RasterJobOpts {
 
 /**
  * کارِ کاملِ چاپِ یک تصویر رستری:
- *   ESC @ → [GS v 0 قطعه + LF]×n → LF → ESC d n → (GS V 42 0 | فید) → ESC @
+ *   ESC @ → [GS v 0 قطعه]×n → LF → ESC d n → (GS V 42 0 | فید) → ESC @
  * طولِ کاغذِ مصرفی = ارتفاعِ تصویر + فیدِ برش — دقیقاً «به‌اندازهٔ محتوا».
  */
 export function buildRasterJob(
@@ -127,7 +127,8 @@ export function buildRasterJob(
     const h = Math.min(fragment, heightDots - y)
     const slice = rows.subarray(y * bytesPerRow, (y + h) * bytesPerRow)
     parts.push(cmdRaster(widthDots, h, slice))
-    parts.push(cmdLf())
+    // GS v 0 already advances by exactly h dots and returns to line start.
+    // LF here would insert a blank text line through a continuous receipt.
   }
   parts.push(cmdLf())
   parts.push(cmdFeed(opts.feedLinesBeforeCut ?? 2))

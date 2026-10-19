@@ -256,7 +256,7 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
         detail: {
           summary: 'Scan a subnet for printers (port 9100 only) — main admin only',
           description:
-            'stage-89: only port 9100 is probed (the only implemented transport — raw ESC/POS; an open 631/IPP port does not imply raw compatibility). The CIDR must be a private restaurant network (10.x / 172.16-31.x / 192.168.x) — loopback, link-local/metadata, CGNAT, multicast and public ranges are rejected. Default CIDRs come from PRINT_SCAN_CIDRS env (or the server interfaces with their real netmasks). mDNS does not cross docker bridge — scanning + manual IP is the docker-safe path. Found hosts are NOT auto-registered — add them explicitly.',
+            'stage-89: only port 9100 is probed (the only implemented transport — raw ESC/POS; an open 631/IPP port does not imply raw compatibility). The CIDR must be a private restaurant network (10.x / 172.16-31.x / 192.168.x) — loopback, link-local/metadata, CGNAT, multicast and public ranges are rejected. Default CIDRs come from PRINT_SCAN_CIDRS env or RFC1918 server interfaces; interface networks broader than /23 are narrowed to the interface address’s /24. Explicit and configured ranges must fit the 512-host scan limit. mDNS does not cross docker bridge — scanning + manual IP is the docker-safe path. Found hosts are NOT auto-registered — add them explicitly.',
         },
       },
     )

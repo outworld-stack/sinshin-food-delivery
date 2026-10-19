@@ -29,7 +29,7 @@
 //      سیاست‌گذاری می‌شود و اتصال به همان IP پین می‌شود (ضد DNS-rebind).
 //  P3) ریاضیاتِ CIDR کامل ۳۲ بیتی شد (هر ۴ اکتت + ماسکِ کامل) —
 //      192.168.1.128/25 حالا نیمهٔ بالایی را اسکن می‌کند؛ پیش‌فرضِ اسکن
-//      از «ماسکِ واقعیِ کارت» ساخته می‌شود (نه فرضِ /24).
+//      از ماسکِ واقعیِ کارت ساخته می‌شود؛ شبکه‌های بزرگ‌تر از /23 به /24 خودِ کارت محدودند.
 //  P4) اسکن فقط پورتِ 9100 — تنها انتقالِ پیاده‌شده RAW/JetDirect است؛
 //      631 (IPP) باز هم به معنیِ پذیرشِ ESC/POS خام نیست.
 //  P5) وضعیتِ نهایی = اتصالِ TCP «و» بیتِ خودِ دستگاه؛ چاپگرِ که خودش
@@ -37,14 +37,15 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/print/print.service.ts
-import net from 'node:net'
 import dns from 'node:dns/promises'
-import { and, eq, inArray } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import { printers, PRINTER_WIDTH_DOTS, SETTING_KEYS } from '#/infra/db/schema'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import { Err } from '#/domain/shared/errors'
+import { isUniqueViolation } from '#/domain/shared/pg'
+import { sendRaw } from '#/domain/print/printTransport'
 import type {
   InvoicePrinterAssignmentDto,
   PrinterDto,
@@ -184,72 +185,6 @@ export class PrinterService {
     throw Err.validation('پورت چاپگر باید بین ۱ تا ۶۵۵۳۵ باشد (پیش‌فرض 9100).')
   }
 
-  // ── TCP خام — لایهٔ سوکتِ مشترکِ probe/چاپ ──
-
-  /**
-   * اتصال + نوشتنِ بایت‌ها + خواندنِ پاسخِ وضعیت (اگر باشد).
-   * replyBytes=0 یعنی فقط بنویس و ببند. پاسخِ DLE EOT تا ۶۰۰ms جمع
-   * می‌شود؛ بی‌پاسخی خطا نیست (بهترین تلاش).
-   */
-  private sendRaw(
-    host: string,
-    port: number,
-    payload: Uint8Array,
-    opts: { connectTimeoutMs: number; writeTimeoutMs?: number; collectReplyMs?: number },
-  ): Promise<{ online: true; reply: Buffer | null } | { online: false; reason: string }> {
-    return new Promise((resolve) => {
-      const socket = new net.Socket()
-      const chunks: Buffer[] = []
-      let settled = false
-      let replyTimer: ReturnType<typeof setTimeout> | null = null
-      let writeTimer: ReturnType<typeof setTimeout> | null = null
-      const finish = (res: { online: true; reply: Buffer | null } | { online: false; reason: string }) => {
-        if (settled) return
-        settled = true
-        if (replyTimer) clearTimeout(replyTimer)
-        if (writeTimer) clearTimeout(writeTimer)
-        socket.destroy()
-        resolve(res)
-      }
-      socket.setTimeout(opts.connectTimeoutMs)
-      socket.once('connect', () => {
-        socket.setTimeout(0)
-        if (payload.length > 0) {
-          const written = socket.write(Buffer.from(payload), (err) => {
-            if (err) finish({ online: false, reason: 'write-error' })
-          })
-          // مهلتِ کلِ نوشتن — چاپگرِ قفل‌شده write را برای همیشه معلق می‌کند
-          writeTimer = setTimeout(
-            () => finish({ online: false, reason: 'write-timeout' }),
-            opts.writeTimeoutMs ?? 3_000,
-          )
-          if (!written) socket.once('drain', () => { if (writeTimer) clearTimeout(writeTimer) })
-        }
-        // جمعِ پاسخِ وضعیت — سکوتِ ۶۰۰ms = تمام
-        const quiet = opts.collectReplyMs ?? 600
-        const armQuiet = () => {
-          if (replyTimer) clearTimeout(replyTimer)
-          replyTimer = setTimeout(() => {
-            finish({ online: true, reply: chunks.length ? Buffer.concat(chunks) : null })
-          }, quiet)
-        }
-        socket.on('data', (d: Buffer) => {
-          chunks.push(d)
-          armQuiet()
-        })
-        armQuiet()
-      })
-      socket.once('timeout', () => finish({ online: false, reason: 'timeout' }))
-      socket.once('error', (err: NodeJS.ErrnoException) => {
-        finish({ online: false, reason: err.code ?? 'error' })
-      })
-      socket.once('close', () => {
-        if (!settled) finish({ online: true, reply: chunks.length ? Buffer.concat(chunks) : null })
-      })
-      socket.connect(port, host)
-    })
-  }
-
   /**
    * probe کامل: حلِ مقصد + سیاست (P2) + اتصال + DLE EOT 1 و 4.
    * مقصدِ مسدود بدونِ اتصال آفلاین برمی‌گردد (اتصال به metadata/loopback
@@ -258,13 +193,14 @@ export class PrinterService {
   private async probe(host: string, port: number): Promise<ProbeResult> {
     let target: ResolvedTarget
     try {
+      this.assertPort(port)
       target = await this.resolveTarget(host, false)
     } catch (err) {
       const raw = err instanceof Error && err.message ? err.message : 'مقصدِ شبکهٔ چاپگر مجاز نیست.'
       // ستونِ دیتابیس ۱۴۰ حرف است — جزئیات هرگز نباید «لیست» را بشکند
       return { online: false, detail: raw.slice(0, 140), paperEnd: false, paperNearEnd: false, offline: false }
     }
-    const res = await this.sendRaw(target.connectIp, port, Buffer.concat([cmdStatus(1), cmdStatus(4)]), {
+    const res = await sendRaw(target.connectIp, port, Buffer.concat([cmdStatus(1), cmdStatus(4)]), {
       connectTimeoutMs: PROBE_CONNECT_TIMEOUT_MS,
       writeTimeoutMs: 1_500,
       collectReplyMs: 500,
@@ -272,12 +208,14 @@ export class PrinterService {
     if (!res.online) {
       return { online: false, detail: null, paperEnd: false, paperNearEnd: false, offline: false }
     }
-    if (!res.reply || res.reply.length < 2) {
+    if (!res.reply || res.reply.length === 0) {
       return { online: true, detail: 'بدون پاسخ وضعیت', paperEnd: false, paperNearEnd: false, offline: false }
     }
     const st = parseStatusPrinter(res.reply[0] as number)
-    const paper = parseStatusPaper(res.reply[1] as number)
-    let detail: string | null = null
+    const paper = res.reply.length > 1
+      ? parseStatusPaper(res.reply[1] as number)
+      : { paperEnd: false, paperNearEnd: false }
+    let detail: string | null = res.reply.length > 1 ? null : 'بدون پاسخ وضعیت کاغذ'
     if (paper.paperEnd) detail = 'کاغذ تمام شده است'
     else if (paper.paperNearEnd) detail = 'کاغذ رو به اتمام'
     else if (st.offline) detail = 'چاپگر خودش را آفلاین اعلام کرده است (درِ باز / صف پارچه / خط)'
@@ -373,19 +311,12 @@ export class PrinterService {
     if (!PRINTER_WIDTH_DOTS.includes(widthDots as (typeof PRINTER_WIDTH_DOTS)[number])) {
       throw Err.validation('عرض کاغذ چاپگر معتبر نیست (۵۷۶ dot برای ۸۰mm یا ۳۸۴ dot برای ۵۸mm).')
     }
-    const dup = await this.deps.db
-      .select({ id: printers.id })
-      .from(printers)
-      .where(and(eq(printers.host, host), eq(printers.port, port)))
-      .limit(1)
-    if (dup.length > 0) {
-      throw Err.conflict('چاپگری با همین IP و پورت از قبل ثبت شده است.')
-    }
     const [row] = await this.deps.db
       .insert(printers)
       .values({ name, host, port, widthDots, autoCut: input.autoCut ?? true })
+      .onConflictDoNothing({ target: [printers.host, printers.port] })
       .returning()
-    if (!row) throw Err.internal('ذخیرهٔ چاپگر ناموفق بود.')
+    if (!row) throw Err.conflict('چاپگری با همین IP و پورت از قبل ثبت شده است.')
     return this.toDto(row)
   }
 
@@ -426,6 +357,12 @@ export class PrinterService {
       .set(values)
       .where(eq(printers.id, id))
       .returning()
+      .catch((error: unknown) => {
+        if (isUniqueViolation(error)) {
+          throw Err.conflict('چاپگری با همین IP و پورت از قبل ثبت شده است.')
+        }
+        throw error
+      })
     if (!row) throw Err.notFound('چاپگر پیدا نشد.')
     this.probeCache.delete(id)
     return this.toDto(row)
@@ -662,7 +599,7 @@ export class PrinterService {
       )
     }
     const job = buildRasterJob(widthPx, heightPx, new Uint8Array(rows), { autoCut: row.autoCut })
-    const res = await this.sendRaw(target.connectIp, row.port, job, {
+    const res = await sendRaw(target.connectIp, row.port, job, {
       connectTimeoutMs: PRINT_CONNECT_TIMEOUT_MS,
       writeTimeoutMs: PRINT_WRITE_TIMEOUT_MS,
       collectReplyMs: 250,
@@ -702,7 +639,7 @@ export class PrinterService {
       widthDots: row.widthDots,
       autoCut: row.autoCut,
     })
-    const res = await this.sendRaw(target.connectIp, row.port, job, {
+    const res = await sendRaw(target.connectIp, row.port, job, {
       connectTimeoutMs: PRINT_CONNECT_TIMEOUT_MS,
       writeTimeoutMs: PRINT_WRITE_TIMEOUT_MS,
       collectReplyMs: 250,
@@ -717,7 +654,7 @@ export class PrinterService {
   // ── تشخیص: اسکنِ زیرشبکه ──
 
   /** CIDRهای پیش‌فرض — env PRINT_SCAN_CIDRS (جداشده با کاما) وگرنه
-   *  زیرشبکه‌های «ماسکِ واقعیِ» کارت‌های خودِ سرور (P3 — نه فرضِ /24).
+   *  زیرشبکه‌های خصوصیِ کارت‌های سرور؛ بازه‌های بزرگ‌تر از /23 به /24 خودِ کارت محدودند.
    *  در docker bridge همان شبکهٔ داکر است — برایِ LAN رستوران env را
    *  تنظیم کنید؛ مستند در REFERENCE */
   private defaultScanCidrs(): { cidrs: string[]; rejected: string[] } {
@@ -733,7 +670,20 @@ export class PrinterService {
       }
       return { cidrs: cidrs.slice(0, 4), rejected }
     }
-    return { cidrs: serverSubnets().map((s) => s.cidr).slice(0, 4), rejected: [] }
+    const { allowLoopback } = this.flags()
+    return {
+      cidrs: serverSubnets()
+        .filter((s) => scanCidrAllowed(s.cidr, { allowLoopback }) !== null)
+        .map((s) => {
+          // Docker/VPN interfaces often cover /16 or /8. Scan the interface's
+          // own /24 by default; keep its actual netmask in the topology report.
+          if (s.prefix >= 23) return s.cidr
+          const local = cidrParse(`${s.ip}/24`) as CidrInfo
+          return `${ipToString(local.network)}/24`
+        })
+        .slice(0, 4),
+      rejected: [],
+    }
   }
 
   /** اسکنِ «فقط پورتِ 9100» روی CIDRهای مجاز (P2/P3/P4) — NAT داکر را عبور می‌کند */
@@ -769,8 +719,17 @@ export class PrinterService {
         )
       }
     }
-    const hosts: string[] = []
-    for (const cidr of cidrs) hosts.push(...cidrHosts(cidr, DISCOVER_MAX_HOSTS))
+    const uniqueHosts = new Set<string>()
+    for (const cidr of cidrs) {
+      const addresses = scanCidrAllowed(cidr, { allowLoopback })
+        ? cidrHosts(cidr, DISCOVER_MAX_HOSTS)
+        : []
+      if (addresses.length === 0) {
+        throw Err.validation(`بازهٔ اسکن ${cidr} معتبر نیست یا بیش از سقف ۵۱۲ میزبان است.`)
+      }
+      for (const host of addresses) uniqueHosts.add(host)
+    }
+    const hosts = [...uniqueHosts]
     if (hosts.length === 0) {
       throw Err.validation('بازهٔ اسکن معتبر نیست (مثال: 192.168.1.0/24 — تا سقف ۵۱۲ میزبان).')
     }
@@ -788,7 +747,7 @@ export class PrinterService {
         const host = hosts[i] as string
         // P4 — فقط 9100: تنها انتقالِ واقعیِ پیاده‌شده (631 = IPP نیست)
         for (const port of DISCOVER_PORTS) {
-          const res = await this.sendRaw(host, port, new Uint8Array(0), {
+          const res = await sendRaw(host, port, new Uint8Array(0), {
             connectTimeoutMs: DISCOVER_PORT_TIMEOUT_MS,
             writeTimeoutMs: 200,
           })

@@ -2,7 +2,7 @@
  *
  * پوشش استیج-۸۸ (اصلی):
  *  ۱) کدگذار ESC/POS بایت‌به‌بایت: GS v 0 (xL/xH بایت، yL/yH dot)،
- *     قطعه‌بندیِ ≤۹۶۰dot + LF بینِ قطعه‌ها، دنبالهٔ برش GS V 42 0،
+ *     قطعه‌بندیِ ≤۹۶۰dot بدون LF بینِ قطعه‌ها، دنبالهٔ برش GS V 42 0،
  *     تفسیرِ DLE EOT 1/4
  *  ۲) PrinterService روی DB موقتی: CRUD + یکتاییِ (host,port) + تخصیصِ
  *     فاکتورها (خطای id مجهول) + پاک‌شدنِ تخصیص با حذف
@@ -32,6 +32,8 @@ import { migrate } from 'drizzle-orm/bun-sql/migrator'
 import { Database } from '../src/infra/db/client'
 import { AppConfig } from '../src/infra/config/env'
 import { SettingsService } from '../src/domain/settings/settings.service'
+import { printers } from '../src/infra/db/schema'
+import { eq } from 'drizzle-orm'
 import { PrinterService } from '../src/domain/print/print.service'
 import {
   buildRasterJob,
@@ -69,12 +71,14 @@ interface FakePrinter {
   paperEnd: (on: boolean) => void
   /** stage-89 (P5) — دستگاه بیتِ آفلاین را خودش اعلام می‌کند */
   offline: (on: boolean) => void
+  paperStatusReply: (on: boolean) => void
   close: () => Promise<void>
 }
 async function startFakePrinter(preferredPort: number): Promise<FakePrinter> {
   const chunks: Buffer[] = []
   let paperEnd = false
   let offline = false
+  let paperStatusReply = true
   const server = net.createServer((socket) => {
     socket.on('data', (d: Buffer) => {
       chunks.push(d)
@@ -84,7 +88,7 @@ async function startFakePrinter(preferredPort: number): Promise<FakePrinter> {
           // 0x12 = آنلاینِ سالم · 0x1a = خود-گزارشِ آفلاین (بیت 3)
           socket.write(Buffer.from([offline ? 0x1a : 0x12]))
         }
-        if (d[i] === 0x10 && d[i + 1] === 0x04 && d[i + 2] === 0x04) {
+        if (paperStatusReply && d[i] === 0x10 && d[i + 1] === 0x04 && d[i + 2] === 0x04) {
           // bits 5,6 (0x60) = کاغذِ تمام · در حالتِ نرمال فقط بیت‌های ثابت
           socket.write(Buffer.from([paperEnd ? 0x72 : 0x12]))
         }
@@ -108,6 +112,7 @@ async function startFakePrinter(preferredPort: number): Promise<FakePrinter> {
     received: () => Buffer.concat(chunks),
     paperEnd: (on: boolean) => { paperEnd = on },
     offline: (on: boolean) => { offline = on },
+    paperStatusReply: (on: boolean) => { paperStatusReply = on },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   }
 }
@@ -315,6 +320,26 @@ try {
   )
   passed('تکراریِ (host,port) رد می‌شود')
 
+  {
+    const attempts = await Promise.allSettled(Array.from({ length: 4 }, (_, i) =>
+      print.add({ name: `Concurrent printer ${i}`, host: '192.168.99.11' })))
+    const created = attempts.filter((r) => r.status === 'fulfilled')
+    const rejected = attempts.filter((r) => r.status === 'rejected')
+    assert.equal(created.length, 1)
+    assert.equal(rejected.length, 3)
+    assert.ok(rejected.every((r) => (r.reason as { status?: number }).status === 409))
+    const duplicate = created[0]!.value
+    try {
+      await assert.rejects(
+        () => print.update(duplicate.id, { host: '127.0.0.1', port: fp.port }),
+        (e: unknown) => (e as { status?: number }).status === 409,
+      )
+    } finally {
+      await print.remove(duplicate.id)
+    }
+    passed('Concurrent registration and duplicate updates return 409 conflicts instead of database errors')
+  }
+
   await assert.rejects(
     () => print.add({ name: 'بد', host: 'http://evil/x', port: 9100 }),
     isValidation,
@@ -441,6 +466,13 @@ try {
   // P5 — دستگاهِ خود-آفلاین: سوکت باز است ولی دستگاه گفته آفلاین
   {
     fake.offline(true)
+    fake.paperStatusReply(false)
+    await assert.rejects(
+      () => print.dispatch({ printerId: added.id, widthPx: 576, heightPx: 16, rows: fakeBitmap(576, 16).toString('base64') }),
+      (e: unknown) => e instanceof Error && e.message.includes('آفلاین'),
+    )
+    fake.paperStatusReply(true)
+    passed('A partial status response still blocks printing when the device reports offline')
     const wireBeforeOffline = fake.received().length
     await assert.rejects(
       () => print.dispatch({ printerId: added.id, widthPx: 576, heightPx: 16, rows: fakeBitmap(576, 16).toString('base64') }),
@@ -483,6 +515,28 @@ try {
 
   await assert.rejects(() => print.test(added.id), isValidation)
   passed('عملیات روی چاپگرِ حذف‌شده 404')
+
+  // Older registrations could store arbitrary ports. Listing must apply the
+  // same policy as dispatch before it sends DLE EOT to that legacy destination.
+  {
+    const priorAnyPort = process.env.PRINT_ALLOW_ANY_PORT
+    delete process.env.PRINT_ALLOW_ANY_PORT
+    const [legacy] = await db.insert(printers).values({
+      name: 'Legacy non-print service', host: '127.0.0.1', port: 631,
+    }).returning()
+    assert.ok(legacy)
+    try {
+      const listedLegacy = await print.list()
+      const found = listedLegacy.find((p) => p.id === legacy.id)
+      assert.equal(found?.status, 'offline')
+      assert.ok(found?.statusDetail?.includes('9100'))
+    } finally {
+      await db.delete(printers).where(eq(printers.id, legacy.id))
+      if (priorAnyPort === undefined) delete process.env.PRINT_ALLOW_ANY_PORT
+      else process.env.PRINT_ALLOW_ANY_PORT = priorAnyPort
+    }
+    passed('Live status probes reject legacy non-9100 ports before connecting')
+  }
 
   // ══ ۴) P1 — مقصدِ دور: hintِ صریح در خطای چاپ ══
   {

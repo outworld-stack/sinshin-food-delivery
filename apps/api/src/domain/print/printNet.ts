@@ -172,6 +172,7 @@ export function scanCidrAllowed(cidr: string, flags: PrintPolicyFlags): CidrInfo
   if (!info) return null
   const kind = classifyIpv4(info.network)
   if (!ipAllowedForPrinters(kind, flags)) return null
+  if (classifyIpv4(info.broadcast) !== kind) return null
   return info
 }
 

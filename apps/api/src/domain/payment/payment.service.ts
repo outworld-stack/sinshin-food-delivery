@@ -286,7 +286,7 @@ export class PaymentService {
    *  ① ردیف PENDING قبلی با gatewayRefِ درگاه واقعی → یک استعلام زنده:
    *     موفق ⇒ finalize (سفارش همان لحظه PAID؛ رِتری رد می‌شود)؛
    *     شکست قطعی از زبان خود درگاه ⇒ تعویضِ امن؛
-   *     نامشخص ⇒ تعویض ممنوع تا نتیجه‌ی قطعی؛ گذشت زمان نشانه‌ی شکست نیست.
+   *     نامشخص ⇒ بازگشت به همان جلسه‌ی درگاه؛ ساخت تلاش تازه ممنوع است.
    *  ② ردیف بدون gatewayRef ⇒ شکست init ثبت‌شده یا گذشت مهلت آماده‌سازی؛
    *     آغازگرِ دیررس پس از تعویض هرگز URL ردیف قبلی را برنمی‌گرداند.
    *  ③ مبلغ/کیف‌پول دست‌نخورده — رزرو کیف پول مالِ «سفارش» است نه ردیف
@@ -331,6 +331,16 @@ export class PaymentService {
       .select()
       .from(payments)
       .where(and(eq(payments.orderId, order.id), eq(payments.status, 'PENDING')))
+    let resume: { id: PaymentId; paymentUrl: string } | undefined
+    const resumeExisting = (p: PaymentRow): boolean => {
+      const paymentUrl = p.metadata?.paymentUrl
+      if (p.gateway.toUpperCase() !== gwId || typeof paymentUrl !== 'string' || !paymentUrl.trim()) return false
+      // Multiple unresolved sessions require reconciliation; never choose one
+      // arbitrarily or replace an attempt which could already have charged.
+      if (resume) throw Err.conflict('چند پرداخت در انتظار بررسی است؛ لطفاً با پشتیبانی تماس بگیرید.')
+      resume = { id: p.id, paymentUrl }
+      return true
+    }
     for (const p of pendingRows) {
       const invalid = this.paymentIntegrity(p, order)
       if (invalid) {
@@ -359,12 +369,16 @@ export class PaymentService {
         if (verdict && !verdict.indeterminate) {
           continue
         }
-        // Age never proves that the PSP did not capture money.
+        // Reopen the existing session when verification is inconclusive.
+        // This does not create a second payable attempt or release its hold.
+        if (resumeExisting(p)) continue
         throw Err.conflict('وضعیت پرداخت قبلی هنوز قطعی نیست — پس از بررسی درگاه دوباره تلاش کنید.')
       }
+      if (pGwId === 'MOCK' && resumeExisting(p)) continue
       if (!p.gatewayRef && (p.metadata?.paymentUrl || p.callbackUrl)) {
         // SEP does not issue RefNum until callback; a null reference does not
-        // mean initiation failed or that the existing session cannot charge.
+        // mean initiation failed. Its saved Token URL resumes the same session.
+        if (resumeExisting(p)) continue
         throw Err.conflict('نتیجه پرداخت قبلی هنوز از بانک نرسیده است؛ تلاش جدید فعلاً ممکن نیست.')
       }
       if (!p.gatewayRef && p.metadata?.initFailed !== true && Date.now() - p.updatedAt.getTime() < 60_000) {
@@ -374,7 +388,7 @@ export class PaymentService {
 
     // Recheck the verified snapshot under the same lock order as finalize.
     // Concurrent retries/callbacks cannot leave two payable attempts behind.
-    const row = await this.moneyTransaction(async (tx) => {
+    const attempt = await this.moneyTransaction<{ paymentUrl: string } | { row: PaymentRow }>(async (tx) => {
       await lockWalletAccounts(tx, [userId])
       await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for('no key update')
       const [currentOrder] = await tx.select().from(orders).where(eq(orders.id, order.id)).for('update')
@@ -391,8 +405,19 @@ export class PaymentService {
       })) {
         throw Err.conflict('وضعیت پرداخت تغییر کرد؛ صفحه سفارش را به‌روز کنید.')
       }
-      // A retry creates a new payment attempt. Existing attempts can still
-      // settle after a switch is disabled, but new attempts must respect it.
+      // Reuse only after checking the same snapshot under settlement locks.
+      // The original URL remains bound to the original amount and callback.
+      if (resume) {
+        // Retire the other attempts already proven safe above, so their later
+        // failure callbacks/reconciliation cannot cancel this payable order.
+        for (const p of currentPending) {
+          if (p.id !== resume.id) await this.supersedePending(tx, p)
+        }
+        return { paymentUrl: resume.paymentUrl }
+      }
+
+      // A fresh attempt must respect the current gateway switch. Existing
+      // sessions can still resume and settle after their gateway is disabled.
       const enabled = await new SettingsService({ db }).enabledGateways(tx)
       const key = gwId.toLowerCase() as keyof typeof enabled
       if (key in enabled && !enabled[key]) {
@@ -408,11 +433,12 @@ export class PaymentService {
         status: 'PENDING',
       })
       .returning()
-      return created
+      if (!created) throw Err.internal('ساخت ردیف پرداخت ناموفق بود.')
+      return { row: created }
     })
-    if (!row) throw Err.internal('ساخت ردیف پرداخت ناموفق بود.')
+    if ('paymentUrl' in attempt) return { paymentUrl: attempt.paymentUrl, displayId: order.displayId }
 
-    const r = await this.initiate(row.id, gwId, {
+    const r = await this.initiate(attempt.row.id, gwId, {
       displayId: order.displayId,
       amount: last.amount,
       mobile: mobile ?? undefined,

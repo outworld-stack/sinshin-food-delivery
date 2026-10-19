@@ -42,7 +42,7 @@ import { faNum, formatPrice } from '#/utils/format'
 
 // ══ بسترِ تست — همان APIهایی که مرورگر می‌دهد، روی Skia ══
 
-/** SVG → PNG — مرورگر SVG را بی‌xmlns هم می‌فهمد؛ رسترایزرِ سخت‌گیر نه */
+/** SVG → PNG: require the same standalone XML namespace as browser Image. */
 function svgDataUrlToPng(src: string): string {
         if (!src.startsWith('data:image/svg+xml')) return src
         const comma = src.indexOf(',')
@@ -50,14 +50,12 @@ function svgDataUrlToPng(src: string): string {
         const svg = src.includes(';base64,')
                 ? Buffer.from(payload, 'base64').toString('utf8')
                 : decodeURIComponent(payload)
-        const fixed = svg.includes('xmlns=')
-                ? svg
-                : svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"')
-        const png = new Resvg(fixed).render().asPng()
+        const png = new Resvg(svg).render().asPng()
         return `data:image/png;base64,${Buffer.from(png).toString('base64')}`
 }
 
 /** Imageِ شبیه‌سازی‌شده — src داده می‌گیرد؛ SVG را رستر می‌کند؛ onload می‌زند */
+let imageLoadFails = false
 class ShimImage {
         /** پیاده‌سازیِ واقعی — drawImageِ رهگیری‌شده همین را می‌کشد */
         readonly impl = new NapiImage()
@@ -71,7 +69,13 @@ class ShimImage {
         }
         set src(value: string) {
                 queueMicrotask(() => {
-                        const png = svgDataUrlToPng(value)
+                        if (imageLoadFails) {
+                                this.onerror?.()
+                                return
+                        }
+                        let png: string
+                        try { png = svgDataUrlToPng(value) }
+                        catch { this.onerror?.(); return }
                         this.impl.onload = () => {
                                 this.onload?.()
                         }
@@ -446,10 +450,18 @@ try {
         // ۶) QR — همان مولدِ محصول → همان رندر → jsQR همان URL را می‌خواند
         for (const w of WIDTHS) {
                 const bmp = await renderSpecToReceiptBitmap(sales12, w)
-                const canvas = lastCanvas()
-                const ctx = canvas.getContext('2d')
-                const img = ctx.getImageData(0, 0, w, bmp.heightPx)
-                const decoded = jsQR(img.data as unknown as Uint8ClampedArray, w, bmp.heightPx)
+                const packed = decodeRows(bmp)
+                const rgba = new Uint8ClampedArray(w * bmp.heightPx * 4)
+                const stride = Math.ceil(w / 8)
+                for (let y = 0; y < bmp.heightPx; y++) {
+                        for (let x = 0; x < w; x++) {
+                                const ink = (packed[y * stride + Math.floor(x / 8)]! >> (7 - x % 8)) & 1
+                                const pixel = (y * w + x) * 4
+                                rgba[pixel] = rgba[pixel + 1] = rgba[pixel + 2] = ink ? 0 : 255
+                                rgba[pixel + 3] = 255
+                        }
+                }
+                const decoded = jsQR(rgba, w, bmp.heightPx)
                 assert.ok(decoded, `QR در عرض ${w} decode نشد`)
                 assert.strictEqual(decoded?.data, COURIER_URL)
                 passed(`QR در عرض ${w}: jsQR دقیقاً همان لینکِ پیک را خواند`)
@@ -496,6 +508,25 @@ try {
                 passed(
                         `نام محصول طولانی: شکست + کلیپ در سلول (ارتفاع ${short.heightPx}→${long.heightPx} · لبهٔ کاغذ پاک)`,
                 )
+        }
+
+        // Unbroken product names and totals must wrap instead of being clipped.
+        {
+                const spec = kitchenSpec(fixtureInvoice(1))
+                const short = await renderSpecToReceiptBitmap(spec, 384)
+                spec.sections[0]!.tables[0]!.rows[0]![0] = 'محصول'.repeat(40)
+                const long = await renderSpecToReceiptBitmap(spec, 384)
+                assert.ok(long.heightPx > short.heightPx, `${long.heightPx} > ${short.heightPx}`)
+                passed('نام بدون فاصله: تمام حروف در چند سطر چاپ می‌شوند')
+        }
+
+        // An Image failure must trigger the caller's browser fallback, never a blank QR.
+        {
+                imageLoadFails = true
+                await assert.rejects(() => renderSpecToReceiptBitmap(sales12, 576), /QR/)
+                imageLoadFails = false
+                assert.ok((await renderSpecToReceiptBitmap(sales12, 576)).heightPx > 0)
+                passed('QR ناموفق خطا می‌دهد و صف رندر بعدی بازیابی می‌شود')
         }
 
         // ۹) نسخهٔ آشپزخانه (جدول درشت) — هر سه عرض بدونِ خطا + جوهرِ معقول
@@ -569,6 +600,26 @@ try {
                         (e: unknown) => e instanceof Error && (e.message.includes('عرض') || e.message.includes('width')),
                 )
                 passed('عرضِ کاغذِ نامعتبر (300) رد می‌شود — فقط ۵۷۶/۳۸۴/۴۲۰')
+        }
+
+        // Font loading itself can stall, not only document.fonts.ready.
+        {
+                const originalLoad = document.fonts.load
+                document.fonts.load = () => new Promise(() => {})
+                let guard: ReturnType<typeof setTimeout> | undefined
+                try {
+                        const bitmap = await Promise.race([
+                                renderSpecToReceiptBitmap(kitchen12, 576),
+                                new Promise<never>((_, reject) => {
+                                        guard = setTimeout(() => reject(new Error('font load blocked printing')), 3_000)
+                                }),
+                        ])
+                        assert.ok(bitmap.heightPx > 0)
+                } finally {
+                        document.fonts.load = originalLoad
+                        clearTimeout(guard)
+                }
+                passed('بارگذاری معطل فونت از چاپ رسید جلوگیری نمی‌کند')
         }
 
         console.log(`\nOK — ${count} بند سبز`)

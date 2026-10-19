@@ -25,7 +25,7 @@ import type {
 } from '@sinshin/shared'
 // src/components/admin/admin2/PrinterManager.tsx
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { memo, useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { Loader, Plus, Printer, Radar, Server, Trash, Wifi } from 'reicon-react'
 import {
 	addAdminPrinter,
@@ -75,20 +75,17 @@ export const PrinterManager = memo(function PrinterManager({
 	const [name, setName] = useState('')
 	const [host, setHost] = useState('')
 	const [port, setPort] = useState('9100')
-	const [widthDots, setWidthDots] = useState<576 | 384>(576)
+	const [widthDots, setWidthDots] = useState<576 | 384 | 420>(576)
 	const [autoCut, setAutoCut] = useState(true)
-	const [scanCidr, setScanCidr] = useState('192.168.1.0/24')
+	const [scanCidr, setScanCidr] = useState('')
 	const [found, setFound] = useState<PrinterDiscoveryDto[] | null>(null)
 	// stage-89 (P1) — گزارشِ توپولوژی فقط وقتی بخش باز است کش می‌شود
 	const { data: network } = useQuery({
 		...adminPrintNetworkOptions,
 		enabled: open,
 	})
-	// پیش‌فرضِ هوشمندِ بازهٔ اسکن = زیرشبکهٔ واقعیِ خودِ سرور
-	useEffect(() => {
-		const cidr = network?.serverSubnets?.[0]?.cidr
-		if (cidr) setScanCidr(cidr)
-	}, [network])
+	// Leave the range empty to use the server's configured discovery networks.
+	// The topology report may describe a much larger subnet than a safe scan.
 
 	const addMutation = useMutation({
 		mutationFn: () =>
@@ -346,13 +343,14 @@ export const PrinterManager = memo(function PrinterManager({
 							<select
 								value={widthDots}
 								onChange={(e) =>
-									setWidthDots(Number(e.target.value) as 576 | 384)
+									setWidthDots(Number(e.target.value) as 576 | 384 | 420)
 								}
 								aria-label="عرض کاغذ"
 								className="rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#160a0d] px-2 py-2 text-xs text-gray-700 dark:text-gray-200 cursor-pointer"
 							>
 								<option value={576}>کاغذ ۸۰mm (معمول)</option>
 								<option value={384}>کاغذ ۵۸mm</option>
+								<option value={420}>کاغذ ۵۸mm (اپسون)</option>
 							</select>
 							<label className="flex items-center gap-2 text-[11px] font-DanaMedium text-gray-600 dark:text-gray-300 cursor-pointer select-none">
 								<input
@@ -384,7 +382,7 @@ export const PrinterManager = memo(function PrinterManager({
 							<input
 								value={scanCidr}
 								onChange={(e) => setScanCidr(e.target.value)}
-								placeholder="192.168.1.0/24"
+								placeholder="پیش‌فرض سرور (اختیاری: 192.168.1.0/24)"
 								dir="ltr"
 								aria-label="بازهٔ اسکن"
 								className="flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#160a0d] px-2.5 py-2 text-xs text-gray-700 dark:text-gray-200 outline-none focus:border-primary dark:focus:border-dark-primary"

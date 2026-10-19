@@ -92,6 +92,7 @@ function ReceiptPreviewPane({ html }: { html: string | null }) {
 	const [scale, setScale] = useState(1)
 
 	useEffect(() => {
+		if (html === null) return
 		const el = wrapRef.current
 		if (!el) return
 		const update = () =>
@@ -232,23 +233,33 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	const [previewKind, setPreviewKind] = useState<InvoiceKind>('sales')
 
 	// ══ stage-88 — چاپگرهای شبکه + تخصیصِ هر فاکتور (سرور منبعِ حقیقت) ══
-	const { data: printers = [], isLoading: printersLoading } =
-		useQuery(adminPrintersOptions)
-	const { data: serverAssignment } = useQuery(adminPrintAssignmentOptions)
+	const {
+		data: printers = [],
+		isPending: printersLoading,
+		isError: printersError,
+	} = useQuery(adminPrintersOptions)
+	const {
+		data: serverAssignment,
+		isPending: assignmentLoading,
+		isError: assignmentError,
+	} = useQuery(adminPrintAssignmentOptions)
 	// نسخهٔ محلی برایِ پاسخِ فوریِ سلکت؛ بعد از موفقیتِ سرور هم‌گام می‌ماند
-	const [assignment, setAssignment] = useState<InvoicePrinterAssignmentDto>({
-		sales: null,
-		kitchen: null,
-	})
-	useEffect(() => {
-		if (serverAssignment) setAssignment(serverAssignment)
-	}, [serverAssignment])
+	const [assignmentDraft, setAssignmentDraft] =
+		useState<InvoicePrinterAssignmentDto | null>(null)
+	const assignment = assignmentDraft ??
+		serverAssignment ?? {
+			sales: null,
+			kitchen: null,
+		}
+	const printSettingsLoading =
+		canManagePrint && (printersLoading || assignmentLoading)
 
 	const invalidatePrintQueries = useCallback(
 		async () =>
 			Promise.all([
 				queryClient.invalidateQueries({ queryKey: ['admin-printers'] }),
 				queryClient.invalidateQueries({ queryKey: ['admin-print-assignment'] }),
+				queryClient.invalidateQueries({ queryKey: ['admin-print-network'] }),
 			]).then(() => undefined),
 		[queryClient],
 	)
@@ -256,13 +267,15 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	const assignMutation = useMutation({
 		mutationFn: (next: InvoicePrinterAssignmentDto) =>
 			setAdminPrintAssignment(next),
-		onSuccess: async () => {
+		onSuccess: async (_, next) => {
+			queryClient.setQueryData(adminPrintAssignmentOptions.queryKey, next)
+			setAssignmentDraft(null)
 			await invalidatePrintQueries()
 		},
 		onError: (err: Error) => {
 			showToast(err.message || 'ذخیرهٔ انتخاب چاپگر ناموفق بود', 'error')
 			// بازگشت به حقیقتِ سرور
-			if (serverAssignment) setAssignment(serverAssignment)
+			setAssignmentDraft(null)
 		},
 	})
 
@@ -326,18 +339,26 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 
 	const setPrinter = useCallback(
 		(kind: 'kitchen' | 'sales', printerId: string) => {
+			if (
+				!canManagePrint ||
+				!serverAssignment ||
+				assignMutation.isPending ||
+				printingRef.current
+			)
+				return
 			const next: InvoicePrinterAssignmentDto = {
 				...assignment,
 				[kind]: printerId || null,
 			}
-			setAssignment(next)
+			setAssignmentDraft(next)
 			assignMutation.mutate(next)
 		},
-		[assignMutation, assignment],
+		[assignMutation, assignment, canManagePrint, serverAssignment],
 	)
 
 	const handlePrint = useCallback(async () => {
-		if (printingRef.current) return
+		if (printingRef.current || printSettingsLoading || assignMutation.isPending)
+			return
 		const selected: InvoiceKind[] = [
 			...(kinds.kitchen ? (['kitchen'] as const) : []),
 			...(kinds.sales ? (['sales'] as const) : []),
@@ -398,11 +419,13 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 		}
 	}, [
 		assignment,
+		assignMutation.isPending,
 		canManagePrint,
 		invoice,
 		kinds,
 		orderId,
 		printers,
+		printSettingsLoading,
 		saveKinds,
 		showToast,
 	])
@@ -443,177 +466,200 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 					</button>
 				</div>
 
-				<div className="px-5 pb-3 shrink-0">
-					{printersLoading ? (
-						<div className="text-[11px] text-gray-400 font-DanaMedium">
-							در حال دریافت چاپگرهای شبکه از سرور…
-						</div>
-					) : printers.length > 0 ? (
-						<div
-							aria-live="polite"
-							className="flex items-center gap-2 text-[11px] text-green-600 dark:text-green-400 font-DanaMedium"
-						>
-							<span className="w-2 h-2 rounded-full bg-green-500 dark:bg-green-400 shrink-0" />
-							چاپ مستقیم فعال — {printers.length} چاپگرِ شبکه روی سرور
-						</div>
-					) : (
-						<div className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
-							چاپگری روی سرور ثبت نشده — فعلاً چاپ با دیالوگ مرورگر است.{' '}
-							{isMainAdmin
-								? 'از بخشِ «مدیریت چاپگرهای شبکه» پایین، چاپگرِ شبکهٔ رستوران را ثبت کنید (IP + پورت 9100).'
-								: 'از مدیرِ اصلی بخواهید چاپگرِ شبکه را ثبت کند.'}
-						</div>
-					)}
-					{deliveryType === 'DELIVERY' && (
-						<p className="text-[11px] text-gray-400 font-DanaMedium leading-relaxed mt-1.5">
-							فاکتور فروش شامل QR اسکن موقعیت مشتری است (۳ ساعت اعتبار).
-						</p>
-					)}
-				</div>
-
-				{/* انتخاب فاکتورها + چاپگرِ هر کدام (تخصیصِ سروری) */}
-				<div className="px-5 space-y-2 shrink-0">
-					<div
-						className={`rounded-xl border transition p-3 space-y-2 ${
-							kinds.sales
-								? 'border-primary/60 bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/10'
-								: 'border-gray-200 dark:border-[#3a151c] bg-gray-50 dark:bg-[#1a0a0e]'
-						}`}
-					>
-						<label
-							htmlFor="inv-print-sales"
-							className={`flex items-center gap-2.5 ${printing ? '' : 'cursor-pointer'}`}
-						>
-							<input
-								id="inv-print-sales"
-								type="checkbox"
-								checked={kinds.sales}
-								onChange={() => toggle('sales')}
-								disabled={printing}
-								className="w-5 h-5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0"
-							/>
-							<span className="text-right">
-								<span className="block font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-									فاکتور فروش (سالن / مشتری)
-								</span>
-								<span className="block text-[11px] text-gray-400 mt-0.5">
-									اقلام + ریز مبالغ + QR پیک (ارسال با پیک)
-								</span>
-							</span>
-						</label>
-						<PrinterSelect
-							id="inv-printer-sales"
-							label="چاپگر:"
-							value={assignment.sales ?? ''}
-							printers={printers}
-							disabled={printing || assignMutation.isPending}
-							locked={!canManagePrint}
-							onChange={(id) => setPrinter('sales', id)}
-						/>
-					</div>
-
-					<div
-						className={`rounded-xl border transition p-3 space-y-2 ${
-							kinds.kitchen
-								? 'border-primary/60 bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/10'
-								: 'border-gray-200 dark:border-[#3a151c] bg-gray-50 dark:bg-[#1a0a0e]'
-						}`}
-					>
-						<label
-							htmlFor="inv-print-kitchen"
-							className={`flex items-center gap-2.5 ${printing ? '' : 'cursor-pointer'}`}
-						>
-							<input
-								id="inv-print-kitchen"
-								type="checkbox"
-								checked={kinds.kitchen}
-								onChange={() => toggle('kitchen')}
-								disabled={printing}
-								className="w-5 h-5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0"
-							/>
-							<span className="text-right">
-								<span className="block font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-									فاکتور آشپزخانه
-								</span>
-								<span className="block text-[11px] text-gray-400 mt-0.5">
-									اقلام بدون قیمت + جدول درشت
-								</span>
-							</span>
-						</label>
-						<PrinterSelect
-							id="inv-printer-kitchen"
-							label="چاپگر:"
-							value={assignment.kitchen ?? ''}
-							printers={printers}
-							disabled={printing || assignMutation.isPending}
-							locked={!canManagePrint}
-							onChange={(id) => setPrinter('kitchen', id)}
-						/>
-					</div>
-
-					{!canManagePrint && (
-						<p className="text-[10px] text-gray-400 font-DanaMedium leading-relaxed">
-							تغییر چاپگر و چاپِ مستقیم نیازمند مجوزِ «چاپ و مدیریت چاپگر» است
-							(ادمین اصلی) — سفارش با دیالوگِ مرورگر چاپ می‌شود.
-						</p>
-					)}
-				</div>
-
-				{/* پیش‌نمایش — عینِ خروجی چاپ مسیرِ مرورگر (stage-85) */}
-				<div className="px-5 pt-3 pb-1 shrink-0">
-					<div className="flex items-center justify-between mb-1.5 gap-2">
-						<span className="text-xs font-DanaDemiBold text-gray-500 dark:text-gray-400 shrink-0">
-							پیش‌نمایش فاکتور
-						</span>
-						<div className="flex gap-1 p-0.5 rounded-lg bg-gray-100 dark:bg-[#1a0a0e]">
-							<button
-								type="button"
-								onClick={() => setPreviewKind('sales')}
-								aria-pressed={previewKind === 'sales'}
-								className={`px-2.5 py-1 rounded-md text-[11px] font-DanaMedium transition cursor-pointer ${
-									previewKind === 'sales'
-										? 'bg-white dark:bg-[#3a151c] text-gray-800 dark:text-white shadow-sm'
-										: 'text-gray-500 dark:text-gray-400'
-								}`}
-							>
-								فروش
-							</button>
-							<button
-								type="button"
-								onClick={() => setPreviewKind('kitchen')}
-								aria-pressed={previewKind === 'kitchen'}
-								className={`px-2.5 py-1 rounded-md text-[11px] font-DanaMedium transition cursor-pointer ${
-									previewKind === 'kitchen'
-										? 'bg-white dark:bg-[#3a151c] text-gray-800 dark:text-white shadow-sm'
-										: 'text-gray-500 dark:text-gray-400'
-								}`}
-							>
-								آشپزخانه
-							</button>
-						</div>
-					</div>
-				</div>
-				<div className="px-5 pb-3 min-h-0 overflow-y-auto">
-					<div className="rounded-xl bg-gray-50 dark:bg-[#160a0d] border border-gray-100 dark:border-[#3a151c] p-2">
-						<ReceiptPreviewPane html={previewHtmls[previewKind] ?? null} />
-					</div>
-				</div>
-
-				{/* مدیریت چاپگرها — فقط ادمین اصلی */}
-				{isMainAdmin && (
+				<div className="min-h-0 flex-1 overflow-y-auto">
 					<div className="px-5 pb-3 shrink-0">
-						<PrinterManager
-							printers={printers}
-							onChanged={invalidatePrintQueries}
-						/>
+						{printSettingsLoading ? (
+							<div className="text-[11px] text-gray-400 font-DanaMedium">
+								در حال دریافت چاپگرهای شبکه از سرور…
+							</div>
+						) : printersError || assignmentError ? (
+							<p className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium">
+								دریافت تنظیمات چاپگر ناموفق بود؛ چاپ با تنظیمات موجود یا دیالوگ
+								مرورگر انجام می‌شود.
+							</p>
+						) : !canManagePrint ? (
+							<p className="text-[11px] text-gray-400 font-DanaMedium">
+								چاپ فاکتورها با دیالوگ مرورگر انجام می‌شود.
+							</p>
+						) : printers.length > 0 ? (
+							<div
+								aria-live="polite"
+								className="flex items-center gap-2 text-[11px] text-green-600 dark:text-green-400 font-DanaMedium"
+							>
+								<span className="w-2 h-2 rounded-full bg-green-500 dark:bg-green-400 shrink-0" />
+								چاپ مستقیم فعال — {printers.length} چاپگرِ شبکه روی سرور
+							</div>
+						) : (
+							<div className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
+								چاپگری روی سرور ثبت نشده — فعلاً چاپ با دیالوگ مرورگر است.{' '}
+								{isMainAdmin
+									? 'از بخشِ «مدیریت چاپگرهای شبکه» پایین، چاپگرِ شبکهٔ رستوران را ثبت کنید (IP + پورت 9100).'
+									: 'از مدیرِ اصلی بخواهید چاپگرِ شبکه را ثبت کند.'}
+							</div>
+						)}
+						{deliveryType === 'DELIVERY' && (
+							<p className="text-[11px] text-gray-400 font-DanaMedium leading-relaxed mt-1.5">
+								فاکتور فروش شامل QR اسکن موقعیت مشتری است (۳ ساعت اعتبار).
+							</p>
+						)}
 					</div>
-				)}
+
+					{/* انتخاب فاکتورها + چاپگرِ هر کدام (تخصیصِ سروری) */}
+					<div className="px-5 space-y-2 shrink-0">
+						<div
+							className={`rounded-xl border transition p-3 space-y-2 ${
+								kinds.sales
+									? 'border-primary/60 bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/10'
+									: 'border-gray-200 dark:border-[#3a151c] bg-gray-50 dark:bg-[#1a0a0e]'
+							}`}
+						>
+							<label
+								htmlFor="inv-print-sales"
+								className={`flex items-center gap-2.5 ${printing ? '' : 'cursor-pointer'}`}
+							>
+								<input
+									id="inv-print-sales"
+									type="checkbox"
+									checked={kinds.sales}
+									onChange={() => toggle('sales')}
+									disabled={printing}
+									className="w-5 h-5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0"
+								/>
+								<span className="text-right">
+									<span className="block font-DanaDemiBold text-sm text-gray-800 dark:text-white">
+										فاکتور فروش (سالن / مشتری)
+									</span>
+									<span className="block text-[11px] text-gray-400 mt-0.5">
+										اقلام + ریز مبالغ + QR پیک (ارسال با پیک)
+									</span>
+								</span>
+							</label>
+							<PrinterSelect
+								id="inv-printer-sales"
+								label="چاپگر:"
+								value={assignment.sales ?? ''}
+								printers={printers}
+								disabled={
+									printing ||
+									assignMutation.isPending ||
+									!serverAssignment ||
+									printersLoading
+								}
+								locked={!canManagePrint}
+								onChange={(id) => setPrinter('sales', id)}
+							/>
+						</div>
+
+						<div
+							className={`rounded-xl border transition p-3 space-y-2 ${
+								kinds.kitchen
+									? 'border-primary/60 bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/10'
+									: 'border-gray-200 dark:border-[#3a151c] bg-gray-50 dark:bg-[#1a0a0e]'
+							}`}
+						>
+							<label
+								htmlFor="inv-print-kitchen"
+								className={`flex items-center gap-2.5 ${printing ? '' : 'cursor-pointer'}`}
+							>
+								<input
+									id="inv-print-kitchen"
+									type="checkbox"
+									checked={kinds.kitchen}
+									onChange={() => toggle('kitchen')}
+									disabled={printing}
+									className="w-5 h-5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0"
+								/>
+								<span className="text-right">
+									<span className="block font-DanaDemiBold text-sm text-gray-800 dark:text-white">
+										فاکتور آشپزخانه
+									</span>
+									<span className="block text-[11px] text-gray-400 mt-0.5">
+										اقلام بدون قیمت + جدول درشت
+									</span>
+								</span>
+							</label>
+							<PrinterSelect
+								id="inv-printer-kitchen"
+								label="چاپگر:"
+								value={assignment.kitchen ?? ''}
+								printers={printers}
+								disabled={
+									printing ||
+									assignMutation.isPending ||
+									!serverAssignment ||
+									printersLoading
+								}
+								locked={!canManagePrint}
+								onChange={(id) => setPrinter('kitchen', id)}
+							/>
+						</div>
+
+						{!canManagePrint && (
+							<p className="text-[10px] text-gray-400 font-DanaMedium leading-relaxed">
+								تغییر چاپگر و چاپِ مستقیم نیازمند مجوزِ «چاپ و مدیریت چاپگر» است
+								(ادمین اصلی) — سفارش با دیالوگِ مرورگر چاپ می‌شود.
+							</p>
+						)}
+					</div>
+
+					{/* پیش‌نمایش — عینِ خروجی چاپ مسیرِ مرورگر (stage-85) */}
+					<div className="px-5 pt-3 pb-1 shrink-0">
+						<div className="flex items-center justify-between mb-1.5 gap-2">
+							<span className="text-xs font-DanaDemiBold text-gray-500 dark:text-gray-400 shrink-0">
+								پیش‌نمایش فاکتور
+							</span>
+							<div className="flex gap-1 p-0.5 rounded-lg bg-gray-100 dark:bg-[#1a0a0e]">
+								<button
+									type="button"
+									onClick={() => setPreviewKind('sales')}
+									aria-pressed={previewKind === 'sales'}
+									className={`px-2.5 py-1 rounded-md text-[11px] font-DanaMedium transition cursor-pointer ${
+										previewKind === 'sales'
+											? 'bg-white dark:bg-[#3a151c] text-gray-800 dark:text-white shadow-sm'
+											: 'text-gray-500 dark:text-gray-400'
+									}`}
+								>
+									فروش
+								</button>
+								<button
+									type="button"
+									onClick={() => setPreviewKind('kitchen')}
+									aria-pressed={previewKind === 'kitchen'}
+									className={`px-2.5 py-1 rounded-md text-[11px] font-DanaMedium transition cursor-pointer ${
+										previewKind === 'kitchen'
+											? 'bg-white dark:bg-[#3a151c] text-gray-800 dark:text-white shadow-sm'
+											: 'text-gray-500 dark:text-gray-400'
+									}`}
+								>
+									آشپزخانه
+								</button>
+							</div>
+						</div>
+					</div>
+					<div className="px-5 pb-3">
+						<div className="rounded-xl bg-gray-50 dark:bg-[#160a0d] border border-gray-100 dark:border-[#3a151c] p-2">
+							<ReceiptPreviewPane html={previewHtmls[previewKind] ?? null} />
+						</div>
+					</div>
+
+					{/* مدیریت چاپگرها — فقط ادمین اصلی */}
+					{isMainAdmin && (
+						<div className="px-5 pb-3 shrink-0">
+							<PrinterManager
+								printers={printers}
+								onChanged={invalidatePrintQueries}
+							/>
+						</div>
+					)}
+				</div>
 
 				<div className="flex items-center gap-3 p-4 pt-0 shrink-0">
 					<button
 						type="button"
 						onClick={() => void handlePrint()}
-						disabled={printing}
+						disabled={
+							printing || printSettingsLoading || assignMutation.isPending
+						}
 						className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-sm cursor-pointer hover:opacity-90 transition disabled:opacity-60"
 					>
 						<Printer size={18} />

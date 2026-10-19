@@ -170,8 +170,8 @@ export const paymentRoutes = (deps: PaymentRoutesDeps) => {
           summary: 'Retry payment initiation for a PENDING_PAYMENT order (owner only)',
           description:
             'stage-58 — makes the checkout error message “پرداخت را از صفحه‌ی سفارش ادامه دهید” actually true. ' +
-            'Creates a fresh payment row for the order (audit: هر تلاش یک ردیف), verifies/supersedes previous PENDING attempts safely ' +
-            '(money-safety: an unresolved old attempt remains pending until the PSP returns a definitive result), then initiates a new gateway session. ' +
+            'Resumes the saved gateway session when a previous PENDING attempt is unresolved. ' +
+            'Creates a fresh payment row and gateway session only after previous attempts can safely be superseded. ' +
             'gatewayId defaults to the last attempt’s gateway. Rate-limited 6/min/IP.',
         },
       },
