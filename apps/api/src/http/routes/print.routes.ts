@@ -4,11 +4,14 @@
 // روت‌های پل چاپ — تشخیص/پیکربندی/انتخاب/چاپِ چاپگرهای شبکه.
 //
 // مدلِ دسترسی (آینهٔ admin-settings):
-//  · shared (ادمین اصلی + ادمین۲ فعال): لیستِ چاپگرها + وضعیتِ زنده،
-//    تخصیصِ هر فاکتور، و ارسالِ رسید (هر دو پنلِ سفارشات این را لازم
-//    دارند — مودالِ چاپ در هر دو نقش باز می‌شود).
-//  · owner (فقط ادمین اصلی): افزودن/ویرایش/حذف/تست/اسکن — مدیریتِ
-//    سخت‌افزار کارِ رئیس است (الگوی ناحیه‌های ارسال و درگاه‌ها).
+//  · shared (ادمین اصلی + ادمین۲ فعال): لیستِ چاپگرها + وضعیتِ زنده و
+//    «خواندنِ» تخصیص — مودالِ چاپ در هر دو نقش همین را لازم دارد.
+//  · manage (ادمین اصلی + ادمین۲ با مجوزِ اختصاصیِ printingManage —
+//    stage-89): «تغییرِ تخصیصِ سراسریِ چاپگرها» و «ارسالِ کارِ چاپ».
+//    بازبینیِ استیج-۸۸: این دو کنشِ جهانی‌اند، نه عملیاتِ روزمرهٔ سفارش —
+//    پیش‌فرض برای ادمین۲ خاموش و فقط با مجوزِ صریحِ ادمین اصلی روشن می‌شود.
+//  · owner (فقط ادمین اصلی): افزودن/ویرایش/حذف/تست/اسکن/گزارشِ شبکه —
+//    مدیریتِ سخت‌افزار کارِ رئیس است (الگوی ناحیه‌های ارسال و درگاه‌ها).
 // ═══════════════════════════════════════════════════════════════
 
 // src/http/routes/print.routes.ts
@@ -18,7 +21,7 @@ import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { PrinterService } from '#/domain/print/print.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
-import { requireAdmin2 } from '#/http/hooks/require-admin2'
+import { requireAdmin2, requireAdmin2Permission } from '#/http/hooks/require-admin2'
 
 export interface PrintRoutesDeps {
   sessions: SessionService
@@ -30,7 +33,7 @@ export interface PrintRoutesDeps {
 const widthDotsSchema = t.Union([t.Literal(576), t.Literal(384), t.Literal(420)])
 
 export const printRoutes = (deps: PrintRoutesDeps) => {
-  // ══ shared — هر دو ادمین: لیست/تخصیص/چاپ ══
+  // ══ shared — هر دو ادمین: خواندنِ لیست/وضعیت/تخصیص ══
   const shared = new Elysia({ prefix: '/admin/print', tags: ['Admin / Print'] })
     .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
 
@@ -41,7 +44,7 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
         detail: {
           summary: 'Network printers + live status (DLE EOT probe)',
           description:
-            'stage-88: server-side print bridge. Lists registered LAN printers (ESC/POS over TCP 9100) with fresh online/offline/paper status. Browsers cannot enumerate OS printers — the API is the source of truth.',
+            'stage-88: server-side print bridge. Lists registered LAN printers (ESC/POS over TCP 9100) with fresh online/offline/paper status. Browsers cannot enumerate OS printers — the API is the source of truth. stage-89: status combines TCP reachability AND the device-reported offline bit.',
         },
       },
     )
@@ -51,6 +54,16 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
         description: 'null means browser dialog fallback. Mirrors the payment-gateways settings pattern.',
       },
     })
+
+  // ══ manage — ادمین اصلی + ادمین۲ با مجوزِ printingManage (stage-89) ══
+  const manage = new Elysia({ prefix: '/admin/print', tags: ['Admin / Print'] })
+    .use(
+      requireAdmin2Permission(
+        { sessions: deps.sessions, admin2: deps.admin2 },
+        'printingManage',
+      ),
+    )
+
     .post(
       '/assignment',
       async ({ body }) => {
@@ -66,9 +79,9 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
           kitchen: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
         }),
         detail: {
-          summary: 'Set per-invoice-type printer assignment',
+          summary: 'Set per-invoice-type printer assignment (printingManage permission)',
           description:
-            'Validated against the printers table — unknown ids are rejected. Removing a printer clears its assignment automatically.',
+            'stage-89: this is a GLOBAL station-wide setting — level-2 admins need the dedicated printingManage permission (default off). Validated against the printers table — unknown ids are rejected. Removing a printer clears its assignment automatically.',
         },
       },
     )
@@ -96,15 +109,26 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
         detail: {
           summary: 'Print a receipt bitmap (ESC/POS raster) to a network printer',
           description:
-            'stage-88: the browser renders the Persian RTL receipt to a canvas (perfect text shaping), packs it 1-bit-per-pixel MSB-first row-major, and posts the rows here. The server frames them as fragmented GS v 0 + feed + partial cut and streams to printer:9100. Paper length == content length. Pre-flight DLE EOT: paper-end and offline are explicit errors.',
+            'stage-88: the browser renders the Persian RTL receipt to a canvas (perfect text shaping), packs it 1-bit-per-pixel MSB-first row-major, and posts the rows here. The server frames them as fragmented GS v 0 + feed + partial cut and streams to printer:9100. Paper length == content length. Pre-flight DLE EOT: paper-end and device-reported offline are explicit errors. stage-89: destination IP is policy-checked (RFC1918 only, DNS-resolved and pinned) and requires the printingManage permission.',
         },
       },
     )
 
-  // ══ owner — فقط ادمین اصلی: مدیریتِ سخت‌افزار ══
+  // ══ owner — فقط ادمین اصلی: مدیریتِ سخت‌افزار + گزارشِ شبکه ══
   const ownerOnly = new Elysia({ prefix: '/admin/print', tags: ['Admin / Print'] })
     .use(requireAdmin(deps.sessions))
 
+    .get(
+      '/network',
+      async () => deps.print.networkReport(),
+      {
+        detail: {
+          summary: 'Network topology report — main admin only',
+          description:
+            'stage-89 (P1): honest view of the real network path — server interfaces with their true netmasks, each printer IP classified against them, deployment mode (lan/remote/empty) and Persian guidance. A VPS outside the restaurant LAN cannot reach private printer IPs; this report says so explicitly instead of failing silently.',
+        },
+      },
+    )
     .post(
       '/printers',
       async ({ body, user }) => {
@@ -135,7 +159,7 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
         detail: {
           summary: 'Register a network printer — main admin only',
           description:
-            'Duplicate (host+port) is rejected. Get the IP from the printer self-test page or POST /admin/print/discover.',
+            'stage-89: host must resolve to a private LAN address (10/172.16-31/192.168) — public, link-local (cloud metadata), CGNAT and loopback targets are rejected; port must be 9100 (the only implemented transport: raw ESC/POS). Duplicate (host+port) is rejected. Get the IP from the printer self-test page or POST /admin/print/discover.',
         },
       },
     )
@@ -167,7 +191,7 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
           widthDots: t.Optional(widthDotsSchema),
           autoCut: t.Optional(t.Boolean()),
         }),
-        detail: { summary: 'Update printer — main admin only' },
+        detail: { summary: 'Update printer — main admin only (same destination policy as add)' },
       },
     )
     .delete(
@@ -208,7 +232,7 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
         detail: {
           summary: 'ASCII test page over the raw socket — main admin only',
           description:
-            'Server-side test (no browser): PC437 text + density pattern + cut. For a Persian test use the receipt path from the print modal (canvas raster).',
+            'Server-side test (no browser): PC437 text + density pattern + cut. stage-89: refuses explicitly when the device reports itself offline or out of paper. For a Persian test use the receipt path from the print modal (canvas raster).',
         },
       },
     )
@@ -230,12 +254,12 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
         }),
         timeout: 90_000,
         detail: {
-          summary: 'Scan a subnet for printers (ports 9100/631) — main admin only',
+          summary: 'Scan a subnet for printers (port 9100 only) — main admin only',
           description:
-            'Outbound NAT from the Docker bridge reaches the restaurant LAN. Default CIDRs come from PRINT_SCAN_CIDRS env (or the server interfaces). mDNS does not cross docker bridge — scanning + manual IP is the docker-safe path. Found hosts are NOT auto-registered — add them explicitly.',
+            'stage-89: only port 9100 is probed (the only implemented transport — raw ESC/POS; an open 631/IPP port does not imply raw compatibility). The CIDR must be a private restaurant network (10.x / 172.16-31.x / 192.168.x) — loopback, link-local/metadata, CGNAT, multicast and public ranges are rejected. Default CIDRs come from PRINT_SCAN_CIDRS env (or the server interfaces with their real netmasks). mDNS does not cross docker bridge — scanning + manual IP is the docker-safe path. Found hosts are NOT auto-registered — add them explicitly.',
         },
       },
     )
 
-  return new Elysia().use(shared).use(ownerOnly)
+  return new Elysia().use(shared).use(manage).use(ownerOnly)
 }

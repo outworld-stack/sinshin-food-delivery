@@ -23,6 +23,7 @@ const FULL_PERMISSIONS: SubAdminPermissionsDto = {
 	articlesRead: true,
 	articlesWrite: true,
 	canAnnounceBusy: true,
+	printingManage: true,
 	hall: true,
 	takeaway: true,
 }
@@ -45,6 +46,7 @@ const EMPTY_PERMISSIONS: SubAdminPermissionsDto = {
 	articlesRead: false,
 	articlesWrite: false,
 	canAnnounceBusy: false,
+	printingManage: false,
 	hall: false,
 	takeaway: false,
 }

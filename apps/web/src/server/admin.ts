@@ -25,6 +25,7 @@ import type {
 	OutsideScope,
 	PrinterDiscoveryDto,
 	PrinterDto,
+	PrinterNetworkReportDto,
 	RegistrationPermitDto,
 	RestaurantStatusDto,
 	StaffInvoice,
@@ -669,4 +670,12 @@ export async function printReceiptBitmap(input: {
 		'POST',
 		input,
 	)
+}
+
+/**
+ * stage-89 (P1) — گزارشِ «مسیرِ واقعیِ شبکهٔ چاپگر» — کارت‌های واقعیِ سرور،
+ * جایِ IP هر چاپگر، حالتِ استقرار و راهنمای فارسی — فقط ادمین اصلی.
+ */
+export async function getAdminPrinterNetworkReport(): Promise<PrinterNetworkReportDto> {
+	return authJson<PrinterNetworkReportDto>('/admin/print/network', 'GET')
 }

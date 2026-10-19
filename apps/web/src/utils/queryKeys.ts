@@ -114,6 +114,8 @@ export const qk = {
 	// stage-88 — پل چاپِ سرور: چاپگرهای شبکه + تخصیصِ فاکتورها
 	adminPrinters: ['admin-printers'] as const,
 	adminPrintAssignment: ['admin-print-assignment'] as const,
+	// stage-89 — گزارشِ توپولوژیِ شبکه (P1) — فقط ادمین اصلی (PrinterManager)
+	adminPrintNetwork: ['admin-print-network'] as const,
 	// round-18 — اسنپ‌شات مانیتورینگ سیستم (/health/metrics)
 	systemMetrics: ['system-metrics'] as const,
 	subAdmins: ['sub-admins'] as const,

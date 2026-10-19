@@ -1,0 +1,1 @@
+ALTER TABLE "admin2_profiles" ADD COLUMN "printing_manage" boolean DEFAULT false NOT NULL;

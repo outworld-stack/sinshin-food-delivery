@@ -72,6 +72,7 @@ export const ALL_ADMIN2_PERMISSIONS: Admin2Permissions = {
     articlesRead: true,
     articlesWrite: true,
     canAnnounceBusy: true,
+    printingManage: true,
 }
 
 /**
@@ -100,6 +101,9 @@ const DEFAULT_ADMIN2_PERMISSIONS = {
     articlesWrite: false,
     /** stage-84 — اعلام شلوغی: فقط با مجوزِ صریحِ ادمین اصلی */
     canAnnounceBusy: false,
+    /** stage-89 — چاپِ مستقیم/تخصیصِ چاپگر: فقط با مجوزِ صریحِ ادمین اصلی
+     *  (بازبینیِ استیج-۸۸: تخصیصِ سراسری و ارسالِ کار، مجوزِ اختصاصی می‌خواهد) */
+    printingManage: false,
 } as const
 
 export class Admin2Service {
@@ -543,6 +547,7 @@ export class Admin2Service {
             articlesRead: p.articlesRead,
             articlesWrite: p.articlesWrite,
             canAnnounceBusy: p.canAnnounceBusy,
+            printingManage: p.printingManage,
         }
     }
 

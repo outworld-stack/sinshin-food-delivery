@@ -5,20 +5,28 @@
 //
 //  · فقط ادمین اصلی (مودال با role==='admin' رندرش می‌کند) — مدیریتِ
 //    سخت‌افزار کارِ رئیس است (الگوی ناحیه‌های ارسال/درگاه‌ها).
-//  · افزودن: نام + IP + پورت (پیش‌فرض 9100) + عرضِ کاغذ (۸۰mm/۵۸mm) + برش.
-//  · تشخیص: اسکنِ زیرشبکه از سمتِ سرور (NAT داکر عبور می‌کند) — نتیجه
-//    فقط «پیش‌پرکردنِ فرم» است؛ ثبت نهایی با دکمهٔ افزودن (چیزی پنهانی
-//    اضافه نمی‌شود).
+//  · افزودن: نام + IP + پورت (فقط 9100 — RAW/JetDirect؛ stage-89) +
+//    عرضِ کاغذ (۸۰mm/۵۸mm) + برش.
+//  · تشخیص: اسکنِ زیرشبکه از سمتِ سرور (NAT داکر عبور می‌کند) — فقط
+//    پورتِ 9100 (stage-89: 631 = IPP خام نیست)؛ نتیجه فقط «پیش‌پرکردنِ
+//    فرم» است؛ ثبت نهایی با دکمهٔ افزودن (چیزی پنهانی اضافه نمی‌شود).
+//  · stage-89 (P1) — «گزارشِ شبکهٔ سرور»: کارت‌های واقعیِ سرور، جایِ IP
+//    هر چاپگر نسبت به آن‌ها و راهنمایِ صریحِ استقرار — تا VPSِ
+//    بیرون-از-رستوران دیگر شبیهِ «چاپگرِ خراب» جلوه نکند.
 //  · تست: صفحهٔ اسکیِ سرور (بدونِ مرورگر) — برایِ تستِ فارسی از خودِ
 //    دکمهٔ «چاپ فاکتورهای انتخابی» مودال استفاده کنید (مسیرِ canvas).
 //  · حذف: تخصیصِ فاکتورها به‌طورِ خودکار پاک می‌شود (سمتِ سرور).
 // ═══════════════════════════════════════════════════════════════
 
-import type { PrinterDiscoveryDto, PrinterDto } from '@sinshin/shared'
+import type {
+	PrinterDiscoveryDto,
+	PrinterDto,
+	PrinterNetworkReportDto,
+} from '@sinshin/shared'
 // src/components/admin/admin2/PrinterManager.tsx
-import { useMutation } from '@tanstack/react-query'
-import { memo, useCallback, useState } from 'react'
-import { Loader, Plus, Printer, Radar, Trash, Wifi } from 'reicon-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { memo, useCallback, useEffect, useState } from 'react'
+import { Loader, Plus, Printer, Radar, Server, Trash, Wifi } from 'reicon-react'
 import {
 	addAdminPrinter,
 	discoverAdminPrinters,
@@ -26,6 +34,7 @@ import {
 	testAdminPrinter,
 } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
+import { adminPrintNetworkOptions } from '#/utils/queryOptions'
 
 interface PrinterManagerProps {
 	printers: PrinterDto[]
@@ -37,6 +46,24 @@ const WIDTH_LABEL: Record<number, string> = {
 	576: 'کاغذ ۸۰mm',
 	384: 'کاغذ ۵۸mm',
 	420: 'کاغذ ۵۸mm (اپسون)',
+}
+
+const MODE_LABEL: Record<
+	PrinterNetworkReportDto['deploymentMode'],
+	{ text: string; cls: string }
+> = {
+	lan: {
+		text: 'سرور روی شبکهٔ چاپگرهاست — مسیرِ چاپ هست',
+		cls: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30',
+	},
+	remote: {
+		text: 'IP چاپگرها بیرونِ شبکهٔ سرور است — مسیر را بررسی کنید',
+		cls: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30',
+	},
+	empty: {
+		text: 'چاپگری ثبت نشده — پس از ثبت، توپولوژی همین‌جا گزارش می‌شود',
+		cls: 'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#1a0a0e]',
+	},
 }
 
 export const PrinterManager = memo(function PrinterManager({
@@ -52,6 +79,16 @@ export const PrinterManager = memo(function PrinterManager({
 	const [autoCut, setAutoCut] = useState(true)
 	const [scanCidr, setScanCidr] = useState('192.168.1.0/24')
 	const [found, setFound] = useState<PrinterDiscoveryDto[] | null>(null)
+	// stage-89 (P1) — گزارشِ توپولوژی فقط وقتی بخش باز است کش می‌شود
+	const { data: network } = useQuery({
+		...adminPrintNetworkOptions,
+		enabled: open,
+	})
+	// پیش‌فرضِ هوشمندِ بازهٔ اسکن = زیرشبکهٔ واقعیِ خودِ سرور
+	useEffect(() => {
+		const cidr = network?.serverSubnets?.[0]?.cidr
+		if (cidr) setScanCidr(cidr)
+	}, [network])
 
 	const addMutation = useMutation({
 		mutationFn: () =>
@@ -144,6 +181,64 @@ export const PrinterManager = memo(function PrinterManager({
 
 			{open && (
 				<div className="px-3 pb-3 space-y-3">
+					{/* stage-89 (P1) — گزارشِ «مسیرِ واقعیِ شبکه» */}
+					{network && (
+						<div className="rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] p-2.5 space-y-1.5">
+							<div className="flex items-center gap-1.5 text-[11px] font-DanaDemiBold text-gray-600 dark:text-gray-300">
+								<Server size={13} />
+								شبکهٔ سرور و مسیر چاپگرها
+							</div>
+							<p
+								className={`inline-block rounded-md px-2 py-1 text-[10px] font-DanaMedium ${
+									(MODE_LABEL[network.deploymentMode] ?? MODE_LABEL.empty).cls
+								}`}
+							>
+								{(MODE_LABEL[network.deploymentMode] ?? MODE_LABEL.empty).text}
+							</p>
+							<p
+								dir="ltr"
+								className="text-[10px] text-gray-400 font-DanaMedium truncate"
+							>
+								{network.serverSubnets.length > 0
+									? network.serverSubnets
+											.map((s) => `${s.ip} (${s.cidr})`)
+											.join(' · ')
+									: 'no ipv4 subnet'}
+							</p>
+							{network.printers.map((p) => (
+								<p
+									key={p.id}
+									dir="ltr"
+									className="text-[10px] font-DanaMedium truncate"
+								>
+									<span
+										className={
+											p.inServerSubnet
+												? 'text-green-600 dark:text-green-400'
+												: 'text-amber-600 dark:text-amber-400'
+										}
+									>
+										{p.inServerSubnet ? '✓' : '!'} {p.host}
+									</span>
+									<span className="text-gray-400">
+										{' '}
+										{p.inServerSubnet
+											? 'inside server subnet'
+											: 'outside server subnets'}
+									</span>
+								</p>
+							))}
+							{network.guidance.map((g) => (
+								<p
+									key={g}
+									className="text-[10px] text-gray-500 dark:text-gray-400 font-DanaMedium leading-relaxed"
+								>
+									{g}
+								</p>
+							))}
+						</div>
+					)}
+
 					{/* فهرست چاپگرها */}
 					{printers.length > 0 && (
 						<div className="space-y-1.5">
@@ -329,10 +424,13 @@ export const PrinterManager = memo(function PrinterManager({
 							</div>
 						)}
 						<p className="text-[10px] text-gray-400 font-DanaMedium leading-relaxed">
-							سرور این بازه را با پورت‌های 9100 و 631 جست‌وجو می‌کند. اگر چاپگر
-							پیدا نشد، IP را از «صفحهٔ تستِ خودِ چاپگر» (دکمهٔ FEED هنگام روشن‌شدن)
-							بخوانید و دستی وارد کنید. برای چاپگرِ شبکه IP ثابت (DHCP
-							Reservation) بگذارید.
+							سرور این بازه را فقط با پورتِ 9100 (راستری خامِ ESC/POS) جست‌وجو
+							می‌کند و فقط شبکه‌های خصوصیِ رستوران را می‌پذیرد. اگر چاپگر پیدا نشد،
+							IP را از «صفحهٔ تستِ خودِ چاپگر» (دکمهٔ FEED هنگام روشن‌شدن) بخوانید و
+							دستی وارد کنید. برای چاپگرِ شبکه IP ثابت (DHCP Reservation) بگذارید
+							— و اگر سرور روی VPSِ بیرون از رستوران است، «گزارشِ شبکهٔ سرور» بالا
+							را بخوانید: بدونِ مسیر/تونل، چاپِ مستقیم از سرورِ دور ممکن نیست و
+							دیالوگِ مرورگر پشتیبان است.
 						</p>
 					</div>
 				</div>

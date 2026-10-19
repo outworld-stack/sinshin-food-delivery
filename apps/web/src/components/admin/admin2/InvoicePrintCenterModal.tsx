@@ -31,6 +31,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Printer, X } from 'reicon-react'
 import { PrinterManager } from '#/components/admin/admin2/PrinterManager'
+import { usePermissions } from '#/hooks/admin/usePermissions'
 import {
 	buildPrintDocumentHtml,
 	measureReceiptHtmlHeightPx,
@@ -155,6 +156,7 @@ function PrinterSelect({
 	value,
 	printers,
 	disabled,
+	locked,
 	onChange,
 }: {
 	id: string
@@ -162,6 +164,8 @@ function PrinterSelect({
 	value: string
 	printers: PrinterDto[]
 	disabled: boolean
+	/** stage-89 — ادمین۲ بدونِ مجوزِ printingManage: قفلِ فقط‌خواندنی */
+	locked?: boolean
 	onChange: (next: string) => void
 }) {
 	return (
@@ -175,7 +179,12 @@ function PrinterSelect({
 			<select
 				id={id}
 				value={value}
-				disabled={disabled}
+				disabled={disabled || locked}
+				title={
+					locked
+						? 'تغییر چاپگر نیاز به مجوز «چاپ و مدیریت چاپگر» دارد — از مدیرِ اصلی بخواهید'
+						: undefined
+				}
 				onChange={(e) => onChange(e.target.value)}
 				className="flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed truncate"
 			>
@@ -206,6 +215,10 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	const queryClient = useQueryClient()
 	const role = useAuthStore((s) => s.role)
 	const isMainAdmin = role === 'admin'
+	// stage-89 — مجوزِ اختصاصی: تغییرِ تخصیصِ سراسری + چاپِ مستقیم
+	// (ادمین اصلی همیشه دارد؛ ادمین۲ فقط با مجوزِ صریح — پیش‌فرض خاموش)
+	const { permissions } = usePermissions()
+	const canManagePrint = isMainAdmin || permissions.printingManage
 	const [kinds, setKinds] = useState(loadDefaultKinds)
 	const [printing, setPrinting] = useState(false)
 	const printingRef = useRef(false)
@@ -348,7 +361,9 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 			for (const kind of selected) {
 				const id = assignment[kind]
 				const printer = printers.find((p) => p.id === id)
-				if (id && printer) {
+				// stage-89 — چاپِ مستقیم مجوزِ printingManage می‌خواهد؛
+				// بدونِ آن، فاکتورها با دیالوگِ مرورگر چاپ می‌شوند
+				if (id && printer && canManagePrint) {
 					directTargets[kind] = {
 						printerId: printer.id,
 						widthDots: printer.widthDots,
@@ -381,7 +396,16 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 			printingRef.current = false
 			setPrinting(false)
 		}
-	}, [assignment, invoice, kinds, orderId, printers, saveKinds, showToast])
+	}, [
+		assignment,
+		canManagePrint,
+		invoice,
+		kinds,
+		orderId,
+		printers,
+		saveKinds,
+		showToast,
+	])
 
 	const toggle = (key: 'kitchen' | 'sales') =>
 		setKinds((prev) => {
@@ -483,6 +507,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 							value={assignment.sales ?? ''}
 							printers={printers}
 							disabled={printing || assignMutation.isPending}
+							locked={!canManagePrint}
 							onChange={(id) => setPrinter('sales', id)}
 						/>
 					</div>
@@ -521,9 +546,17 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 							value={assignment.kitchen ?? ''}
 							printers={printers}
 							disabled={printing || assignMutation.isPending}
+							locked={!canManagePrint}
 							onChange={(id) => setPrinter('kitchen', id)}
 						/>
 					</div>
+
+					{!canManagePrint && (
+						<p className="text-[10px] text-gray-400 font-DanaMedium leading-relaxed">
+							تغییر چاپگر و چاپِ مستقیم نیازمند مجوزِ «چاپ و مدیریت چاپگر» است
+							(ادمین اصلی) — سفارش با دیالوگِ مرورگر چاپ می‌شود.
+						</p>
+					)}
 				</div>
 
 				{/* پیش‌نمایش — عینِ خروجی چاپ مسیرِ مرورگر (stage-85) */}

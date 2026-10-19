@@ -41,6 +41,8 @@ const PERMISSION_LABELS: {
 	{ key: 'articlesWrite', label: 'ایجاد/ویرایش مقاله (صفحه‌ساز بلوکی)' },
 	// stage-84 — اعلام وضعیت «شلوغ» رستوران
 	{ key: 'canAnnounceBusy', label: 'اعلام وضعیت شلوغی رستوران' },
+	// stage-89 — چاپ مستقیم + تخصیص سراسری چاپگرها (مجوز اختصاصی)
+	{ key: 'printingManage', label: 'چاپ مستقیم فاکتور و تخصیص چاپگر شبکه' },
 ]
 // ویرایش دسترسی‌های ادمین۲ — توسط ادمین اصلی
 export const PermissionsEditor = memo(function PermissionsEditor({

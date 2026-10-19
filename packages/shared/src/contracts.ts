@@ -1020,6 +1020,10 @@ export interface SubAdminPermissionsDto {
   articlesWrite: boolean
   /** stage-84 — اعلام وضعیت «شلوغ» رستوران (پیش‌فرضِ افزودن: false) */
   canAnnounceBusy: boolean
+  /** stage-89 — چاپِ مستقیم فاکتور و «تغییرِ تخصیصِ سراسریِ چاپگرها» (پیش‌فرضِ
+   *  افزودن: false — مجوزِ اختصاصی؛ ادمین۲ بدونِ آن فقط لیست/وضعیت می‌بیند و
+   *  چاپ با دیالوگِ مرورگر می‌رود) */
+  printingManage: boolean
 }
 
 /** رارد ۴۷ — بدنه‌ی PATCH دسترسی‌ها — به‌روزرسانی جزئی: همه‌ی کلیدها اختیاری.
@@ -1053,6 +1057,36 @@ export interface InvoicePrinterAssignmentDto {
 export interface PrinterDiscoveryDto {
   host: string
   port: number
+}
+
+/**
+ * stage-89 (P1) — گزارشِ «مسیرِ واقعیِ شبکهٔ چاپگر»: زیرشبکه‌های واقعیِ سرور
+ * (با ماسکِ خودِ کارت)، جایِ IP هر چاپگر نسبت به آن‌ها، حالتِ استقرار و
+ * راهنمایِ فارسی — تا VPS-بیرون-از-رستوران دیگر شبیهِ «چاپگرِ خراب» نشود.
+ */
+export interface PrinterNetworkReportDto {
+  serverSubnets: Array<{ name: string; ip: string; cidr: string }>
+  envScanCidrs: string[]
+  /** empty = چاپگری ثبت نشده · lan = همه داخلِ زیرشبکه‌های سرور · remote = مسیرِ شبکه باید بررسی/حل شود */
+  deploymentMode: 'lan' | 'remote' | 'empty'
+  guidance: string[]
+  printers: Array<{
+    id: string
+    name: string
+    host: string
+    ip: string | null
+    ipKind:
+      | 'privatelan'
+      | 'loopback'
+      | 'linklocal'
+      | 'cgnat'
+      | 'multicast'
+      | 'broadcast'
+      | 'public'
+      | 'unknown'
+    inServerSubnet: boolean
+    status: 'online' | 'offline' | 'unknown'
+  }>
 }
 
 export interface SubAdminRecordDto {

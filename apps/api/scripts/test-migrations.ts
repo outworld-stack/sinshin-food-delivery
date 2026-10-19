@@ -75,6 +75,8 @@ const CHAIN_HAS_0013 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0013')
 const CHAIN_HAS_0014 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0014'))
 /** stage-88 — همان الگو برای ۰۰۱۵ (رجیستری چاپگرهای شبکه) */
 const CHAIN_HAS_0015 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0015'))
+/** stage-89 — همان الگو برای ۰۰۱۶ (مجوزِ printingManage ادمین۲) */
+const CHAIN_HAS_0016 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0016'))
 
 const scratches: string[] = []
 let pass = 0
@@ -236,6 +238,8 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     alter table "categories" drop column if exists "purchase_enabled";
     -- stage-88 — اشیاءِ ۰۰۱۵: رجیستری چاپگرهای شبکه (پل چاپ سرور)
     drop table if exists "printers";
+    -- stage-89 — اشیاءِ ۰۰۱۶: مجوزِ printingManage ادمین۲
+    alter table "admin2_profiles" drop column if exists "printing_manage";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
@@ -448,6 +452,18 @@ await withScratch('a', async (url) => {
     printersUnique === 0 && !CHAIN_HAS_0015
       ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۵ ندارد'
       : `count=${printersUnique}`,
+  )
+  // A2 — stage-89: اشیاءِ ۰۰۱۶ (مجوزِ printingManage ادمین۲ — چاپ مستقیم/تخصیص)
+  const printingManageCol = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.columns where table_name='admin2_profiles' and column_name='printing_manage' and column_default = 'false'`,
+  )
+  ok(
+    'A2: ستونِ printing_manage ادمین۲ (۰۰۱۶ stage-89) با پیش‌فرضِ false',
+    printingManageCol === 1,
+    printingManageCol === 0 && !CHAIN_HAS_0016
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۶ ندارد — اول: bun run db:generate'
+      : `count=${printingManageCol}`,
   )
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)

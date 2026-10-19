@@ -135,6 +135,8 @@ export const admin2Routes = (deps: Admin2RoutesDeps) =>
           articlesWrite: t.Optional(t.Boolean()),
           /** stage-84 — اعلام وضعیت «شلوغ» رستوران */
           canAnnounceBusy: t.Optional(t.Boolean()),
+          /** stage-89 — چاپ مستقیم فاکتور + تخصیص سراسری چاپگرها (مجوز اختصاصی) */
+          printingManage: t.Optional(t.Boolean()),
         }),
         detail: { summary: 'Update scopes and permissions' },
       },

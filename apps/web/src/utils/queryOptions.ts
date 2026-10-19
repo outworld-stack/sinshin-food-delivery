@@ -34,6 +34,7 @@ import {
 	getAdminCouriers,
 	getAdminOrders,
 	getAdminPrintAssignment,
+	getAdminPrinterNetworkReport,
 	getAdminPrinters,
 	getAdminStats,
 	getAdminUserDetails,
@@ -797,4 +798,12 @@ export const adminPrintAssignmentOptions = queryOptions({
 	queryKey: qk.adminPrintAssignment,
 	queryFn: () => getAdminPrintAssignment(),
 	staleTime: 60_000,
+})
+
+// stage-89 (P1) — گزارشِ «مسیرِ واقعیِ شبکه»: کارت‌های سرور + جایِ IP چاپگرها
+// + راهنمای استقرار — فقط ادمین اصلی می‌گیرد (روت owner)
+export const adminPrintNetworkOptions = queryOptions({
+	queryKey: qk.adminPrintNetwork,
+	queryFn: () => getAdminPrinterNetworkReport(),
+	staleTime: 30_000,
 })
