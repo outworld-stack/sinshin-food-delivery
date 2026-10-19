@@ -7,6 +7,7 @@
 //  · polyline مسیر واقعی (no-traffic) اگر سرور داد؛ وگرنه خط مستقیم
 //  · بدون کلید نقشه → فقط کارت متنی/فاصله (بدون شکستن صفحه)
 import { memo, useEffect, useRef } from 'react'
+import { neshanRouteUrl, neshanViewUrl } from '#/utils/neshanLinks'
 
 const SDK_JS =
 	'https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.umd.js'
@@ -243,14 +244,24 @@ export const ScanRouteMap = memo(function ScanRouteMap({
 						{address}
 					</p>
 				)}
-				<a
-					href={`https://neshan.org/maps/@${destination.lat},${destination.lng},15z`}
-					target="_blank"
-					rel="noopener noreferrer"
-					className="inline-block text-xs text-primary dark:text-dark-primary font-DanaDemiBold"
-				>
-					مشاهده مقصد روی نقشه ↗
-				</a>
+				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+					<a
+						href={neshanViewUrl(destination.lat, destination.lng)}
+						target="_blank"
+						rel="noopener noreferrer"
+						className="inline-block text-xs text-primary dark:text-dark-primary font-DanaDemiBold"
+					>
+						مشاهده مقصد روی نقشه ↗
+					</a>
+					<a
+						href={neshanRouteUrl(destination.lat, destination.lng)}
+						target="_blank"
+						rel="noopener noreferrer"
+						className="inline-block text-xs text-primary dark:text-dark-primary font-DanaDemiBold"
+					>
+						مسیریابی تا مقصد در نشان ↗
+					</a>
+				</div>
 			</div>
 		)
 	}

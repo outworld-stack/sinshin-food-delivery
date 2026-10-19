@@ -24,6 +24,7 @@ import {
 import { defaultParseSearch, Link } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
 import { useI18n } from '#/i18n'
+import { neshanRouteUrl, neshanViewUrl } from '#/utils/neshanLinks'
 import { ArticleLocationMap } from './ArticleLocationMap'
 import { observeArticleBlocks } from './articleBlockAnimations'
 
@@ -462,10 +463,15 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 			)
 		}
 		case 'location': {
-			// stage-84 — بلوک موقعیت: عنوان/آدرس + نقشه‌ی تعاملی
-			// (کلاینتی — SSR فقط متن) + دکمه‌ی بیرونی.
+			// stage-92 — بلوک موقعیت: عنوان/آدرس + نقشه‌ی تعاملی
+			// (کلاینتی — SSR فقط متن) + دو دیپ‌لینکِ راستی‌آزمایی‌شده:
+			// «مشاهده» نقشه را روی نقطه باز می‌کند (@lat,lng) و
+			// «مسیریابی» پینِ مقصد را روی نقطه می‌گذارد و مسیر از
+			// موقعیتِ کنونیِ کاربر می‌کشد (routing/car/destination —
+			// همان «مسیریابی به اینجا» خودِ نشان).
 			const { lat, lng, title, address } = block.props
-			const neshanUrl = `https://neshan.org/maps/@${lat},${lng},15z`
+			const viewUrl = neshanViewUrl(lat, lng)
+			const routeUrl = neshanRouteUrl(lat, lng)
 			return (
 				<div className="space-y-3">
 					{(title || address) && (
@@ -490,14 +496,24 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 					)}
 					<ArticleLocationMap lat={lat} lng={lng} />
 					<div style={{ textAlign: block.style?.align }}>
-						<a
-							href={neshanUrl}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-primary/30 dark:border-dark-primary/30 text-primary dark:text-dark-primary font-DanaMedium text-sm cursor-pointer hover:bg-primary/5 dark:hover:bg-dark-primary/5 transition"
-						>
-							{t['article.viewMap']}
-						</a>
+						<div className="inline-flex flex-wrap items-center gap-2">
+							<a
+								href={viewUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-primary/30 dark:border-dark-primary/30 text-primary dark:text-dark-primary font-DanaMedium text-sm cursor-pointer hover:bg-primary/5 dark:hover:bg-dark-primary/5 transition"
+							>
+								{t['article.viewMap']}
+							</a>
+							<a
+								href={routeUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium text-sm cursor-pointer hover:opacity-90 transition"
+							>
+								{t['article.routeMap']}
+							</a>
+						</div>
 					</div>
 				</div>
 			)

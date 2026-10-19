@@ -55,6 +55,7 @@ import {
 	moveBlock,
 	WIDTH_OPTIONS,
 } from './blockModel'
+import { LocationPickerField } from './LocationPickerField'
 
 const PALETTE_ICONS: Record<
 	ArticleBlock['type'],
@@ -490,46 +491,13 @@ function BlockFields({ block, patchProps }: FieldCtx) {
 						value={block.props.address ?? ''}
 						onChange={(e) => patchProps({ address: e.target.value })}
 					/>
-					<div className="grid grid-cols-2 gap-2">
-						<label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-							<span className="shrink-0">عرض جغرافیایی</span>
-							<input
-								className={inputCls}
-								dir="ltr"
-								type="number"
-								step="0.000001"
-								min={-90}
-								max={90}
-								value={block.props.lat}
-								onChange={(e) =>
-									patchProps({
-										lat: Number(e.target.value) || 0,
-									})
-								}
-							/>
-						</label>
-						<label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-							<span className="shrink-0">طول جغرافیایی</span>
-							<input
-								className={inputCls}
-								dir="ltr"
-								type="number"
-								step="0.000001"
-								min={-180}
-								max={180}
-								value={block.props.lng}
-								onChange={(e) =>
-									patchProps({
-										lng: Number(e.target.value) || 0,
-									})
-								}
-							/>
-						</label>
-					</div>
-					<p className="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
-						مختصات را از نقشه (کپی موقعیت) اینجا بگذارید — در صفحه‌ی مقاله، نقشه‌ی
-						تعاملی + دکمه‌ی «مشاهده روی نقشه» به کاربر نشان داده می‌شود.
-					</p>
+					<LocationPickerField
+						lat={block.props.lat}
+						lng={block.props.lng}
+						onChange={(coords) =>
+							patchProps({ lat: coords.lat, lng: coords.lng })
+						}
+					/>
 				</div>
 			)
 		case 'divider':

@@ -295,6 +295,7 @@ export const fa = {
 
 	// ── مقالات (رارد ۳۲) ──
 	'article.viewMap': 'مشاهده روی نقشه',
+	'article.routeMap': 'مسیریابی از موقعیت من',
 	'articles.title': 'مقالات سین‌شین',
 	'articles.filterSort': 'فیلتر و مرتب‌سازی',
 	'articles.filtersTitle': 'فیلترهای مقالات',

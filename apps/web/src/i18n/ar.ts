@@ -293,6 +293,7 @@ export const ar: Dict = {
 	// ── المقالات (الجولة ٣٢) ──
 	'articles.title': 'مقالات سين‌شين',
 	'article.viewMap': 'عرض على الخريطة',
+	'article.routeMap': 'المسار من موقعي',
 	'articles.filterSort': 'تصفية وترتيب',
 	'articles.filtersTitle': 'تصفية المقالات',
 	'articles.subFilter': 'تصنيف أدق:',

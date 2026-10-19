@@ -38,6 +38,7 @@ mock.module('@tanstack/react-router', () => ({ Link: () => null }))
 const toasts: string[] = []
 mock.module('#/stores/toastStore', () => ({ useToastStore: (select: (state: unknown) => unknown) => select({ showToast: (message: string) => toasts.push(message) }) }))
 mock.module('#/components/shared/ImageField', () => ({ ImageField: () => null }))
+mock.module('#/components/shared/MapPicker', () => ({ MapPicker: () => null }))
 mock.module('#/components/shared/Toggle', () => ({ Toggle: () => null }))
 mock.module('#/components/admin/ArField', () => ({ ArField: () => null }))
 
@@ -196,6 +197,37 @@ assert.equal(plainTextToDoc('First\r\n\r\nSecond').blocks.length, 2)
 const emojiMigration = plainTextToDoc(`${'x'.repeat(4999)}🍕rest`)
 assert.equal((emojiMigration.blocks[0]!.props as { text: string }).text.length, 4999, 'paragraph splitting must not break a Unicode surrogate pair')
 
+// stage-92 — بلوک موقعیت: انتخاب‌گرِ نقشه به‌جای تایپِ دستیِ مختصات +
+// لینک‌های تستِ نشان (نما: @lat,lng · مسیر: routing/car/destination).
+doc = { version: 1, blocks: [{ id: 'location-d', type: 'location', props: { lat: 37.4822056, lng: 49.4418273, title: 'شعبه انزلی', address: 'بلوار اقدسیه' } }] }
+builderTree = renderBuilder()
+const locationFields = fieldsFor(builderTree, 'location-d')
+const locationFieldsTree = (locationFields.type as (props: Record<string, unknown>) => unknown)(locationFields.props)
+assert(!nodes(locationFieldsTree).some(node => node.type === 'input' && node.props.type === 'number'),
+	'stage-92: manual lat/lng number inputs are replaced by the map picker')
+const pickerElement = find(locationFieldsTree, node => typeof node.type === 'function' && node.type.name === 'LocationPickerField')
+assert.equal(pickerElement.props.lat, 37.4822056, 'picker is wired to the block coordinates')
+assert.equal(pickerElement.props.lng, 49.4418273)
+const Picker = pickerElement.type as (props: Record<string, unknown>) => unknown
+const pickerHost: Host = { cells: [], cursor: 0 }
+const pickerProps = { lat: 37.4822056, lng: 49.4418273,
+	onChange: (coords: Record<string, number>) => locationFields.props.patchProps({ lat: coords.lat, lng: coords.lng }) }
+let pickerTree = render(pickerHost, Picker, pickerProps as never)
+assert(find(pickerTree, node => node.type === 'button' && Array.isArray(node.props.children) && node.props.children.includes('انتخاب روی نقشه')),
+	'map picker button is offered for the location block')
+assert(find(pickerTree, node => node.type === 'a' && node.props.href === 'https://neshan.org/maps/@37.482206,49.441827,15z'),
+	'verified view deep link — neshan opens centered on the point')
+assert(find(pickerTree, node => node.type === 'a' && node.props.href === 'https://neshan.org/maps/routing/car/destination/37.482206,49.441827'),
+	'verified route deep link — destination pin + route from the current location')
+find(pickerTree, node => node.type === 'button' && node.props['aria-expanded'] === false).props.onClick()
+pickerTree = render(pickerHost, Picker, pickerProps as never)
+const mapPickerElement = find(pickerTree, node => typeof node.type === 'function' && node.type.name === 'MapPicker')
+assert.deepEqual(mapPickerElement.props.value, { lat: 37.4822056, lng: 49.4418273 }, 'MapPicker receives the block point')
+mapPickerElement.props.onChange({ lat: 37.5, lng: 49.5 })
+assert.equal((doc.blocks[0]!.props as { lat: number }).lat, 37.5, 'map click updates the block coordinates')
+assert.equal((doc.blocks[0]!.props as { lng: number }).lng, 49.5)
+assert.equal((doc.blocks[0]!.props as { title: string }).title, 'شعبه انزلی', 'map click never touches other block props')
+
 const client = new QueryClient()
 const affectedKeys = [qk.articleCategories, qk.adminArticleCategories, qk.adminArticles,
   qk.articles('all', 'all'), qk.articles('category-a', 'sub-a'), qk.adminArticleDetails('a'), qk.adminArticleDetails('b')]
@@ -205,4 +237,4 @@ await invalidateArticleQueries(client)
 for (const key of affectedKeys) assert.equal(client.getQueryState(key)?.isInvalidated, true, `Article mutation refreshes ${key.join('/')}`)
 assert.equal(client.getQueryState(['unrelated'])?.isInvalidated, false)
 client.clear()
-console.log('Articles admin regressions passed: plain/builder editing, draft preservation, mode conversion, categories, Arabic steps, immutable process edits, stable IDs, delayed uploads, undo, long text migration and article cache invalidation.')
+console.log('Articles admin regressions passed: plain/builder editing, draft preservation, mode conversion, categories, Arabic steps, immutable process edits, stable IDs, delayed uploads, undo, long text migration, map-based location picking and article cache invalidation.')

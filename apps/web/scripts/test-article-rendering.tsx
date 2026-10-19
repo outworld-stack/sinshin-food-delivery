@@ -13,7 +13,7 @@ mock.module('@tanstack/react-router', () => ({
 		return createElement('a', { ...props, href: to + (query ? `?${query}` : '') + (hash ? `#${hash}` : '') }, children)
 	},
 }))
-mock.module('#/i18n', () => ({ useI18n: () => ({ t: { 'article.viewMap': 'View map' } }) }))
+mock.module('#/i18n', () => ({ useI18n: () => ({ t: { 'article.viewMap': 'View map', 'article.routeMap': 'Route from me' } }) }))
 const { ArticleBlocksRenderer } = await import('../src/components/site/articles/ArticleBlocksRenderer')
 const render = (blocks: unknown[]) => renderToStaticMarkup(createElement(ArticleBlocksRenderer, {
 	doc: { version: 1, blocks } as ArticleBlocksDoc,
@@ -76,7 +76,17 @@ assert(linked.includes('href="/articles/test?lang=ar#location"'))
 assert(linked.includes('target="_blank" rel="noopener noreferrer"'))
 assert(!linked.includes('Unsafe'))
 assert(linked.includes('Test address') && linked.includes('View map'))
-assert.equal((linked.match(/neshan.org\/maps/g) ?? []).length, 1)
+assert(linked.includes('Route from me'))
+// stage-92 — دو دیپ‌لینکِ راستی‌آزمایی‌شده: نما (@lat,lng) + مسیر (routing/car/destination)
+assert(
+	linked.includes('href="https://neshan.org/maps/@37.000000,49.000000,15z"'),
+	'view deep link opens neshan centered on the block coordinates',
+)
+assert(
+	linked.includes('href="https://neshan.org/maps/routing/car/destination/37.000000,49.000000"'),
+	'route deep link pins the block point and routes from the current location',
+)
+assert.equal((linked.match(/neshan.org\/maps/g) ?? []).length, 2)
 
 class FakeElement {
 	classes = new Set<string>()
