@@ -111,6 +111,9 @@ export const qk = {
 
 	// --- پنل ادمین ---
 	adminStats: ['admin-stats'] as const,
+	// stage-88 — پل چاپِ سرور: چاپگرهای شبکه + تخصیصِ فاکتورها
+	adminPrinters: ['admin-printers'] as const,
+	adminPrintAssignment: ['admin-print-assignment'] as const,
 	// round-18 — اسنپ‌شات مانیتورینگ سیستم (/health/metrics)
 	systemMetrics: ['system-metrics'] as const,
 	subAdmins: ['sub-admins'] as const,

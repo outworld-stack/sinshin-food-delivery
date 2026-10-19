@@ -41,6 +41,7 @@ import type { PaymentService } from '#/domain/payment/payment.service'
 import type { UploadService } from '#/infra/uploads/upload.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { LiveService } from '#/domain/live/live.service'
+import type { PrinterService } from '#/domain/print/print.service'
 import type { CourierService } from '#/domain/courier/courier.service'
 import type { ReviewService } from '#/domain/review/review.service'
 import type { ReportService } from '#/domain/report/report.service'
@@ -77,6 +78,7 @@ import { paymentRoutes } from '#/http/routes/payment.routes'
 import { uploadRoutes } from '#/http/routes/upload.routes'
 import { admin2Routes } from '#/http/routes/admin2.routes'
 import { liveRoutes } from '#/http/routes/live.routes'
+import { printRoutes } from '#/http/routes/print.routes'
 import { courierRoutes } from '#/http/routes/courier.routes'
 import { reviewRoutes } from '#/http/routes/review.routes'
 import { reportRoutes } from '#/http/routes/report.routes'
@@ -121,6 +123,8 @@ export interface AppDeps {
   uploads: UploadService
   admin2: Admin2Service
   live: LiveService
+  /** stage-88 — پل چاپِ سرور (چاپگرهای شبکهٔ ESC/POS روی 9100) */
+  print: PrinterService
   couriers: CourierService
   reviews: ReviewService
   reports: ReportService
@@ -267,6 +271,7 @@ export const buildApp = (deps: AppDeps) => {
     .use(adminOrderRoutes({ sessions: deps.sessions, orders: deps.orders, audit: deps.audit }))
     .use(admin2Routes({ sessions: deps.sessions, admin2: deps.admin2, settings: deps.settings }))
     .use(liveRoutes({ sessions: deps.sessions, admin2: deps.admin2, live: deps.live, orders: deps.orders }))
+    .use(printRoutes({ sessions: deps.sessions, admin2: deps.admin2, print: deps.print, audit: deps.audit }))
     .use(courierRoutes({ sessions: deps.sessions, admin2: deps.admin2, couriers: deps.couriers, redis: deps.redis }))
     .use(reviewRoutes({ sessions: deps.sessions, admin2: deps.admin2, reviews: deps.reviews }))
     .use(

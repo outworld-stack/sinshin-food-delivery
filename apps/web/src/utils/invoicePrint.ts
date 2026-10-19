@@ -15,22 +15,23 @@
 // ردیف عمودی، QR وسط‌چین. جدول فروش هم باریک‌تر شد (سایز داخل نام محصول).
 //
 // stage-85 — چاپِ «مستقیم بدون دیالوگ»: هر نوع فاکتور می‌تواند پرینترِ
-// پیش‌فرضِ خودش را داشته باشد (QZ Tray محلی — lib/printAgent): فاکتورِ
-// دارایِ پرینترِ منتخب بی‌دیالوگ چاپ می‌شود، بقیه همان مسیرِ مرورگر را
-// می‌روند؛ خطای مسیرِ مستقیم هرگز سفارشِ چاپ را نمی‌کُشد — همان فاکتور
-// با دیالوگِ مرورگر چاپ می‌شود و پیامِ خطا برگردانده می‌شود. ساختِ
-// specها عمومی شد (buildInvoicePrintSpecs) تا «پیش‌نمایش» مودال از همان
-// موتور استفاده کند (عینِ چیزی که چاپ می‌شود).
+// پیش‌فرضِ خودش را داشته باشد؛ فاکتورِ دارایِ پرینترِ منتخب بی‌دیالوگ چاپ
+// می‌شود، بقیه همان مسیرِ مرورگر را می‌روند؛ خطای مسیرِ مستقیم هرگز
+// سفارشِ چاپ را نمی‌کُشد — همان فاکتور با دیالوگِ مرورگر چاپ می‌شود و
+// پیامِ خطا برگردانده می‌شود. ساختِ specها عمومی شد (buildInvoicePrintSpecs)
+// تا «پیش‌نمایش» مودال از همان موتور استفاده کند (عینِ چیزی که چاپ می‌شود).
+//
+// stage-88 — مسیرِ مستقیم از QZ Tray (ابزارِ ثالث — کنار گذاشته شد) به
+// «پل چاپِ سرور» رسید: چاپگرهای شبکه در DB ثبت می‌شوند، متنِ فارسی
+// در canvasِ مرورگر شکل‌گیری می‌شود (رسید 1bpp) و API با GS v 0 روی
+// سوکتِ 9100 می‌فرستد — بدونِ هیچ ابزارِ ثالث و با طولِ کاغذ = محتوا.
 
-import { agentPrintHtml } from '#/lib/printAgent'
 import {
-	buildPrintDocumentHtml,
-	measureReceiptHtmlHeightPx,
 	type PrintDocumentSpec,
 	printHtmlDocumentAsync,
-	receiptPxToMm,
 } from '#/lib/printDocument'
-import type { StaffInvoice } from '#/server/admin'
+import { renderSpecToReceiptBitmap } from '#/lib/receiptCanvas'
+import { printReceiptBitmap, type StaffInvoice } from '#/server/admin'
 import { faNum, formatDate, formatPrice, formatTime } from '#/utils/format'
 import { qrSvgMarkup } from '#/utils/qrSvg'
 
@@ -245,33 +246,43 @@ export interface InvoicePrintResult {
 	agentErrors: string[]
 }
 
+/** مقصدِ مستقیمِ یک نوع فاکتور — چاپگرِ شبکه از طریقِ پلِ سرور */
+export interface DirectPrintTarget {
+	printerId: string
+	/** عرضِ سرِ چاپ در dot — رسید در همان عرض رندر می‌شود */
+	widthDots: number
+}
+
 /**
  * چاپ فاکتور(های) سفارش — هر نوع فاکتور = یک سند چاپ جداگانه.
  *  • بدونِ پرینترِ منتخب: همان صفِ چاپِ قبل — دیالوگ اول (مثلاً اشپزخانه)
  *    بسته شود، دومی (فروش) خودکار باز می‌شود.
- *  • stage-85 — باِ agentPrinters: فاکتورِ دارایِ پرینترِ منتخب مستقیم و
- *    بی‌دیالوگ به همان پرینتر فرستاده می‌شود (QZ Tray)؛ خطا = جایگزینیِ
- *    همان فاکتور با مسیرِ مرورگر (سفارشِ چاپ هرگز نمی‌میرد).
+ *  • stage-88 — باِ directTargets: فاکتورِ دارایِ چاپگرِ شبکه از طریقِ
+ *    «پل چاپِ سرور» بی‌دیالوگ چاپ می‌شود (canvas فارسی → GS v 0 روی
+ *    سوکتِ 9100)؛ خطا = جایگزینیِ همان فاکتور با مسیرِ مرورگر
+ *    (سفارشِ چاپ هرگز نمی‌میرد).
  */
 export async function printOrderInvoices(
 	inv: StaffInvoice,
 	kinds: InvoiceKind[],
-	opts?: { agentPrinters?: Partial<Record<InvoiceKind, string>> },
+	opts?: { directTargets?: Partial<Record<InvoiceKind, DirectPrintTarget>> },
 ): Promise<InvoicePrintResult> {
 	const items = await buildInvoicePrintSpecs(inv, kinds)
 	const result: InvoicePrintResult = { direct: 0, dialogs: 0, agentErrors: [] }
 	const dialogQueue: PrintDocumentSpec[] = []
 	for (const item of items) {
-		const target = opts?.agentPrinters?.[item.kind]
+		const target = opts?.directTargets?.[item.kind]
 		if (target) {
 			try {
-				const html = buildPrintDocumentHtml(item.spec)
-				const heightPx = await measureReceiptHtmlHeightPx(html)
-				const heightMm =
-					heightPx !== null ? receiptPxToMm(heightPx) + 3 : undefined
-				await agentPrintHtml(target, html, {
-					heightMm,
-					jobName: item.spec.fileName,
+				const bitmap = await renderSpecToReceiptBitmap(
+					item.spec,
+					target.widthDots,
+				)
+				await printReceiptBitmap({
+					printerId: target.printerId,
+					widthPx: bitmap.widthPx,
+					heightPx: bitmap.heightPx,
+					rows: bitmap.rows,
 				})
 				result.direct += 1
 				continue

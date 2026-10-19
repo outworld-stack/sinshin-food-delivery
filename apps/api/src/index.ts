@@ -28,6 +28,7 @@ import { DeviceService } from '#/domain/device/device.service'
 import { RegistrationPermitService } from '#/domain/auth/registration-permit.service'
 import { AuthService } from '#/domain/auth/auth.service'
 import { SettingsService } from '#/domain/settings/settings.service'
+import { PrinterService } from '#/domain/print/print.service'
 import { MenuService } from '#/domain/menu/menu.service'
 import { PackagingService } from '#/domain/menu/packaging.service'
 import { CartService } from '#/domain/cart/cart.service'
@@ -140,6 +141,9 @@ const payments = new PaymentService({ db, config, orders, notifications, hub: ss
 const uploads = new UploadService(config.uploadDir)
 const admin2 = new Admin2Service({ db, config, settings, hub: sseHub })
 const live = new LiveService({ db, config, admin2, hub: sseHub })
+// stage-88 — پل چاپِ سرور: رجیستری چاپگرهای شبکه + ارسالِ مستقیمِ ESC/POS
+// روی TCP 9100 (بدونِ هیچ ابزارِ شخصِ ثالث — node:netِ خودِ ران‌تایم)
+const print = new PrinterService({ db, settings })
 const couriers = new CourierService({ db, config, redis, sms, settings, neshan })
 const admin = new AdminService({ db })
 const reviews = new ReviewService({ db })
@@ -253,6 +257,7 @@ const app = buildApp({
   uploads,
   admin2,
   live,
+  print,
   couriers,
   reviews,
   reports,

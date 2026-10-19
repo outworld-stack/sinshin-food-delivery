@@ -47,6 +47,12 @@ export const SETTING_KEYS = {
    * نمایشِ آن درگاه در چک‌اوت. کلید نداشته/نبود = فعال (پشتیبان ایمن).
    */
   paymentGateways: 'payment_gateways', // { mellat, zarinpal, sep }
+  /**
+   * stage-88 — تخصیصِ «هر نوع فاکتور → چاپگرِ شبکه» (jsonb):
+   * { sales: uuid|null, kitchen: uuid|null } — null یعنی دیالوگِ مرورگر.
+   * چاپگرها در جدولِ printers زندگی می‌کنند؛ حذفِ چاپگر تخصیصش را null می‌کند.
+   */
+  invoicePrinters: 'invoice_printers', // { sales, kitchen }
   /** مختصات مبدأ ارسال */
   restaurantLocation: 'restaurant_location', // { lat, lng }
   // round-11: کلید packagingFee حذف شد — stage-10 هزینهٔ بسته‌بندی

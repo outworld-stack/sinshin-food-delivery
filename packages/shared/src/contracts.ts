@@ -1027,6 +1027,34 @@ export interface SubAdminPermissionsDto {
  *  یک تایپ هم شکلِ درخواست و هم پاسخ بود و مصرف‌کننده مجبور به دفاع ?? false بود. */
 export type SubAdminPermissionsPatch = Partial<SubAdminPermissionsDto>
 
+// ═══════════ stage-88 — پل چاپِ سرور (چاپگرهای شبکهٔ ESC/POS روی 9100) ═══════════
+
+/** یک چاپگرِ ثبت‌شدهٔ شبکه — وضعیت = آخرین probeِ سرور (زنده در پاسخِ لیست) */
+export interface PrinterDto {
+  id: string
+  name: string
+  host: string
+  port: number
+  /** عرضِ سرِ چاپ در dot — ۵۷۶ (کاغذ ۸۰mm) یا ۳۸۴ (۵۸mm) */
+  widthDots: number
+  autoCut: boolean
+  status: 'online' | 'offline' | 'unknown'
+  statusDetail: string | null
+  lastStatusAt: string | null
+}
+
+/** تخصیصِ هر نوع فاکتور به چاپگر — null یعنی دیالوگِ مرورگر (پشتیبان) */
+export interface InvoicePrinterAssignmentDto {
+  sales: string | null
+  kitchen: string | null
+}
+
+/** نتیجهٔ اسکنِ زیرشبکه — میزبان‌هایی که پورتِ چاپ دارند */
+export interface PrinterDiscoveryDto {
+  host: string
+  port: number
+}
+
 export interface SubAdminRecordDto {
   userId: UserId
   phone: string

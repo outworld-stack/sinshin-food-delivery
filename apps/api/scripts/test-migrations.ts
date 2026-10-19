@@ -73,6 +73,8 @@ const CHAIN_HAS_0009 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0009')
 const CHAIN_HAS_0013 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0013'))
 /** stage-86 — همان الگو برای ۰۰۱۴ (امکان خریدِ دسته‌بندی‌ها) */
 const CHAIN_HAS_0014 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0014'))
+/** stage-88 — همان الگو برای ۰۰۱۵ (رجیستری چاپگرهای شبکه) */
+const CHAIN_HAS_0015 = DISK_JOURNAL.entries.some((e) => e.tag.startsWith('0015'))
 
 const scratches: string[] = []
 let pass = 0
@@ -232,6 +234,8 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     -- stage-86 — اشیاءِ ۰۰۱۴: امکان خریدِ دسته‌بندی‌ها (والد + زیردسته)
     alter table "main_categories" drop column if exists "purchase_enabled";
     alter table "categories" drop column if exists "purchase_enabled";
+    -- stage-88 — اشیاءِ ۰۰۱۵: رجیستری چاپگرهای شبکه (پل چاپ سرور)
+    drop table if exists "printers";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
@@ -410,6 +414,40 @@ await withScratch('a', async (url) => {
     Number(purchaseDefault) < 2 && !CHAIN_HAS_0014
       ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۴ ندارد — اول: bun run db:generate'
       : `count=${purchaseDefault}`,
+  )
+  // A2 — stage-88: اشیاءِ ۰۰۱۵ (جدولِ printers + ایندکسِ یکتای host,port)
+  const printersTable = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.tables where table_name='printers'`,
+  )
+  ok(
+    'A2: جدول printers رجیستری چاپگرها (۰۰۱۵ stage-88) ساخته شد',
+    printersTable === 1,
+    printersTable === 0 && !CHAIN_HAS_0015
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۵ ندارد — اول: bun run db:generate'
+      : `count=${printersTable}`,
+  )
+  const printersWidthDefault = await scalar(
+    url,
+    `select count(*)::int as n from information_schema.columns where table_name='printers' and column_name='width_dots' and column_default = '576'`,
+  )
+  ok(
+    'A2: پیش‌فرضِ width_dots = 576 (کاغذ ۸۰mm — رفتارِ POS)',
+    printersWidthDefault === 1,
+    printersWidthDefault === 0 && !CHAIN_HAS_0015
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۵ ندارد'
+      : `count=${printersWidthDefault}`,
+  )
+  const printersUnique = await scalar(
+    url,
+    `select count(*)::int as n from pg_indexes where indexname='printers_host_port_key'`,
+  )
+  ok(
+    'A2: ایندکسِ یکتای (host,port) چاپگرها ساخته شد',
+    printersUnique === 1,
+    printersUnique === 0 && !CHAIN_HAS_0015
+      ? 'زنجیره‌ی روی دیسک هنوز ۰۰۱۵ ندارد'
+      : `count=${printersUnique}`,
   )
 
   // A3 — بک‌فیل نوع/برند (ماتریس UA)

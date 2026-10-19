@@ -19,9 +19,12 @@ import type {
 	CourierListRowDto,
 	CourierOptionDto,
 	GeoStatusDto,
+	InvoicePrinterAssignmentDto,
 	LiveOrderDetailDto,
 	LiveOrdersDataDto,
 	OutsideScope,
+	PrinterDiscoveryDto,
+	PrinterDto,
 	RegistrationPermitDto,
 	RestaurantStatusDto,
 	StaffInvoice,
@@ -575,4 +578,95 @@ export async function revokeRegistrationPermit(input: {
 		input.data,
 	)
 	return { success: true }
+}
+
+// ═════════════ stage-88 — پل چاپِ سرور (چاپگرهای شبکه، بدون ابزار ثالث) ═════════════
+// تشخیص/پیکربندی/انتخاب/چاپ — همه از API؛ مرورگر فقط canvas فارسی می‌سازد.
+
+export async function getAdminPrinters(): Promise<PrinterDto[]> {
+	const res = await authJson<{ printers: PrinterDto[] }>(
+		'/admin/print/printers',
+		'GET',
+	)
+	return res.printers
+}
+
+export async function addAdminPrinter(input: {
+	name: string
+	host: string
+	port?: number
+	widthDots?: number
+	autoCut?: boolean
+}): Promise<PrinterDto> {
+	const res = await authJson<{ printer: PrinterDto }>(
+		'/admin/print/printers',
+		'POST',
+		input,
+	)
+	return res.printer
+}
+
+export async function updateAdminPrinter(
+	id: string,
+	patch: {
+		name?: string
+		host?: string
+		port?: number
+		widthDots?: number
+		autoCut?: boolean
+	},
+): Promise<PrinterDto> {
+	const res = await authJson<{ printer: PrinterDto }>(
+		`/admin/print/printers/${id}`,
+		'PATCH',
+		patch,
+	)
+	return res.printer
+}
+
+export async function removeAdminPrinter(id: string): Promise<void> {
+	await authJson<unknown>(`/admin/print/printers/${id}`, 'DELETE')
+}
+
+export async function testAdminPrinter(id: string): Promise<{ bytes: number }> {
+	return authJson<{ success: boolean; bytes: number }>(
+		`/admin/print/printers/${id}/test`,
+		'POST',
+		{},
+	)
+}
+
+export async function discoverAdminPrinters(cidr?: string): Promise<{
+	scanned: string[]
+	found: PrinterDiscoveryDto[]
+}> {
+	return authJson<{ scanned: string[]; found: PrinterDiscoveryDto[] }>(
+		'/admin/print/discover',
+		'POST',
+		cidr ? { cidr } : {},
+	)
+}
+
+export async function getAdminPrintAssignment(): Promise<InvoicePrinterAssignmentDto> {
+	return authJson<InvoicePrinterAssignmentDto>('/admin/print/assignment', 'GET')
+}
+
+export async function setAdminPrintAssignment(
+	assignment: InvoicePrinterAssignmentDto,
+): Promise<void> {
+	await authJson<unknown>('/admin/print/assignment', 'POST', assignment)
+}
+
+/** ارسالِ بیت‌مپِ 1bpp (canvasِ مرورگر) → GS v 0 روی سوکتِ چاپگر */
+export async function printReceiptBitmap(input: {
+	printerId: string
+	widthPx: number
+	heightPx: number
+	rows: string
+}): Promise<{ bytes: number }> {
+	return authJson<{ success: boolean; bytes: number }>(
+		'/admin/print/receipt',
+		'POST',
+		input,
+	)
 }

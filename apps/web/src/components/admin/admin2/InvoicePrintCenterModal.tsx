@@ -1,43 +1,57 @@
 // ═══════════════════════════════════════════════════════════════
-// stage-85 — sinshin-food-delivery
+// stage-88 — sinshin-food-delivery
 // مسیر مقصد: apps/web/src/components/admin/admin2/InvoicePrintCenterModal.tsx
-// وضعیت: جایگزینی کامل فایل stage-84
-// «مرکز چاپ فاکتور» نسخهٔ ۲:
-//  · پیش‌نمایشِ زندهٔ فاکتور داخل خود مودال — عینِ چیزی که چاپ می‌شود
-//    (همان موتور چاپ: buildPrintDocumentHtml + iframe کاغذی ۸۰mm).
-//  · پرینترِ پیش‌فرضِ هر نوع فاکتور (فروش / آشپزخانه) یک بار انتخاب و
-//    در localStorage ذخیره می‌شود؛ با QZ Tray نصب‌شده، زدنِ «چاپ» دیگر
-//    هیچ دیالوگِ انتخابِ پرینتری باز نمی‌کند (چاپ مستقیم — الگوی POS).
-//  · بدونِ QZ Tray رفتارِ stage-84 دست‌نخورده: صفِ دیالوگ‌های مرورگر.
-//  · فاکتورها هنگامِ باز شدنِ مودال پیش‌ساخته می‌شوند (شبکه + QR) تا
-//    کلیکِ چاپ آنی باشد؛ خطای چاپِ مستقیم هرگز سفارش را نمی‌کُشد — همان
-//    فاکتور با دیالوگِ مرورگر جایگزین می‌شود.
-//  · تیک‌ها (sinshin-invoice-kinds) و پرینترها (sinshin-invoice-printers)
-//    جدا ذخیره می‌شوند.
+// وضعیت: جایگزینی کامل فایل stage-85
+// «مرکز چاپ فاکتور» نسخهٔ ۳ — پلِ چاپِ سرور (بدونِ هیچ ابزارِ ثالث):
+//
+//  چرا نسخهٔ ۲ (QZ Tray) فقط «دیالوگ مرورگر» نشان می‌داد؟ صفحهٔ وب در
+//  سندباکسِ مرورگر هرگز فهرستِ چاپگرهای سیستم‌عامل را نمی‌بیند — Web
+//  Print API فقط برای Isolated Web Appهای کروم است و QZ Tray ابزارِ
+//  ثالثِ نصب‌شده روی دستگاه بود. حالا «تشخیص/پیکربندی/انتخاب» همه
+//  سمتِ سرور است (apps/api → سوکتِ TCP 9100) و بدونِ هیچ نصبِ
+//  اضافه‌ای کار می‌کند — چاپگرهای شبکهٔ رستوران را API خودش پیدا و
+//  مدیریت می‌کند.
+//
+//  · چاپگرِ هر نوع فاکتور (فروش/آشپزخانه) در سرور ذخیره می‌شود
+//    (settings invoice_printers) — تخصیص بینِ همهٔ ایستگاه‌ها مشترک است.
+//  · چاپِ مستقیم: متنِ فارسی در canvasِ همین مرورگر شکل‌گیری می‌شود
+//    (رسیدِ 1bpp) → GS v 0 روی سوکتِ 9100 — طولِ کاغذ = طولِ محتوا
+//    (کاغذِ هدرِ اضافه صفر؛ برشِ خودکار).
+//  · بدونِ چاپگرِ منتخب: همان صفِ دیالوگ‌های مرورگر (پشتیبانِ همیشگی).
+//  · خطای چاپِ مستقیم هرگز سفارش را نمی‌کُشد — همان فاکتور با دیالوگِ
+//    مرورگر جایگزین می‌شود.
+//  · پیش‌نمایشِ زنده (stage-85) دست‌نخورده — عینِ مسیرِ مرورگر.
+//  · مدیریتِ چاپگرها (افزودن/حذف/تست/اسکن) فقط برای ادمین اصلی — بخشِ
+//    تاشوی پایین (PrinterManager).
 // ═══════════════════════════════════════════════════════════════
 
+import type { InvoicePrinterAssignmentDto, PrinterDto } from '@sinshin/shared'
 // src/components/admin/admin2/InvoicePrintCenterModal.tsx
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Printer, X } from 'reicon-react'
-import {
-	connectPrintAgent,
-	getPrintAgentStatus,
-	listAgentPrinters,
-	type PrintAgentStatus,
-	subscribePrintAgentStatus,
-} from '#/lib/printAgent'
+import { PrinterManager } from '#/components/admin/admin2/PrinterManager'
 import {
 	buildPrintDocumentHtml,
 	measureReceiptHtmlHeightPx,
 	RECEIPT_PROBE_PX,
 } from '#/lib/printDocument'
-import { getStaffOrderInvoice, type StaffInvoice } from '#/server/admin'
+import {
+	getStaffOrderInvoice,
+	type StaffInvoice,
+	setAdminPrintAssignment,
+} from '#/server/admin'
+import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import {
 	buildInvoicePrintSpecs,
 	type InvoiceKind,
 	printOrderInvoices,
 } from '#/utils/invoicePrint'
+import {
+	adminPrintAssignmentOptions,
+	adminPrintersOptions,
+} from '#/utils/queryOptions'
 
 interface InvoicePrintCenterModalProps {
 	/** displayId سفارش (ord-…) */
@@ -49,7 +63,6 @@ interface InvoicePrintCenterModalProps {
 }
 
 const KIND_STORAGE_KEY = 'sinshin-invoice-kinds'
-const PRINTER_STORAGE_KEY = 'sinshin-invoice-printers'
 /** عرضِ «کاغذ» پیش‌نمایش (px) — ۸۰mm + کمی حاشیهٔ بصری */
 const PAPER_W = 302
 
@@ -67,23 +80,6 @@ function loadDefaultKinds(): { kitchen: boolean; sales: boolean } {
 		// localStorage خراب/مقدار قدیمی — پیش‌فرض
 	}
 	return { kitchen: true, sales: true }
-}
-
-/** stage-85 — پرینترِ پیش‌فرضِ هر فاکتور؛ '' یعنی دیالوگِ مرورگر */
-function loadDefaultPrinters(): { sales: string; kitchen: string } {
-	try {
-		const raw = localStorage.getItem(PRINTER_STORAGE_KEY)
-		if (raw) {
-			const parsed = JSON.parse(raw) as { sales?: unknown; kitchen?: unknown }
-			return {
-				sales: typeof parsed.sales === 'string' ? parsed.sales : '',
-				kitchen: typeof parsed.kitchen === 'string' ? parsed.kitchen : '',
-			}
-		}
-	} catch {
-		// مقدار قدیمی/خراب — دیالوگ مرورگر
-	}
-	return { sales: '', kitchen: '' }
 }
 
 /** پیش‌نمایش کاغذی ۸۰mm — همان HTML چاپی داخل iframe؛ ارتفاع بعد از
@@ -151,19 +147,20 @@ function ReceiptPreviewPane({ html }: { html: string | null }) {
 	)
 }
 
-/** سلکتِ پرینترِ یک نوع فاکتور — گزینهٔ اول = دیالوگِ مرورگر */
+/** سلکتِ چاپگرِ یک نوع فاکتور — گزینهٔ اول = دیالوگِ مرورگر؛ بقیه =
+ *  چاپگرهای شبکهٔ ثبت‌شده روی سرور (وضعیتِ زنده در متنِ گزینه) */
 function PrinterSelect({
 	id,
 	label,
 	value,
-	options,
+	printers,
 	disabled,
 	onChange,
 }: {
 	id: string
 	label: string
 	value: string
-	options: string[]
+	printers: PrinterDto[]
 	disabled: boolean
 	onChange: (next: string) => void
 }) {
@@ -183,14 +180,16 @@ function PrinterSelect({
 				className="flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed truncate"
 			>
 				<option value="">دیالوگ مرورگر (پیش‌فرض)</option>
-				{value && !options.includes(value) && (
+				{value && !printers.some((p) => p.id === value) && (
 					<option value={value} disabled>
-						{value} — در دسترس نیست
+						چاپگرِ حذف‌شده — دوباره انتخاب کنید
 					</option>
 				)}
-				{options.map((name) => (
-					<option key={name} value={name}>
-						{name}
+				{printers.map((p) => (
+					<option key={p.id} value={p.id}>
+						{p.status === 'online' ? '●' : p.status === 'offline' ? '○' : '◌'}{' '}
+						{p.name} — {p.host}
+						{p.statusDetail ? ` (${p.statusDetail})` : ''}
 					</option>
 				))}
 			</select>
@@ -204,47 +203,57 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	onClose,
 }: InvoicePrintCenterModalProps) {
 	const showToast = useToastStore((s) => s.showToast)
+	const queryClient = useQueryClient()
+	const role = useAuthStore((s) => s.role)
+	const isMainAdmin = role === 'admin'
 	const [kinds, setKinds] = useState(loadDefaultKinds)
 	const [printing, setPrinting] = useState(false)
 	const printingRef = useRef(false)
 	// ترمیم اسکنِ استیج-۸۴ — فاکتور هنگامِ «باز شدنِ» مودال پیش‌واکشی می‌شود:
 	// کلیکِ چاپ دیگر منتظرِ شبکه نمی‌ماند و چاپِ مجدد آنی است
 	const [invoice, setInvoice] = useState<StaffInvoice | null>(null)
-	// stage-85 — پیش‌نمایش + پرینترهای مستقیم
+	// stage-85 — پیش‌نمایش زنده
 	const [previewHtmls, setPreviewHtmls] = useState<
 		Partial<Record<InvoiceKind, string>>
 	>({})
 	const [previewKind, setPreviewKind] = useState<InvoiceKind>('sales')
-	const [agentPrinters, setAgentPrinters] = useState<string[]>([])
-	const [printers, setPrinters] = useState(loadDefaultPrinters)
-	const [agentStatus, setAgentStatus] = useState<PrintAgentStatus>(
-		getPrintAgentStatus(),
-	)
-	// وضعیتِ زندهٔ سرویس چاپ مستقیم (QZ Tray)
-	useEffect(() => subscribePrintAgentStatus(setAgentStatus), [])
 
-	// اتصال به سرویس چاپ مستقیم — یک بار در هر باز شدن؛ دکمهٔ «تلاش
-	// مجدد» همین را صدا می‌زند (بدونِ ری‌رانِ کلِ افکت‌ها)
-	const reconnectAgent = useCallback(async () => {
-		setAgentPrinters([])
-		let ok = false
-		try {
-			ok = await connectPrintAgent()
-		} catch {
-			ok = false
-		}
-		if (!ok) return
-		try {
-			setAgentPrinters(await listAgentPrinters())
-		} catch {
-			// فهرست پرینترها نیامد — سلکت‌ها روی دیالوگ می‌مانند
-		}
-	}, [])
-
+	// ══ stage-88 — چاپگرهای شبکه + تخصیصِ هر فاکتور (سرور منبعِ حقیقت) ══
+	const { data: printers = [], isLoading: printersLoading } =
+		useQuery(adminPrintersOptions)
+	const { data: serverAssignment } = useQuery(adminPrintAssignmentOptions)
+	// نسخهٔ محلی برایِ پاسخِ فوریِ سلکت؛ بعد از موفقیتِ سرور هم‌گام می‌ماند
+	const [assignment, setAssignment] = useState<InvoicePrinterAssignmentDto>({
+		sales: null,
+		kitchen: null,
+	})
 	useEffect(() => {
-		void reconnectAgent()
-	}, [reconnectAgent])
+		if (serverAssignment) setAssignment(serverAssignment)
+	}, [serverAssignment])
 
+	const invalidatePrintQueries = useCallback(
+		async () =>
+			Promise.all([
+				queryClient.invalidateQueries({ queryKey: ['admin-printers'] }),
+				queryClient.invalidateQueries({ queryKey: ['admin-print-assignment'] }),
+			]).then(() => undefined),
+		[queryClient],
+	)
+
+	const assignMutation = useMutation({
+		mutationFn: (next: InvoicePrinterAssignmentDto) =>
+			setAdminPrintAssignment(next),
+		onSuccess: async () => {
+			await invalidatePrintQueries()
+		},
+		onError: (err: Error) => {
+			showToast(err.message || 'ذخیرهٔ انتخاب چاپگر ناموفق بود', 'error')
+			// بازگشت به حقیقتِ سرور
+			if (serverAssignment) setAssignment(serverAssignment)
+		},
+	})
+
+	// فاکتور سفارش — پیش‌واکشی
 	useEffect(() => {
 		let cancelled = false
 		setInvoice(null)
@@ -302,17 +311,17 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 		[],
 	)
 
-	const setPrinter = useCallback((kind: 'kitchen' | 'sales', name: string) => {
-		setPrinters((prev) => {
-			const next = { ...prev, [kind]: name }
-			try {
-				localStorage.setItem(PRINTER_STORAGE_KEY, JSON.stringify(next))
-			} catch {
-				// ذخیرهٔ انتخاب اختیاری است
+	const setPrinter = useCallback(
+		(kind: 'kitchen' | 'sales', printerId: string) => {
+			const next: InvoicePrinterAssignmentDto = {
+				...assignment,
+				[kind]: printerId || null,
 			}
-			return next
-		})
-	}, [])
+			setAssignment(next)
+			assignMutation.mutate(next)
+		},
+		[assignMutation, assignment],
+	)
 
 	const handlePrint = useCallback(async () => {
 		if (printingRef.current) return
@@ -330,22 +339,26 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 		try {
 			const inv = invoice ?? (await getStaffOrderInvoice(orderId))
 			setInvoice(inv)
-			// پرینترهای مستقیم — فقط فاکتورهایی که هم پرینترِ منتخب دارند و هم
-			// سرویس آماده است؛ بقیه با دیالوگِ مرورگر چاپ می‌شوند
-			const agentPrintersMap: Partial<Record<InvoiceKind, string>> = {}
-			if (agentStatus === 'ready') {
-				for (const kind of selected) {
-					const name = kind === 'kitchen' ? printers.kitchen : printers.sales
-					if (name && agentPrinters.includes(name))
-						agentPrintersMap[kind] = name
+			// چاپگرهای مستقیم — فقط فاکتورهایی که چاپگرِ منتخبِ زنده دارند؛
+			// بقیه با دیالوگِ مرورگر چاپ می‌شوند (خطای مسیرِ مستقیم هم
+			// همان‌جا فرود می‌آید)
+			const directTargets: Partial<
+				Record<InvoiceKind, { printerId: string; widthDots: number }>
+			> = {}
+			for (const kind of selected) {
+				const id = assignment[kind]
+				const printer = printers.find((p) => p.id === id)
+				if (id && printer) {
+					directTargets[kind] = {
+						printerId: printer.id,
+						widthDots: printer.widthDots,
+					}
 				}
 			}
 			const result = await printOrderInvoices(
 				inv,
 				selected,
-				Object.keys(agentPrintersMap).length > 0
-					? { agentPrinters: agentPrintersMap }
-					: undefined,
+				Object.keys(directTargets).length > 0 ? { directTargets } : undefined,
 			)
 			if (result.agentErrors.length > 0) {
 				showToast(
@@ -353,7 +366,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 					'error',
 				)
 			} else if (result.dialogs === 0 && result.direct > 0) {
-				showToast('فاکتورها مستقیم به پرینتر ارسال شد')
+				showToast('فاکتورها مستقیم به چاپگر شبکه ارسال شد')
 			} else {
 				showToast('چاپ فاکتور ارسال شد')
 			}
@@ -368,16 +381,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 			printingRef.current = false
 			setPrinting(false)
 		}
-	}, [
-		agentPrinters,
-		agentStatus,
-		invoice,
-		kinds,
-		orderId,
-		printers,
-		saveKinds,
-		showToast,
-	])
+	}, [assignment, invoice, kinds, orderId, printers, saveKinds, showToast])
 
 	const toggle = (key: 'kitchen' | 'sales') =>
 		setKinds((prev) => {
@@ -385,8 +389,6 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 			saveKinds(next)
 			return next
 		})
-
-	const agentReady = agentStatus === 'ready'
 
 	return (
 		<div className="fixed inset-0 z-100 flex items-center justify-center p-3 sm:p-4">
@@ -418,38 +420,24 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 				</div>
 
 				<div className="px-5 pb-3 shrink-0">
-					{/* وضعیت سرویس چاپ مستقیم (stage-85) */}
-					{agentReady ? (
+					{printersLoading ? (
+						<div className="text-[11px] text-gray-400 font-DanaMedium">
+							در حال دریافت چاپگرهای شبکه از سرور…
+						</div>
+					) : printers.length > 0 ? (
 						<div
 							aria-live="polite"
 							className="flex items-center gap-2 text-[11px] text-green-600 dark:text-green-400 font-DanaMedium"
 						>
 							<span className="w-2 h-2 rounded-full bg-green-500 dark:bg-green-400 shrink-0" />
-							چاپ مستقیم فعال — درخواست‌ها را در QZ Tray تأیید کنید
-						</div>
-					) : agentStatus === 'connecting' ? (
-						<div className="text-[11px] text-gray-400 font-DanaMedium">
-							در حال جستجوی سرویس چاپ مستقیم…
+							چاپ مستقیم فعال — {printers.length} چاپگرِ شبکه روی سرور
 						</div>
 					) : (
-						<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium">
-							<span>چاپ مستقیم با تأیید QZ Tray: نرم‌افزار را از</span>
-							<a
-								href="https://qz.io"
-								target="_blank"
-								rel="noreferrer"
-								className="underline underline-offset-2"
-							>
-								qz.io
-							</a>
-							<span>روی همین دستگاه نصب کنید</span>
-							<button
-								type="button"
-								onClick={() => void reconnectAgent()}
-								className="rounded-md border border-amber-400/50 dark:border-amber-500/40 px-2 py-0.5 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
-							>
-								تلاش مجدد
-							</button>
+						<div className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
+							چاپگری روی سرور ثبت نشده — فعلاً چاپ با دیالوگ مرورگر است.{' '}
+							{isMainAdmin
+								? 'از بخشِ «مدیریت چاپگرهای شبکه» پایین، چاپگرِ شبکهٔ رستوران را ثبت کنید (IP + پورت 9100).'
+								: 'از مدیرِ اصلی بخواهید چاپگرِ شبکه را ثبت کند.'}
 						</div>
 					)}
 					{deliveryType === 'DELIVERY' && (
@@ -459,7 +447,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 					)}
 				</div>
 
-				{/* انتخاب فاکتورها + پرینترِ پیش‌فرضِ هر کدام */}
+				{/* انتخاب فاکتورها + چاپگرِ هر کدام (تخصیصِ سروری) */}
 				<div className="px-5 space-y-2 shrink-0">
 					<div
 						className={`rounded-xl border transition p-3 space-y-2 ${
@@ -491,11 +479,11 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 						</label>
 						<PrinterSelect
 							id="inv-printer-sales"
-							label="پرینتر پیش‌فرض:"
-							value={printers.sales}
-							options={agentPrinters}
-							disabled={!agentReady || printing}
-							onChange={(name) => setPrinter('sales', name)}
+							label="چاپگر:"
+							value={assignment.sales ?? ''}
+							printers={printers}
+							disabled={printing || assignMutation.isPending}
+							onChange={(id) => setPrinter('sales', id)}
 						/>
 					</div>
 
@@ -529,16 +517,16 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 						</label>
 						<PrinterSelect
 							id="inv-printer-kitchen"
-							label="پرینتر پیش‌فرض:"
-							value={printers.kitchen}
-							options={agentPrinters}
-							disabled={!agentReady || printing}
-							onChange={(name) => setPrinter('kitchen', name)}
+							label="چاپگر:"
+							value={assignment.kitchen ?? ''}
+							printers={printers}
+							disabled={printing || assignMutation.isPending}
+							onChange={(id) => setPrinter('kitchen', id)}
 						/>
 					</div>
 				</div>
 
-				{/* پیش‌نمایش — عینِ خروجی چاپ (stage-85) */}
+				{/* پیش‌نمایش — عینِ خروجی چاپ مسیرِ مرورگر (stage-85) */}
 				<div className="px-5 pt-3 pb-1 shrink-0">
 					<div className="flex items-center justify-between mb-1.5 gap-2">
 						<span className="text-xs font-DanaDemiBold text-gray-500 dark:text-gray-400 shrink-0">
@@ -572,11 +560,21 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 						</div>
 					</div>
 				</div>
-				<div className="px-5 pb-4 min-h-0 overflow-y-auto">
+				<div className="px-5 pb-3 min-h-0 overflow-y-auto">
 					<div className="rounded-xl bg-gray-50 dark:bg-[#160a0d] border border-gray-100 dark:border-[#3a151c] p-2">
 						<ReceiptPreviewPane html={previewHtmls[previewKind] ?? null} />
 					</div>
 				</div>
+
+				{/* مدیریت چاپگرها — فقط ادمین اصلی */}
+				{isMainAdmin && (
+					<div className="px-5 pb-3 shrink-0">
+						<PrinterManager
+							printers={printers}
+							onChanged={invalidatePrintQueries}
+						/>
+					</div>
+				)}
 
 				<div className="flex items-center gap-3 p-4 pt-0 shrink-0">
 					<button

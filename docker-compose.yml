@@ -71,6 +71,13 @@ x-api-service: &api-service
     # فاز-۲/M15 — راز مشترک api ↔ مترجم (هدر x-translator-token)
     TRANSLATOR_TOKEN: ${TRANSLATOR_TOKEN:-}
 
+    # stage-88 — پل چاپ سرور: بازه‌های پیش‌فرضِ «اسکنِ چاپگر» (جداشده با
+    # کاما؛ خالی = زیرشبکه‌های کارت‌های خودِ سرور که در docker bridge
+    # شبکه‌ی داکر است). برای رستوران: PRINT_SCAN_CIDRS=192.168.1.0/24
+    # چاپ/ارسال به هر IPِ LAN مستقل از این متغیر کار می‌کند (NAT خروجی)؛
+    # این فقط «پیدا کردنِ خودکار» را هدایت می‌کند.
+    PRINT_SCAN_CIDRS: ${PRINT_SCAN_CIDRS:-}
+
   volumes:
     - uploads_data:/data/uploads
 

@@ -26,7 +26,6 @@ import type {
 // مزیت: loader سرور و useQuery کلاینت از همین تعریف استفاده می‌کنن؛
 // staleTime/کلید/queryFn هیچ‌وقت از هم دیگه جدا نمی‌شن
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
-import { tehranDay } from './tehranDay'
 import { getAboutContent } from '#/server/about'
 import {
 	getAdmin2Options,
@@ -34,6 +33,8 @@ import {
 	getAdminCourierDetailsForRole,
 	getAdminCouriers,
 	getAdminOrders,
+	getAdminPrintAssignment,
+	getAdminPrinters,
 	getAdminStats,
 	getAdminUserDetails,
 	// ⬅ NEW: لیست‌های ادمین حالا فکتوری دارند (پیش‌نیاز loader + query)
@@ -103,6 +104,7 @@ import {
 } from '#/server/user'
 import type { DeliveryType } from '#/types/site/checkout'
 import { qk } from './queryKeys'
+import { tehranDay } from './tehranDay'
 
 // رارد ۴۶ — MainData/AdminOrdersData از قرارداد مشترک می‌آیند؛
 // کپی‌های محلی این فایل و OrderRowِ types/admin/orders حذف شدند (شکل‌ها بدون تغییر).
@@ -781,3 +783,18 @@ export const adminCourierDetailsOptions = (
 				data: { id: courierId, adminId: admin2Id },
 			}),
 	})
+
+// --- stage-88 — پل چاپِ سرور: چاپگرهای شبکه + تخصیصِ فاکتورها ---
+// staleTime کوتاه (پروبِ زنده در هر باز شدنِ مودال تازه می‌شود)؛ تخصیص
+// به‌محضِ تغییر سروری invalidate می‌شود (mutation در خود مودال)
+export const adminPrintersOptions = queryOptions({
+	queryKey: qk.adminPrinters,
+	queryFn: () => getAdminPrinters(),
+	staleTime: 15_000,
+})
+
+export const adminPrintAssignmentOptions = queryOptions({
+	queryKey: qk.adminPrintAssignment,
+	queryFn: () => getAdminPrintAssignment(),
+	staleTime: 60_000,
+})
