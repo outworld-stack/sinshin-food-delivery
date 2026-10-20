@@ -645,6 +645,7 @@ export async function discoverAdminPrinters(cidr?: string): Promise<{
 		'/admin/print/discover',
 		'POST',
 		cidr ? { cidr } : {},
+		{ timeoutMs: 90_000 },
 	)
 }
 

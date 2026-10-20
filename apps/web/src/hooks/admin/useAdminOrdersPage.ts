@@ -17,6 +17,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { z } from 'zod'
 import { useAuthStore } from '#/stores/authStore'
+import { usePermissions } from '#/hooks/admin/usePermissions'
 import {
 	admin2FilterOptions,
 	adminOrdersOptions,
@@ -184,11 +185,12 @@ export function useAdminOrdersPage() {
 	const role = useAuthStore((s) => s.role)
 	const admin2Id = useAuthStore((s) => s.admin2Id)
 	const isMainAdmin = role === 'admin'
+	const { permissions, isChecking } = usePermissions()
 
 	// کوئری سفارشات — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
 	// نقش هم داخل کلیده — کش ادمین اصلی و ادمین۲ جدا (دیتایشون فرق داره)
-	const { data, isLoading } = useQuery(
-		adminOrdersOptions({
+	const { data, isLoading, isError, refetch } = useQuery({
+		...adminOrdersOptions({
 			page: search.page,
 			limit: search.limit,
 			search: search.search,
@@ -201,7 +203,8 @@ export function useAdminOrdersPage() {
 			admin2Id,
 			todayDay,
 		}),
-	)
+		enabled: permissions.orderDetailsRead,
+	})
 
 	// گزینه‌های فیلتر — فقط ادمین اصلی (فکتوری: کلید + staleTime یکجا)
 	const { data: admin2Options } = useQuery({
@@ -302,6 +305,7 @@ export function useAdminOrdersPage() {
 	)
 
 	return {
+		permissions, isChecking, isError, refetch,
 		// ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
 		// page/limit دیگر از کاهنده نیستند؛ از URL می‌آیند (تایپ‌دار)
 		state: { ...state, page: search.page, limit: search.limit },

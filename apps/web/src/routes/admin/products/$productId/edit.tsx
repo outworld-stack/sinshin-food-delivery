@@ -10,6 +10,7 @@ import { useToastStore } from '#/stores/toastStore'
 import type { ProductFormData } from '#/types/forms'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { PermissionGate } from '#/components/shared/PermissionGate'
+import { RouteNotFound } from '#/components/shared/RouteFallbacks'
 
 export const Route = createFileRoute('/admin/products/$productId/edit')({
         component: EditProductPage,
@@ -20,11 +21,12 @@ function EditProductPage() {
         const navigate = useNavigate()
         const queryClient = useQueryClient()
         const showToast = useToastStore((state) => state.showToast)
-        const { permissions, isMainAdmin } = usePermissions()
+        const { permissions, isMainAdmin, isChecking } = usePermissions()
 
-        const { data: product, isLoading } = useQuery(
-                adminProductDetailsOptions(productId),
-        )
+        const { data: product, isLoading, isError, refetch } = useQuery({
+                ...adminProductDetailsOptions(productId),
+                enabled: permissions.productsWrite,
+        })
 
         // ورودی کاملاً تایپ‌دار (قبلاً data: any بود) —
         // stage-60 — categoryIds حالا در PATCH هم می‌رود (دسته دیگر immutable نیست)
@@ -55,13 +57,16 @@ function EditProductPage() {
         })
 
         // گارد — فقط productsWrite اجازه ویرایش دارد
+        if (isChecking || isLoading) return <AdminProductFormSkeleton />
         if (!permissions.productsWrite) {
                 return <PermissionGate hasAccess={false} pageName="ویرایش محصول" />
         }
 
-        if (isLoading || !product) {
-                return <AdminProductFormSkeleton />
-        }
+        if (isError && !product) return <div role="alert" className="space-y-3 text-center py-12">
+                <p>دریافت محصول ناموفق بود.</p>
+                <button type="button" onClick={() => void refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+        </div>
+        if (!product) return <RouteNotFound />
 
         return (
                 <div className="space-y-6">

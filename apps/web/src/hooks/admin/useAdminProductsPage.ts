@@ -68,14 +68,14 @@ export function useAdminProductsPage() {
   }, [])
 
   // کتگوری‌ها — فکتوری مشترک با فرم محصول/کوپن (staleTime ۶۰s یکجا)
-  const { data: catData } = useQuery(adminCategoriesOptions)
+  const { data: catData } = useQuery({ ...adminCategoriesOptions, enabled: permissions.productsRead })
 
   // کوئری محصولات — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
   // placeholderData داخل فکتوری: تایپ/تعویض صفحه بدون فلیک اسکلتون
-  const { data, isLoading } = useQuery(adminProductsOptions({
+  const { data, isLoading, isError, refetch } = useQuery({ ...adminProductsOptions({
     page: search.page, limit: search.limit,
     search: search.search, status: search.status, categoryId: search.categoryId,
-  }))
+  }), enabled: permissions.productsRead })
 
   // فعال/غیرفعال کردن — ⬅ NEW: آپدیت اپتیمیستیک با بازگردانی
   // قبلاً: کلیک → انتظار سرور → نامعتبرسازی → رفرش.
@@ -173,8 +173,8 @@ export function useAdminProductsPage() {
   }, [])
 
   const handleConfirmToggle = useCallback(() => {
-    if (confirmToggle) toggleMutation.mutate(confirmToggle.id)
-  }, [confirmToggle, toggleMutation])
+    if (permissions.productsWrite && confirmToggle && !toggleMutation.isPending) toggleMutation.mutate(confirmToggle.id)
+  }, [permissions.productsWrite, confirmToggle, toggleMutation])
 
   const handleCancelToggle = useCallback(() => setConfirmToggle(null), [])
 
@@ -190,7 +190,7 @@ export function useAdminProductsPage() {
       limit: search.limit,
       confirmToggle,
     },
-    data, isLoading, permissions, isChecking,
+    data, isLoading, isError, refetch, permissions, isChecking,
     products, total, totalPages, categories,
     handleSearch, handleStatus, handleCategory,
     handlePage, handleLimit,

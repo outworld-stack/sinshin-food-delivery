@@ -13,6 +13,7 @@ import { useToastStore } from '#/stores/toastStore'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { adminUserDetailsOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
+import { hasAdminPermission } from '#/utils/adminAccess'
 import { PermissionGate, Can } from '#/components/shared/PermissionGate'
 import { Mobile, Monitor } from 'reicon-react'
 import { ChartPanel } from '#/components/shared/ChartPanel'
@@ -32,6 +33,7 @@ export const Route = createFileRoute('/admin/users/$userId/')({
   // ناوبری به صفحه جزئیات بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context, params }) => {
+    if (!await hasAdminPermission(context.queryClient, 'usersRead')) return
     await context.queryClient.query(adminUserDetailsOptions(params.userId))
   },
 
@@ -69,7 +71,7 @@ function AdminUserDetailPage() {
   // ⬅ NEW: اشتراک در کش مشترک با loader (فکتوری مرکزی).
   // حالا نامعتبرسازی زیر، واقعاً این useQuery را ریفچ می‌کند —
   // بعد از ترمینیت دستگاه، لیست همان لحظه به‌روز می‌شود
-  const { data: user } = useQuery(adminUserDetailsOptions(userId))
+  const { data: user, isLoading, isError, refetch } = useQuery({ ...adminUserDetailsOptions(userId), enabled: permissions.usersRead })
 
   const terminateMutation = useMutation({
     mutationFn: (deviceId: string) => terminateDevice({ data: { userId, deviceId } }),
@@ -81,12 +83,16 @@ function AdminUserDetailPage() {
   })
 
   // گارد صفحه — usersRead
-  if (isChecking) {
+  if (isChecking || isLoading) {
     return <AdminUserDetailSkeleton />
   }
   if (!permissions.usersRead) {
     return <PermissionGate hasAccess={false} pageName="جزئیات کاربر" />
   }
+  if (isError && !user) return <div role="alert" className="space-y-3 text-center py-12">
+    <p>دریافت اطلاعات کاربر ناموفق بود.</p>
+    <button type="button" onClick={() => void refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+  </div>
 
   if (!user) {
     return <RouteNotFound />
@@ -164,7 +170,9 @@ function AdminUserDetailPage() {
                 {dev.isCurrent && (
                   <span className="text-xs text-green-500 font-DanaDemiBold px-3 py-1 rounded-full bg-green-100 dark:bg-green-500/10">فعلی</span>
                 )}
-                <button onClick={() => terminateMutation.mutate(dev.id)} className="text-xs text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition cursor-pointer font-DanaMedium">ترمینیت</button>
+                <Can allowed={permissions.usersWrite}>
+                  <button type="button" disabled={terminateMutation.isPending} onClick={() => terminateMutation.mutate(dev.id)} className="text-xs text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition cursor-pointer font-DanaMedium disabled:opacity-50">ترمینیت</button>
+                </Can>
               </div>
             </div>
           ))}
@@ -179,7 +187,7 @@ function AdminUserDetailPage() {
         <OrdersBox orders={user.orders} addresses={user.addresses} />
         <ReferralsBox referrals={user.referrals} />
       </div>
-      <AddressesBox addresses={user.addresses} userId={userId} />
+      <AddressesBox addresses={user.addresses} userId={userId} canDelete={permissions.usersWrite} />
 
       <LogsBox logs={user.logs} />
     </div>

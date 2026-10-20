@@ -112,6 +112,7 @@ export class Admin2Service {
         string,
         { at: number; p: typeof admin2Profiles.$inferSelect | null }
     >()
+    private profileCacheVersion = 0
 
     constructor(
         private readonly deps: { db: Db; config: AppConfig; settings: SettingsService; hub: SseHub },
@@ -200,6 +201,7 @@ export class Admin2Service {
     async scopeOf(userId: string): Promise<Admin2Scope | null> {
         const p = await this.cachedProfile(userId)
         if (!p) return null
+        if (!p.isActive) throw Err.forbidden('دسترسی این ادمین غیرفعال است.')
         return { hall: p.scopeHall, takeaway: p.scopeTakeaway }
     }
 
@@ -322,71 +324,62 @@ export class Admin2Service {
         scopeHall: boolean
         scopeTakeaway: boolean
     }): Promise<{ success: boolean; message?: string; userId?: string }> {
-        const { db } = this.deps
-        const existing = await db.query.users.findFirst({ where: eq(users.phone, input.phone) })
-        if (existing) {
-            if (existing.role === 'admin2') {
-                return { success: false, message: 'این شماره قبلاً ادمین سطح ۲ است' }
+        const firstName = input.firstName.trim()
+        const lastName = input.lastName.trim()
+        if (!firstName || !lastName) throw Err.validation('نام و نام خانوادگی الزامی است.')
+        if (this.deps.config.isSuperAdmin(input.phone)) {
+            return { success: false, message: 'ادمین اصلی قابل تبدیل به ادمین سطح ۲ نیست' }
+        }
+        const result = await this.deps.db.transaction(async (db) => {
+            // Match the phone lock used by OTP registration and serialize promotions.
+            await db.execute(sql`select pg_advisory_xact_lock(hashtext(${input.phone}))`)
+            const [existing] = await db.select().from(users).where(eq(users.phone, input.phone)).for('update')
+            if (existing && existing.role !== 'user') {
+                return {
+                    success: false,
+                    message: existing.role === 'admin2'
+                        ? 'این شماره قبلاً ادمین سطح ۲ است'
+                        : existing.role === 'admin'
+                            ? 'ادمین اصلی قابل تبدیل به ادمین سطح ۲ نیست'
+                            : 'فقط حساب کاربر عادی قابل تبدیل به ادمین سطح ۲ است',
+                }
             }
-            // phase-1: ادمین اصلی هرگز demote نمی‌شود
-            if (existing.role === 'admin') {
-                return { success: false, message: 'ادمین اصلی قابل تبدیل به ادمین سطح ۲ نیست' }
+
+            let userId = existing?.id
+            if (existing) {
+                await db.update(users).set({ role: 'admin2', updatedAt: new Date() }).where(eq(users.id, existing.id))
+            } else {
+                const [created] = await db.insert(users).values({
+                    phone: input.phone,
+                    role: 'admin2',
+                    termsAcceptedAt: new Date(),
+                    termsVersion: '1',
+                }).returning({ id: users.id })
+                if (!created) throw Err.internal('ذخیره‌سازی ناموفق بود')
+                userId = created.id
             }
-            // ارتقا: user عادی → admin2 + پروفایل
-            await db.update(users).set({ role: 'admin2' }).where(eq(users.id, existing.id))
+            if (!userId) throw Err.internal('ذخیره‌سازی ناموفق بود')
+
+            const profile = {
+                firstName,
+                lastName,
+                isActive: true,
+                scopeHall: input.scopeHall,
+                scopeTakeaway: input.scopeTakeaway,
+                ...DEFAULT_ADMIN2_PERMISSIONS,
+            }
             await db
                 .insert(admin2Profiles)
-                .values({
-                    userId: asUserId(existing.id),
-                    firstName: input.firstName,
-                    lastName: input.lastName,
-                    scopeHall: input.scopeHall,
-                    scopeTakeaway: input.scopeTakeaway,
-                    // stage-48 — دسترسی‌های پیش‌فرض (به‌جز ویرایش کاربران/ارسال نوتیف)
-                    ...DEFAULT_ADMIN2_PERMISSIONS,
-                } as typeof admin2Profiles.$inferInsert)
+                .values({ userId: asUserId(userId), ...profile })
                 .onConflictDoUpdate({
                     target: admin2Profiles.userId,
-                    set: {
-                        firstName: input.firstName,
-                        lastName: input.lastName,
-                        scopeHall: input.scopeHall,
-                        scopeTakeaway: input.scopeTakeaway,
-                        // stage-48 — پروفایل قدیمی بدون این ستون‌ها = مقادیر false؛
-                        // ارتقای مجدد با همین فرم پیش‌فرض‌ها را می‌نویسد
-                        ...DEFAULT_ADMIN2_PERMISSIONS,
-                    },
+                    set: { ...profile, updatedAt: new Date() },
                 })
-            return { success: true, userId: existing.id }
-        }
-
-        // کاربر جدید — اولین لاگین OTP خودش را می‌سازد
-        // ولی ثبت‌نام ادمین۲ بدون terms منطقی است — مستقیم insert با نقش
-        const [created] = await db
-            .insert(users)
-            .values({
-                phone: input.phone,
-                role: 'admin2',
-                termsAcceptedAt: new Date(),
-                termsVersion: '1',
-            })
-            .returning()
-        if (!created) return { success: false, message: 'ذخیره‌سازی ناموفق بود' }
-
-        await db.insert(admin2Profiles).values({
-            userId: asUserId(created.id),
-            firstName: input.firstName,
-            lastName: input.lastName,
-            scopeHall: input.scopeHall,
-            scopeTakeaway: input.scopeTakeaway,
-            // stage-48 — دسترسی‌های پیش‌فرض (به‌جز ویرایش کاربران/ارسال نوتیف)
-            ...DEFAULT_ADMIN2_PERMISSIONS,
-        } as typeof admin2Profiles.$inferInsert)
-
-        // round-16 — پروفایل جدید ممکن است قبلاً «نبود» کش شده باشد
-        this.invalidateProfileCache()
-
-        return { success: true, userId: created.id }
+            return { success: true, userId }
+        })
+        // Both new registrations and promotions may have cached a missing profile.
+        if (result.success && result.userId) this.invalidateProfileCache(result.userId)
+        return result
     }
 
     async setPermissions(
@@ -405,22 +398,24 @@ export class Admin2Service {
         }
         if (hall !== undefined) patch.scopeHall = hall
         if (takeaway !== undefined) patch.scopeTakeaway = takeaway
-        await this.deps.db
+        const [updated] = await this.deps.db
             .update(admin2Profiles)
             .set(patch)
             .where(eq(admin2Profiles.userId, uid))
+            .returning({ userId: admin2Profiles.userId })
+        if (!updated) throw Err.notFound('ادمین سطح ۲ پیدا نشد.')
         // round-16 — کش پروفایل همان لحظه بی‌اعتبار
         this.invalidateProfileCache(adminUserId)
     }
 
     async toggleActive(adminUserId: string): Promise<void> {
         const uid = asUserId(adminUserId)
-        const p = await this.profile(adminUserId)
-        if (!p) throw Err.notFound('ادمین سطح ۲ پیدا نشد.')
-        await this.deps.db
+        const [updated] = await this.deps.db
             .update(admin2Profiles)
-            .set({ isActive: !p.isActive, updatedAt: new Date() })
+            .set({ isActive: sql`not ${admin2Profiles.isActive}`, updatedAt: new Date() })
             .where(eq(admin2Profiles.userId, uid))
+            .returning({ userId: admin2Profiles.userId })
+        if (!updated) throw Err.notFound('ادمین سطح ۲ پیدا نشد.')
         // round-16 — غیرفعال‌سازی باید بی‌تأخیر بر افزودن مجدد بنشیند
         this.invalidateProfileCache(adminUserId)
     }
@@ -444,7 +439,7 @@ export class Admin2Service {
         reasonAr?: string | null,
     ): Promise<void> {
         const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
-        if (actorRole === 'admin2' && !(p?.canToggleTemporaryClose)) {
+        if (actorRole !== 'admin' && (actorRole !== 'admin2' || !p?.isActive || !p.canToggleTemporaryClose)) {
             throw Err.forbidden('اجازه‌ی اعلام وضعیت موقت را ندارید.')
         }
         await this.deps.settings.set(SETTING_KEYS.temporarilyClosed, closed)
@@ -473,6 +468,7 @@ export class Admin2Service {
                         }
                     : {},
             )
+            await this.touchActivity(actorUserId)
         }
     }
 
@@ -488,12 +484,13 @@ export class Admin2Service {
         busy: boolean,
     ): Promise<void> {
         const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
-        if (actorRole === 'admin2' && !(p?.canAnnounceBusy)) {
+        if (actorRole !== 'admin' && (actorRole !== 'admin2' || !p?.isActive || !p.canAnnounceBusy)) {
             throw Err.forbidden('اجازه‌ی اعلام وضعیت شلوغی را ندارید.')
         }
         await this.deps.settings.setBusy(busy)
         if (actorRole === 'admin2') {
             await this.log(actorUserId, busy ? 'BUSY_ON' : 'BUSY_OFF', null, {})
+            await this.touchActivity(actorUserId)
         }
     }
 
@@ -511,7 +508,10 @@ export class Admin2Service {
         const hit = this.profileCache.get(userId)
         if (hit && Date.now() - hit.at < PROFILE_CACHE_TTL_MS) return hit.p
         // findFirst → undefined؛ قرارداد کش null است
+        const version = this.profileCacheVersion
         const p = (await this.profile(userId)) ?? null
+        // A read started before a permission update must not repopulate the stale cache.
+        if (version !== this.profileCacheVersion) return this.cachedProfile(userId)
         this.profileCache.set(userId, { at: Date.now(), p })
         // سقف حافظه — تازه‌سازی کامل (ادمین‌های سطح ۲ معدودند)
         if (this.profileCache.size > 200) this.profileCache.clear()
@@ -519,6 +519,7 @@ export class Admin2Service {
     }
 
     private invalidateProfileCache(userId?: string): void {
+        this.profileCacheVersion += 1
         if (userId) this.profileCache.delete(userId)
         else this.profileCache.clear()
     }

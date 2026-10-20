@@ -104,12 +104,12 @@ const SettingsContent = memo(function SettingsContent() {
 	// رارد ۳۷ — سوییچ «فقط ایران» + انتخاب دامنه عراق → GeoAccessCard
 
 	const handleTrackingToggle = useCallback(() => {
-		if (tracking) trackingMutation.mutate(!tracking)
+		if (tracking !== undefined && !trackingMutation.isPending) trackingMutation.mutate(!tracking)
 	}, [tracking, trackingMutation])
 
 	const handleRestaurantToggle = useCallback(() => {
-		if (restaurant) restaurantMutation.mutate(!restaurant.isOpen)
-	}, [restaurant, restaurantMutation])
+		if (statusFull && !restaurantMutation.isPending) restaurantMutation.mutate(!statusFull.isOpen)
+	}, [statusFull, restaurantMutation])
 
 	// stage-84 — ساعت باز شدن از طریق onNextOpenTimeChange باکس وضعیت آپدیت می‌شود
 
@@ -161,7 +161,7 @@ const SettingsContent = memo(function SettingsContent() {
 						canToggleTemporaryClose={
 							permissions.canToggleTemporaryClose === true
 						}
-						hourlyOpen={restaurant?.isOpen ?? true}
+						hourlyOpen={statusFull?.isOpen ?? restaurant?.isOpen ?? false}
 						busy={statusFull?.isBusy === true}
 						temporarilyClosed={statusFull?.temporarilyClosed === true}
 						onToggleHourly={handleRestaurantToggle}

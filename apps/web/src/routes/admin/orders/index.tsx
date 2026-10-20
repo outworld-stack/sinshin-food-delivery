@@ -27,6 +27,8 @@ import { AdminOrdersPageSkeleton } from '#/components/LoadingSkeletons'
 import { Pagination } from '#/components/Pagination'
 import { BottomSheet } from '#/components/shared/BottomSheet'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { PermissionGate } from '#/components/shared/PermissionGate'
+import { hasAdminPermission } from '#/utils/adminAccess'
 import { StatusBadge } from '#/components/shared/StatusBadge'
 import {
 	adminOrdersSearchSchema,
@@ -197,9 +199,14 @@ const AdminOrdersPage = memo(function AdminOrdersPage() {
 		navigate({ search: (prev) => ({ ...prev, sortDate: 'newest', page: 1 }) })
 	}, [navigate])
 
-	if (page.isLoading) {
+	if (page.isChecking || page.isLoading) {
 		return <AdminOrdersPageSkeleton />
 	}
+	if (!page.permissions.orderDetailsRead) return <PermissionGate hasAccess={false} pageName="سفارشات" />
+	if (page.isError && !page.data) return <div role="alert" className="space-y-3 text-center py-12">
+		<p>دریافت سفارشات ناموفق بود.</p>
+		<button type="button" onClick={() => void page.refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+	</div>
 
 	return (
 		<div className="space-y-6">
@@ -365,6 +372,7 @@ export const Route = createFileRoute('/admin/orders/')({
 		await ensureAuthHydrated()
 		const { role, admin2Id } = useAuthStore.getState()
 		if (role !== 'admin' && role !== 'admin2') return
+		if (!await hasAdminPermission(context.queryClient, 'orderDetailsRead')) return
 		await context.queryClient.query(
 			adminOrdersOptions({ ...deps, role, admin2Id }),
 		)

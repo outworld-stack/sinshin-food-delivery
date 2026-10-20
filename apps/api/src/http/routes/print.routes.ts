@@ -7,10 +7,10 @@
 //  · shared (ادمین اصلی + ادمین۲ فعال): لیستِ چاپگرها + وضعیتِ زنده و
 //    «خواندنِ» تخصیص — مودالِ چاپ در هر دو نقش همین را لازم دارد.
 //  · manage (ادمین اصلی + ادمین۲ با مجوزِ اختصاصیِ printingManage —
-//    stage-89): «تغییرِ تخصیصِ سراسریِ چاپگرها» و «ارسالِ کارِ چاپ».
+//    stage-89): جستجو و ثبت چاپگر، تغییر تخصیص سراسری و ارسال کار چاپ.
 //    بازبینیِ استیج-۸۸: این دو کنشِ جهانی‌اند، نه عملیاتِ روزمرهٔ سفارش —
 //    پیش‌فرض برای ادمین۲ خاموش و فقط با مجوزِ صریحِ ادمین اصلی روشن می‌شود.
-//  · owner (فقط ادمین اصلی): افزودن/ویرایش/حذف/تست/اسکن/گزارشِ شبکه —
+//  · owner (فقط ادمین اصلی): ویرایش/حذف/تست/گزارشِ شبکه —
 //    مدیریتِ سخت‌افزار کارِ رئیس است (الگوی ناحیه‌های ارسال و درگاه‌ها).
 // ═══════════════════════════════════════════════════════════════
 
@@ -114,21 +114,6 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
       },
     )
 
-  // ══ owner — فقط ادمین اصلی: مدیریتِ سخت‌افزار + گزارشِ شبکه ══
-  const ownerOnly = new Elysia({ prefix: '/admin/print', tags: ['Admin / Print'] })
-    .use(requireAdmin(deps.sessions))
-
-    .get(
-      '/network',
-      async () => deps.print.networkReport(),
-      {
-        detail: {
-          summary: 'Network topology report — main admin only',
-          description:
-            'stage-89 (P1): honest view of the real network path — server interfaces with their true netmasks, each printer IP classified against them, deployment mode (lan/remote/empty) and Persian guidance. A VPS outside the restaurant LAN cannot reach private printer IPs; this report says so explicitly instead of failing silently.',
-        },
-      },
-    )
     .post(
       '/printers',
       async ({ body, user }) => {
@@ -157,9 +142,48 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
           autoCut: t.Optional(t.Boolean()),
         }),
         detail: {
-          summary: 'Register a network printer — main admin only',
+          summary: 'Register a network printer (printingManage permission)',
           description:
             'stage-89: host must resolve to a private LAN address (10/172.16-31/192.168) — public, link-local (cloud metadata), CGNAT and loopback targets are rejected; port must be 9100 (the only implemented transport: raw ESC/POS). Duplicate (host+port) is rejected. Get the IP from the printer self-test page or POST /admin/print/discover.',
+        },
+      },
+    )
+    .post(
+      '/discover',
+      async ({ body, user }) => {
+        const res = await deps.print.discover({ cidr: body.cidr })
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'PRINTER_DISCOVER',
+          entity: 'printer',
+          metadata: { scanned: res.scanned, found: res.found.length },
+        })
+        return res
+      },
+      {
+        body: t.Object({
+          cidr: t.Optional(t.String({ minLength: 7, maxLength: 18 })),
+        }),
+        timeout: 90_000,
+        detail: {
+          summary: 'Scan a subnet for printers (printingManage permission)',
+          description:
+            'Only port 9100 is probed (raw ESC/POS; IPP is not supported). CIDRs must be private restaurant networks; loopback requires an explicit development flag. Defaults come from PRINT_SCAN_CIDRS or up to four RFC1918 server interfaces; networks broader than /23 are narrowed to the interface address’s /24. Each range is limited to 512 hosts and all ranges together to 2048. Concurrent equivalent scans share results and all scans share a 64-socket limit. Selecting a discovered device registers it; scanning alone does not register devices or change defaults. The API must have a network route to the restaurant printers.',
+        },
+      },
+    )
+
+  // ══ owner — فقط ادمین اصلی: ویرایش/حذف/تست + گزارشِ شبکه ══
+  const ownerOnly = new Elysia({ prefix: '/admin/print', tags: ['Admin / Print'] })
+    .use(requireAdmin(deps.sessions))
+    .get(
+      '/network',
+      async () => deps.print.networkReport(),
+      {
+        detail: {
+          summary: 'Network topology report — main admin only',
+          description:
+            'Server interfaces with their true netmasks, each printer IP classified against them, deployment mode (lan/remote/empty) and Persian guidance. A VPS outside the restaurant LAN needs a network route to reach private printer IPs.',
         },
       },
     )
@@ -233,30 +257,6 @@ export const printRoutes = (deps: PrintRoutesDeps) => {
           summary: 'ASCII test page over the raw socket — main admin only',
           description:
             'Server-side test (no browser): PC437 text + density pattern + cut. stage-89: refuses explicitly when the device reports itself offline or out of paper. For a Persian test use the receipt path from the print modal (canvas raster).',
-        },
-      },
-    )
-    .post(
-      '/discover',
-      async ({ body, user }) => {
-        const res = await deps.print.discover({ cidr: body.cidr })
-        await deps.audit.log({
-          actorId: user.id,
-          action: 'PRINTER_DISCOVER',
-          entity: 'printer',
-          metadata: { scanned: res.scanned, found: res.found.length },
-        })
-        return res
-      },
-      {
-        body: t.Object({
-          cidr: t.Optional(t.String({ minLength: 7, maxLength: 18 })),
-        }),
-        timeout: 90_000,
-        detail: {
-          summary: 'Scan a subnet for printers (port 9100 only) — main admin only',
-          description:
-            'Only port 9100 is probed (raw ESC/POS; IPP is not supported). CIDRs must be private restaurant networks; loopback requires an explicit development flag. Defaults come from PRINT_SCAN_CIDRS or up to four RFC1918 server interfaces; networks broader than /23 are narrowed to the interface address’s /24. Each range is limited to 512 hosts and all ranges together to 2048. Concurrent equivalent scans share results and all scans share a 64-socket limit. The print center scans automatically and lists discoveries in both default-printer dropdowns. Selecting a discovered device registers it; scanning alone does not register devices or change defaults. The API must have a network route to the restaurant printers.',
         },
       },
     )

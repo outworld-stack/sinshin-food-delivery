@@ -7,6 +7,9 @@ import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { memo, useReducer, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { adminCourierDetailsOptions } from '#/utils/queryOptions'
+import { hasAdminPermission } from '#/utils/adminAccess'
+import { usePermissions } from '#/hooks/admin/usePermissions'
+import { PermissionGate } from '#/components/shared/PermissionGate'
 import { useAuthStore, ensureAuthHydrated } from '#/stores/authStore'
 import { ChartPanel } from '#/components/shared/ChartPanel'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
@@ -33,6 +36,7 @@ function tripReducer(state: TripState, action: TripAction): TripState {
 
 const CourierDetailPage = memo(function CourierDetailPage() {
   const { courierId } = Route.useParams()
+  const { permissions, isChecking } = usePermissions()
 
   // نقش‌محور: ادمین۲ → فقط تحویل‌های سفارشات خودش
   const role = useAuthStore((s) => s.role)
@@ -41,13 +45,20 @@ const CourierDetailPage = memo(function CourierDetailPage() {
 
   // ⬅ NEW: کش مشترک با loader — همان کلید نقش‌محور؛
   // قبلاً دو منبع جدا بودند (loaderData + کوئری کلید خام role-view)
-  const { data: viewData } = useQuery(adminCourierDetailsOptions(courierId, viewAdmin2Id))
+  const { data: viewData, isLoading, isError, refetch } = useQuery({ ...adminCourierDetailsOptions(courierId, viewAdmin2Id), enabled: permissions.couriersRead })
 
   const [state, dispatch] = useReducer(tripReducer, initialTripState)
   const handleToggleTrip = useCallback((id: string) => dispatch({ type: 'TOGGLE_TRIP', payload: id }), [])
 
+  if (isChecking || isLoading) return <CourierDetailSkeleton />
+  if (!permissions.couriersRead) return <PermissionGate hasAccess={false} pageName="جزئیات پیک" />
+  if (isError && !viewData) return <div role="alert" className="space-y-3 text-center py-12">
+    <p>دریافت اطلاعات پیک ناموفق بود.</p>
+    <button type="button" onClick={() => void refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+  </div>
+
   if (!viewData) {
-    return <CourierDetailSkeleton />
+    return <RouteNotFound />
   }
 
   return (
@@ -173,6 +184,7 @@ export const Route = createFileRoute('/admin/couriers/$courierId')({
     await ensureAuthHydrated()
     const { role, admin2Id } = useAuthStore.getState()
     if (role !== 'admin' && role !== 'admin2') return
+    if (!await hasAdminPermission(context.queryClient, 'couriersRead')) return
     const viewAdmin2Id = role === 'admin2' ? (admin2Id ?? undefined) : undefined
     const courier = await context.queryClient.query(
       adminCourierDetailsOptions(params.courierId, viewAdmin2Id),

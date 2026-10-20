@@ -10,6 +10,7 @@ import { ChartPanel } from '#/components/shared/ChartPanel'
 import { Admin2RecentOrders } from '#/components/admin/admin2/Admin2RecentOrders'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { Skeleton } from '#/components/LoadingSkeletons'
+import { PermissionGate } from '#/components/shared/PermissionGate'
 
 // اسکلتون اختصاصی — هم pendingComponent، هم حالت‌های isLoading
 function Admin2DashboardSkeleton() {
@@ -29,25 +30,30 @@ function Admin2DashboardSkeleton() {
 const Admin2Dashboard = memo(function Admin2Dashboard() {
   // سشن — گارد لود: تا نیامده اسکلتون (نه «ابتدا وارد شوید») — رفع باگ رفرش.
   // ⬅ NEW: فکتوری مشترک با usePermissions/AdminLayout/پنل زنده (staleTime ۱۵s)
-  const { data: session, isLoading: sessionLoading } = useQuery(admin2SessionOptions)
+  const { data: session, isLoading: sessionLoading, isError: sessionError, refetch: refetchSession } = useQuery(admin2SessionOptions)
 
   const adminId = session?.admin?.userId ?? ''
+  const canReadOrders = session?.isAdmin2LoggedIn === true && session.admin?.permissions.orderDetailsRead === true
 
   // ⬅ NEW: فکتوری مرکزی — قبلاً کلید خام ['admin2-stats', adminId] بود (هم‌hash)
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading, isError: statsError, refetch: refetchStats } = useQuery({
     ...admin2StatsOptions(adminId),
-    enabled: !!adminId,
+    enabled: canReadOrders && !!adminId,
   })
 
   // ⬅ اول لود، بعد چک ورود
   if (sessionLoading) {
     return <Admin2DashboardSkeleton />
   }
+  if (sessionError && !session) return <div role="alert" className="space-y-3 text-center py-12">
+    <p>دریافت اطلاعات ورود ناموفق بود.</p>
+    <button type="button" onClick={() => void refetchSession()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+  </div>
 
   if (!session?.isAdmin2LoggedIn) {
     return (
       <div className="text-center py-20 space-y-4">
-        <p className="text-gray-500 font-DanaMedium">ابتدا از پنل سفارشات زنده وارد شوید</p>
+        <p className="text-gray-500 font-DanaMedium">ابتدا وارد حساب مدیریتی خود شوید</p>
         <Link
           to="/login"
           className="inline-block px-6 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white text-sm font-DanaMedium cursor-pointer"
@@ -57,6 +63,12 @@ const Admin2Dashboard = memo(function Admin2Dashboard() {
       </div>
     )
   }
+
+  if (!canReadOrders) return <PermissionGate hasAccess={false} pageName="آمار سفارشات" />
+  if (statsError && !stats) return <div role="alert" className="space-y-3 text-center py-12">
+    <p>دریافت آمار ناموفق بود.</p>
+    <button type="button" onClick={() => void refetchStats()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+  </div>
 
   if (statsLoading || !stats) {
     return <Admin2DashboardSkeleton />
@@ -86,7 +98,7 @@ export const Route = createFileRoute('/admin/admin2/dashboard/')({
   // => ناوبری بدون حتی یک اسکلتون.
   loader: async ({ context }) => {
     const session = await context.queryClient.query(admin2SessionOptions)
-    if (session?.isAdmin2LoggedIn && session.admin?.userId) {
+    if (session?.isAdmin2LoggedIn && session.admin?.userId && session.admin.permissions.orderDetailsRead) {
       await context.queryClient.query(admin2StatsOptions(session.admin.userId))
     }
   },

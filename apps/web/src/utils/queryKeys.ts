@@ -98,6 +98,7 @@ export const qk = {
 	admin2LiveOrders: (adminId: string) =>
 		['admin2-live-orders', adminId] as const,
 	admin2Stats: (adminId: string) => ['admin2-stats', adminId] as const,
+	admin2StatsPrefix: ['admin2-stats'] as const,
 
 	// --- سبد خرید ---
 	// آیتم‌ها مستقیم داخل کلید می‌شینن (hash ساختاری — بدون JSON.stringify)؛

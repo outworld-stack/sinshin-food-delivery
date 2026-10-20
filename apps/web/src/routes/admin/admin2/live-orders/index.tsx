@@ -1,6 +1,6 @@
 // src/routes/admin/admin2/live-orders/index.tsx
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Bell, BellOff, Login4 } from 'reicon-react'
 import { ConfirmOrderModal } from '#/components/admin/admin2/ConfirmOrderModal'
 // stage-84 — مرکز چاپ فاکتور (جایگزین چاپ خودکار)
@@ -10,6 +10,7 @@ import { NoteModal } from '#/components/admin/admin2/NoteModal'
 import { LiveOrdersSkeleton } from '#/components/LoadingSkeletons'
 import { Pagination } from '#/components/Pagination'
 import { RouteError } from '#/components/shared/RouteFallbacks'
+import { PermissionGate } from '#/components/shared/PermissionGate'
 import { useAdmin2Panel } from '#/hooks/admin/useAdmin2Panel'
 
 // --- حالت لاگین‌نبودن: ورود فقط از صفحه لاگین سایت ---
@@ -59,24 +60,35 @@ const Admin2Page = memo(function Admin2Page() {
 
 	// آیتم ۲۳: صفحه‌بندی بعد از ۲۰ سفارش
 	const totalPages = Math.ceil(page.orders.length / page.ordersPerPage)
+	const safePage = Math.min(currentPage, totalPages || 1)
+	useEffect(() => {
+		setCurrentPage(safePage)
+	}, [safePage])
 	const visibleOrders = useMemo(
 		() =>
 			page.orders.slice(
-				(currentPage - 1) * page.ordersPerPage,
-				currentPage * page.ordersPerPage,
+				(safePage - 1) * page.ordersPerPage,
+				safePage * page.ordersPerPage,
 			),
-		[page.orders, currentPage, page.ordersPerPage],
+		[page.orders, safePage, page.ordersPerPage],
 	)
 
 	// در حال لود سشن — اسکلتون اختصاصی (نه پیام خطا)
 	if (page.isLoading) {
 		return <LiveOrdersSkeleton />
 	}
+	if (page.sessionError && !page.session) {
+		return <div role="alert" className="space-y-3 text-center py-12">
+			<p>دریافت اطلاعات ورود ناموفق بود.</p>
+			<button type="button" onClick={() => void page.refetchSession()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+		</div>
+	}
 
 	// لاگین نیست؟
 	if (!page.session?.isAdmin2LoggedIn) {
 		return <NotLoggedIn />
 	}
+	if (!page.canReadOrders) return <PermissionGate hasAccess={false} pageName="سفارشات زنده" />
 
 	return (
 		<div className="space-y-6">
@@ -87,7 +99,7 @@ const Admin2Page = memo(function Admin2Page() {
 						سفارشات زنده
 					</h1>
 					<p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium flex items-center gap-2">
-						<span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+						<span className={`w-2 h-2 rounded-full ${page.liveError ? 'bg-orange-500' : 'bg-green-500 animate-pulse'}`}></span>
 						ادمین: {page.session?.admin?.firstName}{' '}
 						{page.session?.admin?.lastName}
 					</p>
@@ -123,6 +135,10 @@ const Admin2Page = memo(function Admin2Page() {
 				id="live-orders-area"
 				className="bg-white dark:bg-[#2a1015] p-4 sm:p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm space-y-3"
 			>
+				{page.liveError && <div role="alert" className="rounded-xl p-4 bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-300 space-y-2">
+					<p>به‌روزرسانی سفارشات ناموفق بود؛ اطلاعات نمایش‌داده‌شده ممکن است قدیمی باشد.</p>
+					<button type="button" onClick={() => void page.refetchLive()} className="underline cursor-pointer">تلاش دوباره</button>
+				</div>}
 				{visibleOrders.length > 0 ? (
 					visibleOrders.map((order) => (
 						<LiveOrderCard
@@ -133,15 +149,15 @@ const Admin2Page = memo(function Admin2Page() {
 							onRequestPrint={handleRequestPrint}
 						/>
 					))
-				) : (
+				) : !page.liveError ? (
 					<div className="text-center py-16 text-gray-400 font-DanaMedium">
 						هنوز سفارشی ثبت نشده — منتظر...
 					</div>
-				)}
+				) : null}
 
 				{totalPages > 1 && (
 					<Pagination
-						currentPage={currentPage}
+						currentPage={safePage}
 						totalPages={totalPages}
 						itemsPerPage={page.ordersPerPage}
 						totalItems={page.orders.length}
@@ -174,6 +190,7 @@ const Admin2Page = memo(function Admin2Page() {
 			{/* مودال تایید / تغییر پیک — courierId و deliveryType از کارت می‌آید */}
 			{page.state.confirmOrder && (
 				<ConfirmOrderModal
+					key={page.state.confirmOrder.orderId}
 					orderId={page.state.confirmOrder.orderId}
 					courierId={page.state.confirmOrder.courierId}
 					isReassign={page.state.confirmOrder.isReassign} // ⬅️ پراپ صریح

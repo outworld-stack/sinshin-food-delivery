@@ -14,9 +14,10 @@ type AddressRow = AdminUserDetailsDto['addresses'][number]
 interface AddressesBoxProps {
   addresses: AddressRow[]
   userId: string
+  canDelete: boolean
 }
 
-export const AddressesBox = memo(function AddressesBox({ addresses, userId }: AddressesBoxProps) {
+export const AddressesBox = memo(function AddressesBox({ addresses, userId, canDelete }: AddressesBoxProps) {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
 
@@ -37,8 +38,8 @@ export const AddressesBox = memo(function AddressesBox({ addresses, userId }: Ad
   const openDeleteModal = useCallback((id: string) => setAddressToDelete(id), [])
   const closeDeleteModal = useCallback(() => setAddressToDelete(null), [])
   const confirmDelete = useCallback(() => {
-    if (addressToDelete) deleteMut.mutate(addressToDelete)
-  }, [addressToDelete, deleteMut])
+    if (canDelete && addressToDelete && !deleteMut.isPending) deleteMut.mutate(addressToDelete)
+  }, [canDelete, addressToDelete, deleteMut])
 
   const totalPages = Math.ceil(addresses.length / limit)
   const safePage = Math.min(page, totalPages || 1)
@@ -68,7 +69,7 @@ export const AddressesBox = memo(function AddressesBox({ addresses, userId }: Ad
                 </div>
               </div>
 
-              <div className="flex justify-center sm:justify-end sm:shrink-0 sm:self-start">
+              {canDelete && <div className="flex justify-center sm:justify-end sm:shrink-0 sm:self-start">
                 <button
                   onClick={() => openDeleteModal(addr.id)}
                   className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer"
@@ -76,7 +77,7 @@ export const AddressesBox = memo(function AddressesBox({ addresses, userId }: Ad
                 >
                   <Trash2 size={18} />
                 </button>
-              </div>
+              </div>}
 
             </div>
           </div>
@@ -98,7 +99,7 @@ export const AddressesBox = memo(function AddressesBox({ addresses, userId }: Ad
       )}
 
       <ConfirmModal
-        isOpen={addressToDelete !== null}
+        isOpen={canDelete && addressToDelete !== null}
         title="حذف آدرس"
         message="آیا از حذف این آدرس مطمئن هستید؟ این عملیات قابل بازگشت نیست."
         onConfirm={confirmDelete}

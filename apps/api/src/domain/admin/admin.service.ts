@@ -570,11 +570,14 @@ export class AdminService {
     // ═══ phase-3.5: اکشن‌هایی که فرانت از قبل صدا می‌زد — روت‌ها نبودند! ═══
 
     /** تلفن کاربر — برای ترمینیت دستگاه توسط ادمین */
-    async getUserPhone(userId: string): Promise<string | null> {
+    async getUserPhone(userId: string, actorRole: string): Promise<string | null> {
         const u = await this.deps.db.query.users.findFirst({
             where: eq(users.id, asUserId(userId)),
-            columns: { phone: true },
+            columns: { phone: true, role: true },
         })
+        if (u && actorRole !== 'admin' && (actorRole !== 'admin2' || u.role !== 'user')) {
+            throw Err.forbidden('مدیریت حساب ادمین‌ها فقط توسط ادمین اصلی')
+        }
         return u?.phone ?? null
     }
 
@@ -665,10 +668,13 @@ export class AdminService {
 
 
     /** حذف آدرس — scoped به همان کاربر (FK سفارشات SET NULL؛ تصویر لحظه‌ای می‌ماند) */
-    async deleteUserAddress(userId: string, addressId: string): Promise<void> {
-        await this.deps.db
+    async deleteUserAddress(userId: string, addressId: string, actorRole: string): Promise<void> {
+        if (!await this.getUserPhone(userId, actorRole)) throw Err.notFound('کاربر پیدا نشد.')
+        const [deleted] = await this.deps.db
             .delete(addresses)
             .where(and(eq(addresses.id, asAddressId(addressId)), eq(addresses.userId, asUserId(userId))))
+            .returning({ id: addresses.id })
+        if (!deleted) throw Err.notFound('آدرس پیدا نشد.')
     }
 
     // ═════════════ سفارشات ادمین ═════════════

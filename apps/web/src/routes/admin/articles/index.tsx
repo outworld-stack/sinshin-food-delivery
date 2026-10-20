@@ -14,6 +14,7 @@ import { useToastStore } from '#/stores/toastStore'
 import { invalidateArticleQueries } from '#/components/admin/articles/invalidateArticleQueries'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { PermissionGate } from '#/components/shared/PermissionGate'
+import { hasAdminPermission } from '#/utils/adminAccess'
 import {
         adminArticlesOptions,
         adminArticleCategoriesOptions,
@@ -26,6 +27,7 @@ export const Route = createFileRoute('/admin/articles/')({
         // هر دو کوئری صفحه را به‌صورت موازی در کش پر می‌کند؛ ناوبری بدون اسکلتون.
         // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
         loader: async ({ context }) => {
+                if (!await hasAdminPermission(context.queryClient, 'articlesRead')) return
                 await Promise.all([
                         context.queryClient.query(adminArticlesOptions),
                         context.queryClient.query(adminArticleCategoriesOptions),
@@ -51,8 +53,8 @@ function AdminArticlesPage() {
         const showToast = useToastStore((state) => state.showToast)
 
         // ⬅ NEW: کوئری‌ها — همان کلیدهایی که loader روت با کوئری پر کرده
-        const { data: articles, isLoading, isError, refetch } = useQuery(adminArticlesOptions)
-        const { data: categories } = useQuery(adminArticleCategoriesOptions)
+        const { data: articles, isLoading, isError, refetch } = useQuery({ ...adminArticlesOptions, enabled: permissions.articlesRead })
+        const { data: categories } = useQuery({ ...adminArticleCategoriesOptions, enabled: permissions.articlesRead })
 
         const [confirmToggleArticle, setConfirmToggleArticle] = useState<
                 string | null

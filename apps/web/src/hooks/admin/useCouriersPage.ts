@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
 import { searchTextField } from '#/utils/searchSchema'
 import { adminCouriersOptions } from '#/utils/queryOptions'
+import { usePermissions } from '#/hooks/admin/usePermissions'
 import { pageField, limitField } from '#/utils/searchSchema'
 
 // --- اسکیمای search — بازه تاریخ + جستجو + صفحه‌بندی، همه در URL ---
@@ -36,15 +37,16 @@ export function useCouriersPage() {
   // درَفت جستجو — تا وقتی «اعمال» نشده فچی در کار نیست
   const navigate = useNavigate({ from: '/admin/couriers/' })
   const search = useSearch({ from: '/admin/couriers/' })
+  const { permissions, isChecking } = usePermissions()
   const [tempSearch, setTempSearch] = useState(search.search)
   useEffect(() => setTempSearch(search.search), [search.search])
 
   // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
   // placeholderData داخل فکتوری: تعویض صفحه/بازه بدون فلیک اسکلتون
-  const { data, isLoading } = useQuery(adminCouriersOptions({
+  const { data, isLoading, isError, refetch } = useQuery({ ...adminCouriersOptions({
     page: search.page, limit: search.limit,
     search: search.search, dateFrom: search.dateFrom, dateTo: search.dateTo,
-  }))
+  }), enabled: permissions.couriersRead })
 
   // آمار مشتق — مجموع تحویل‌ها و درآمد
   const stats = useMemo(() => {
@@ -90,7 +92,7 @@ export function useCouriersPage() {
     // ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
     // dateFrom/dateTo/page/limit دیگر از کاهنده نیستند؛ از URL می‌آیند (تایپ‌دار)
     state: { tempSearch, dateFrom: search.dateFrom, dateTo: search.dateTo, page: search.page, limit: search.limit },
-    data, isLoading, stats,
+    data, isLoading, isError, refetch, stats, permissions, isChecking,
     handleSearchChange, handleDateFrom, handleDateTo,
     handleApply, handleReset, handlePage, handleLimit,
   }

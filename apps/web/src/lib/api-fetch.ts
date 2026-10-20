@@ -16,6 +16,8 @@ import { langHeaders, resolveRequestLang } from '#/lib/lang-header'
 export interface FetchOpts {
 	/** هدرهای اضافی — با هدرهای پایه ادغام می‌شوند (مثل idempotency-key) */
 	headers?: Record<string, string>
+	/** Longer bounded operations, such as printer discovery, can set their budget. */
+	timeoutMs?: number
 }
 
 /**
@@ -199,7 +201,7 @@ export async function authJson<T>(
 		credentials: 'include',
 		signal: ssrFetchSignal(), // کار-۳
 		...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-	})
+	}, { timeoutMs: opts?.timeoutMs })
 
 	if (res.status === 401) {
 		const refreshed = await tryRefresh()
@@ -213,7 +215,7 @@ export async function authJson<T>(
 				credentials: 'include',
 				signal: ssrFetchSignal(), // کار-۳ — سیگنال تازه برای تلاش مجدد
 				...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-			})
+			}, { timeoutMs: opts?.timeoutMs })
 		}
 		// stage-60 — خروج فقط داخلِ خود tryRefresh رخ می‌دهد (401/403 قطعی از
 		// refresh)؛ 429/5xx/شبکه → false بدون خروج — همین res خطای خودش را

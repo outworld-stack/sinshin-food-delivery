@@ -9,7 +9,8 @@ import { CourierCard } from '#/components/admin/couriers/CourierCard'
 import { CouriersFilterBox } from '#/components/admin/couriers/CouriersFilterBox'
 import { AddCourierModal } from '#/components/admin/couriers/AddCourierModal'
 import { Pagination } from '#/components/Pagination'
-import { Can } from '#/components/shared/PermissionGate'
+import { Can, PermissionGate } from '#/components/shared/PermissionGate'
+import { hasAdminPermission } from '#/utils/adminAccess'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { RouteError } from '#/components/shared/RouteFallbacks'
 import { formatPrice, faNum } from '#/utils/format'
@@ -30,9 +31,14 @@ const CouriersPage = memo(function CouriersPage() {
   const total = page.data?.total ?? 0
   const totalPages = Math.ceil(total / page.state.limit)
 
-  if (page.isLoading) {
+  if (page.isChecking || page.isLoading) {
     return <CouriersPageSkeleton />
   }
+  if (!permissions.couriersRead) return <PermissionGate hasAccess={false} pageName="پیک‌ها" />
+  if (page.isError && !page.data) return <div role="alert" className="space-y-3 text-center py-12">
+    <p>دریافت پیک‌ها ناموفق بود.</p>
+    <button type="button" onClick={() => void page.refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+  </div>
 
   return (
     <div className="space-y-6">
@@ -108,7 +114,7 @@ const CouriersPage = memo(function CouriersPage() {
       </div>
 
       {/* مودال افزودن پیک — فقط با couriersWrite */}
-      {isAddCourierOpen && <AddCourierModal onClose={handleCloseAdd} />}
+      {isAddCourierOpen && permissions.couriersWrite && <AddCourierModal onClose={handleCloseAdd} />}
     </div>
   )
 })
@@ -129,6 +135,7 @@ export const Route = createFileRoute('/admin/couriers/')({
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context, deps }) => {
+    if (!await hasAdminPermission(context.queryClient, 'couriersRead')) return
     await context.queryClient.query(adminCouriersOptions(deps))
   },
 

@@ -622,7 +622,7 @@ export const adminOrdersOptions = (f: AdminOrdersFilters) => {
 			}
 			const sortDate = today ? 'newest' : f.sortDate
 			// ادمین۲ → فقط سفارشات خودش
-			if (f.role === 'admin2' && f.admin2Id) {
+			if (f.role === 'admin2') {
 				// رارد ۴۷ — adminId از امضا حذف شد: سمت HTTP هرگز ارسال نمی‌شد؛
 				// محدودکردن به سفارشات خودِ ادمین۲ از طریق توکن احراز هویت انجام می‌شود
 				return getSubAdminOrders({

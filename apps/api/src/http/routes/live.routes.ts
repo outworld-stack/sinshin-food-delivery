@@ -56,7 +56,7 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
 						lastName: p?.lastName ?? null,
 						permissions: admin2,
 					},
-					queueCount: await deps.admin2.queueCountFor(user.id, user.role),
+					queueCount: admin2.orderDetailsRead ? await deps.admin2.queueCountFor(user.id, user.role) : 0,
 				};
 			},
 			{
@@ -176,13 +176,16 @@ export const liveRoutes = (deps: LiveRoutesDeps) =>
 		 */
 		.get(
 			"/orders/:displayId/invoice",
-			({ params }) => deps.orders.invoiceForStaff(params.displayId),
+			async ({ user, params }) => {
+				await deps.live.assertOrderViewable(user.id, user.role, params.displayId);
+				return deps.orders.invoiceForStaff(params.displayId);
+			},
 			{
 				params: t.Object({ displayId: t.String({ pattern: DISPLAY_PATTERN }) }),
 				detail: {
 					summary: "Invoice print data — kitchen + sales (staff)",
 					description:
-						"Full print payload: items with prices, breakdown, customer info, delivery type/address and courier fields for the sales QR. No ownership check — staff route.",
+						"Full print payload for main administrators, or level-2 administrators who confirmed the order or can view it in their queue. Includes items, breakdown, delivery information and courier fields.",
 				},
 			},
 		);

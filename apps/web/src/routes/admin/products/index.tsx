@@ -19,6 +19,8 @@ import {
 } from '#/hooks/admin/useAdminProductsPage'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { adminProductsOptions } from '#/utils/queryOptions'
+import { hasAdminPermission } from '#/utils/adminAccess'
+import { RouteError } from '#/components/shared/RouteFallbacks'
 
 export const Route = createFileRoute('/admin/products/')({
 	ssr: false,
@@ -43,6 +45,7 @@ export const Route = createFileRoute('/admin/products/')({
 	// کلیدی پیش‌واکشی شود که کامپوننت مصرف می‌کند — حتی وقتی search در deps نیست.
 	// (parse دوباره با zod: تایپ‌دار + strip فیلدهای روت‌های دیگر)
 	loader: async ({ context, deps, location }) => {
+		if (!await hasAdminPermission(context.queryClient, 'productsRead')) return
 		const { search } = adminProductsSearchSchema.parse(location.search)
 		await context.queryClient.query(
 			adminProductsOptions({
@@ -57,6 +60,7 @@ export const Route = createFileRoute('/admin/products/')({
 
 	component: AdminProductsPage,
 	pendingComponent: AdminProductsPageSkeleton,
+	errorComponent: RouteError,
 
 	head: () => ({
 		meta: [
@@ -77,6 +81,10 @@ function AdminProductsPage() {
 	if (!page.permissions.productsRead) {
 		return <PermissionGate hasAccess={false} pageName="محصولات" />
 	}
+	if (page.isError && !page.data) return <div role="alert" className="space-y-3 text-center py-12">
+		<p>دریافت محصولات ناموفق بود.</p>
+		<button type="button" onClick={() => void page.refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+	</div>
 
 	return (
 		<div className="space-y-6">

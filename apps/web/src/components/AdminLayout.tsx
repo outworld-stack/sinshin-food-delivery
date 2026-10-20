@@ -17,9 +17,9 @@
 // تغییر: آیتم «نوتیفیکیشن» در منوی ادمین اصلی
 // ═══════════════════════════════════════════════════════════════
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 // src/components/AdminLayout.tsx
-import { Link, Outlet } from '@tanstack/react-router'
+import { Link, Outlet, useNavigate } from '@tanstack/react-router'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
 	Bag,
@@ -44,6 +44,7 @@ import { ThemeToggle } from '#/components/ThemeToggle'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { useRealLogout } from '#/hooks/shared/useRealLogout'
 import { useHydrated } from '#/hooks/useHydrated'
+import { onUnauthorized } from '#/lib/auth-session'
 import { useAuthStore } from '#/stores/authStore'
 import type { NavItem } from '#/types/shared/navigation'
 import { admin2SessionOptions } from '#/utils/queryOptions'
@@ -100,20 +101,22 @@ function buildAdmin2Items(permissions: {
 	productsRead: boolean
 	usersRead: boolean
 	notificationsRead: boolean
+	notificationsSend: boolean
 	articlesRead: boolean
+	couriersRead: boolean
+	orderDetailsRead: boolean
 }): NavItem[] {
 	const items: NavItem[] = [
-		{
+		...(permissions.orderDetailsRead ? [{
 			to: '/admin/admin2/dashboard/',
 			label: 'داشبورد من',
 			icon: <Layout size={20} />,
 			exact: true,
-		},
-		LIVE_PANEL_ITEM,
-		ORDERS_ITEM,
-		COURIERS_ITEM,
+		} satisfies NavItem] : []),
+		...(permissions.orderDetailsRead ? [LIVE_PANEL_ITEM, ORDERS_ITEM] : []),
+		...(permissions.couriersRead ? [COURIERS_ITEM] : []),
 		// stage-48 — پنل نوتیف (تاریخچه/ارسال داخل خود صفحه گارد می‌شود)
-		...(permissions.notificationsRead
+		...(permissions.notificationsRead || permissions.notificationsSend
 			? [
 					{
 						to: '/admin/notifications',
@@ -186,13 +189,14 @@ export const AdminLayout = memo(function AdminLayout() {
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
 	const role = useAuthStore((s) => s.role)
-	const logout = useAuthStore((s) => s.logout)
+	const queryClient = useQueryClient()
+	const navigate = useNavigate()
 
 	const { permissions, isAdmin2 } = usePermissions()
 
 	// سینک سشن ادمین۲ — سشن سرور مرده => استور کلاینت هم پاک شه (گارد روت ریدایرکت می‌کنه)
 	// فکتوری مشترک با usePermissions؛ فقط polling اینجا اضافه می‌شه
-	const { data: admin2Session } = useQuery({
+	const { data: admin2Session, isLoading: sessionLoading, isError: sessionError, refetch: refetchSession } = useQuery({
 		...admin2SessionOptions,
 		enabled: role === 'admin2',
 		refetchInterval: 30_000,
@@ -200,9 +204,14 @@ export const AdminLayout = memo(function AdminLayout() {
 
 	useEffect(() => {
 		if (role === 'admin2' && admin2Session && !admin2Session.isAdmin2LoggedIn) {
-			logout()
+			onUnauthorized()
+			queryClient.clear()
+			void navigate({ to: '/login', replace: true })
+		} else if (role !== 'admin' && role !== 'admin2') {
+			queryClient.clear()
+			void navigate({ to: '/login', replace: true })
 		}
-	}, [role, admin2Session, logout])
+	}, [role, admin2Session, navigate, queryClient])
 
 	const menuItems = useMemo(() => {
 		if (isAdmin2) return buildAdmin2Items(permissions)
@@ -215,6 +224,17 @@ export const AdminLayout = memo(function AdminLayout() {
 	const handleCloseMobileMenu = useCallback(
 		() => setIsMobileMenuOpen(false),
 		[],
+	)
+
+	if (role !== 'admin' && role !== 'admin2') return <AdminLayoutSkeleton />
+	if (role === 'admin2' && admin2Session && !admin2Session.isAdmin2LoggedIn) return <AdminLayoutSkeleton />
+	if (role === 'admin2' && sessionLoading) return <AdminLayoutSkeleton />
+	if (role === 'admin2' && sessionError && !admin2Session) return (
+		<div role="alert" className="min-h-screen flex flex-col items-center justify-center gap-4 font-DanaMedium">
+			<p>دریافت دسترسی‌های حساب ناموفق بود.</p>
+			<button type="button" onClick={() => void refetchSession()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+			<button type="button" onClick={handleLogout} className="text-gray-500 cursor-pointer">خروج از پنل</button>
+		</div>
 	)
 
 	return (

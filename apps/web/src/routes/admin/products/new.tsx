@@ -8,6 +8,7 @@ import { useToastStore } from '#/stores/toastStore'
 import type { ProductFormData } from '#/types/forms'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { PermissionGate } from '#/components/shared/PermissionGate'
+import { AdminProductFormSkeleton } from '#/components/LoadingSkeletons'
 
 export const Route = createFileRoute('/admin/products/new')({
         component: NewProductPage,
@@ -17,7 +18,7 @@ function NewProductPage() {
         const navigate = useNavigate()
         const queryClient = useQueryClient()
         const showToast = useToastStore((state) => state.showToast)
-        const { permissions, isMainAdmin } = usePermissions()
+        const { permissions, isMainAdmin, isChecking } = usePermissions()
 
         // ورودی کاملاً تایپ‌دار (قبلاً data: any بود) —
         // ProductFormData دقیقاً با اسکیمای createAdminProduct مپ می‌شه
@@ -43,6 +44,7 @@ function NewProductPage() {
         })
 
         // گارد — فقط productsWrite اجازه ساخت دارد
+        if (isChecking) return <AdminProductFormSkeleton />
         if (!permissions.productsWrite) {
                 return <PermissionGate hasAccess={false} pageName="افزودن محصول جدید" />
         }

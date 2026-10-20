@@ -173,6 +173,33 @@ assert.equal(discoveryEnabled, false, 'staff without hardware authorization neve
 await click(center.print)
 assert.equal(printed.length, 1)
 assert.equal(printed[0], undefined, 'staff without hardware permission can still print with the browser')
+assert.equal(center.html.includes('اسکن دوباره'), false, 'restricted staff do not see the scan action')
+assert.deepEqual(center.sales.discovered, [], 'cached discoveries are hidden after permission is revoked')
+;(center.sales.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
+assert.equal(registered.length, 0, 'a locked selection cannot register a device')
+assert.equal(assignments.length, 0)
+
+reset()
+role = 'admin2'
+center = renderCenter()
+assert.equal(discoveryEnabled, true, 'authorized Level 2 administrators can search for printers')
+assert.equal(center.sales.locked, false)
+assert.equal(center.html.includes('اسکن دوباره'), true, 'authorized staff can rescan')
+assert.deepEqual(center.sales.discovered, center.kitchen.discovered)
+;(center.kitchen.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
+await Promise.all(mutations)
+assert.equal(registered.length, 1, 'Level 2 staff can register their selected discovery')
+assert.deepEqual(assignments, [{ sales: 'sales-printer', kitchen: 'detected-printer' }])
+
+reset()
+role = 'admin2'
+discoveryQuery = { isPending: false, isError: true }
+center = renderCenter()
+assert.equal(center.html.includes('شناسایی خودکار ناموفق بود'), true)
+assert.equal(center.sales.disabled, false, 'failed discovery does not block known printers')
+;(center.sales.onChange as (id: string) => void)('kitchen-printer')
+await Promise.all(mutations)
+assert.deepEqual(assignments, [{ sales: 'kitchen-printer', kitchen: 'kitchen-printer' }])
 
 reset()
 center = renderCenter()

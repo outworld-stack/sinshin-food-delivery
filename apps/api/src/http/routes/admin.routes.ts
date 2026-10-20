@@ -206,9 +206,9 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
     )
     .delete(
       '/users/:id/devices/:deviceId',
-      async ({ params }) => {
+      async ({ params, user }) => {
         // revokeIdentity مالکیت را با phone چک می‌کند — همان موتور مسیرهای خودِ کاربر
-        const phone = await deps.admin.getUserPhone(params.id)
+        const phone = await deps.admin.getUserPhone(params.id, user.role)
         if (!phone) throw Err.notFound('کاربر پیدا نشد.')
         const ok = await deps.devices.revokeIdentity(
           asUserId(params.id),
@@ -225,7 +225,7 @@ export const adminRoutes = (deps: AdminRoutesDeps) => {
     )
     .delete(
       '/users/:id/addresses/:addressId',
-      ({ params }) => deps.admin.deleteUserAddress(params.id, params.addressId),
+      ({ params, user }) => deps.admin.deleteUserAddress(params.id, params.addressId, user.role),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }), addressId: t.String({ pattern: UUID_PATTERN }) }),
         detail: { summary: 'Delete user address (usersWrite) — orders keep snapshot' },

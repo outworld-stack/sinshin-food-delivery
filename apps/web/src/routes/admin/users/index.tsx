@@ -12,6 +12,8 @@ import { AdminUsersListSkeleton } from '#/components/LoadingSkeletons'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { PermissionGate } from '#/components/shared/PermissionGate'
 import { BottomSheet } from '#/components/shared/BottomSheet'
+import { hasAdminPermission } from '#/utils/adminAccess'
+import { RouteError } from '#/components/shared/RouteFallbacks'
 
 
 const AdminUsersPage = memo(function AdminUsersPage() {
@@ -28,6 +30,10 @@ const AdminUsersPage = memo(function AdminUsersPage() {
   if (!page.permissions.usersRead) {
     return <PermissionGate hasAccess={false} pageName="کاربران" />
   }
+  if (page.isError && !page.data) return <div role="alert" className="space-y-3 text-center py-12">
+    <p>دریافت کاربران ناموفق بود.</p>
+    <button type="button" onClick={() => void page.refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+  </div>
 
   return (
     <div className="space-y-6">
@@ -153,11 +159,13 @@ export const Route = createFileRoute('/admin/users/')({
   // اجرا و کوئری در کش پر می‌شود؛ ناوبری بدون حتی یک اسکلتون.
   // داده پشت گارد نقش است؛ سرور رندرش نمی‌کند (صفحه noindex است)
   loader: async ({ context, deps }) => {
+    if (!await hasAdminPermission(context.queryClient, 'usersRead')) return
     await context.queryClient.query(adminUsersOptions(deps))
   },
 
   component: AdminUsersPage,
   pendingComponent: AdminUsersListSkeleton,
+  errorComponent: RouteError,
 
   head: () => ({
     meta: [

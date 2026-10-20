@@ -28,9 +28,10 @@ import type { Db } from '#/infra/db/client'
 import { orders } from '#/infra/db/schema'
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import type { SessionService } from '#/domain/auth/session.service'
+import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import { asOrderId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
-import { requireAuth } from '#/http/hooks/require-auth'
+import { authenticateRequest, requireAuth } from '#/http/hooks/require-auth'
 import { UUID_RE } from '#/domain/shared/ids'
 import { DISPLAY_RE } from '#/domain/shared/ids'
 import { clientIp } from '#/domain/shared/net'
@@ -76,6 +77,7 @@ const menuIps = (capsGlobal.__sinshin_menu_stream_ips ??= new Map())
 export interface RealtimeDeps {
   hub: SseHub
   sessions: SessionService
+  admin2: Admin2Service
   db: Db // ← phase-1: برای auth مالکیت orders:{id}
 }
 
@@ -86,6 +88,13 @@ async function authorizeChannel(
   user: { id: string; role: string },
 ): Promise<void> {
   if (channel.startsWith('demo:')) return
+
+  const permissions = user.role === 'admin2' && channel.startsWith('orders:')
+    ? await deps.admin2.permissionsOf(user.id)
+    : null
+  if (user.role === 'admin2' && channel.startsWith('orders:') && !permissions?.orderDetailsRead) {
+    throw Err.forbidden('اجازه‌ی مشاهده سفارش‌ها را ندارید.')
+  }
 
   if (channel === 'orders:new') {
     if (user.role !== 'admin' && user.role !== 'admin2') {
@@ -105,24 +114,32 @@ async function authorizeChannel(
   }
 
   // orders:{displayId | uuid}
-  if (user.role === 'admin' || user.role === 'admin2') return
+  if (user.role === 'admin') return
   const target = channel.slice('orders:'.length)
   // فرمت را قبل از کوئری چک کن — eq روی uuid با مقدار نامعتبر یعنی خطای PG
   const row = DISPLAY_RE.test(target)
     ? await deps.db
-      .select({ userId: orders.userId })
+      .select({ userId: orders.userId, confirmedBy: orders.confirmedBy, status: orders.status, deliveryType: orders.deliveryType })
       .from(orders)
       .where(eq(orders.displayId, target))
       .limit(1)
       .then((r) => r[0])
     : UUID_RE.test(target)
       ? await deps.db
-        .select({ userId: orders.userId })
+        .select({ userId: orders.userId, confirmedBy: orders.confirmedBy, status: orders.status, deliveryType: orders.deliveryType })
         .from(orders)
         .where(eq(orders.id, asOrderId(target)))
         .limit(1)
         .then((r) => r[0])
       : undefined
+  if (user.role === 'admin2') {
+    const inQueueScope = row?.status === 'PAID' && row.confirmedBy === null && (
+      (permissions?.hall && row.deliveryType === 'DINE_IN') ||
+      (permissions?.takeaway && (row.deliveryType === 'DELIVERY' || row.deliveryType === 'PICKUP'))
+    )
+    if (row && (row.confirmedBy === user.id || inQueueScope)) return
+    throw Err.forbidden('این کانال خارج از حوزه‌ی شماست.')
+  }
   if (!row || row.userId !== user.id) throw Err.forbidden('این کانال مال شما نیست.')
 }
 
@@ -194,12 +211,14 @@ export const realtimeRoutes = (deps: RealtimeDeps) => {
         const cleanup = () => {
           if (closed) return
           closed = true
+          queue.length = 0
           waiter?.(null)
           waiter = null
           unsubscribe?.()
           unsubscribe = null
           if (heartbeat) clearInterval(heartbeat)
           heartbeat = null
+          request.signal.removeEventListener('abort', cleanup)
           // round-28 — سقف اتصال: جای این اتصال آزاد شود
           caps.total -= 1
           const n = (caps.byUser.get(user.id) ?? 1) - 1
@@ -210,13 +229,34 @@ export const realtimeRoutes = (deps: RealtimeDeps) => {
         // قطع شدن کلاینت (Bun سیگنال abort می‌دهد) → cleanup
         request.signal.addEventListener('abort', cleanup)
 
+        // Long-lived streams must stop delivering after a ban, permission change,
+        // or another administrator claiming an order that was previously in the queue.
+        let authorization: Promise<{ id: string; role: string }> | null = null
+        const reauthorize = () => {
+          if (!authorization) {
+            authorization = authenticateRequest(deps.sessions, request)
+              .then(async ({ user: currentUser }) => {
+                await authorizeChannel(deps, channel, currentUser)
+                return currentUser
+              })
+              .finally(() => { authorization = null })
+          }
+          return authorization
+        }
         unsubscribe = deps.hub.subscribe(channel, (payload) => {
-          push(sseChunk(payload.event, payload.data))
+          void reauthorize().then((currentUser) => {
+            // The shared panel channel is an invalidation signal. Keep unrelated
+            // order IDs and administrator IDs out of level-2 clients.
+            push(sseChunk(payload.event, currentUser.role === 'admin2' && channel === 'orders:new' ? {} : payload.data))
+          }, cleanup)
         })
         push(sseChunk('connected', { channel, at: new Date().toISOString() }))
 
         // ضربان — اتصال را زنده نگه می‌دارد و در پروکسی‌ها تشخیصِ قطع‌شدن می‌دهد
-        heartbeat = setInterval(() => push(encoder.encode(': ping\n\n')), HEARTBEAT_MS)
+        heartbeat = setInterval(() => {
+          void reauthorize().then(() => push(encoder.encode(': ping\n\n')), cleanup)
+        }, HEARTBEAT_MS)
+        if (request.signal.aborted) cleanup()
 
         return new ReadableStream<Uint8Array>({
           async pull(controller) {
@@ -238,7 +278,7 @@ export const realtimeRoutes = (deps: RealtimeDeps) => {
         detail: {
           summary: 'SSE live stream',
           description:
-            'Auth via Bearer header only (fetch-based SSE on the frontend — tokens never travel in URLs). Channel authorization: demo:* = any user; orders:new = admins only; orders:{id} = admins or the order owner; notify:{userId} = owner only; notify:all = any authenticated user (content-free "new notification" ping — stage-77). Pull-based stream (backpressure-safe, bounded queue), 15s heartbeat. Connection caps: 5 per user, 500 total (round-28).',
+            'Auth via Bearer header only. Order channels require active staff order permissions; level-2 administrators are restricted to their confirmed orders or scoped queue. Panel events contain no order data for level-2 administrators. Permissions and sessions are rechecked during delivery and heartbeats. Personal notification channels require ownership. Connection caps: 5 per user, 500 total.',
         },
       },
     )

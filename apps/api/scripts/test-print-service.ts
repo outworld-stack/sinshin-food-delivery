@@ -29,11 +29,11 @@ import assert from 'node:assert/strict'
 import net from 'node:net'
 import { SQL } from 'bun'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
-import { Database } from '../src/infra/db/client'
+import { Database, type Db } from '../src/infra/db/client'
 import { AppConfig } from '../src/infra/config/env'
 import { SettingsService } from '../src/domain/settings/settings.service'
-import { printers } from '../src/infra/db/schema'
-import { eq } from 'drizzle-orm'
+import { printers, settings as settingsTable, SETTING_KEYS } from '../src/infra/db/schema'
+import { eq, sql } from 'drizzle-orm'
 import { PrinterService } from '../src/domain/print/print.service'
 import {
   buildRasterJob,
@@ -158,6 +158,38 @@ function passed(name: string) {
 function isValidation(e: unknown): boolean {
   const status = (e as { status?: number } | null)?.status
   return status === 422 || status === 404
+}
+
+/** Pause assignment writes at PostgreSQL, so concurrent requests really overlap. */
+async function holdAssignmentWrites(db: Db): Promise<() => Promise<void>> {
+  const locked = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const transaction = db.transaction(async (tx) => {
+    await tx.select().from(settingsTable)
+      .where(eq(settingsTable.key, SETTING_KEYS.invoicePrinters)).for('update')
+    locked.resolve()
+    await release.promise
+  })
+  void transaction.catch(locked.reject)
+  await locked.promise
+  return async () => {
+    release.resolve()
+    await transaction
+  }
+}
+
+async function waitForBlockedQueries(db: Db, count: number, finished?: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline) {
+    if (finished?.()) return
+    const rows = await db.execute<{ count: number }>(sql`
+      select count(*)::int as count from pg_stat_activity
+      where datname = current_database() and wait_event_type = 'Lock'
+    `)
+    if (Number(rows[0]?.count) >= count) return
+    await Bun.sleep(10)
+  }
+  assert.fail(`Expected ${count} concurrent queries waiting for database locks`)
 }
 
 try {
@@ -515,6 +547,94 @@ try {
 
   await assert.rejects(() => print.test(added.id), isValidation)
   passed('عملیات روی چاپگرِ حذف‌شده 404')
+
+  // Separate services represent API instances with independent settings caches.
+  const anotherPrint = () => new PrinterService({ db, settings: new SettingsService({ db, config }) })
+  {
+    const obsolete = await print.add({ name: 'Obsolete printer', host: '192.168.253.11' })
+    const replacement = await print.add({ name: 'Replacement printer', host: '192.168.253.12' })
+    await print.setAssignment({ sales: obsolete.id, kitchen: null })
+    const removingInstance = anotherPrint()
+    await removingInstance.assignment()
+    const release = await holdAssignmentWrites(db)
+    const selected = { sales: replacement.id, kitchen: replacement.id }
+    const selecting = anotherPrint().setAssignment(selected)
+    let operations: Promise<PromiseSettledResult<void>[]> | undefined
+    try {
+      await waitForBlockedQueries(db, 1)
+      operations = Promise.allSettled([selecting, removingInstance.remove(obsolete.id)])
+      await waitForBlockedQueries(db, 2)
+    } finally {
+      await release()
+      const results = await (operations ?? Promise.allSettled([selecting]))
+      assert.ok(results.every((result) => result.status === 'fulfilled'), JSON.stringify(results))
+    }
+    assert.deepStrictEqual(await anotherPrint().assignment(), selected)
+    passed('Concurrent deletion preserves a newly selected replacement printer')
+    assert.deepStrictEqual(await removingInstance.assignment(), selected)
+    passed('Assignment reads observe another API instance immediately, without stale settings cache')
+    await print.remove(replacement.id)
+  }
+
+  {
+    const sales = await print.add({ name: 'Concurrent sales deletion', host: '192.168.253.13' })
+    const kitchen = await print.add({ name: 'Concurrent kitchen deletion', host: '192.168.253.14' })
+    await print.setAssignment({ sales: sales.id, kitchen: kitchen.id })
+    const first = anotherPrint()
+    const second = anotherPrint()
+    await Promise.all([first.assignment(), second.assignment()])
+    const release = await holdAssignmentWrites(db)
+    const removing = Promise.allSettled([first.remove(sales.id), second.remove(kitchen.id)])
+    try {
+      await waitForBlockedQueries(db, 2)
+    } finally {
+      await release()
+      const results = await removing
+      assert.ok(results.every((result) => result.status === 'fulfilled'), JSON.stringify(results))
+    }
+    assert.deepStrictEqual(await anotherPrint().assignment(), { sales: null, kitchen: null })
+    passed('Concurrent deletion of both assigned printers leaves no dangling assignment')
+  }
+
+  {
+    const target = await print.add({ name: 'Selected while deleting', host: '192.168.253.15' })
+    await print.setAssignment({ sales: null, kitchen: null })
+    const release = await holdAssignmentWrites(db)
+    const selecting = anotherPrint().setAssignment({ sales: target.id, kitchen: target.id })
+    let operations: Promise<PromiseSettledResult<void>[]> | undefined
+    try {
+      // Selection has reached its write, after validating that the printer exists.
+      await waitForBlockedQueries(db, 1)
+      let deleted = false
+      const removing = anotherPrint().remove(target.id).then(() => { deleted = true })
+      operations = Promise.allSettled([selecting, removing])
+      await waitForBlockedQueries(db, 2, () => deleted)
+    } finally {
+      await release()
+      const results = await (operations ?? Promise.allSettled([selecting]))
+      assert.ok(results.every((result) => result.status === 'fulfilled'), JSON.stringify(results))
+    }
+    assert.deepStrictEqual(await db.select().from(printers).where(eq(printers.id, target.id)), [])
+    assert.deepStrictEqual(await anotherPrint().assignment(), { sales: null, kitchen: null })
+    passed('Deletion cannot race between assignment validation and saving the selected printer')
+  }
+
+  {
+    const target = await print.add({ name: 'Rollback deletion', host: '192.168.253.16' })
+    await print.setAssignment({ sales: target.id, kitchen: null })
+    await db.execute(sql`alter table settings add constraint test_assignment_cleanup_failure
+      check (key <> 'invoice_printers' or value ->> 'sales' is not null)`)
+    try {
+      await assert.rejects(() => print.remove(target.id))
+      const rows = await db.select().from(printers).where(eq(printers.id, target.id))
+      assert.equal(rows.length, 1)
+      assert.deepStrictEqual(await anotherPrint().assignment(), { sales: target.id, kitchen: null })
+    } finally {
+      await db.execute(sql`alter table settings drop constraint test_assignment_cleanup_failure`)
+      await print.remove(target.id)
+    }
+    passed('Failed assignment cleanup rolls back printer deletion')
+  }
 
   // Older registrations could store arbitrary ports. Listing must apply the
   // same policy as dispatch before it sends DLE EOT to that legacy destination.

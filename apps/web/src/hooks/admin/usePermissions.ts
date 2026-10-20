@@ -64,7 +64,7 @@ export function usePermissions() {
 		role === 'admin'
 			? FULL_PERMISSIONS
 			: role === 'admin2'
-				? (session?.admin?.permissions ?? EMPTY_PERMISSIONS)
+				? (session?.isAdmin2LoggedIn ? session.admin?.permissions ?? EMPTY_PERMISSIONS : EMPTY_PERMISSIONS)
 				: EMPTY_PERMISSIONS
 
 	const isMainAdmin = role === 'admin'

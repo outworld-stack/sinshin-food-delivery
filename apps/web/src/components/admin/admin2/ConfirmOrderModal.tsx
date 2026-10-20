@@ -97,6 +97,8 @@ export const ConfirmOrderModal = memo(function ConfirmOrderModal({
 			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
 			queryClient.invalidateQueries({ queryKey: qk.adminOrdersAll })
 			queryClient.invalidateQueries({ queryKey: qk.adminOrderDetailsAll })
+			queryClient.invalidateQueries({ queryKey: qk.admin2StatsPrefix })
+			queryClient.invalidateQueries({ queryKey: qk.adminCouriersAll })
 			showToast(
 				'سفارش تایید شد — فاکتورها را هر زمان از دکمه‌ی «چاپ فاکتور» کارت سفارش بگیرید',
 			)

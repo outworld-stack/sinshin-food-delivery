@@ -89,18 +89,18 @@ export class LiveService {
 		viewerRole: string,
 	): Promise<{ orders: LiveOrderView[]; total: number }> {
 
-	// رارد M7 — hit کوتاه: تازگی داده‌ی پنل زنده تا ۱.۵ ثانیه کافی است
-	const cacheKey = `${adminUserId}:${viewerRole}`;
-	const hit = this.liveOrdersCache.get(cacheKey);
-	if (hit && Date.now() - hit.at < 1_500) return hit.value;
-
 		const isMainAdmin = viewerRole === "admin";
 		const scope = isMainAdmin
 			? { hall: true, takeaway: true }
 			: await this.deps.admin2.scopeOf(adminUserId);
-		if (!scope || (!scope.hall && !scope.takeaway)) {
+		if (!scope) {
 			return { orders: [], total: 0 };
 		}
+		// Scope changes must take effect even while the order cache is warm.
+		// Removing queue access still leaves this administrator's confirmed orders visible.
+		const cacheKey = `${adminUserId}:${viewerRole}:${scope.hall}:${scope.takeaway}`;
+		const hit = this.liveOrdersCache.get(cacheKey);
+		if (hit && Date.now() - hit.at < 1_500) return hit.value;
 
 		// PAID (صفِ حوزه) ∪ CONFIRMED/ON_THE_WAY — ادمین اصلی: مالِ همه، ادمین۲: مالِ خودش
 		const scopeSql =
@@ -108,7 +108,9 @@ export class LiveService {
 				? sql`true`
 				: scope.hall
 					? eq(orders.deliveryType, "DINE_IN")
-					: sql`${orders.deliveryType} in ('DELIVERY', 'PICKUP')`;
+					: scope.takeaway
+						? sql`${orders.deliveryType} in ('DELIVERY', 'PICKUP')`
+						: sql`false`;
 		const ownershipSql = isMainAdmin
 			? sql`true`
 			: eq(orders.confirmedBy, adminUserId);
@@ -205,6 +207,7 @@ export class LiveService {
 			.where(eq(orders.id, row.id));
 		await this.deps.admin2.log(adminUserId, "NOTE_SEEN", displayId, {});
 		await this.deps.admin2.touchActivity(adminUserId);
+		this.liveOrdersCacheInvalidate();
 		// پنل‌های دیگر هم ببینند noteSeen شد — refresh
 		this.deps.hub.publish("orders:new", {
 			event: "order-updated",
@@ -232,12 +235,6 @@ export class LiveService {
 	): Promise<{ success: boolean; message?: string }> {
 		const row = await this.mustGet(displayId);
 
-		if (row.customerNote && !row.noteSeen) {
-			return {
-				success: false,
-				message: "ابتدا نکته مشتری را ببینید و تیک بزنید",
-			};
-		}
 		// حوزه قبل از status — پیام درست برای ادمینِ خارج از حوزه
 		if (viewerRole !== "admin") {
 			const scope = await this.deps.admin2.scopeOf(adminUserId);
@@ -250,8 +247,11 @@ export class LiveService {
 				return { success: false, message: "این سفارش خارج از حوزه‌ی شماست" };
 		}
 
-		if (row.status !== "PAID") {
+		if (row.status !== "PAID" || row.confirmedBy !== null) {
 			return { success: false, message: "این سفارش قابل تایید نیست" };
+		}
+		if (row.customerNote && !row.noteSeen) {
+			return { success: false, message: "ابتدا نکته مشتری را ببینید و تیک بزنید" };
 		}
 
 		let courierId: CourierId | null = null;
@@ -288,7 +288,7 @@ export class LiveService {
 					input.notePrintOnInvoice === true,
 				updatedAt: new Date(),
 			})
-			.where(and(eq(orders.id, row.id), eq(orders.status, "PAID")))
+			.where(and(eq(orders.id, row.id), eq(orders.status, "PAID"), isNull(orders.confirmedBy)))
 			.returning();
 		if (!updated)
 			return {
@@ -407,16 +407,10 @@ export class LiveService {
 		viewerRole: string,
 		displayId: string,
 	) {
-		const row = await this.mustGet(displayId);
+		const row = await this.assertOrderViewable(viewerUserId, viewerRole, displayId);
 		const buyer = (
 			await this.deps.db.select().from(users).where(eq(users.id, row.userId))
 		)[0]!;
-
-		// امن-۳: ادمین۲ فقط مالک خودش یا صفِ PAID داخل حوزه را می‌بیند.
-		// قبلاً سفارش‌های PAID بدون چک scope برای همه‌ی ادمین‌های۲ باز بود.
-		if (viewerRole === "admin2") {
-			await this.assertViewable(viewerUserId, row);
-		}
 
 		const items = await this.deps.db
 			.select()
@@ -437,6 +431,14 @@ export class LiveService {
 		};
 	}
 
+	/** Apply the same staff ownership/scope rule to detail and invoice endpoints. */
+	async assertOrderViewable(viewerUserId: string, viewerRole: string, displayId: string): Promise<OrderRow> {
+		if (viewerRole !== "admin" && viewerRole !== "admin2") throw Err.forbidden();
+		const row = await this.mustGet(displayId);
+		if (viewerRole === "admin2") await this.assertViewable(viewerUserId, row);
+		return row;
+	}
+
 	// ── داخلی ──
 
 	/**
@@ -449,7 +451,7 @@ export class LiveService {
 		row: OrderRow,
 	): Promise<void> {
 		if (row.confirmedBy === adminUserId) return;
-		if (row.status === "PAID") {
+		if (row.status === "PAID" && row.confirmedBy === null) {
 			const scope = await this.deps.admin2.scopeOf(adminUserId);
 			const inScope =
 				!!scope &&

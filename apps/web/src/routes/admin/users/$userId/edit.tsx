@@ -13,6 +13,8 @@ import { AdminUserEditSkeleton } from '#/components/LoadingSkeletons'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { PermissionGate } from '#/components/shared/PermissionGate'
 import { usePermissions } from '#/hooks/admin/usePermissions'
+import { hasAdminPermission } from '#/utils/adminAccess'
+import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { ChevronRight } from 'reicon-react'
 
 
@@ -21,17 +23,25 @@ const AdminUserEditPage = memo(function AdminUserEditPage() {
   const { userId } = Route.useParams()
   const { permissions, isChecking } = usePermissions()
 
-  const { data: user } = useQuery(adminUserDetailsOptions(userId))
+  const { data: user, isLoading, isError, refetch } = useQuery({
+    ...adminUserDetailsOptions(userId),
+    enabled: permissions.usersWrite,
+  })
 
   const page = useAdminUserEditPage(userId, user)
 
   // گارد — ویرایش فقط با usersWrite
-  if (isChecking) {
+  if (isChecking || isLoading) {
     return <AdminUserEditSkeleton />
   }
   if (!permissions.usersWrite) {
     return <PermissionGate hasAccess={false} pageName="ویرایش کاربر" />
   }
+  if (isError && !user) return <div role="alert" className="space-y-3 text-center py-12">
+    <p>دریافت اطلاعات کاربر ناموفق بود.</p>
+    <button type="button" onClick={() => void refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+  </div>
+  if (!user) return <RouteNotFound />
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -95,9 +105,11 @@ export const Route = createFileRoute('/admin/users/$userId/edit')({
   // ⬅ NEW: پیش‌واکشی — دیتای کاربر معمولاً از قبل در کش است (ناوبری از
   // صفحه‌ی جزئیات)؛ این loader فقط برای deep-link/رفرش مستقیم تضمین می‌کند
   loader: async ({ context, params }) => {
+    if (!await hasAdminPermission(context.queryClient, 'usersWrite')) return
     await context.queryClient.query(adminUserDetailsOptions(params.userId))
   },
   pendingComponent: AdminUserEditSkeleton,
+  errorComponent: RouteError,
   head: () => ({
     meta: [
       { title: 'ویرایش کاربر | سین شین' },

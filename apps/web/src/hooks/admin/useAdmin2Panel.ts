@@ -122,9 +122,10 @@ export function useAdmin2Panel() {
 
 	// ⬅ NEW: سشن از فکتوری مشترک — با usePermissions/AdminLayout/داشبورد یک کش
 	// (staleTime ۱۵s داخل فکتوری متمرکز شده)
-	const { data: session, isLoading } = useQuery(admin2SessionOptions)
+	const { data: session, isLoading: sessionLoading, isError: sessionError, refetch: refetchSession } = useQuery(admin2SessionOptions)
 
 	const adminId = session?.admin?.userId ?? ''
+	const canReadOrders = session?.isAdmin2LoggedIn === true && session.admin?.permissions.orderDetailsRead === true
 
 	// ⬅ NEW: پول تطبیقی — فاصله‌ی ریفچ بر اساس دیتای آخرین پول:
 	//   * سفارش PAID در صف → هر ۲.۵ ثانیه (جهت تایید سریع)
@@ -135,9 +136,9 @@ export function useAdmin2Panel() {
 	// می‌ایستاد و سفارش جدید دیده نمی‌شد تا بازگشت به تب)
 	// ⬅ round-16 — وضعیت SSE (قبل از کوئری تعریف می‌شود تا closure پول به آن دسترسی داشته باشد)
 	const [sseConnected, setSseConnected] = useState(false)
-	const { data: liveData, refetch: refetchLive } = useQuery({
+	const { data: liveData, refetch: refetchLive, isLoading: liveLoading, isError: liveError } = useQuery({
 		...admin2LiveOrdersOptions(adminId),
-		enabled: session?.isAdmin2LoggedIn === true,
+		enabled: canReadOrders,
 		refetchInterval: (query) => {
 			// stage-74 — در پس‌زمینه (تب مخفی/PWAMinimize) پولِ سریع خاموش:
 			// قبلاً PAID در صف یعنی ۲.۵s حتی مخفی (~۱۴۴۰ req/h). حالا فقط تورِ
@@ -161,7 +162,7 @@ export function useAdmin2Panel() {
 	// lib/sse-client مشترک — تایم‌اوت اتصال/watchdog سکوت/retry/بازسازی
 	// روی برگشت از پس‌زمینه داخلش است). پول تطبیقی تور ایمنی است.
 	useEffect(() => {
-		if (!session?.isAdmin2LoggedIn) return
+		if (!canReadOrders) return
 		if (typeof window === 'undefined' || typeof AbortController === 'undefined')
 			return
 
@@ -230,30 +231,24 @@ export function useAdmin2Panel() {
 			sse.stop()
 			setSseConnected(false)
 		}
-	}, [session?.isAdmin2LoggedIn, refetchLive])
+	}, [canReadOrders, adminId, refetchLive])
 
 	// دینگ سفارش جدید
 	// round-29 — قبلاً شرط prevCountRef.current > 0 یعنی پنلِ خالی هرگز برای
 	// «اولین» سفارش دینگ/توست نمی‌زد. حالا فقط اولین لودِ داده بی‌صدا مبنای شمارش
 	// می‌شود (چه خالی چه پُر) و هر رشد بعدی — حتی از صفر — اعلان می‌دهد.
-	const prevCountRef = useRef(0)
-	const firstLoadRef = useRef(true)
+	const previousOrdersRef = useRef<{ adminId: string; ids: Set<string> } | null>(null)
 	const orders = liveData?.orders ?? []
 	useEffect(() => {
-		if (firstLoadRef.current) {
-			// اولین پاسخ موفق → فقط مبنای شمارش؛ دینگِ لود اولیه نمی‌خواهیم
-			if (liveData !== undefined) {
-				firstLoadRef.current = false
-				prevCountRef.current = orders.length
-			}
-			return
-		}
-		if (orders.length > prevCountRef.current) {
+		if (!liveData || !canReadOrders) return
+		const previous = previousOrdersRef.current
+		// Compare identities: one completed order and one new order can leave the queue size unchanged.
+		if (previous?.adminId === adminId && liveData.orders.some(order => order.status === 'PAID' && !previous.ids.has(order.id))) {
 			if (state.soundEnabled) playDing()
 			showToast('🔔 سفارش جدید ثبت شد!')
 		}
-		prevCountRef.current = orders.length
-	}, [liveData, orders.length, state.soundEnabled, showToast])
+		previousOrdersRef.current = { adminId, ids: new Set(liveData.orders.map(order => order.id)) }
+	}, [adminId, canReadOrders, liveData, state.soundEnabled, showToast])
 
 	// --- لاگ‌اوت: ابطال سشن سمت سرور + پاک‌سازی کامل (phase-3) ---
 	// subAdminLogout → POST /auth/logout (برای admin2 سشن + لاگ فعالیت هم بسته می‌شود)
@@ -350,7 +345,12 @@ export function useAdmin2Panel() {
 	return {
 		state,
 		session,
-		isLoading,
+		isLoading: sessionLoading || (canReadOrders && liveLoading),
+		sessionError,
+		liveError,
+		refetchSession,
+		refetchLive,
+		canReadOrders,
 		orders,
 		isLoggingOut: logoutMutation.isPending,
 		handleLogout,

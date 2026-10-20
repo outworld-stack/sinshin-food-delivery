@@ -1020,7 +1020,7 @@ export interface SubAdminPermissionsDto {
   articlesWrite: boolean
   /** stage-84 — اعلام وضعیت «شلوغ» رستوران (پیش‌فرضِ افزودن: false) */
   canAnnounceBusy: boolean
-  /** stage-89 — چاپِ مستقیم فاکتور و «تغییرِ تخصیصِ سراسریِ چاپگرها» (پیش‌فرضِ
+  /** جستجو/ثبت/انتخاب چاپگر شبکه و چاپ مستقیم فاکتور (پیش‌فرضِ
    *  افزودن: false — مجوزِ اختصاصی؛ ادمین۲ بدونِ آن فقط لیست/وضعیت می‌بیند و
    *  چاپ با دیالوگِ مرورگر می‌رود) */
   printingManage: boolean

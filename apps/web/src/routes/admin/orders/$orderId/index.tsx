@@ -18,6 +18,8 @@ import { memo } from 'react'
 import { ChevronRight, Phone, Store } from 'reicon-react'
 import { AdminOrderDetailSkeleton } from '#/components/LoadingSkeletons'
 import { OrderBreakdownCard } from '#/components/shared/OrderBreakdownCard'
+import { PermissionGate } from '#/components/shared/PermissionGate'
+import { hasAdminPermission } from '#/utils/adminAccess'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
 import { StatusBadge } from '#/components/shared/StatusBadge'
 import { usePermissions } from '#/hooks/admin/usePermissions'
@@ -32,7 +34,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 	const { orderId } = Route.useParams()
 	const showToast = useToastStore((s) => s.showToast)
 	const hydrated = useHydrated()
-	const { permissions, isMainAdmin } = usePermissions()
+	const { permissions, isMainAdmin, isChecking } = usePermissions()
 
 	// نقش‌محور: ادمین۲ فقط سفارش خودش (بک: adminId از کوکی)
 	const role = useAuthStore((s) => s.role)
@@ -42,12 +44,19 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 	// ⬅ NEW: اشتراک در کش مشترک با loader (فکتوری مرکزی) —
 	// همان کلیدی که loader با کوئری پر کرده؛
 	// نامعتبرسازی از ConfirmOrderModal (تایید/تغییر پیک) اینجا واقعاً می‌نشیند
-	const { data: order } = useQuery(
-		adminOrderDetailsOptions(orderId, viewAdmin2Id),
-	)
+	const { data: order, isLoading, isError, refetch } = useQuery({
+		...adminOrderDetailsOptions(orderId, viewAdmin2Id),
+		enabled: permissions.orderDetailsRead,
+	})
 
 	// ریز فاکتور — ادمین اصلی همیشه / ادمین۲ با پرمیشن orderDetailsRead
 	const canSeeBreakdown = isMainAdmin || permissions.orderDetailsRead
+	if (isChecking || isLoading) return <AdminOrderDetailSkeleton />
+	if (!permissions.orderDetailsRead) return <PermissionGate hasAccess={false} pageName="جزئیات سفارش" />
+	if (isError && !order) return <div role="alert" className="space-y-3 text-center py-12">
+		<p>دریافت سفارش ناموفق بود.</p>
+		<button type="button" onClick={() => void refetch()} className="text-primary underline cursor-pointer">تلاش دوباره</button>
+	</div>
 
 	if (!order) {
 		// در حال ریفچ بعد از نامعتبرسازی یا سفارش خارج از دسترس نقش
@@ -367,6 +376,7 @@ export const Route = createFileRoute('/admin/orders/$orderId/')({
 		await ensureAuthHydrated()
 		const { role, admin2Id } = useAuthStore.getState()
 		if (role !== 'admin' && role !== 'admin2') return
+		if (!await hasAdminPermission(context.queryClient, 'orderDetailsRead')) return
 		const viewAdmin2Id = role === 'admin2' ? (admin2Id ?? undefined) : undefined
 		const order = await context.queryClient.query(
 			adminOrderDetailsOptions(params.orderId, viewAdmin2Id),

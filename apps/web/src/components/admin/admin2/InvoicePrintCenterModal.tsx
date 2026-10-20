@@ -21,8 +21,8 @@
 //  · خطای چاپِ مستقیم هرگز سفارش را نمی‌کُشد — همان فاکتور با دیالوگِ
 //    مرورگر جایگزین می‌شود.
 //  · پیش‌نمایشِ زنده (stage-85) دست‌نخورده — عینِ مسیرِ مرورگر.
-//  · مدیریتِ چاپگرها (افزودن/حذف/تست/اسکن) فقط برای ادمین اصلی — بخشِ
-//    تاشوی پایین (PrinterManager).
+//  · جستجو و انتخاب چاپگر برای ادمین اصلی و ادمین۲ با printingManage.
+//    ویرایش/حذف/تست فقط برای ادمین اصلی در بخش PrinterManager.
 // ═══════════════════════════════════════════════════════════════
 
 import type {
@@ -270,12 +270,12 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	const discovery = useQuery({
 		queryKey: PRINTER_DISCOVERY_KEY,
 		queryFn: () => discoverAdminPrinters(),
-		enabled: isMainAdmin,
+		enabled: canManagePrint,
 		staleTime: 30_000,
 		retry: false,
 		refetchOnWindowFocus: false,
 	})
-	const discovered = isMainAdmin
+	const discovered = canManagePrint
 		? (discovery.data?.found ?? []).filter(
 				(found) =>
 					!printers.some((p) => p.host === found.host && p.port === found.port),
@@ -560,12 +560,10 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 						) : (
 							<div className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
 								چاپگری روی سرور ثبت نشده — فعلاً چاپ با دیالوگ مرورگر است.{' '}
-								{isMainAdmin
-									? 'چاپگر شناسایی‌شده را از فهرست سالن یا آشپزخانه انتخاب کنید تا ثبت و پیش‌فرض شود.'
-									: 'از مدیرِ اصلی بخواهید چاپگرِ شبکه را ثبت کند.'}
+								چاپگر شناسایی‌شده را از فهرست سالن یا آشپزخانه انتخاب کنید تا ثبت و پیش‌فرض شود.
 							</div>
 						)}
-						{isMainAdmin && (
+						{canManagePrint && (
 							<div className="mt-2 space-y-1.5 text-[11px] font-DanaMedium text-gray-500 dark:text-gray-400">
 								<div
 									className="flex items-center justify-between gap-2"
@@ -595,13 +593,13 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 									<p className="text-amber-600 dark:text-amber-400">
 										{discovery.error instanceof Error
 											? discovery.error.message
-											: 'شبکهٔ چاپگر را در بخش مدیریت بررسی کنید.'}
+											: 'جستجوی چاپگر ناموفق بود؛ دوباره تلاش کنید.'}
 									</p>
 								)}
 								<p>
 									انتخاب هر فهرست به‌عنوان چاپگر پیش‌فرض همان بخش برای همهٔ
 									ایستگاه‌ها ذخیره می‌شود. کاغذ چاپگر تازه ۸۰ میلی‌متر است؛ تنظیمات
-									آن در مدیریت چاپگرها قابل ویرایش است.
+									آن توسط مدیر اصلی قابل ویرایش است.
 								</p>
 							</div>
 						)}

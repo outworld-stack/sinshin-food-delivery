@@ -176,12 +176,12 @@ export function useAdminUsersPage() {
 
   // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
   // preload-on-intent (هاور روی «کاربران» در سایدبار) => ناوبری آنی
-  const { data, isLoading } = useQuery(adminUsersOptions({
+  const { data, isLoading, isError, refetch } = useQuery({ ...adminUsersOptions({
     page: search.page, limit: search.limit,
     search: search.search, deviceType: search.deviceType, deviceBrand: search.deviceBrand,
     status: search.status,
     sortDate: search.sortDate, sortWallet: search.sortWallet, sortSpent: search.sortSpent,
-  }))
+  }), enabled: permissions.usersRead })
 
   // مسدودسازی — ⬅ NEW: آپدیت اپتیمیستیک با بازگردانی
   // قبلاً: کلیک → انتظار سرور → نامعتبرسازی → رفرش.
@@ -308,8 +308,8 @@ export function useAdminUsersPage() {
   }, [])
 
   const handleConfirmToggle = useCallback(() => {
-    if (state.confirmToggle) toggleMutation.mutate(state.confirmToggle.id)
-  }, [state.confirmToggle, toggleMutation])
+    if (permissions.usersWrite && state.confirmToggle && !toggleMutation.isPending) toggleMutation.mutate(state.confirmToggle.id)
+  }, [permissions.usersWrite, state.confirmToggle, toggleMutation])
 
   const handleCancelToggle = useCallback(() => dispatch({ type: 'CLEAR_TOGGLE' }), [])
 
@@ -317,7 +317,7 @@ export function useAdminUsersPage() {
     // ساختار قبلی حفظ شده — کامپوننت‌ها بدون تغییر کار می‌کنن
     // page/limit دیگر از کاهنده نیستند؛ از URL می‌آیند (تایپ‌دار)
     state: { ...state, page: search.page, limit: search.limit },
-    data, isLoading, permissions, isChecking,
+    data, isLoading, isError, refetch, permissions, isChecking,
     toggleMutation,
     handleTempSearch, handleTempDeviceType, handleTempDeviceBrand, handleTempStatus,
     handleTempSortDate, handleTempSortWallet, handleTempSortSpent,

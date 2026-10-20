@@ -234,7 +234,7 @@ export const buildApp = (deps: AppDeps) => {
         audit: deps.audit,
       }),
     )
-    .use(realtimeRoutes({ hub: deps.sseHub, sessions: deps.sessions, db: deps.db.db }))
+    .use(realtimeRoutes({ hub: deps.sseHub, sessions: deps.sessions, admin2: deps.admin2, db: deps.db.db }))
     .use(
       authRoutes({
         config: deps.config,

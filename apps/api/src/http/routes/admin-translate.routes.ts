@@ -7,22 +7,41 @@
 
 // src/http/routes/admin-translate.routes.ts
 import { Elysia, t } from 'elysia'
+import type { TranslationEntityType } from '@sinshin/shared'
 
 import type { SessionService } from '#/domain/auth/session.service'
-import type { Admin2Service } from '#/domain/admin2/admin2.service'
+import type { Admin2Service, Admin2Permissions } from '#/domain/admin2/admin2.service'
 import type { TranslationService } from '#/domain/translation/translation.service'
+import { Err } from '#/domain/shared/errors'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
 
 /**
  * round-35 — صف و پیش‌نمایش ترجمه‌ی خودکار (مترجم آفلاین NLLB).
  *
- * گارد: requireAdmin2 پایه (ادمین اصلی + هر ادمین۲ فعال) — بدون
- * permission خاص. چرا: این روت‌ها فقط ستون‌های «عربی» محتوای نمایشی
- * را می‌نویسند، نوشتن دستی را هرگز بازنویسی نمی‌کنند (قرارداد
- * «دستی برنده» در سرویس) و فارسیِ سایت را دست نمی‌زنند؛ جایی هم
- * برای permission جدید در مدل فعلی (products/users/couriers/...)
- * نمی‌ماند. preview اصلاً DB نمی‌نویسد.
+ * Active staff may preview translations and read queue status. Enqueuing
+ * jobs writes published content through the worker, so it requires the same
+ * edit permission as the entity's normal administration routes.
  */
+
+const ENTITY_WRITE_PERMISSION: Record<TranslationEntityType, keyof Admin2Permissions | null> = {
+  product: 'productsWrite',
+  mainCategory: 'mainCategoriesWrite',
+  category: 'mainCategoriesWrite',
+  article: 'articlesWrite',
+  articleCategory: 'articlesWrite',
+  articleSubCategory: 'articlesWrite',
+  gallery: null,
+  terms: null,
+  about: null,
+}
+
+function assertCanEnqueue(role: string, permissions: Admin2Permissions | null, entityType?: TranslationEntityType): void {
+  if (role === 'admin') return
+  const permission = entityType ? ENTITY_WRITE_PERMISSION[entityType] : null
+  if (!permission || !permissions?.[permission]) {
+    throw Err.forbidden('اجازه‌ی ویرایش ترجمه‌ی این محتوا را ندارید.')
+  }
+}
 
 const EntityTypeSchema = t.Union([
   t.Literal('product'),
@@ -65,7 +84,10 @@ export const adminTranslateRoutes = (deps: AdminTranslateRoutesDeps) =>
     )
 
     // ── صف‌کردن یک موجودیت (حذف تکرار با موارد در انتظار) ──
-    .post('/', async ({ body }) => deps.translation.enqueue(body.entityType, body.entityId), {
+    .post('/', async ({ body, user, admin2 }) => {
+      assertCanEnqueue(user.role, admin2, body.entityType)
+      return deps.translation.enqueue(body.entityType, body.entityId)
+    }, {
       body: t.Object({
         entityType: EntityTypeSchema,
         // 'terms' مقدار ویژه‌ی 'latest' را هم می‌پذیرد (در سرویس تفسیر می‌شود)
@@ -77,7 +99,10 @@ export const adminTranslateRoutes = (deps: AdminTranslateRoutesDeps) =>
     // ── صف‌کردن همه‌ی ناقص‌ها (یک نوع یا همه) ──
     .post(
       '/bulk',
-      async ({ body }) => deps.translation.enqueueBulkMissing(body.entityType),
+      async ({ body, user, admin2 }) => {
+        assertCanEnqueue(user.role, admin2, body.entityType)
+        return deps.translation.enqueueBulkMissing(body.entityType)
+      },
       {
         body: t.Object({ entityType: t.Optional(EntityTypeSchema) }),
         detail: {

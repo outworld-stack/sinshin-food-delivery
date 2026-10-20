@@ -38,10 +38,10 @@
 
 //src/domain/print/print.service.ts
 import dns from 'node:dns/promises'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
-import { printers, PRINTER_WIDTH_DOTS, SETTING_KEYS } from '#/infra/db/schema'
+import type { Db, DbOrTx, Tx } from '#/infra/db/client'
+import { printers, PRINTER_WIDTH_DOTS, settings, SETTING_KEYS } from '#/infra/db/schema'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import { Err } from '#/domain/shared/errors'
 import { isUniqueViolation } from '#/domain/shared/pg'
@@ -409,19 +409,20 @@ export class PrinterService {
   }
 
   async remove(id: string): Promise<void> {
-    const [row] = await this.deps.db.delete(printers).where(eq(printers.id, id)).returning()
-    if (!row) throw Err.notFound('چاپگر پیدا نشد.')
+    await this.withAssignmentLock(async (tx) => {
+      const [row] = await tx.delete(printers).where(eq(printers.id, id)).returning()
+      if (!row) throw Err.notFound('چاپگر پیدا نشد.')
+      // Read under the same lock as selection, and commit cleanup with deletion.
+      const assignment = await this.readAssignment(tx)
+      if (assignment.sales === id || assignment.kitchen === id) {
+        await this.writeAssignment(tx, {
+          sales: assignment.sales === id ? null : assignment.sales,
+          kitchen: assignment.kitchen === id ? null : assignment.kitchen,
+        })
+      }
+    })
     this.probeCache.delete(id)
     this.probeInFlight.delete(id)
-    // تخصیصِ فاکتورها اگر به این چاپگر اشاره می‌کند پاک شود — رفرنسِ مرده نه
-    const assignment = await this.assignment()
-    const next: InvoicePrinterAssignmentDto = {
-      sales: assignment.sales === id ? null : assignment.sales,
-      kitchen: assignment.kitchen === id ? null : assignment.kitchen,
-    }
-    if (next.sales !== assignment.sales || next.kitchen !== assignment.kitchen) {
-      await this.setAssignment(next)
-    }
   }
 
   // ── گزارشِ توپولوژیِ شبکه (P1) — «مسیرِ واقعیِ شبکه» شفاف ──
@@ -551,8 +552,18 @@ export class PrinterService {
 
   // ── تخصیصِ «هر نوع فاکتور → چاپگر» (settings؛ الگوی درگاه‌ها) ──
 
-  async assignment(): Promise<InvoicePrinterAssignmentDto> {
-    const raw = await this.deps.settings.get<unknown>(SETTING_KEYS.invoicePrinters, {})
+  private withAssignmentLock<T>(run: (tx: Tx) => Promise<T>): Promise<T> {
+    return this.deps.db.transaction(async (tx) => {
+      // Coordinate all API instances, including the first assignment before a
+      // settings row exists. Lock before validating or deleting any printer.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('print:assignment', 0))`)
+      return run(tx)
+    })
+  }
+
+  private async readAssignment(db: DbOrTx): Promise<InvoicePrinterAssignmentDto> {
+    // Printer removal/selection must be visible immediately across instances.
+    const raw = await this.deps.settings.get<unknown>(SETTING_KEYS.invoicePrinters, {}, db)
     const stored = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
     const sales = stored.sales
     const kitchen = stored.kitchen
@@ -560,6 +571,20 @@ export class PrinterService {
       sales: typeof sales === 'string' && sales.length > 0 ? sales : null,
       kitchen: typeof kitchen === 'string' && kitchen.length > 0 ? kitchen : null,
     }
+  }
+
+  private async writeAssignment(tx: Tx, next: InvoicePrinterAssignmentDto): Promise<void> {
+    const value = { sales: next.sales ?? null, kitchen: next.kitchen ?? null }
+    await tx.insert(settings)
+      .values({ key: SETTING_KEYS.invoicePrinters, value })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value, updatedAt: new Date() },
+      })
+  }
+
+  assignment(): Promise<InvoicePrinterAssignmentDto> {
+    return this.readAssignment(this.deps.db)
   }
 
   async setAssignment(next: InvoicePrinterAssignmentDto): Promise<void> {
@@ -571,18 +596,17 @@ export class PrinterService {
         ),
       ),
     ]
-    if (wanted.length > 0) {
-      const found = await this.deps.db
-        .select({ id: printers.id })
-        .from(printers)
-        .where(inArray(printers.id, wanted))
-      if (found.length !== wanted.length) {
-        throw Err.validation('چاپگرِ انتخاب‌شده برای یکی از فاکتورها پیدا نشد.')
+    await this.withAssignmentLock(async (tx) => {
+      if (wanted.length > 0) {
+        const found = await tx
+          .select({ id: printers.id })
+          .from(printers)
+          .where(inArray(printers.id, wanted))
+        if (found.length !== wanted.length) {
+          throw Err.validation('چاپگرِ انتخاب‌شده برای یکی از فاکتورها پیدا نشد.')
+        }
       }
-    }
-    await this.deps.settings.set(SETTING_KEYS.invoicePrinters, {
-      sales: next.sales ?? null,
-      kitchen: next.kitchen ?? null,
+      await this.writeAssignment(tx, next)
     })
   }
 
