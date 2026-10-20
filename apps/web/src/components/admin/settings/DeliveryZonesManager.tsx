@@ -31,7 +31,8 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
   const [editing, setEditing] = useState<{ radiusKm: number; radius: string; fee: string } | null>(null)
 
   // ⬅ NEW: کوئری از فکتوری مرکزی — قبلاً کلید خام ['delivery-zones'] بود (هم‌hash)
-  const { data, isLoading } = useQuery(deliveryZonesOptions)
+  const { data, isLoading, isError } = useQuery(deliveryZonesOptions)
+  const reportError = (error: Error) => showToast(error.message || 'ذخیره ناحیه ناموفق بود', 'error')
 
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: qk.deliveryZones })
@@ -42,6 +43,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
 
   const addMut = useMutation({
     mutationFn: (payload: { radiusKm: number; fee: number }) => addDeliveryZone(payload),
+    onError: reportError,
 
     onSuccess: (res) => {
       if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
@@ -54,6 +56,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
 
   const removeMut = useMutation({
     mutationFn: (radiusKm: number) => removeDeliveryZone({ radiusKm }),
+    onError: reportError,
     onSuccess: (res) => {
       if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
       invalidate()
@@ -64,6 +67,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
 
   // round-13 — به‌روزرسانی ناحیه (فقط ادمین اصلی؛ API گارد دارد)
   const updateMut = useMutation({
+    onError: reportError,
     mutationFn: (payload: { radiusKm: number; newRadiusKm: number; fee: number }) =>
       updateDeliveryZone(payload),
     onSuccess: (res) => {
@@ -77,8 +81,8 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
   const handleAdd = useCallback(() => {
     const radiusKm = Number(radiusInput)
     const fee = Number(feeInput)
-    if (!Number.isFinite(radiusKm) || radiusKm < 0.5) { showToast('شعاع حداقل ۰.۵ کیلومتر', 'error'); return }
-    if (!Number.isFinite(fee) || fee < 0) { showToast('هزینه معتبر نیست', 'error'); return }
+    if (!Number.isFinite(radiusKm) || radiusKm < 0.5 || radiusKm > 500) { showToast('شعاع باید بین ۰.۵ و ۵۰۰ کیلومتر باشد', 'error'); return }
+    if (!feeInput.trim() || !Number.isSafeInteger(fee) || fee < 0 || fee > 2_147_483_647) { showToast('هزینه معتبر نیست', 'error'); return }
     addMut.mutate({ radiusKm, fee })
   }, [radiusInput, feeInput, addMut, showToast])
 
@@ -93,8 +97,8 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
     if (!editing) return
     const newRadiusKm = Number(editing.radius)
     const fee = Number(editing.fee)
-    if (!Number.isFinite(newRadiusKm) || newRadiusKm < 0.5) { showToast('شعاع حداقل ۰.۵ کیلومتر', 'error'); return }
-    if (!Number.isFinite(fee) || fee < 0) { showToast('هزینه معتبر نیست', 'error'); return }
+    if (!Number.isFinite(newRadiusKm) || newRadiusKm < 0.5 || newRadiusKm > 500) { showToast('شعاع باید بین ۰.۵ و ۵۰۰ کیلومتر باشد', 'error'); return }
+    if (!editing.fee.trim() || !Number.isSafeInteger(fee) || fee < 0 || fee > 2_147_483_647) { showToast('هزینه معتبر نیست', 'error'); return }
     updateMut.mutate({ radiusKm: editing.radiusKm, newRadiusKm, fee })
   }, [editing, updateMut, showToast])
 
@@ -128,6 +132,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
         </div>
       )}
 
+      {isError && <p role="alert" className="mb-3 text-sm text-red-500">دریافت ناحیه‌های ارسال ناموفق بود؛ دوباره تلاش کنید.</p>}
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (

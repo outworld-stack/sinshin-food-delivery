@@ -227,6 +227,13 @@ mapPickerElement.props.onChange({ lat: 37.5, lng: 49.5 })
 assert.equal((doc.blocks[0]!.props as { lat: number }).lat, 37.5, 'map click updates the block coordinates')
 assert.equal((doc.blocks[0]!.props as { lng: number }).lng, 49.5)
 assert.equal((doc.blocks[0]!.props as { title: string }).title, 'شعبه انزلی', 'map click never touches other block props')
+mapPickerElement.props.onValidityChange(false)
+pickerTree = render(pickerHost, Picker, pickerProps as never)
+assert.equal(find(pickerTree, node => node.type === 'button' && node.props['aria-expanded'] === true).props.disabled, true,
+	'an invalid coordinate draft remains mounted so native article-form validation cannot be bypassed by collapsing the map')
+mapPickerElement.props.onValidityChange(true)
+pickerTree = render(pickerHost, Picker, pickerProps as never)
+assert.equal(find(pickerTree, node => node.type === 'button' && node.props['aria-expanded'] === true).props.disabled, false)
 
 const client = new QueryClient()
 const affectedKeys = [qk.articleCategories, qk.adminArticleCategories, qk.adminArticles,

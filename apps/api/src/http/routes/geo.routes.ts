@@ -71,8 +71,6 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
     )
 
   // ── فاز-۲ — پروکسی سرویس‌های نشان (requireAuth: سهمیه API محافظت می‌شود) ──
-  const COORD_RE = '^-?\\d{1,3}(\\.\\d{1,7})?$'
-
   const userRoutes = new Elysia({ prefix: '/geo', tags: ['Geo'] })
     .use(requireAuth(deps.sessions))
     .get(
@@ -93,8 +91,8 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
       },
       {
         query: t.Object({
-          lat: t.String({ pattern: COORD_RE }),
-          lng: t.String({ pattern: COORD_RE }),
+          lat: t.Numeric({ minimum: -90, maximum: 90 }),
+          lng: t.Numeric({ minimum: -180, maximum: 180 }),
         }),
         beforeHandle: [
           ipRateLimit({ redis: deps.redis, scope: 'geo-reverse', limit: 120, windowSeconds: 60 }),
@@ -133,8 +131,8 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
       },
       {
         query: t.Object({
-          from: t.String({ minLength: 5, maxLength: 40 }),
-          to: t.String({ minLength: 5, maxLength: 40 }),
+          from: t.String({ minLength: 3, maxLength: 80 }),
+          to: t.String({ minLength: 3, maxLength: 80 }),
         }),
         beforeHandle: [
           ipRateLimit({ redis: deps.redis, scope: 'geo-route', limit: 60, windowSeconds: 60 }),
@@ -164,8 +162,8 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
       },
       {
         query: t.Object({
-          origins: t.String({ minLength: 5, maxLength: 500 }),
-          destinations: t.String({ minLength: 5, maxLength: 500 }),
+          origins: t.String({ minLength: 3, maxLength: 800 }),
+          destinations: t.String({ minLength: 3, maxLength: 800 }),
           type: t.Optional(t.String()),
           traffic: t.Optional(t.String()),
         }),
@@ -197,6 +195,7 @@ export const geoRoutes = (deps: GeoRoutesDeps) => {
 const parsePair = (s: string): { lat: number; lng: number } | null => {
   const parts = s.split(',')
   if (parts.length !== 2) return null
+  if (parts.some((part) => !/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(part.trim()))) return null
   const la = Number(parts[0])
   const ln = Number(parts[1])
   if (!Number.isFinite(la) || !Number.isFinite(ln)) return null

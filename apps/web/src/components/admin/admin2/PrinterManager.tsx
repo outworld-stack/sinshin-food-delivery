@@ -32,6 +32,7 @@ import {
 	discoverAdminPrinters,
 	removeAdminPrinter,
 	testAdminPrinter,
+	updateAdminPrinter,
 } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import { adminPrintNetworkOptions } from '#/utils/queryOptions'
@@ -40,6 +41,11 @@ interface PrinterManagerProps {
 	printers: PrinterDto[]
 	/** پس از هر تغییر — نامعتبرسازیِ کوئری چاپگرها */
 	onChanged: () => Promise<void>
+	onDiscovered: (result: {
+		scanned: string[]
+		found: PrinterDiscoveryDto[]
+	}) => void
+	disabled?: boolean
 }
 
 const WIDTH_LABEL: Record<number, string> = {
@@ -69,9 +75,12 @@ const MODE_LABEL: Record<
 export const PrinterManager = memo(function PrinterManager({
 	printers,
 	onChanged,
+	onDiscovered,
+	disabled = false,
 }: PrinterManagerProps) {
 	const showToast = useToastStore((s) => s.showToast)
 	const [open, setOpen] = useState(false)
+	const [editingId, setEditingId] = useState<string | null>(null)
 	const [name, setName] = useState('')
 	const [host, setHost] = useState('')
 	const [port, setPort] = useState('9100')
@@ -88,19 +97,24 @@ export const PrinterManager = memo(function PrinterManager({
 	// The topology report may describe a much larger subnet than a safe scan.
 
 	const addMutation = useMutation({
-		mutationFn: () =>
-			addAdminPrinter({
+		mutationFn: () => {
+			const input = {
 				name,
 				host,
-				port: Number(port) || 9100,
+				port: Number(port),
 				widthDots,
 				autoCut,
-			}),
+			}
+			return editingId
+				? updateAdminPrinter(editingId, input)
+				: addAdminPrinter(input)
+		},
 		onSuccess: async () => {
 			await onChanged()
 			showToast(`چاپگر «${name}» ثبت شد`)
 			setName('')
 			setHost('')
+			setEditingId(null)
 		},
 		onError: (err: Error) =>
 			showToast(err.message || 'ثبت چاپگر ناموفق بود', 'error'),
@@ -127,6 +141,7 @@ export const PrinterManager = memo(function PrinterManager({
 		mutationFn: () => discoverAdminPrinters(scanCidr || undefined),
 		onSuccess: (res) => {
 			setFound(res.found)
+			onDiscovered(res)
 			showToast(
 				res.found.length > 0
 					? `${res.found.length} دستگاهِ چاپ در شبکه پیدا شد`
@@ -138,6 +153,7 @@ export const PrinterManager = memo(function PrinterManager({
 	})
 
 	const submitAdd = useCallback(() => {
+		if (disabled || addMutation.isPending) return
 		if (!name.trim()) {
 			showToast('نام چاپگر را وارد کنید', 'error')
 			return
@@ -146,11 +162,17 @@ export const PrinterManager = memo(function PrinterManager({
 			showToast('IP چاپگر را وارد کنید (مثلاً 192.168.1.87)', 'error')
 			return
 		}
+		if (Number(port) !== 9100) {
+			showToast('فقط پورت 9100 برای چاپ شبکه پشتیبانی می‌شود', 'error')
+			return
+		}
 		addMutation.mutate()
-	}, [addMutation, host, name, showToast])
+	}, [addMutation, disabled, host, name, port, showToast])
 
 	const applyFound = useCallback(
 		(f: PrinterDiscoveryDto) => {
+			setEditingId(null)
+			setName(`چاپگر ${f.host}`)
 			setHost(f.host)
 			setPort(String(f.port))
 			setOpen(true)
@@ -177,7 +199,10 @@ export const PrinterManager = memo(function PrinterManager({
 			</button>
 
 			{open && (
-				<div className="px-3 pb-3 space-y-3">
+				<fieldset
+					disabled={disabled || addMutation.isPending}
+					className="px-3 pb-3 space-y-3 min-w-0"
+				>
 					{/* stage-89 (P1) — گزارشِ «مسیرِ واقعیِ شبکه» */}
 					{network && (
 						<div className="rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] p-2.5 space-y-1.5">
@@ -282,6 +307,20 @@ export const PrinterManager = memo(function PrinterManager({
 									</span>
 									<button
 										type="button"
+										onClick={() => {
+											setEditingId(p.id)
+											setName(p.name)
+											setHost(p.host)
+											setPort(String(p.port))
+											setWidthDots(p.widthDots as 576 | 384 | 420)
+											setAutoCut(p.autoCut)
+										}}
+										className="shrink-0 rounded-md border border-gray-200 dark:border-[#3a151c] px-2 py-1 text-[10px] cursor-pointer"
+									>
+										ویرایش
+									</button>
+									<button
+										type="button"
 										onClick={() => testMutation.mutate(p.id)}
 										disabled={testMutation.isPending}
 										className="shrink-0 rounded-md border border-gray-200 dark:border-[#3a151c] px-2 py-1 text-[10px] font-DanaMedium text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-100 dark:hover:bg-[#3a151c] transition disabled:opacity-50"
@@ -313,7 +352,7 @@ export const PrinterManager = memo(function PrinterManager({
 					<div className="rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] p-2.5 space-y-2">
 						<div className="flex items-center gap-1.5 text-[11px] font-DanaDemiBold text-gray-600 dark:text-gray-300">
 							<Plus size={13} />
-							افزودن چاپگر شبکه
+							{editingId ? 'ویرایش چاپگر شبکه' : 'افزودن چاپگر شبکه'}
 						</div>
 						<div className="grid grid-cols-2 gap-2">
 							<input
@@ -368,8 +407,25 @@ export const PrinterManager = memo(function PrinterManager({
 							disabled={addMutation.isPending}
 							className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-xs py-2 cursor-pointer hover:opacity-90 transition disabled:opacity-60"
 						>
-							{addMutation.isPending ? 'در حال ثبت…' : 'ثبت چاپگر'}
+							{addMutation.isPending
+								? 'در حال ثبت…'
+								: editingId
+									? 'ذخیرهٔ تغییرات'
+									: 'ثبت چاپگر'}
 						</button>
+						{editingId && (
+							<button
+								type="button"
+								onClick={() => {
+									setEditingId(null)
+									setName('')
+									setHost('')
+								}}
+								className="text-xs cursor-pointer"
+							>
+								انصراف از ویرایش
+							</button>
+						)}
 					</div>
 
 					{/* تشخیص در شبکه */}
@@ -431,7 +487,7 @@ export const PrinterManager = memo(function PrinterManager({
 							دیالوگِ مرورگر پشتیبان است.
 						</p>
 					</div>
-				</div>
+				</fieldset>
 			)}
 		</div>
 	)

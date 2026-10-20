@@ -552,6 +552,11 @@ export const ar: Dict = {
 
 	// ── الخريطة (الجولة ٣٣) ──
 	'map.pickLocation': 'اختيار الموقع على الخريطة',
+	'map.unavailable': 'الخريطة غير متاحة. يمكنك استخدام الإحداثيات أو رابط الخريطة.',
+	'map.invalidCoordinates': 'أدخل إحداثيات مكتملة وصحيحة لحفظ الموقع.',
+	'map.waitingLocation': 'بانتظار موقع الساعي…',
+	'map.viewDestination': 'عرض الوجهة على الخريطة ↗',
+	'map.routeDestination': 'الاتجاهات إلى الوجهة ↗',
 	'map.noKeyWarning':
 		'لم يتم ضبط مفتاح خريطة نُشان — يمكنك إدخال الإحداثيات يدوياً، أو',
 	'map.lat': 'خط العرض (lat)',

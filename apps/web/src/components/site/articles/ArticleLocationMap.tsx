@@ -1,91 +1,12 @@
-// ═══════════════════════════════════════════════════════════════
-// stage-84 — sinshin-food-delivery
-// مسیر مقصد: apps/web/src/components/site/articles/ArticleLocationMap.tsx (فایل جدید)
-// نقشه‌ی فقط-نمایش برای بلوک «موقعیت» مقاله.
-//
-// الگوها (هم‌خانواده‌ی MapPicker/CourierTrackingMap):
-//  · SDK نشان (MapLibre) از CDN — بدون تغییر package.json
-//  · کلاینتی-فقط: نقشه در useEffect بعد از mount ساخته می‌شود →
-//    SSR/کرالر متن/آدرس را می‌گیرد (درس ab-js — بدون JS هم محتوا هست)
-//  · بدون کلید VITE_NESHAN_MAP_KEY → هیچ رندر نقشه‌ای (سقوط بی‌صدا)؛
-//    آدرس/دکمه‌ی بیرونی از BlockContent اصلی می‌آید.
-// ═══════════════════════════════════════════════════════════════
-
-// src/components/site/articles/ArticleLocationMap.tsx
 import { memo, useEffect, useRef, useState } from 'react'
-
-const SDK_JS =
-	'https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.umd.js'
-const SDK_CSS =
-	'https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.css'
-const MAP_STYLE = 'https://static.neshan.org/sdk/maplibre/styles/light.json'
-
-const NESHAN_KEY =
-	(import.meta.env.VITE_NESHAN_MAP_KEY as string | undefined) ||
-	(import.meta.env.VITE_NESHAN_API_KEY as string | undefined)
-
-/** شکل loose سمت SDK — UMD بدون تایپ است */
-interface LooseMap {
-	remove(): void
-}
-interface LooseMarker {
-	setLngLat(pos: { lat: number; lng: number }): LooseMarker
-	addTo(map: LooseMap): LooseMarker
-	remove(): void
-}
-interface LooseMapLibre {
-	Map: new (opts: Record<string, unknown>) => LooseMap
-	Marker: new (opts: { element?: HTMLElement; anchor?: string }) => LooseMarker
-}
-
-let sdkPromise: Promise<LooseMapLibre> | null = null
-function loadNeshanSdk(): Promise<LooseMapLibre> {
-	if (sdkPromise) return sdkPromise
-	sdkPromise = new Promise<LooseMapLibre>((resolve, reject) => {
-		const w = window as unknown as { maplibregl?: { default?: LooseMapLibre } }
-		if (w.maplibregl?.default) return resolve(w.maplibregl.default)
-		const script = document.createElement('script')
-		script.src = SDK_JS
-		script.async = true
-		script.onload = () => {
-			const ml = (
-				window as unknown as { maplibregl?: { default?: LooseMapLibre } }
-			).maplibregl?.default
-			if (ml) resolve(ml)
-			else {
-				sdkPromise = null
-				reject(
-					new Error(
-						'SDK نقشه‌ی نشان لود شد اما window.maplibregl.default خالی است',
-					),
-				)
-			}
-		}
-		script.onerror = () => {
-			sdkPromise = null
-			reject(new Error('بارگذاری SDK نقشه‌ی نشان ناموفق بود'))
-		}
-		document.head.appendChild(script)
-		if (!document.querySelector(`link[href="${SDK_CSS}"]`)) {
-			const link = document.createElement('link')
-			link.rel = 'stylesheet'
-			link.href = SDK_CSS
-			document.head.appendChild(link)
-		}
-	})
-	return sdkPromise
-}
-
-function pinColor(): string {
-	try {
-		const v = getComputedStyle(document.documentElement)
-			.getPropertyValue('--color-primary')
-			.trim()
-		return v || '#f6339a'
-	} catch {
-		return '#f6339a'
-	}
-}
+import {
+	loadNeshanSdk,
+	NESHAN_KEY,
+	NESHAN_STYLE,
+	type NeshanMap,
+	type NeshanMarker,
+} from '#/lib/neshan-sdk'
+import { isNeshanCoord } from '#/utils/neshanLinks'
 
 interface ArticleLocationMapProps {
 	lat: number
@@ -93,30 +14,59 @@ interface ArticleLocationMapProps {
 	zoom?: number
 }
 
-/**
- * نقشه‌ی تعاملیِ فقط-نمایش با یک پین. interactive (زوم/جابه‌جایی) ولی
- * بدون هندلرِ کلیک — بلوکِ موقعیتِ مقاله داده‌ای تولید نمی‌کند.
- */
 export const ArticleLocationMap = memo(function ArticleLocationMap({
 	lat,
 	lng,
 	zoom = 15,
 }: ArticleLocationMapProps) {
 	const containerRef = useRef<HTMLDivElement>(null)
-	const [ready, setReady] = useState(false)
-	// ترمیم اسکنِ استیج-۸۴ — cleanupِ واقعی در خودِ افکت (map.remove در ref)؛
-	// قبلاً return از داخل .then بود که React نادیده می‌گیرد → نشتِ WebGL
-	const mapRef = useRef<LooseMap | null>(null)
+	const [visible, setVisible] = useState(false)
+	const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
+	const valid = isNeshanCoord(lat, lng)
+
+	// Long articles can contain many locations. Defer SDK/WebGL/tile work until
+	// each block approaches the viewport; leave its text and links server-rendered.
+	useEffect(() => {
+		if (!NESHAN_KEY || !valid || !containerRef.current) return
+		if (typeof IntersectionObserver === 'undefined') {
+			setVisible(true)
+			return
+		}
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((entry) => entry.isIntersecting)) {
+					setVisible(true)
+					observer.disconnect()
+				}
+			},
+			{ rootMargin: '200px' },
+		)
+		observer.observe(containerRef.current)
+		return () => observer.disconnect()
+	}, [valid])
 
 	useEffect(() => {
-		if (!NESHAN_KEY) return
+		if (!NESHAN_KEY || !valid || !visible) return
 		let cancelled = false
+		let map: NeshanMap | undefined
+		let marker: NeshanMarker | undefined
+		setState('loading')
+		const fail = () => {
+			if (cancelled) return
+			cancelled = true
+			marker?.remove()
+			map?.remove()
+			marker = undefined
+			map = undefined
+			setState('failed')
+		}
+		const timer = setTimeout(fail, 20_000)
 		void loadNeshanSdk()
-			.then((maplibregl) => {
+			.then((sdk) => {
 				if (cancelled || !containerRef.current) return
-				const map = new maplibregl.Map({
+				map = new sdk.Map({
 					container: containerRef.current,
-					style: MAP_STYLE,
+					style: NESHAN_STYLE,
 					center: [lng, lat],
 					zoom,
 					minZoom: 2,
@@ -125,34 +75,33 @@ export const ArticleLocationMap = memo(function ArticleLocationMap({
 					apiKey: NESHAN_KEY,
 					rtl: { lazy: false },
 				})
-				mapRef.current = map
-				const pinEl = document.createElement('div')
-				pinEl.style.cssText =
-					'width:32px;height:32px;transform:translate(-50%,-100%);'
-				pinEl.innerHTML = `<svg width="32" height="32" viewBox="0 0 24 24" fill="${pinColor()}" stroke="white" stroke-width="1"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>`
-				new maplibregl.Marker({ element: pinEl, anchor: 'bottom' })
-					.setLngLat({ lat, lng })
-					.addTo(map)
-				setReady(true)
+				marker = new sdk.Marker().setLngLat({ lat, lng }).addTo(map)
+				map.on('load', () => {
+					if (cancelled) return
+					clearTimeout(timer)
+					setState('ready')
+				})
 			})
 			.catch(() => {
-				// بدون نقشه هم بلوک کار می‌کند — آدرس + دکمه‌ی بیرونی از BlockContent
+				clearTimeout(timer)
+				fail()
 			})
 		return () => {
 			cancelled = true
-			mapRef.current?.remove()
-			mapRef.current = null
+			clearTimeout(timer)
+			marker?.remove()
+			map?.remove()
 		}
-	}, [lat, lng, zoom])
+	}, [lat, lng, zoom, valid, visible])
 
-	if (!NESHAN_KEY) return null
-
+	if (!NESHAN_KEY || !valid) return null
 	return (
 		<div
 			ref={containerRef}
+			hidden={state === 'failed'}
 			className={
 				'relative w-full h-56 sm:h-64 rounded-2xl overflow-hidden border border-gray-200 dark:border-[#3a151c] bg-gray-100 dark:bg-[#1a0a0e] ' +
-				(ready ? '' : 'animate-pulse')
+				(state === 'loading' ? 'animate-pulse' : '')
 			}
 			role="img"
 			aria-label="نقشه‌ی موقعیت"

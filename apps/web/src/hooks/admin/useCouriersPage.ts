@@ -11,7 +11,7 @@
 // حالا: همه‌ی فیلترها = search params روت (validateSearch با zod).
 // نکته‌ی UX: تاریخ‌ها مستقیم به URL می‌روند (دیت‌پیکر تعویض گسسته دارد،
 // نه تایپ پیوسته)؛ فقط جستجو تا دکمه‌ی «اعمال» درَفت می‌ماند.
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
@@ -34,10 +34,10 @@ export type AdminCouriersSearch = z.infer<typeof adminCouriersSearchSchema>
 // فقط یک درَفت محلی باقی مانده (جستجو) — کاهنده حذف شد؛ useState کفایت می‌کند
 export function useCouriersPage() {
   // درَفت جستجو — تا وقتی «اعمال» نشده فچی در کار نیست
-  const [tempSearch, setTempSearch] = useState('')
-
   const navigate = useNavigate({ from: '/admin/couriers/' })
   const search = useSearch({ from: '/admin/couriers/' })
+  const [tempSearch, setTempSearch] = useState(search.search)
+  useEffect(() => setTempSearch(search.search), [search.search])
 
   // کوئری — فکتوری مرکزی؛ همان کلیدی که loader روت با کوئری پر کرده.
   // placeholderData داخل فکتوری: تعویض صفحه/بازه بدون فلیک اسکلتون
@@ -49,10 +49,9 @@ export function useCouriersPage() {
   // آمار مشتق — مجموع تحویل‌ها و درآمد
   const stats = useMemo(() => {
     const couriers = data?.couriers ?? []
-    const allDeliveries = couriers.flatMap(c => c.trips.flatMap(t => t.deliveries))
-    const totalDeliveries = allDeliveries.length
-    const totalAmount = allDeliveries.reduce((s, d) => s + d.amount, 0)
-    const totalTrips = couriers.reduce((s, c) => s + c.trips.length, 0)
+    const totalDeliveries = couriers.reduce((sum, c) => sum + (c.totalDeliveries ?? c.trips.reduce((count, t) => count + t.deliveries.length, 0)), 0)
+    const totalAmount = couriers.reduce((sum, c) => sum + (c.totalAmount ?? c.trips.reduce((amount, t) => amount + t.deliveries.reduce((value, d) => value + d.amount, 0), 0)), 0)
+    const totalTrips = couriers.reduce((sum, c) => sum + (c.totalTrips ?? c.trips.length), 0)
     return { totalDeliveries, totalAmount, totalTrips }
   }, [data])
 

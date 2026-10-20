@@ -83,6 +83,7 @@ const MAX_RECEIPT_HEIGHT_DOTS = 4_000
 const DISCOVER_CONCURRENCY = 64
 const DISCOVER_PORT_TIMEOUT_MS = 350
 const DISCOVER_MAX_HOSTS = 512
+const DISCOVER_MAX_TOTAL_HOSTS = 2048
 /** P4 — تنها انتقالِ پیاده‌شده RAW/JetDirect است؛ IPP واقعی پیاده نشده */
 export const DISCOVER_PORTS = [9100] as const
 /** P2 — پورتِ مجازِ ثبتِ چاپگر: فقط 9100 (خامِ ESC/POS) */
@@ -105,12 +106,39 @@ interface ResolvedTarget {
   kind: IpKind
 }
 
+interface ReceiptInput {
+  printerId: string
+  widthPx: number
+  heightPx: number
+  rows: string
+}
+
+interface DiscoveryResult {
+  scanned: string[]
+  found: Array<{ host: string; port: number }>
+}
+
 export class PrinterService {
   constructor(
     private readonly deps: { db: Db; settings: SettingsService },
   ) {}
 
-  private readonly probeCache = new Map<string, { at: number; result: ProbeResult }>()
+  private readonly probeCache = new Map<string, { target: string; at: number; result: ProbeResult }>()
+  private readonly probeInFlight = new Map<string, { target: string; promise: Promise<ProbeResult> }>()
+  private readonly printerQueues = new Map<string, Promise<unknown>>()
+  private readonly discoveryInFlight = new Map<string, Promise<DiscoveryResult>>()
+  private discoveryQueue: Promise<unknown> = Promise.resolve()
+
+  /** Keep status requests and receipt streams from competing for the same device. */
+  private withPrinterLock<T>(id: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.printerQueues.get(id) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(run)
+    this.printerQueues.set(id, current)
+    void current.finally(() => {
+      if (this.printerQueues.get(id) === current) this.printerQueues.delete(id)
+    }).catch(() => undefined)
+    return current
+  }
 
   // ── سیاست (P2) — پرچم‌های dev/test فقط با env صریح ──
 
@@ -232,7 +260,7 @@ export class PrinterService {
     return p.online && !p.offline ? 'online' : 'offline'
   }
 
-  private toDto(row: typeof printers.$inferSelect, probe?: ProbeResult): PrinterDto {
+  private toDto(row: typeof printers.$inferSelect, probe?: ProbeResult, probedAt?: number): PrinterDto {
     const status: PrinterDto['status'] = probe
       ? PrinterService.combinedStatus(probe)
       : row.lastStatus === 'online' || row.lastStatus === 'offline'
@@ -247,7 +275,7 @@ export class PrinterService {
       autoCut: row.autoCut,
       status,
       statusDetail: probe ? probe.detail : row.lastStatusDetail,
-      lastStatusAt: (probe ? new Date() : row.lastStatusAt)?.toISOString() ?? null,
+      lastStatusAt: (probe ? new Date(probedAt ?? Date.now()) : row.lastStatusAt)?.toISOString() ?? null,
     }
   }
 
@@ -259,10 +287,21 @@ export class PrinterService {
     const probes = await Promise.all(
       rows.map(async (row) => {
         const cached = this.probeCache.get(row.id)
-        if (cached && now - cached.at < PROBE_CACHE_TTL_MS) return cached.result
-        const result = await this.probe(row.host, row.port)
-        this.probeCache.set(row.id, { at: now, result })
-        return result
+        const target = `${row.host}:${row.port}`
+        if (cached?.target === target && now - cached.at < PROBE_CACHE_TTL_MS) return cached.result
+        const pending = this.probeInFlight.get(row.id)
+        if (pending?.target === target) return pending.promise
+        const promise = this.withPrinterLock(row.id, () => this.probe(row.host, row.port))
+        this.probeInFlight.set(row.id, { target, promise })
+        try {
+          const result = await promise
+          if (this.probeInFlight.get(row.id)?.promise === promise) {
+            this.probeCache.set(row.id, { target, at: Date.now(), result })
+          }
+          return result
+        } finally {
+          if (this.probeInFlight.get(row.id)?.promise === promise) this.probeInFlight.delete(row.id)
+        }
       }),
     )
     // ذخیرهٔ تغییرات وضعیت (fire-and-forget نیست — ولی خطایش بی‌اهمیت است)
@@ -276,13 +315,13 @@ export class PrinterService {
             .set({
               lastStatus: status,
               lastStatusDetail: p.detail?.slice(0, 140) ?? null,
-              lastStatusAt: new Date(),
+              lastStatusAt: new Date(this.probeCache.get(row.id)?.at ?? Date.now()),
             })
             .where(eq(printers.id, row.id))
         }
       }),
     )
-    return rows.map((row, i) => this.toDto(row, probes[i] as ProbeResult))
+    return rows.map((row, i) => this.toDto(row, probes[i] as ProbeResult, this.probeCache.get(row.id)?.at))
   }
 
   private validateHostShape(host: string): string {
@@ -365,6 +404,7 @@ export class PrinterService {
       })
     if (!row) throw Err.notFound('چاپگر پیدا نشد.')
     this.probeCache.delete(id)
+    this.probeInFlight.delete(id)
     return this.toDto(row)
   }
 
@@ -372,6 +412,7 @@ export class PrinterService {
     const [row] = await this.deps.db.delete(printers).where(eq(printers.id, id)).returning()
     if (!row) throw Err.notFound('چاپگر پیدا نشد.')
     this.probeCache.delete(id)
+    this.probeInFlight.delete(id)
     // تخصیصِ فاکتورها اگر به این چاپگر اشاره می‌کند پاک شود — رفرنسِ مرده نه
     const assignment = await this.assignment()
     const next: InvoicePrinterAssignmentDto = {
@@ -512,8 +553,9 @@ export class PrinterService {
 
   async assignment(): Promise<InvoicePrinterAssignmentDto> {
     const raw = await this.deps.settings.get<unknown>(SETTING_KEYS.invoicePrinters, {})
-    const sales = (raw as { sales?: unknown }).sales
-    const kitchen = (raw as { kitchen?: unknown }).kitchen
+    const stored = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    const sales = stored.sales
+    const kitchen = stored.kitchen
     return {
       sales: typeof sales === 'string' && sales.length > 0 ? sales : null,
       kitchen: typeof kitchen === 'string' && kitchen.length > 0 ? kitchen : null,
@@ -546,12 +588,11 @@ export class PrinterService {
 
   // ── چاپ ──
 
-  async dispatch(input: {
-    printerId: string
-    widthPx: number
-    heightPx: number
-    rows: string
-  }): Promise<{ bytes: number }> {
+  dispatch(input: ReceiptInput): Promise<{ bytes: number }> {
+    return this.withPrinterLock(input.printerId, () => this.dispatchReceipt(input))
+  }
+
+  private async dispatchReceipt(input: ReceiptInput): Promise<{ bytes: number }> {
     const [row] = await this.deps.db.select().from(printers).where(eq(printers.id, input.printerId))
     if (!row) throw Err.notFound('چاپگر مقصد پیدا نشد.')
     const widthPx = input.widthPx
@@ -582,7 +623,7 @@ export class PrinterService {
     const target = await this.resolveTarget(row.host, false)
     this.assertPort(row.port)
     // پیش‌پرواز — کاغذ/آفلاینِ دستگاه، قبل از ارسالِ رستری
-    const pre = await this.probe(row.host, row.port)
+    const pre = await this.probe(target.connectIp, row.port)
     if (!pre.online) {
       const hint = await this.remoteHint(row.host)
       throw Err.validation(
@@ -612,13 +653,17 @@ export class PrinterService {
   }
 
   /** صفحهٔ تستِ اسکی — از همان سوکت؛ برایِ اطمینانِ اتصال/IP بدونِ مرورگر */
-  async test(id: string): Promise<{ bytes: number }> {
+  test(id: string): Promise<{ bytes: number }> {
+    return this.withPrinterLock(id, () => this.printTestPage(id))
+  }
+
+  private async printTestPage(id: string): Promise<{ bytes: number }> {
     const [row] = await this.deps.db.select().from(printers).where(eq(printers.id, id))
     if (!row) throw Err.notFound('چاپگر پیدا نشد.')
     const target = await this.resolveTarget(row.host, false)
     this.assertPort(row.port)
     // P5 — پیش‌پروای همانِ dispatch: دستگاهِ خود-آفلاین/بی‌کاغذ تست نمی‌گیرد
-    const pre = await this.probe(row.host, row.port)
+    const pre = await this.probe(target.connectIp, row.port)
     if (!pre.online) {
       const hint = await this.remoteHint(row.host)
       throw Err.validation(
@@ -668,7 +713,7 @@ export class PrinterService {
         if (scanCidrAllowed(c, { allowLoopback })) cidrs.push(c)
         else rejected.push(c)
       }
-      return { cidrs: cidrs.slice(0, 4), rejected }
+      return { cidrs, rejected }
     }
     const { allowLoopback } = this.flags()
     return {
@@ -733,11 +778,30 @@ export class PrinterService {
     if (hosts.length === 0) {
       throw Err.validation('بازهٔ اسکن معتبر نیست (مثال: 192.168.1.0/24 — تا سقف ۵۱۲ میزبان).')
     }
-    if (hosts.length > DISCOVER_MAX_HOSTS) {
+    if (hosts.length > DISCOVER_MAX_TOTAL_HOSTS) {
       throw Err.validation(
-        `بازهٔ اسکن بیش از حد بزرگ است — حداکثر ${DISCOVER_MAX_HOSTS} میزبان.`,
+        `بازه‌های اسکن بیش از حد بزرگ هستند — حداکثر ${DISCOVER_MAX_TOTAL_HOSTS} میزبان در مجموع.`,
       )
     }
+    const key = hosts.slice().sort().join(',')
+    const existing = this.discoveryInFlight.get(key)
+    if (existing) {
+      const result = await existing
+      return { ...result, scanned: cidrs }
+    }
+    // Coalesce matching requests; serialize different ranges so all open print
+    // centers together still use at most DISCOVER_CONCURRENCY sockets.
+    const promise = this.discoveryQueue.catch(() => undefined).then(() => this.scanHosts(hosts, cidrs))
+    this.discoveryQueue = promise
+    this.discoveryInFlight.set(key, promise)
+    try {
+      return await promise
+    } finally {
+      this.discoveryInFlight.delete(key)
+    }
+  }
+
+  private async scanHosts(hosts: string[], cidrs: string[]): Promise<DiscoveryResult> {
     const found: Array<{ host: string; port: number }> = []
     let cursor = 0
     const worker = async (): Promise<void> => {
@@ -759,6 +823,7 @@ export class PrinterService {
       }
     }
     await Promise.all(Array.from({ length: Math.min(DISCOVER_CONCURRENCY, hosts.length) }, worker))
+    found.sort((a, b) => (parseIpv4(a.host) as number) - (parseIpv4(b.host) as number))
     return { scanned: cidrs, found }
   }
 }

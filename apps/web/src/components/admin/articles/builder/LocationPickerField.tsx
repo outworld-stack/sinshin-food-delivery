@@ -31,6 +31,7 @@ export function LocationPickerField({
 	onChange,
 }: LocationPickerFieldProps) {
 	const [open, setOpen] = useState(false)
+	const [validDraft, setValidDraft] = useState(true)
 
 	return (
 		<div className="space-y-2">
@@ -38,6 +39,7 @@ export function LocationPickerField({
 				<button
 					type="button"
 					onClick={() => setOpen((v) => !v)}
+					disabled={open && !validDraft}
 					aria-expanded={open}
 					className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary dark:bg-dark-primary text-white text-xs font-DanaDemiBold cursor-pointer hover:opacity-90 transition"
 				>
@@ -69,7 +71,13 @@ export function LocationPickerField({
 					تستِ مسیریابی ↗
 				</a>
 			</div>
-			{open && <MapPicker value={{ lat, lng }} onChange={onChange} />}
+			{open && (
+				<MapPicker
+					value={{ lat, lng }}
+					onChange={onChange}
+					onValidityChange={setValidDraft}
+				/>
+			)}
 			{!open && (
 				<p className="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
 					روی نقشه کلیک کن تا نقطهٔ دقیق انتخاب شود (پین جابه‌جا می‌شود و آدرسِ

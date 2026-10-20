@@ -50,7 +50,7 @@ export const courierRoutes = (deps: CourierRoutesDeps) => {
           phone: t.String({ pattern: '^09[0-9]{9}$' }),
           // رارد H3 — otp-core.ts کد را با randomOtpCode(6) تولید می‌کند؛
           // قید ۴رقمی یعنی هر verify همیشه 422 → فلوی امنیتی مرده بود.
-          code: t.String({ minLength: 6, maxLength: 6 }),
+          code: t.String({ pattern: '^[0-9]{6}$' }),
         }),
         beforeHandle: ipRateLimit({
           redis: deps.redis,
@@ -127,13 +127,14 @@ export const courierRoutes = (deps: CourierRoutesDeps) => {
       // round-11 (اسکن H-3): روت قبلی آرایهٔ خام برمی‌گرداند و فیلترها را
       // نادیده می‌گرفت — صفحهٔ پنل { couriers: [...با trips], total } با
       // صفحه‌بندی/جستجو/بازهٔ تحویل می‌خواهد.
-      ({ query }) =>
+      ({ query, user }) =>
         deps.couriers.listCouriersPage({
           page: query.page ?? 1,
           limit: query.limit ?? 10,
           search: query.search,
           dateFrom: query.dateFrom,
           dateTo: query.dateTo,
+          admin2Id: user.role === 'admin2' ? user.id : undefined,
         }),
       {
         query: t.Object({

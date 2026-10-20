@@ -6,7 +6,7 @@
 //        داشبورد ادمین۲ — PII خام دیگر به پنل سطح ۲ نمی‌رسد
 // ═══════════════════════════════════════════════════════════════
 //src/domain/live/live.service.ts
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { buildRangeCharts, currentPeriodStart } from "#/domain/shared/charts";
 import { maskPhone } from "#/domain/shared/pg";
 import type { Db } from "#/infra/db/client";
@@ -257,10 +257,13 @@ export class LiveService {
 		let courierId: CourierId | null = null;
 		if (row.deliveryType === "DELIVERY" && input.courierId) {
 			const courier = await this.deps.db.query.couriers.findFirst({
-				where: eq(couriers.id, asCourierId(input.courierId)),
+				where: and(eq(couriers.id, asCourierId(input.courierId)), eq(couriers.isActive, true)),
 			});
 			if (!courier) return { success: false, message: "پیک یافت نشد" };
 			courierId = courier.id;
+		}
+		if (row.deliveryType === "DELIVERY" && input.securityEnabled && !courierId) {
+			return { success: false, message: "برای اسکن امن، ابتدا پیک را انتخاب کنید" };
 		}
 
 		const [updated] = await this.deps.db
@@ -342,21 +345,35 @@ export class LiveService {
 		if (row.deliveryType !== "DELIVERY") {
 			return { success: false, message: "این سفارش ارسال با پیک ندارد" };
 		}
+		if (!newCourierId && row.courierSecurityEnabled) {
+			return { success: false, message: "سفارش دارای اسکن امن باید پیک مشخص داشته باشد" };
+		}
 
 		if (newCourierId) {
 			const courier = await this.deps.db.query.couriers.findFirst({
-				where: eq(couriers.id, asCourierId(newCourierId)),
+				where: and(eq(couriers.id, asCourierId(newCourierId)), eq(couriers.isActive, true)),
 			});
 			if (!courier) return { success: false, message: "پیک یافت نشد" };
 		}
 
-		await this.deps.db
+		const [updated] = await this.deps.db
 			.update(orders)
 			.set({
 				courierId: newCourierId ? asCourierId(newCourierId) : null,
+				courierLocation: null,
 				updatedAt: new Date(),
 			})
-			.where(eq(orders.id, row.id));
+			.where(and(
+				eq(orders.id, row.id),
+				eq(orders.status, "CONFIRMED"),
+				eq(orders.deliveryType, "DELIVERY"),
+				isNull(orders.courierArrivedAt),
+				row.courierId ? eq(orders.courierId, row.courierId) : isNull(orders.courierId),
+				eq(orders.courierSecurityEnabled, row.courierSecurityEnabled),
+				viewerRole === "admin" ? undefined : eq(orders.confirmedBy, adminUserId),
+			))
+			.returning({ id: orders.id });
+		if (!updated) return { success: false, message: "وضعیت سفارش هم‌زمان تغییر کرده است؛ صفحه را تازه کنید" };
 		await this.deps.admin2.log(adminUserId, "COURIER_REASSIGN", displayId, {
 			newCourierId,
 		});

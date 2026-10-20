@@ -44,6 +44,7 @@ export async function courierScan(input: {
         /** ترمیم اسکنِ استیج-۸۴ — true یعنی اسکنِ مجددِ idempotent (تا ۳ ساعت
          *  پس از اولین اسکن؛ سفارش قبلاً در مسیر بوده) */
         alreadyScanned?: boolean
+        trackingEnabled?: boolean
         /** stage-84 — فقط روی موفقیت: مسیر رستوران→مقصد برای نقشه */
         route?: CourierScanRoute
 }> {
@@ -51,6 +52,7 @@ export async function courierScan(input: {
                 success: boolean
                 message?: string
                 alreadyScanned?: boolean
+                trackingEnabled?: boolean
                 route?: CourierScanRoute
         }>(`/courier/scan/${input.orderId}`, {
                 courierToken: input.courierToken ?? undefined,
@@ -64,8 +66,8 @@ export async function updateCourierLocation(input: {
         courierToken: string
         lat: number
         lng: number
-}): Promise<{ success: boolean; message?: string }> {
-        return postJson<{ success: boolean; message?: string }>(
+}): Promise<{ success: boolean; message?: string; accepted?: boolean; stopTracking?: boolean }> {
+        return postJson<{ success: boolean; message?: string; accepted?: boolean; stopTracking?: boolean }>(
                 `/courier/orders/${input.orderId}/location`,
                 { courierToken: input.courierToken, lat: input.lat, lng: input.lng },
         )

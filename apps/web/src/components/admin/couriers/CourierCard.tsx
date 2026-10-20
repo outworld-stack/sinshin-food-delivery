@@ -13,7 +13,8 @@ interface CourierCardProps {
 // کارت پیک — کلیک → صفحه مخصوص پیک
 export const CourierCard = memo(function CourierCard({ courier }: CourierCardProps) {
   const allDeliveries = courier.trips.flatMap(t => t.deliveries)
-  const totalEarnings = allDeliveries.reduce((sum, d) => sum + d.amount, 0)
+  const totalEarnings = courier.totalAmount ?? allDeliveries.reduce((sum, d) => sum + d.amount, 0)
+  const totalDeliveries = courier.totalDeliveries ?? allDeliveries.length
 
   return (
     <div className="border border-gray-300 dark:border-white/10 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] p-4">
@@ -39,13 +40,13 @@ export const CourierCard = memo(function CourierCard({ courier }: CourierCardPro
           <div className="text-center">
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">سفرها</p>
             <p className="font-DanaDemiBold text-gray-800 dark:text-white">
-              {faNum(courier.trips.length)}
+              {faNum(courier.totalTrips ?? courier.trips.length)}
             </p>
           </div>
           <div className="text-center">
             <p className="text-[10px] text-gray-400 font-DanaMedium mb-0.5">تحویل‌ها</p>
             <p className="font-DanaDemiBold text-gray-800 dark:text-white">
-              {faNum(allDeliveries.length)}
+              {faNum(totalDeliveries)}
             </p>
           </div>
           <div className="text-center">
@@ -59,7 +60,7 @@ export const CourierCard = memo(function CourierCard({ courier }: CourierCardPro
 
       {/* خلاصه سفرها — ۲ سفارش آخر */}
       <div className="space-y-2">
-        {allDeliveries.slice(-2).map((d) => (
+        {allDeliveries.slice(0, 2).map((d) => (
           <div key={d.orderId} className="flex items-center justify-between p-3 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-100 dark:border-white/5">
             <div className="flex items-center gap-2 min-w-0">
               <RouteIcon size={14} className="text-primary dark:text-dark-primary shrink-0" />
@@ -74,7 +75,7 @@ export const CourierCard = memo(function CourierCard({ courier }: CourierCardPro
             </div>
           </div>
         ))}
-        {allDeliveries.length > 2 && (
+        {totalDeliveries > 2 && (
           <Link
             to="/admin/couriers/$courierId"
             params={{ courierId: courier.id }}
@@ -83,7 +84,7 @@ export const CourierCard = memo(function CourierCard({ courier }: CourierCardPro
             مشاهده جزئیات و نمودار عملکرد →
           </Link>
         )}
-        {allDeliveries.length === 0 && (
+        {totalDeliveries === 0 && (
           <p className="text-xs text-gray-400 text-center py-3">در این بازه سفری ثبت نشده</p>
         )}
       </div>

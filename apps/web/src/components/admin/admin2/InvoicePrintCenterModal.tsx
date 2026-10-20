@@ -25,11 +25,15 @@
 //    تاشوی پایین (PrinterManager).
 // ═══════════════════════════════════════════════════════════════
 
-import type { InvoicePrinterAssignmentDto, PrinterDto } from '@sinshin/shared'
+import type {
+	InvoicePrinterAssignmentDto,
+	PrinterDiscoveryDto,
+	PrinterDto,
+} from '@sinshin/shared'
 // src/components/admin/admin2/InvoicePrintCenterModal.tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Printer, X } from 'reicon-react'
+import { Printer, Radar, X } from 'reicon-react'
 import { PrinterManager } from '#/components/admin/admin2/PrinterManager'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import {
@@ -38,6 +42,12 @@ import {
 	RECEIPT_PROBE_PX,
 } from '#/lib/printDocument'
 import {
+	discoveryValue,
+	PRINTER_DISCOVERY_KEY,
+	registerDiscoveredPrinter,
+} from '#/lib/printerDiscovery'
+import {
+	discoverAdminPrinters,
 	getStaffOrderInvoice,
 	type StaffInvoice,
 	setAdminPrintAssignment,
@@ -156,6 +166,7 @@ function PrinterSelect({
 	label,
 	value,
 	printers,
+	discovered,
 	disabled,
 	locked,
 	onChange,
@@ -164,6 +175,7 @@ function PrinterSelect({
 	label: string
 	value: string
 	printers: PrinterDto[]
+	discovered: PrinterDiscoveryDto[]
 	disabled: boolean
 	/** stage-89 — ادمین۲ بدونِ مجوزِ printingManage: قفلِ فقط‌خواندنی */
 	locked?: boolean
@@ -189,12 +201,14 @@ function PrinterSelect({
 				onChange={(e) => onChange(e.target.value)}
 				className="flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed truncate"
 			>
-				<option value="">دیالوگ مرورگر (پیش‌فرض)</option>
-				{value && !printers.some((p) => p.id === value) && (
-					<option value={value} disabled>
-						چاپگرِ حذف‌شده — دوباره انتخاب کنید
-					</option>
-				)}
+				<option value="">دیالوگ مرورگر</option>
+				{value &&
+					!printers.some((p) => p.id === value) &&
+					!discovered.some((p) => discoveryValue(p) === value) && (
+						<option value={value} disabled>
+							چاپگرِ حذف‌شده — دوباره انتخاب کنید
+						</option>
+					)}
 				{printers.map((p) => (
 					<option key={p.id} value={p.id}>
 						{p.status === 'online' ? '●' : p.status === 'offline' ? '○' : '◌'}{' '}
@@ -202,6 +216,15 @@ function PrinterSelect({
 						{p.statusDetail ? ` (${p.statusDetail})` : ''}
 					</option>
 				))}
+				{discovered.length > 0 && (
+					<optgroup label="چاپگرهای شناسایی‌شده — انتخاب برای ثبت">
+						{discovered.map((p) => (
+							<option key={discoveryValue(p)} value={discoveryValue(p)}>
+								{p.host}:{p.port} — شناسایی‌شده
+							</option>
+						))}
+					</optgroup>
+				)}
 			</select>
 		</div>
 	)
@@ -223,6 +246,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	const [kinds, setKinds] = useState(loadDefaultKinds)
 	const [printing, setPrinting] = useState(false)
 	const printingRef = useRef(false)
+	const assigningRef = useRef(false)
 	// ترمیم اسکنِ استیج-۸۴ — فاکتور هنگامِ «باز شدنِ» مودال پیش‌واکشی می‌شود:
 	// کلیکِ چاپ دیگر منتظرِ شبکه نمی‌ماند و چاپِ مجدد آنی است
 	const [invoice, setInvoice] = useState<StaffInvoice | null>(null)
@@ -243,6 +267,20 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 		isPending: assignmentLoading,
 		isError: assignmentError,
 	} = useQuery(adminPrintAssignmentOptions)
+	const discovery = useQuery({
+		queryKey: PRINTER_DISCOVERY_KEY,
+		queryFn: () => discoverAdminPrinters(),
+		enabled: isMainAdmin,
+		staleTime: 30_000,
+		retry: false,
+		refetchOnWindowFocus: false,
+	})
+	const discovered = isMainAdmin
+		? (discovery.data?.found ?? []).filter(
+				(found) =>
+					!printers.some((p) => p.host === found.host && p.port === found.port),
+			)
+		: []
 	// نسخهٔ محلی برایِ پاسخِ فوریِ سلکت؛ بعد از موفقیتِ سرور هم‌گام می‌ماند
 	const [assignmentDraft, setAssignmentDraft] =
 		useState<InvoicePrinterAssignmentDto | null>(null)
@@ -265,17 +303,40 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	)
 
 	const assignMutation = useMutation({
-		mutationFn: (next: InvoicePrinterAssignmentDto) =>
-			setAdminPrintAssignment(next),
-		onSuccess: async (_, next) => {
+		mutationFn: async (draft: InvoicePrinterAssignmentDto) => {
+			const next = { ...draft }
+			for (const kind of ['sales', 'kitchen'] as const) {
+				const detected = discovered.find(
+					(p) => discoveryValue(p) === next[kind],
+				)
+				if (!detected) continue
+				const printer = await registerDiscoveredPrinter(detected, printers)
+				queryClient.setQueryData<PrinterDto[]>(
+					adminPrintersOptions.queryKey,
+					(current = []) => [
+						...current.filter((p) => p.id !== printer.id),
+						printer,
+					],
+				)
+				next[kind] = printer.id
+				setAssignmentDraft({ ...next })
+			}
+			await setAdminPrintAssignment(next)
+			return next
+		},
+		onSuccess: async (next) => {
 			queryClient.setQueryData(adminPrintAssignmentOptions.queryKey, next)
 			setAssignmentDraft(null)
 			await invalidatePrintQueries()
+			showToast('چاپگر پیش‌فرض ذخیره شد')
 		},
 		onError: (err: Error) => {
 			showToast(err.message || 'ذخیرهٔ انتخاب چاپگر ناموفق بود', 'error')
 			// بازگشت به حقیقتِ سرور
 			setAssignmentDraft(null)
+		},
+		onSettled: () => {
+			assigningRef.current = false
 		},
 	})
 
@@ -343,6 +404,7 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 				!canManagePrint ||
 				!serverAssignment ||
 				assignMutation.isPending ||
+				assigningRef.current ||
 				printingRef.current
 			)
 				return
@@ -351,13 +413,19 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 				[kind]: printerId || null,
 			}
 			setAssignmentDraft(next)
+			assigningRef.current = true
 			assignMutation.mutate(next)
 		},
 		[assignMutation, assignment, canManagePrint, serverAssignment],
 	)
 
 	const handlePrint = useCallback(async () => {
-		if (printingRef.current || printSettingsLoading || assignMutation.isPending)
+		if (
+			printingRef.current ||
+			printSettingsLoading ||
+			assignMutation.isPending ||
+			assigningRef.current
+		)
 			return
 		const selected: InvoiceKind[] = [
 			...(kinds.kitchen ? (['kitchen'] as const) : []),
@@ -493,8 +561,48 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 							<div className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
 								چاپگری روی سرور ثبت نشده — فعلاً چاپ با دیالوگ مرورگر است.{' '}
 								{isMainAdmin
-									? 'از بخشِ «مدیریت چاپگرهای شبکه» پایین، چاپگرِ شبکهٔ رستوران را ثبت کنید (IP + پورت 9100).'
+									? 'چاپگر شناسایی‌شده را از فهرست سالن یا آشپزخانه انتخاب کنید تا ثبت و پیش‌فرض شود.'
 									: 'از مدیرِ اصلی بخواهید چاپگرِ شبکه را ثبت کند.'}
+							</div>
+						)}
+						{isMainAdmin && (
+							<div className="mt-2 space-y-1.5 text-[11px] font-DanaMedium text-gray-500 dark:text-gray-400">
+								<div
+									className="flex items-center justify-between gap-2"
+									aria-live="polite"
+								>
+									<span>
+										{discovery.isFetching
+											? 'در حال شناسایی خودکار چاپگرها…'
+											: discovery.isError
+												? 'شناسایی خودکار ناموفق بود'
+												: `${discovery.data?.found.length ?? 0} چاپگر در اسکن شبکه شناسایی شد`}
+									</span>
+									<button
+										type="button"
+										onClick={() => void discovery.refetch()}
+										disabled={
+											discovery.isFetching ||
+											printing ||
+											assignMutation.isPending
+										}
+										className="inline-flex items-center gap-1 rounded-md border px-2 py-1 cursor-pointer disabled:opacity-50"
+									>
+										<Radar size={13} /> اسکن دوباره
+									</button>
+								</div>
+								{discovery.isError && (
+									<p className="text-amber-600 dark:text-amber-400">
+										{discovery.error instanceof Error
+											? discovery.error.message
+											: 'شبکهٔ چاپگر را در بخش مدیریت بررسی کنید.'}
+									</p>
+								)}
+								<p>
+									انتخاب هر فهرست به‌عنوان چاپگر پیش‌فرض همان بخش برای همهٔ
+									ایستگاه‌ها ذخیره می‌شود. کاغذ چاپگر تازه ۸۰ میلی‌متر است؛ تنظیمات
+									آن در مدیریت چاپگرها قابل ویرایش است.
+								</p>
 							</div>
 						)}
 						{deliveryType === 'DELIVERY' && (
@@ -536,9 +644,10 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 							</label>
 							<PrinterSelect
 								id="inv-printer-sales"
-								label="چاپگر:"
+								label="چاپگر پیش‌فرض:"
 								value={assignment.sales ?? ''}
 								printers={printers}
+								discovered={discovered}
 								disabled={
 									printing ||
 									assignMutation.isPending ||
@@ -580,9 +689,10 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 							</label>
 							<PrinterSelect
 								id="inv-printer-kitchen"
-								label="چاپگر:"
+								label="چاپگر پیش‌فرض:"
 								value={assignment.kitchen ?? ''}
 								printers={printers}
+								discovered={discovered}
 								disabled={
 									printing ||
 									assignMutation.isPending ||
@@ -648,6 +758,10 @@ export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 							<PrinterManager
 								printers={printers}
 								onChanged={invalidatePrintQueries}
+								onDiscovered={(result) =>
+									queryClient.setQueryData(PRINTER_DISCOVERY_KEY, result)
+								}
+								disabled={printing || assignMutation.isPending}
 							/>
 						</div>
 					)}

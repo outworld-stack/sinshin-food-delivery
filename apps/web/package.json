@@ -17,6 +17,8 @@
     "check": "biome check",
     "test:admin-day": "bun scripts/test-admin-day.ts",
     "test:printing": "bun scripts/test-print-agent.ts && bun scripts/test-print-document.ts && bun scripts/test-invoice-print-center.tsx",
+    "test:maps": "bun scripts/test-neshan-sdk.ts && bun scripts/test-maps-client.tsx",
+    "test:courier": "bun scripts/test-courier-client.ts",
     "test:receipt-canvas": "bun scripts/test-receipt-canvas.ts",
     "test:device": "bun scripts/test-device-fingerprint.ts",
     "test:fetch-timeout": "bun scripts/test-fetch-timeout.ts",

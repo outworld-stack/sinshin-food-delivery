@@ -1,5 +1,5 @@
 // src/components/dashboard/addresses/AddressFormModal.tsx
-import { memo, useState, useCallback, useEffect } from 'react'
+import { memo, useState, useCallback, useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { addUserAddress, updateUserAddress } from '#/server/user'
 import { qk } from '#/utils/queryKeys'
@@ -7,6 +7,7 @@ import { useToastStore } from '#/stores/toastStore'
 import { MapPicker } from '#/components/shared/MapPicker'
 import { useI18n } from '#/i18n'
 import { X } from 'reicon-react'
+import { isNeshanCoord } from '#/utils/neshanLinks'
 
 interface AddressItem {
   id: string
@@ -24,24 +25,30 @@ interface AddressFormModalProps {
 export const AddressFormModal = memo(function AddressFormModal({ editing, onClose }: AddressFormModalProps) {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
-  const { t } = useI18n()
+  const { t, apiError } = useI18n()
 
-  const [title, setTitle] = useState('')
-  const [addressText, setAddressText] = useState('')
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [title, setTitle] = useState(editing?.title ?? '')
+  const [addressText, setAddressText] = useState(editing?.address ?? '')
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(editing ? { lat: editing.lat, lng: editing.lng } : null)
+  const [coordsValid, setCoordsValid] = useState(true)
+  const editingId = editing?.id
+  const editingRef = useRef(editing)
+  editingRef.current = editing
 
   // هیدراته در حالت ویرایش (پین ریست می‌شود — کاربر دوباره تعیین می‌کند)
   useEffect(() => {
-    if (editing) {
-      setTitle(editing.title)
-      setAddressText(editing.address)
-      setCoords({ lat: editing.lat, lng: editing.lng })
+    const current = editingRef.current
+    if (editingId && current) {
+      setTitle(current.title)
+      setAddressText(current.address)
+      setCoords({ lat: current.lat, lng: current.lng })
     } else {
       setTitle('')
       setAddressText('')
       setCoords(null)
     }
-  }, [editing])
+    // Profile refetches replace objects; only switching addresses resets a draft.
+  }, [editingId])
 
   const mutation = useMutation({
     mutationFn: (data: { id?: string; title: string; address: string; lat: number; lng: number }) => {
@@ -57,15 +64,17 @@ export const AddressFormModal = memo(function AddressFormModal({ editing, onClos
       showToast(editing ? t['dash.addresses.editedToast'] : t['dash.addresses.addedToast'])
       onClose()
     },
+    onError: (error: Error) => showToast(apiError(error.message), 'error'),
   })
 
   const handleCoords = useCallback((c: { lat: number; lng: number }) => setCoords(c), [])
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault()
-    if (!coords) { showToast(t['dash.addresses.pickLocationError'], 'error'); return }
+    if (mutation.isPending) return
+    if (!coordsValid || !coords || !isNeshanCoord(coords.lat, coords.lng)) { showToast(t['dash.addresses.pickLocationError'], 'error'); return }
     mutation.mutate({ id: editing?.id, title, address: addressText, lat: coords.lat, lng: coords.lng })
-  }, [coords, editing, title, addressText, mutation, showToast, t])
+  }, [coords, coordsValid, editing, title, addressText, mutation, showToast, t])
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
@@ -83,7 +92,7 @@ export const AddressFormModal = memo(function AddressFormModal({ editing, onClos
 
         {/* نقشه — انتخابگر مشترک */}
         <div className="mb-4">
-          <MapPicker value={coords} onChange={handleCoords} />
+          <MapPicker value={coords} onChange={handleCoords} onValidityChange={setCoordsValid} />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -111,7 +120,7 @@ export const AddressFormModal = memo(function AddressFormModal({ editing, onClos
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer">{t['common.cancel']}</button>
-            <button type="submit" disabled={mutation.isPending} className="flex-1 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50">
+            <button type="submit" disabled={mutation.isPending || !coords || !coordsValid} className="flex-1 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50">
               {mutation.isPending ? t['common.saving'] : t['common.save']}
             </button>
           </div>

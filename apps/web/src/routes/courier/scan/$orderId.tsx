@@ -10,10 +10,10 @@ import { ScanRouteMap } from '#/components/courier/ScanRouteMap'
 import {
 	type CourierScanRoute,
 	courierScan,
-	updateCourierLocation,
 } from '#/server/courier'
 import { useToastStore } from '#/stores/toastStore'
 import { getCourierToken } from '#/utils/courierSession'
+import { startCourierTracking } from '#/utils/courierTracking'
 import { faNum } from '#/utils/format'
 
 export const Route = createFileRoute('/courier/scan/$orderId')({
@@ -22,7 +22,7 @@ export const Route = createFileRoute('/courier/scan/$orderId')({
 	component: CourierScanPage,
 })
 
-type Phase = 'idle' | 'scanning' | 'tracking' | 'error'
+type Phase = 'idle' | 'scanning' | 'tracking' | 'ready' | 'error'
 
 function CourierScanPage() {
 	const { orderId } = Route.useParams()
@@ -37,8 +37,7 @@ function CourierScanPage() {
 	// stage-84 — مسیر رستوران → مقصد (پاسخ اسکن موفق)
 	const [route, setRoute] = useState<CourierScanRoute | null>(null)
 
-	const watchIdRef = useRef<number | null>(null)
-	const lastSentRef = useRef(0)
+	const stopTrackingRef = useRef<(() => void) | null>(null)
 	const runIdRef = useRef(0)
 
 	// پاک‌سازی وقتی صفحه بسته می‌شود
@@ -48,12 +47,10 @@ function CourierScanPage() {
 		setPosition(null)
 		setRoute(null)
 		setSentCount(0)
-		lastSentRef.current = 0
 		return () => {
 			runIdRef.current += 1
-			if (watchIdRef.current !== null)
-				navigator.geolocation.clearWatch(watchIdRef.current)
-			watchIdRef.current = null
+			stopTrackingRef.current?.()
+			stopTrackingRef.current = null
 		}
 	}, [orderId])
 
@@ -64,10 +61,8 @@ function CourierScanPage() {
 		setMessage('')
 		// ترمیم اسکنِ استیج-۸۴ — قبل از استریمِ جدید، استریمِ قبلی پاک شود
 		// (اسکنِ مجدد/تلاشِ دوباره watchPosition تازه نمی‌ساخت و کهنه می‌ماند)
-		if (watchIdRef.current !== null) {
-			navigator.geolocation.clearWatch(watchIdRef.current)
-			watchIdRef.current = null
-		}
+		stopTrackingRef.current?.()
+		stopTrackingRef.current = null
 		try {
 			// phase-5: منبع واحد توکن پیک — نشست خودِ پیک (OTP).
 			// قبلاً اسکن از ?courier= می‌خواند و موقعیت از sessionStorage — دو منبع متفاوت!
@@ -90,51 +85,24 @@ function CourierScanPage() {
 			)
 			// stage-84 — مسیر رستوران → مقصد برای نقشه‌ی همین صفحه
 			setRoute(res.route ?? null)
-			setPhase('tracking')
-
-			if (!('geolocation' in navigator)) {
-				setMessage('مرورگر شما موقعیت را پشتیبانی نمی‌کند')
+			setPhase('ready')
+			if (!res.trackingEnabled) {
+				setMessage('ردیابی موقعیت برای این سفارش فعال نیست')
 				return
 			}
-			watchIdRef.current = navigator.geolocation.watchPosition(
-				async (pos) => {
-					if (runId !== runIdRef.current) return
-					const { latitude, longitude } = pos.coords
-					setPosition({ lat: latitude, lng: longitude })
-					// ارسال حداکثر هر ۵ ثانیه
-					const now = Date.now()
-					if (now - lastSentRef.current > 5000) {
-						lastSentRef.current = now
-						try {
-							const result = await updateCourierLocation({
-								orderId,
-								courierToken: getCourierToken() ?? '',
-								lat: latitude,
-								lng: longitude,
-							})
-							if (runId !== runIdRef.current) return
-							if (result.success) {
-								setSentCount((c) => c + 1)
-								setMessage('')
-							} else {
-								setMessage(result.message ?? 'ارسال موقعیت انجام نشد')
-							}
-						} catch (err) {
-							if (runId !== runIdRef.current) return
-							// phase-5: خطای ارسال موقعیت دیگر بی‌صدا نیست —
-							// «نشست پیک منقضی شده» باید دیده شود تا پیک بداند دوباره وارد شود
-							setMessage(
-								err instanceof Error ? err.message : 'خطا در ارسال موقعیت',
-							)
-						}
-					}
-				},
-				(err) => {
-					if (runId !== runIdRef.current) return
-					setMessage('دسترسی به موقعیت رد شد: ' + err.message)
-				},
-				{ enableHighAccuracy: true, maximumAge: 3000 },
-			)
+			const courierToken = getCourierToken()
+			if (!courierToken) {
+				setMessage('برای ارسال موقعیت، وارد حساب پیک تخصیص‌یافته شوید')
+				return
+			}
+			setPhase('tracking')
+			stopTrackingRef.current = startCourierTracking({
+				orderId, courierToken,
+				onPosition: setPosition,
+				onSent: () => setSentCount((count) => count + 1),
+				onMessage: setMessage,
+				onStopped: () => setPhase('ready'),
+			})
 		} catch (err: unknown) {
 			if (runId !== runIdRef.current) return
 			setPhase('error')
@@ -145,11 +113,9 @@ function CourierScanPage() {
 	// توقف ارسال
 	const handleStop = useCallback(() => {
 		runIdRef.current += 1
-		if (watchIdRef.current !== null) {
-			navigator.geolocation.clearWatch(watchIdRef.current)
-			watchIdRef.current = null
-		}
-		setPhase('idle')
+		stopTrackingRef.current?.()
+		stopTrackingRef.current = null
+		setPhase('ready')
 		showToast('ارسال موقعیت متوقف شد')
 	}, [showToast])
 
@@ -176,8 +142,8 @@ function CourierScanPage() {
 						<div className="space-y-4">
 							<p className="text-sm text-gray-500 dark:text-gray-400 font-DanaMedium text-center leading-relaxed">
 								با زدن دکمه، رسیدن شما به رستوران ثبت می‌شود و سفارش «در مسیر»
-								می‌شود. سپس موقعیت گوشی شما تا پایان تحویل برای مشتری ارسال
-								می‌شود.
+								می‌شود. در صورت فعال بودن ردیابی، پیک تخصیص‌یافته می‌تواند موقعیت
+								خود را برای مشتری ارسال کند.
 							</p>
 							<button
 								type="button"
@@ -199,12 +165,12 @@ function CourierScanPage() {
 						</div>
 					)}
 
-					{phase === 'tracking' && (
+					{(phase === 'tracking' || phase === 'ready') && (
 						<div className="space-y-4">
 							<div className="flex items-center gap-2 p-4 rounded-xl bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20">
 								<Check size={20} className="text-green-500 shrink-0" />
 								<p className="text-sm text-green-600 dark:text-green-400 font-DanaMedium">
-									سفارش «در مسیر» است — موقعیت شما برای مشتری ارسال می‌شود
+									{phase === 'tracking' ? 'ردیابی فعال است؛ صفحه را باز نگه دارید' : 'اسکن سفارش ثبت شد؛ ارسال موقعیت فعال نیست'}
 								</p>
 							</div>
 
@@ -247,7 +213,7 @@ function CourierScanPage() {
 								>
 									{position
 										? `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`
-										: 'در انتظار GPS…'}
+										: phase === 'tracking' ? 'در انتظار GPS…' : '—'}
 								</p>
 								<p className="text-xs text-gray-400 font-DanaMedium">
 									ارسال‌های موفق: {faNum(sentCount)} · حداکثر هر ۵ ثانیه
@@ -262,12 +228,17 @@ function CourierScanPage() {
 
 							<button
 								type="button"
-								onClick={handleStop}
+								onClick={phase === 'tracking' ? handleStop : handleStart}
 								className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer flex items-center justify-center gap-2"
 							>
 								<X size={16} />
-								توقف ارسال موقعیت
+								{phase === 'tracking' ? 'توقف ارسال موقعیت' : 'بررسی دوباره و ادامه تحویل'}
 							</button>
+							{phase === 'ready' && (
+								<Link to="/courier/login" search={{ orderId }} className="block text-center text-sm text-primary dark:text-dark-primary hover:underline">
+									ورود / احراز هویت پیک
+								</Link>
+							)}
 						</div>
 					)}
 
@@ -287,6 +258,7 @@ function CourierScanPage() {
 							</button>
 							<Link
 								to="/courier/login"
+								search={{ orderId }}
 								className="block text-center text-sm text-primary dark:text-dark-primary font-DanaMedium hover:underline"
 							>
 								ورود / احراز هویت پیک

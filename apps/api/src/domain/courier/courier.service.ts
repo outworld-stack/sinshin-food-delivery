@@ -13,7 +13,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/courier/courier.service.ts
-import { and, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { buildRangeCharts } from '#/domain/shared/charts'
 import type { Db } from '#/infra/db/client'
 import { courierDeliveries, courierTrips, couriers, orders, type OrderRow } from '#/infra/db/schema'
@@ -28,6 +28,7 @@ import type { SettingsService, RestaurantLocation } from '#/domain/settings/sett
 import { sendOtp, verifyOtp, type OtpKeys } from '#/domain/shared/otp-core'
 import { asCourierId } from '#/domain/shared/brand'
 import { requireOrder } from '#/domain/order/order-lookup'
+import { startCourierTrip } from '#/domain/courier/courier-trip'
 
 const COURIER_TOKEN_TTL_SECONDS = 10_800 // ۳ ساعت — stage-84: QR روی فاکتور تا ۳ ساعت قابل اسکن است
 const LOCATION_THROTTLE_MS = 3000 // حداکثر یک آپدیت در ۳ ثانیه
@@ -75,7 +76,7 @@ export class CourierService {
 
   async requestOtp(phone: string): Promise<{ cooldownSeconds: number; devCode?: string }> {
     const courier = await this.deps.db.query.couriers.findFirst({
-      where: eq(couriers.phone, phone),
+      where: and(eq(couriers.phone, phone), eq(couriers.isActive, true)),
     })
     if (!courier) throw Err.notFound('پیکی با این شماره ثبت نشده است.')
 
@@ -107,7 +108,7 @@ export class CourierService {
 
   async verifyOtp(phone: string, code: string): Promise<{ token: string; courierId: string }> {
     const courier = await this.deps.db.query.couriers.findFirst({
-      where: eq(couriers.phone, phone),
+      where: and(eq(couriers.phone, phone), eq(couriers.isActive, true)),
     })
     if (!courier) throw Err.notFound('پیکی با این شماره ثبت نشده است.')
 
@@ -132,14 +133,16 @@ export class CourierService {
 
     // توکن ۳ ساعته (stage-84) — QR روی فاکتور تا ۳ ساعت قابل اسکن می‌ماند
     const token = crypto.randomUUID()
-    await this.deps.redis.setJson(K.token(token), { courierId: courier.id, phone }, {
+    const stored = await this.deps.redis.set(K.token(token), JSON.stringify({ courierId: courier.id, phone }), {
       ex: COURIER_TOKEN_TTL_SECONDS,
     })
+    if (stored !== 'OK') throw Err.serviceUnavailable('ذخیره نشست پیک ناموفق بود؛ دوباره وارد شوید.')
     return { token, courierId: courier.id }
   }
 
   /** از توکن — courierId یا null */
   async courierIdFromToken(token: string): Promise<string | null> {
+    if (!token || token.length > 64) return null
     const v = await this.deps.redis.getJson<{ courierId: string; phone: string }>(K.token(token))
     return v?.courierId ?? null
   }
@@ -207,6 +210,7 @@ export class CourierService {
     /** ترمیم اسکنِ استیج-۸۴ — true یعنی «اسکنِ مجدد» (سفارش قبلاً در مسیر بوده)؛
      *  کلاینت توستِ متفاوت می‌دهد و وضعیت دوباره جابه‌جا نمی‌شود */
     alreadyScanned?: boolean
+    trackingEnabled?: boolean
     /** stage-84 — فقط روی موفقیت: مسیر نمایشی برای نقشه‌ی اسکن */
     route?: {
       origin: { lat: number; lng: number }
@@ -243,7 +247,7 @@ export class CourierService {
       if (!courierId) {
         return { success: false, message: CourierService.SCAN_FAILED }
       }
-      if (row.courierId && courierId !== row.courierId) {
+      if (!row.courierId || courierId !== row.courierId) {
         return { success: false, message: CourierService.SCAN_FAILED }
       }
     }
@@ -260,22 +264,34 @@ export class CourierService {
         return { success: false, message: CourierService.QR_EXPIRED }
       }
       const route = await this.routeForScan(row)
-      return { success: true, alreadyScanned: true, route }
+      return { success: true, alreadyScanned: true, trackingEnabled: row.trackingEnabled === true, route }
     }
 
     if (row.status !== 'CONFIRMED') {
       return { success: false, message: CourierService.SCAN_FAILED }
     }
+    // A tracked delivery cannot acquire a courier after dispatch; staff must
+    // finish the deferred assignment while the order is still CONFIRMED.
+    if (row.trackingEnabled && !row.courierId) {
+      return { success: false, message: 'ابتدا از رستوران بخواهید پیک این سفارش را مشخص کند.' }
+    }
 
-    const [updated] = await this.deps.db
-      .update(orders)
-      .set({
-        status: 'ON_THE_WAY',
-        courierArrivedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(orders.id, row.id), eq(orders.status, 'CONFIRMED')))
-      .returning()
+    const updated = await this.deps.db.transaction(async (tx) => {
+      const now = new Date()
+      const [scanned] = await tx
+        .update(orders)
+        .set({ status: 'ON_THE_WAY', courierArrivedAt: now, updatedAt: now })
+        .where(and(
+          eq(orders.id, row.id),
+          eq(orders.status, 'CONFIRMED'),
+          eq(orders.deliveryType, 'DELIVERY'),
+          eq(orders.courierSecurityEnabled, row.courierSecurityEnabled),
+          row.courierId ? eq(orders.courierId, row.courierId) : isNull(orders.courierId),
+        ))
+        .returning()
+      if (scanned?.courierId) await startCourierTrip(tx, scanned.courierId, now)
+      return scanned
+    })
     if (!updated) {
       // Another scan may have won the conditional update. Recheck security
       // and return the same rescan response instead of reporting a failure.
@@ -286,7 +302,7 @@ export class CourierService {
     // سفرِ پیک — باز کن اگر سشنِ بازی نیست، تحویل ثبت در confirmDelivery
     // stage-84 — مسیر رستوران→مشتری همراه پاسخ (نقشه‌ی صفحه‌ی اسکن)
     const route = await this.routeForScan(updated)
-    return { success: true, alreadyScanned: false, route }
+    return { success: true, alreadyScanned: false, trackingEnabled: updated.trackingEnabled === true, route }
   }
 
   // ── استریم موقعیت ──
@@ -300,32 +316,47 @@ export class CourierService {
     displayId: string,
     lat: number,
     lng: number,
-  ): Promise<{ success: boolean; message?: string }> {
+  ): Promise<{ success: boolean; message?: string; accepted?: boolean; stopTracking?: boolean }> {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      throw Err.validation('مختصات موقعیت معتبر نیست.')
+    }
     const courierId = await this.courierIdFromToken(courierToken)
     if (!courierId) throw Err.unauthorized('نشست پیک منقضی شده است.')
 
     const row = await this.mustGet(displayId)
-    if (row.status !== 'ON_THE_WAY') {
-      return { success: false, message: 'سفارش در مسیر نیست' }
+    if (row.deliveryType !== 'DELIVERY' || row.status !== 'ON_THE_WAY') {
+      return { success: false, message: 'سفارش در مسیر نیست', stopTracking: true }
     }
     if (!row.trackingEnabled) {
-      return { success: false, message: 'ردیابی این سفارش فعال نیست' }
+      return { success: false, message: 'ردیابی این سفارش فعال نیست', stopTracking: true }
     }
-    if (row.courierSecurityEnabled && row.courierId && courierId !== row.courierId) {
-      return { success: false, message: 'این پیک به این سفارش تخصیص نیافته' }
+    if (!row.courierId || courierId !== row.courierId) {
+      return { success: false, message: 'این پیک به این سفارش تخصیص نیافته', stopTracking: true }
     }
 
     // محدودسازی سرور — setNx با TTL کوتاه
-    const throttleKey = K.throttle(displayId)
-    if (!(await this.deps.redis.setNx(throttleKey, '1', { ex: Math.ceil(LOCATION_THROTTLE_MS / 1000) }))) {
-      return { success: true } // ردِ بی‌جواب — مشتری بعدی را می‌گیرد
+    const throttleKey = K.throttle(row.id)
+    const admitted = await this.deps.redis.setNx(throttleKey, '1', { ex: Math.ceil(LOCATION_THROTTLE_MS / 1000) })
+    if (admitted === false) {
+      return { success: true, accepted: false }
+    }
+    if (admitted === null) {
+      throw Err.serviceUnavailable('ارسال موقعیت موقتاً در دسترس نیست؛ دوباره تلاش کنید.')
     }
 
-    await this.deps.db
+    const [updated] = await this.deps.db
       .update(orders)
       .set({ courierLocation: { lat, lng }, updatedAt: new Date() })
-      .where(eq(orders.id, row.id))
-    return { success: true }
+      .where(and(
+        eq(orders.id, row.id),
+        eq(orders.deliveryType, 'DELIVERY'),
+        eq(orders.status, 'ON_THE_WAY'),
+        eq(orders.trackingEnabled, true),
+        eq(orders.courierId, asCourierId(courierId)),
+      ))
+      .returning({ id: orders.id })
+    if (!updated) return { success: false, message: 'وضعیت یا پیک سفارش تغییر کرده است', stopTracking: true }
+    return { success: true, accepted: true }
   }
 
   // ── مدیریت (ادمین اصلی) ──
@@ -334,153 +365,117 @@ export class CourierService {
     return this.deps.db.select().from(couriers).orderBy(desc(couriers.createdAt))
   }
 
-  /**
-   * لیست پیک‌ها با فیلتر و شکل واقعی صفحهٔ پنل:
-   * { couriers: [{id,name,phone,trips:[{...,deliveries:[]}]}], total }
-   * بازهٔ زمانی روی deliveredAt اعمال می‌شود؛ پیک/سفرِ بدون تحویل در بازه حذف می‌شود.
-   * (تاریخچه: round-11 شکل پاسخ ساخت؛ round-17 کوئری‌ها به SQL منتقل شدند)
-   *
-   * round-17 — صفحه‌بندی لیست پیک‌ها با push-down کامل به SQL:
-   *
-   * قبلاً «همه‌ی» سفرها و «همه‌ی» تحویل‌های تاریخچه به حافظه بارگذاری و
-   * بعد در JS فیلتر/صفحه‌بندی می‌شدند — با رشد ماه‌ها، هر بازدید این
-   * صفحه کل past را می‌کشید.
-   *
-   * حالا:
-   *  • «پیک‌های قابل‌دیدن» با EXISTS زیرکوئری در SQL (فیلتر بازه)
-   *  • سفرها/تحویل‌ها فقط برای پیک‌های «صفحه‌ی» فعلی
-   *  • فیلتر بازه‌ی تحویل‌ها داخل SQL (ایندکس delivered_at)
-   *
-   * شکل پاسخ عیناً دست‌نخورده ماند (قرارداد فرانت همان است).
-   */
+  /** SQL pagination with complete scoped totals and two recent deliveries
+   * per courier. Historical filters never truncate by trip age or a row cap. */
   async listCouriersPage(filters: {
     page: number
     limit: number
     search?: string
     dateFrom?: string
     dateTo?: string
-  }): Promise<{
-    // رارد ۴۷ — شکل ردیف از قرارداد مشترک (CourierListRowDto)؛ trips روی
-    // سیم ستون‌های بیشتری دارد ولی مصرف‌کننده فقط زیرمجموعه‌ی قرارداد را می‌خواند
-    couriers: CourierListRowDto[]
-    total: number
-  }> {
+    admin2Id?: string
+  }): Promise<{ couriers: CourierListRowDto[]; total: number }> {
     const { db } = this.deps
-
-    // فیلتر متن روی نام/موبایل (مثل «محمد یا 0912...»)
     const text = filters.search?.trim()
-    // stage-55 — escape wildcard جستجو (٪ و _ و \) — الگوی امنِ «شامل»
     const courierWhere = text
       ? or(ilike(couriers.name, likePattern(text)), ilike(couriers.phone, likePattern(text)))
       : undefined
-
-    // بازهٔ تحویل — تاریخ‌های خراب بی‌اثرند (نه ۵۰۰)
-    const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : undefined
-    const toDate = filters.dateTo ? new Date(filters.dateTo) : undefined
-    const from = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined
-    const to = toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined
-    const hasRange = from !== undefined || to !== undefined
-
-    // پیکِ قابل‌دیدن = (بدون بازه: همه) یا (با بازه: دارای حداقل یک
-    // تحویلِ داخل بازه) — EXISTS، بدون بارگذاری هیچ ردیفی
-    const rangeExists = hasRange
-      ? sql`exists (
-          select 1 from ${courierTrips} t
-          join ${courierDeliveries} d on d.trip_id = t.id
-          where t.courier_id = ${couriers.id}
-            ${from ? sql`and d.delivered_at >= ${from}` : sql``}
-            ${to ? sql`and d.delivered_at <= ${to}` : sql``}
-        )`
-      : undefined
-    const visibleWhere = and(courierWhere, rangeExists)
-
-    // رارد M10 — شمارش و صفحه‌بندی در SQL: قبلاً «همه‌ی» ردیف‌های پیکِ
-    // منطبق بارگذاری و در JS برش می‌شد. سقف دفاعی صفحه هم اینجاست.
-    const total = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(couriers)
-      .where(visibleWhere)
-      .then((r) => r[0]?.count ?? 0)
-
-    const page = Math.min(Math.max(1, filters.page || 1), 500)
-    const limit = Math.min(Math.max(1, filters.limit || 10), 50)
-    const pageRows = await db
-      .select()
-      .from(couriers)
-      .where(visibleWhere)
-      .orderBy(desc(couriers.createdAt))
-      .limit(limit)
-      .offset((page - 1) * limit)
-
-    // سفرها و تحویل‌ها فقط برای همین صفحه — نه کل پیک‌ها
-    // رارد M10 — سفرها به پنجره‌ی ۹۰ روزه (یا بازه‌ی گزارش با ۱ روز مهلت)
-    // محدود شدند: قبلاً تاریخچه‌ی نامحدود هر پیک در هر بازدید لود می‌شد.
-    const courierIds = pageRows.map((c) => c.id)
-    const tripsFloor = from
-      ? new Date(from.getTime() - 24 * 3600 * 1000) // مهلت ۱ روز قبل از بازه
-      : new Date(Date.now() - 90 * 24 * 3600 * 1000) // پیش‌فرض: ۹۰ روز اخیر
-    const trips = courierIds.length
-      ? await db
-        .select()
-        .from(courierTrips)
-        .where(
-          and(
-            inArray(courierTrips.courierId, courierIds),
-            gte(courierTrips.startedAt, tripsFloor),
-          ),
-        )
-        .orderBy(desc(courierTrips.startedAt))
-        .limit(600)
-      : []
-
-    // فیلتر بازه داخل SQL — ایندکس courier_deliveries_delivered_idx
-    const tripIds = trips.map((t) => t.id)
-    const dConds: SQL[] = []
-    if (tripIds.length > 0) dConds.push(inArray(courierDeliveries.tripId, tripIds))
-    if (from) dConds.push(gte(courierDeliveries.deliveredAt, from))
-    if (to) dConds.push(lte(courierDeliveries.deliveredAt, to))
-    const deliveries =
-      tripIds.length > 0
-        ? await db
-          .select()
-          .from(courierDeliveries)
-          .where(dConds.length > 0 ? and(...dConds) : undefined)
-        : []
-
-    const byTrip = new Map<string, Array<typeof courierDeliveries.$inferSelect>>()
-    for (const d of deliveries) {
-      const list = byTrip.get(d.tripId as string) ?? []
-      list.push(d)
-      byTrip.set(d.tripId as string, list)
+    const parseDate = (value?: string) => {
+      const date = value ? new Date(value) : undefined
+      return date && Number.isFinite(date.getTime()) ? date : undefined
     }
-    const byCourier = new Map<string, Array<typeof courierTrips.$inferSelect>>()
-    for (const t of trips) {
-      const list = byCourier.get(t.courierId as string) ?? []
-      list.push(t)
-      byCourier.set(t.courierId as string, list)
-    }
+    const from = parseDate(filters.dateFrom)
+    const to = parseDate(filters.dateTo)
+    if (from && to && from > to) throw Err.validation('تاریخ شروع باید پیش از تاریخ پایان باشد.')
+    const filtered = Boolean(from || to || filters.admin2Id)
+    const deliveryWhere = and(
+      from ? gte(courierDeliveries.deliveredAt, from) : undefined,
+      to ? lte(courierDeliveries.deliveredAt, to) : undefined,
+      filters.admin2Id ? sql`${courierDeliveries.orderId} in (
+        select ${orders.id} from ${orders} where ${orders.confirmedBy} = ${filters.admin2Id}
+      )` : undefined,
+    )
+    const visibleWhere = and(courierWhere, filtered ? sql`exists (
+      select 1 from ${courierTrips}
+      join ${courierDeliveries} on ${courierDeliveries.tripId} = ${courierTrips.id}
+      where ${courierTrips.courierId} = ${couriers.id} and ${deliveryWhere}
+    )` : undefined)
+    const page = Math.min(Math.max(1, Math.floor(filters.page || 1)), 100000)
+    const limit = Math.min(Math.max(1, Math.floor(filters.limit || 10)), 100)
+    const [counts, pageRows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(couriers).where(visibleWhere),
+      db.select().from(couriers).where(visibleWhere)
+        .orderBy(desc(couriers.createdAt), desc(couriers.id)).limit(limit).offset((page - 1) * limit),
+    ])
+    const total = counts[0]?.count ?? 0
+    const courierIds = pageRows.map((courier) => courier.id)
+    if (!courierIds.length) return { couriers: [], total }
 
+    // Aggregate the complete selected range; only the two latest deliveries
+    // per courier are transferred for card previews.
+    const ranked = db.select({
+      id: courierDeliveries.id,
+      courierId: courierTrips.courierId,
+      tripId: courierDeliveries.tripId,
+      startedAt: courierTrips.startedAt,
+      completedAt: courierTrips.completedAt,
+      orderId: orders.displayId,
+      addressSnapshot: courierDeliveries.addressSnapshot,
+      deliveredAt: courierDeliveries.deliveredAt,
+      amount: courierDeliveries.amount,
+      rank: sql<number>`row_number() over (partition by ${courierTrips.courierId}
+        order by ${courierDeliveries.deliveredAt} desc, ${courierDeliveries.id} desc)`.as('delivery_rank'),
+    }).from(courierDeliveries)
+      .innerJoin(courierTrips, eq(courierTrips.id, courierDeliveries.tripId))
+      .innerJoin(orders, eq(orders.id, courierDeliveries.orderId))
+      .where(and(inArray(courierTrips.courierId, courierIds), deliveryWhere)).as('ranked_deliveries')
+    const [aggregates, previews] = await Promise.all([
+      db.select({
+        courierId: courierTrips.courierId,
+        totalTrips: filtered
+          ? sql<number>`count(distinct case when ${courierDeliveries.id} is not null then ${courierTrips.id} end)::int`
+          : sql<number>`count(distinct ${courierTrips.id})::int`,
+        totalDeliveries: sql<number>`count(${courierDeliveries.id})::int`,
+        totalAmount: sql<number>`coalesce(sum(${courierDeliveries.amount}), 0)::bigint`,
+      }).from(courierTrips)
+        .leftJoin(courierDeliveries, and(eq(courierDeliveries.tripId, courierTrips.id), deliveryWhere))
+        .where(inArray(courierTrips.courierId, courierIds)).groupBy(courierTrips.courierId),
+      db.select().from(ranked).where(lte(ranked.rank, 2)).orderBy(desc(ranked.deliveredAt)),
+    ])
+    const totals = new Map(aggregates.map((value) => [value.courierId, value]))
+    const byCourier = new Map<string, CourierListRowDto['trips']>()
+    for (const delivery of previews) {
+      const trips = byCourier.get(delivery.courierId) ?? []
+      let trip = trips.find((value) => value.id === delivery.tripId)
+      if (!trip) {
+        trip = { id: delivery.tripId, startedAt: delivery.startedAt, completedAt: delivery.completedAt, deliveries: [] }
+        trips.push(trip)
+      }
+      trip.deliveries.push({
+        id: delivery.id,
+        orderId: delivery.orderId, addressSnapshot: delivery.addressSnapshot,
+        deliveredAt: delivery.deliveredAt, amount: delivery.amount,
+      })
+      byCourier.set(delivery.courierId, trips)
+    }
     return {
-      couriers: pageRows.map((c) => ({
-        id: c.id as string,
-        name: c.name,
-        phone: c.phone,
-        createdAt: c.createdAt,
-        trips: (byCourier.get(c.id as string) ?? [])
-          .map((t) => ({ ...t, deliveries: byTrip.get(t.id as string) ?? [] }))
-          // در حالت بازه: سفرهای بی‌تحویلِ داخل بازه نمایش داده نمی‌شوند
-          .filter((t) => (hasRange ? t.deliveries.length > 0 : true)),
+      couriers: pageRows.map((courier) => ({
+        id: courier.id, name: courier.name, phone: courier.phone, createdAt: courier.createdAt,
+        trips: byCourier.get(courier.id) ?? [],
+        totalTrips: totals.get(courier.id)?.totalTrips ?? 0,
+        totalDeliveries: totals.get(courier.id)?.totalDeliveries ?? 0,
+        totalAmount: Number(totals.get(courier.id)?.totalAmount ?? 0),
       })),
       total,
     }
   }
 
   async addCourier(input: { name: string; phone: string }): Promise<{ success: boolean; message?: string }> {
-    const clash = await this.deps.db.query.couriers.findFirst({
-      where: eq(couriers.phone, input.phone),
-    })
-    if (clash) return { success: false, message: 'پیکی با این شماره از قبل موجود است' }
-    await this.deps.db.insert(couriers).values(input)
+    const name = input.name.trim()
+    if (!name) throw Err.validation('نام پیک را وارد کنید.')
+    const [created] = await this.deps.db.insert(couriers).values({ ...input, name })
+      .onConflictDoNothing({ target: couriers.phone }).returning({ id: couriers.id })
+    if (!created) return { success: false, message: 'پیکی با این شماره از قبل موجود است' }
     return { success: true }
   }
 
@@ -516,9 +511,12 @@ export class CourierService {
       : sql``
     const deliveries = tripIds.length
       ? await this.deps.db
-        .select()
+        .select({ delivery: courierDeliveries, displayId: orders.displayId })
         .from(courierDeliveries)
+        .innerJoin(orders, eq(orders.id, courierDeliveries.orderId))
         .where(sql`${inArray(courierDeliveries.tripId, tripIds)} ${ownership}`)
+        .orderBy(desc(courierDeliveries.deliveredAt))
+        .then((rows) => rows.map(({ delivery, displayId }) => ({ ...delivery, orderId: displayId })))
       : []
 
     // stage-55 — مجموع از SQL واقعی (قبلاً: fetch همه‌ی ردیف‌ها + reduce در JS).
@@ -534,12 +532,18 @@ export class CourierService {
         .where(sql`${inArray(courierDeliveries.tripId, tripIds)} ${ownership}`)
       : [{ count: 0, total: 0 }]
 
+    const byTrip = new Map<string, typeof deliveries>()
+    for (const delivery of deliveries) {
+      const group = byTrip.get(delivery.tripId) ?? []
+      group.push(delivery)
+      byTrip.set(delivery.tripId, group)
+    }
     return {
       courier,
       trips: trips.map((t) => ({
         ...t,
-        deliveries: deliveries.filter((d) => d.tripId === t.id),
-      })),
+        deliveries: byTrip.get(t.id) ?? [],
+      })).filter((trip) => !admin2Id || trip.deliveries.length > 0),
       totalDeliveries: totals?.count ?? 0,
       totalAmount: Number(totals?.total ?? 0),
       // ⬅ phase-3: نمودار از تحویل‌های واقعی — نقش‌محور

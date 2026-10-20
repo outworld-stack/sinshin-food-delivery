@@ -130,7 +130,8 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     .post(
       '/delivery-zones',
       async ({ body, user }) => {
-        await deps.zones.add(body.radiusKm, body.fee)
+        const result = await deps.zones.add(body.radiusKm, body.fee)
+        if (!result.success) return result
         await deps.audit.log({
           actorId: user.id,
           action: 'ZONE_ADD',
@@ -142,7 +143,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       {
         body: t.Object({
           radiusKm: t.Number({ minimum: 0.5, maximum: 500 }),
-          fee: t.Number({ minimum: 0 }),
+          fee: t.Integer({ minimum: 0, maximum: 2_147_483_647 }),
         }),
         detail: { summary: 'Add delivery zone (duplicate radius rejected) — main admin only' },
       },
@@ -150,7 +151,8 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     .post(
       '/delivery-zones/remove',
       async ({ body, user }) => {
-        await deps.zones.remove(body.radiusKm)
+        const result = await deps.zones.remove(body.radiusKm)
+        if (!result.success) return result
         await deps.audit.log({
           actorId: user.id,
           action: 'ZONE_REMOVE',
@@ -186,7 +188,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
         body: t.Object({
           radiusKm: t.Number({ minimum: 0.5, maximum: 500 }),
           newRadiusKm: t.Number({ minimum: 0.5, maximum: 500 }),
-          fee: t.Number({ minimum: 0 }),
+          fee: t.Integer({ minimum: 0, maximum: 2_147_483_647 }),
         }),
         detail: {
           summary: 'Update zone radius/fee (duplicate radius rejected) — main admin only',

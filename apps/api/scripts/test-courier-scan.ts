@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { mock } from 'bun:test'
+mock.module('../src/domain/courier/courier-trip', () => ({ startCourierTrip: async () => ({ id: 'trip-id' }) }))
 import { CourierService } from '../src/domain/courier/courier.service'
 import type { OrderRow } from '../src/infra/db/schema'
 
@@ -15,6 +17,7 @@ let neverUpdate = false
 let authorizedCourier: string | null = 'assigned'
 const service = new CourierService({
   db: {
+    transaction: async (work: (tx: unknown) => unknown) => work((service as any).deps.db),
     select: () => ({ from: () => ({ where: async () => [row] }) }),
     update: () => ({ set: (change: Partial<OrderRow>) => ({ where: () => ({ returning: async () => {
       updateCount++

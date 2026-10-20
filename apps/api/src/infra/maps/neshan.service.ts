@@ -71,8 +71,7 @@ interface CacheEntry<T> {
 
 export class NeshanService {
   private readonly cache = new Map<string, CacheEntry<unknown>>()
-  /** شمارنده‌ی مدخل‌های کش — جلوگیری از رشد بی‌سقف */
-  private cacheCount = 0
+  private readonly inFlight = new Map<string, Promise<unknown | null>>()
   private readonly cacheMaxEntries = 2_000
 
   constructor(private readonly config: AppConfig) {}
@@ -107,22 +106,39 @@ export class NeshanService {
   private cacheGet<T>(key: string): T | null {
     const hit = this.cache.get(key)
     if (!hit) return null
-    if (hit.expiresAt < Date.now()) {
+    if (hit.expiresAt <= Date.now()) {
       this.cache.delete(key)
-      this.cacheCount--
       return null
     }
     return hit.value as T
   }
 
   private cacheSet<T>(key: string, value: T): void {
-    if (this.cacheCount >= this.cacheMaxEntries) {
-      // تخلیه‌ی کامل — ساده و کافی (TTL کوتاه است)
-      this.cache.clear()
-      this.cacheCount = 0
+    if (!this.cache.has(key) && this.cache.size >= this.cacheMaxEntries) {
+      const oldest = this.cache.keys().next().value
+      if (oldest !== undefined) this.cache.delete(oldest)
     }
     this.cache.set(key, { value, expiresAt: Date.now() + this.config.neshan.cacheTtlSeconds * 1000 })
-    this.cacheCount++
+  }
+
+  /** Coalesce identical requests before spending provider quota. Invalid provider
+   * payloads must fail as softly as transport errors, and failures remain retryable. */
+  private async cached<T>(key: string, load: () => Promise<T | null>): Promise<T | null> {
+    const hit = this.cacheGet<T>(key)
+    if (hit !== null) return hit
+    const pending = this.inFlight.get(key)
+    if (pending) return pending as Promise<T | null>
+    const task = (async () => {
+      try {
+        const value = await load()
+        if (value !== null) this.cacheSet(key, value)
+        return value
+      } catch {
+        return null
+      }
+    })()
+    this.inFlight.set(key, task)
+    try { return await task } finally { this.inFlight.delete(key) }
   }
 
   private roundCoord(v: number): string {
@@ -135,9 +151,7 @@ export class NeshanService {
   async reverseGeocode(lat: number, lng: number): Promise<NeshanReverseResult | null> {
     if (!this.isCoord(lat, lng)) return null
     const key = `rev:${this.roundCoord(lat)},${this.roundCoord(lng)}`
-    const cached = this.cacheGet<NeshanReverseResult>(key)
-    if (cached) return cached
-
+    return this.cached(key, async () => {
     interface RawReverse {
       status?: string
       formatted_address?: string
@@ -150,20 +164,20 @@ export class NeshanService {
       in_odd_even_zone?: boolean
     }
     const raw = await this.get<RawReverse>(`/v5/reverse?lat=${lat}&lng=${lng}`)
-    if (!raw || raw.status !== 'OK' || !raw.formatted_address) return null
+    if (!raw || raw.status !== 'OK' || typeof raw.formatted_address !== 'string' || !raw.formatted_address.trim()) return null
 
     const result: NeshanReverseResult = {
       formattedAddress: raw.formatted_address,
-      routeName: raw.route_name ?? '',
-      neighbourhood: raw.neighbourhood ?? null,
-      city: raw.city ?? '',
-      state: raw.state ?? '',
-      municipalityZone: raw.municipality_zone ?? null,
+      routeName: typeof raw.route_name === 'string' ? raw.route_name : '',
+      neighbourhood: typeof raw.neighbourhood === 'string' ? raw.neighbourhood : null,
+      city: typeof raw.city === 'string' ? raw.city : '',
+      state: typeof raw.state === 'string' ? raw.state : '',
+      municipalityZone: typeof raw.municipality_zone === 'string' ? raw.municipality_zone : null,
       inTrafficZone: raw.in_traffic_zone === true,
       inOddEvenZone: raw.in_odd_even_zone === true,
     }
-    this.cacheSet(key, result)
     return result
+    })
   }
 
   // ═══ مسیریابی بدون ترافیک (v4/direction/no-traffic) ═══
@@ -176,18 +190,15 @@ export class NeshanService {
     if (!this.isCoord(origin.lat, origin.lng) || !this.isCoord(destination.lat, destination.lng)) {
       return null
     }
-    const waypoints = (opts?.waypoints ?? [])
-      .filter((w) => this.isCoord(w.lat, w.lng))
-      .slice(0, 5)
+    const waypoints = opts?.waypoints ?? []
+    if (waypoints.length > 5 || waypoints.some((w) => !this.isCoord(w.lat, w.lng))) return null
     const wpStr = waypoints.length > 0
       ? `&waypoints=${encodeURIComponent(waypoints.map((w) => `${w.lat},${w.lng}`).join('|'))}`
       : ''
     const key =
       `route:${this.roundCoord(origin.lat)},${this.roundCoord(origin.lng)}→` +
-      `${this.roundCoord(destination.lat)},${this.roundCoord(destination.lng)}${wpStr}`
-    const cached = this.cacheGet<NeshanRoute>(key)
-    if (cached) return cached
-
+      `${this.roundCoord(destination.lat)},${this.roundCoord(destination.lng)}${wpStr}:alt=${opts?.alternative === true}`
+    return this.cached(key, async () => {
     interface RawRoute {
       routes?: Array<{
         overview_polyline?: { points?: string }
@@ -206,18 +217,22 @@ export class NeshanService {
       `&alternative=${opts?.alternative === true ? 'true' : 'false'}`,
     )
     const r = raw?.routes?.[0]
-    if (!r?.overview_polyline?.points || !r.legs?.[0]) return null
-
-    const leg = r.legs[0]
+    if (typeof r?.overview_polyline?.points !== 'string' || !Array.isArray(r.legs) || r.legs.length === 0) return null
+    if (r.legs.some((leg) => !nonnegative(leg?.distance?.value) || !nonnegative(leg?.duration?.value))) return null
+    const coordinates = decodePolyline(r.overview_polyline.points)
+    if (coordinates.length < 2) return null
+    const distanceMeters = r.legs.reduce((sum, leg) => sum + leg.distance!.value!, 0)
+    const durationSeconds = r.legs.reduce((sum, leg) => sum + leg.duration!.value!, 0)
+    if (!nonnegative(distanceMeters) || !nonnegative(durationSeconds)) return null
     const result: NeshanRoute = {
-      distanceMeters: leg.distance?.value ?? 0,
-      durationSeconds: leg.duration?.value ?? 0,
-      coordinates: decodePolyline(r.overview_polyline.points),
-      summary: leg.summary ?? '',
+      distanceMeters,
+      durationSeconds,
+      coordinates,
+      summary: r.legs.map((leg) => typeof leg.summary === 'string' ? leg.summary : '').filter(Boolean).join(' — '),
       overviewPolyline: r.overview_polyline.points,
     }
-    this.cacheSet(key, result)
     return result
+    })
   }
 
   // ═══ ماتریس فاصله (v1/distance-matrix[/no-traffic]) ═══
@@ -227,9 +242,11 @@ export class NeshanService {
     destinations: LatLng[],
     opts?: { type?: 'car' | 'motorcycle'; traffic?: boolean },
   ): Promise<NeshanMatrixElement[][] | null> {
-    const cleanOrigins = origins.filter((p) => this.isCoord(p.lat, p.lng)).slice(0, MATRIX_MAX)
-    const cleanDests = destinations.filter((p) => this.isCoord(p.lat, p.lng)).slice(0, MATRIX_MAX)
-    if (cleanOrigins.length === 0 || cleanDests.length === 0) return null
+    // Never filter/truncate points: doing so silently changes matrix row/column identities.
+    if (origins.length === 0 || destinations.length === 0 || origins.length > MATRIX_MAX || destinations.length > MATRIX_MAX ||
+      [...origins, ...destinations].some((p) => !this.isCoord(p.lat, p.lng))) return null
+    const cleanOrigins = origins
+    const cleanDests = destinations
 
     const type = opts?.type === 'motorcycle' ? 'motorcycle' : 'car'
     const traffic = opts?.traffic === true
@@ -238,9 +255,7 @@ export class NeshanService {
       cleanOrigins.map((p) => `${this.roundCoord(p.lat)},${this.roundCoord(p.lng)}`).join(';') +
       '|' +
       cleanDests.map((p) => `${this.roundCoord(p.lat)},${this.roundCoord(p.lng)}`).join(';')
-    const cached = this.cacheGet<NeshanMatrixElement[][]>(key)
-    if (cached) return cached
-
+    return this.cached(key, async () => {
     interface RawMatrix {
       rows?: Array<{
         elements?: Array<{
@@ -256,18 +271,20 @@ export class NeshanService {
       `&origins=${encodeURIComponent(cleanOrigins.map((p) => `${p.lat},${p.lng}`).join('|'))}` +
       `&destinations=${encodeURIComponent(cleanDests.map((p) => `${p.lat},${p.lng}`).join('|'))}`,
     )
-    if (!raw?.rows) return null
+    if (!Array.isArray(raw?.rows) || raw.rows.length !== origins.length ||
+      raw.rows.some((row) => !Array.isArray(row?.elements) || row.elements.length !== destinations.length)) return null
 
     const matrix: NeshanMatrixElement[][] = raw.rows.map((row) =>
       (row.elements ?? []).map((el) => ({
         status:
-          el.status === 'Ok' ? 'Ok' : el.status === 'NoRoute' ? 'NoRoute' : 'UnknownError',
-        distanceMeters: el.distance?.value ?? null,
-        durationSeconds: el.duration?.value ?? null,
+          el?.status === 'Ok' && nonnegative(el.distance?.value) && nonnegative(el.duration?.value)
+            ? 'Ok' : el?.status === 'NoRoute' ? 'NoRoute' : 'UnknownError',
+        distanceMeters: el?.status === 'Ok' && nonnegative(el.distance?.value) && nonnegative(el.duration?.value) ? el.distance.value : null,
+        durationSeconds: el?.status === 'Ok' && nonnegative(el.distance?.value) && nonnegative(el.duration?.value) ? el.duration.value : null,
       })),
     )
-    this.cacheSet(key, matrix)
     return matrix
+    })
   }
 
   /** فاصله‌ی هوایی هیورساین — fallback همیشه در دسترس (بدون API) */
@@ -279,7 +296,7 @@ export class NeshanService {
     const la2 = (b.lat * Math.PI) / 180
     const h =
       Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2
-    return Math.round(2 * R * Math.asin(Math.sqrt(h)))
+    return Math.round(2 * R * Math.asin(Math.sqrt(Math.min(1, Math.max(0, h)))))
   }
 
   private isCoord(lat: number, lng: number): boolean {
@@ -290,38 +307,39 @@ export class NeshanService {
   }
 }
 
+function nonnegative(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
 /**
  * رمزگشایی Encoded Polyline (الگوریتم گوگل) — خروجی [lat, lng][].
  * برای رسم مسیر روی MapLibre در فرانت.
  */
 export function decodePolyline(encoded: string): Array<[number, number]> {
+  if (typeof encoded !== 'string' || encoded.length > 200_000) return []
   const points: Array<[number, number]> = []
   let index = 0
   let lat = 0
   let lng = 0
 
-  while (index < encoded.length) {
-    // latitude
+  const readDelta = (): number | null => {
     let result = 0
-    let shift = 0
-    let b: number
-    do {
-      b = encoded.charCodeAt(index++) - 63
-      result |= (b & 0x1f) << shift
-      shift += 5
-    } while (b >= 0x20)
-    lat += result & 1 ? ~(result >> 1) : result >> 1
-
-    // longitude
-    result = 0
-    shift = 0
-    do {
-      b = encoded.charCodeAt(index++) - 63
-      result |= (b & 0x1f) << shift
-      shift += 5
-    } while (b >= 0x20)
-    lng += result & 1 ? ~(result >> 1) : result >> 1
-
+    for (let shift = 0; shift <= 25; shift += 5) {
+      if (index >= encoded.length) return null
+      const b = encoded.charCodeAt(index++) - 63
+      if (b < 0 || b > 63) return null
+      result += (b & 0x1f) * 2 ** shift
+      if (b < 0x20) return result % 2 ? -(Math.floor(result / 2) + 1) : result / 2
+    }
+    return null
+  }
+  while (index < encoded.length) {
+    const dLat = readDelta()
+    const dLng = readDelta()
+    if (dLat === null || dLng === null) return []
+    lat += dLat
+    lng += dLng
+    if (Math.abs(lat) > 90e5 || Math.abs(lng) > 180e5) return []
     points.push([lat / 1e5, lng / 1e5])
   }
   return points

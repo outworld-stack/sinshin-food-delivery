@@ -48,6 +48,7 @@ import {
         couponGrants,
         coupons,
         couriers,
+        courierDeliveries,
         orderItems,
         orders,
         payments,
@@ -93,6 +94,7 @@ import type {
 } from "@sinshin/shared";
 import { requireOrder, requireOwnedOrder, findOrder } from './order-lookup'
 import type { CheckoutClaim } from './checkout-idempotency.service'
+import { closeIdleCourierTrips, lockCourierTrips, startCourierTrip } from '#/domain/courier/courier-trip'
 
 
 function newDisplayId(): string {
@@ -1093,15 +1095,21 @@ export class OrderService {
                                 throw Err.conflict("فقط سفارش‌های پرداخت‌شده قابل بازگشت وجه هستند.");
                         }
 
+                        // Match dispatch/confirmation lock order: order, then courier.
+                        // Cancellation and last delivery must agree on whether this trip is idle.
+                        const courierId = row.deliveryType === 'DELIVERY' ? row.courierId : null;
+                        if (courierId) await lockCourierTrips(tx, courierId);
+                        const canceledAt = new Date();
                         await tx
                                 .update(orders)
                                 .set({
                                         status: "CANCELED",
                                         paymentStatus: "REFUNDED",
                                         internalNote: reason,
-                                        updatedAt: new Date(),
+                                        updatedAt: canceledAt,
                                 })
                                 .where(eq(orders.id, row.id));
+                        if (courierId) await closeIdleCourierTrips(tx, courierId, canceledAt);
 
                         // The locked order makes this idempotent. An unexpected ledger
                         // conflict must roll back the refund, never silently omit credit.
@@ -1379,28 +1387,31 @@ export class OrderService {
 
         /** تایید تحویل توسط مشتری — قرارداد فرانت */
         async confirmDelivery(userId: string, displayId: string): Promise<void> {
-                const row = await requireOwnedOrder(this.deps.db, userId, displayId);
-                // امن-۷: فقط بعد از تایید رستوران — PAID یعنی سفارش هنوز وارد جریان
-                // آشپزخانه/پیک نشده؛ بستنش توسط مشتری زودهنگام بود و جریان را می‌شکست
-                if (row.status !== "CONFIRMED" && row.status !== "ON_THE_WAY") {
-                        throw Err.conflict("این سفارش هنوز تایید نشده و قابل تایید تحویل نیست.");
-                }
-                // گارد دومی روی خود UPDATE — چک-و-آپدیت اتمیک نیست
-                const [updated] = await this.deps.db
-                        .update(orders)
-                        .set({
-                                status: "DELIVERED",
-                                deliveredAt: new Date(),
-                                updatedAt: new Date(),
-                        })
-                        .where(
-                                and(
-                                        eq(orders.id, row.id),
-                                        inArray(orders.status, ["CONFIRMED", "ON_THE_WAY"]),
-                                ),
-                        )
-                        .returning();
-                if (!updated) throw Err.conflict("این سفارش قابل تایید تحویل نیست.");
+                await this.deps.db.transaction(async (tx) => {
+                        const row = await findOrder(tx, displayId, { forUpdate: true });
+                        if (!row || row.userId !== userId) throw Err.notFound('سفارش پیدا نشد.');
+                        // Retrying a successful confirmation must not create another delivery.
+                        if (row.status === 'DELIVERED') return;
+                        if (row.status !== 'CONFIRMED' && row.status !== 'ON_THE_WAY') {
+                                throw Err.conflict('این سفارش هنوز تایید نشده و قابل تایید تحویل نیست.');
+                        }
+                        const trip = row.deliveryType === 'DELIVERY' && row.courierId
+                                ? await startCourierTrip(tx, row.courierId, row.courierArrivedAt ?? new Date())
+                                : null;
+                        // The courier lock may wait for another dispatch; completion
+                        // must be timestamped after the trip it belongs to exists.
+                        const deliveredAt = new Date();
+                        await tx.update(orders).set({ status: 'DELIVERED', deliveredAt, updatedAt: deliveredAt })
+                                .where(eq(orders.id, row.id));
+                        if (trip && row.courierId) {
+                                await tx.insert(courierDeliveries).values({
+                                        tripId: trip.id, orderId: row.id,
+                                        addressSnapshot: row.addressSnapshot ?? '',
+                                        deliveredAt, amount: row.totalAmount,
+                                });
+                                await closeIdleCourierTrips(tx, row.courierId, deliveredAt);
+                        }
+                });
         }
 
         /** پرچم ردیابی — تصویر لحظه‌ایِ ثبت سفارش، نه وضعیت فعلی تنظیمات */

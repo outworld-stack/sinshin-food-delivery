@@ -1164,7 +1164,8 @@ export interface CourierOptionDto {
 
 export interface CourierDeliveryDto {
   id: string
-  orderId: OrderId
+  /** Public order display ID used by order-detail routes. */
+  orderId: string
   addressSnapshot: string
   deliveredAt: Date
   amount: number
@@ -1193,6 +1194,10 @@ export interface CourierListRowDto {
   phone: string
   createdAt: Date
   trips: CourierTripDto[]
+  /** Complete totals for the selected range; trips contains recent previews. */
+  totalTrips?: number
+  totalDeliveries?: number
+  totalAmount?: number
 }
 
 export interface Admin2SessionDto {

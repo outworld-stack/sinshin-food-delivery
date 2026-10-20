@@ -234,3 +234,104 @@ console.log('PASS an allowed scan CIDR cannot include public addresses')
 }
 
 console.log('OK print transport regressions')
+
+{
+  const originalInterfaces = os.networkInterfaces
+  const originalCidrs = process.env.PRINT_SCAN_CIDRS
+  delete process.env.PRINT_SCAN_CIDRS
+  os.networkInterfaces = () => Object.fromEntries([1, 2, 3].map((n) => [`lan${n}`, [{
+    address: `192.168.${n}.8`, netmask: '255.255.255.0', family: 'IPv4' as const,
+    mac: '00:00:00:00:00:00', internal: false, cidr: `192.168.${n}.8/24`,
+  }]]))
+  let active = 0
+  let peak = 0
+  const sender = spyOn(transport, 'sendRaw').mockImplementation(async (host) => {
+    active++
+    peak = Math.max(peak, active)
+    await Promise.resolve()
+    active--
+    return host.endsWith('.20') || host.endsWith('.3') ? { online: true, reply: null } : { online: false, reason: 'test' }
+  })
+  try {
+    const unused = new Proxy({}, { get: () => { throw new Error('Unexpected dependency access') } })
+    const service = new PrinterService(unused as ConstructorParameters<typeof PrinterService>[0])
+    const [first, second] = await Promise.all([service.discover({}), service.discover({})])
+    assert.deepEqual(first, second)
+    assert.equal(first.scanned.length, 3, 'automatic scans handle multiple physical/VPN interfaces')
+    assert.equal(sender.mock.calls.length, 762, 'concurrent print centers share one scan')
+    assert.ok(peak <= 64)
+    assert.deepEqual(first.found.map((p) => p.host), ['192.168.1.3', '192.168.1.20', '192.168.2.3', '192.168.2.20', '192.168.3.3', '192.168.3.20'])
+    sender.mockClear()
+    peak = 0
+    await Promise.all([service.discover({ cidr: '192.168.1.0/25' }), service.discover({ cidr: '192.168.2.0/25' })])
+    assert.equal(sender.mock.calls.length, 252)
+    assert.ok(peak <= 64, 'different simultaneous scans share the global socket limit')
+    process.env.PRINT_SCAN_CIDRS = '192.168.1.0/29,192.168.2.0/29,192.168.3.0/29,192.168.4.0/29,192.168.5.0/29'
+    assert.equal((await service.discover({})).scanned.length, 5, 'configured networks are never silently dropped')
+  } finally {
+    sender.mockRestore()
+    os.networkInterfaces = originalInterfaces
+    if (originalCidrs === undefined) delete process.env.PRINT_SCAN_CIDRS
+    else process.env.PRINT_SCAN_CIDRS = originalCidrs
+  }
+  console.log('PASS multi-interface discovery, deterministic dropdown order, shared scans and global connection limit')
+}
+
+{
+  const row = {
+    id: 'printer-1', name: 'Test', host: '192.168.1.20', port: 9100,
+    widthDots: 576, autoCut: true, lastStatus: 'online', lastStatusDetail: null,
+    lastStatusAt: new Date(0), createdAt: new Date(0), updatedAt: new Date(0),
+  }
+  const db = {
+    select: () => ({ from: () => ({
+      then: (resolve: (rows: unknown[]) => unknown) => Promise.resolve(resolve([row])),
+      where: async () => [row],
+    }) }),
+    update: () => ({ set: () => ({ where: async () => {} }) }),
+  }
+  const service = new PrinterService({ db, settings: { get: async () => null } } as unknown as ConstructorParameters<typeof PrinterService>[0])
+  assert.deepEqual(await service.assignment(), { sales: null, kitchen: null }, 'corrupt/null settings fall back to empty defaults')
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  let calls = 0
+  const sender = spyOn(transport, 'sendRaw').mockImplementation(async () => {
+    calls++
+    await gate
+    return { online: true, reply: Buffer.from([0x12, 0x12]) }
+  })
+  try {
+    const listing = Promise.all([service.list(), service.list()])
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    assert.equal(calls, 1, 'concurrent lists share each device probe')
+    release()
+    const [first, second] = await listing
+    assert.equal(first[0]?.lastStatusAt, second[0]?.lastStatusAt)
+    const cached = await service.list()
+    assert.equal(calls, 1)
+    assert.equal(cached[0]?.lastStatusAt, first[0]?.lastStatusAt, 'cache hits report the real probe time')
+  } finally { sender.mockRestore() }
+
+  const events: string[] = []
+  let active = 0
+  let peak = 0
+  const queueSender = spyOn(transport, 'sendRaw').mockImplementation(async (_host, _port, payload) => {
+    active++
+    peak = Math.max(peak, active)
+    events.push(payload.length === 6 ? 'status' : 'receipt')
+    await Promise.resolve()
+    active--
+    return { online: true, reply: Buffer.from([0x12, 0x12]) }
+  })
+  try {
+    const receipt = { printerId: row.id, widthPx: 576, heightPx: 1, rows: Buffer.alloc(72).toString('base64') }
+    await Promise.all([service.dispatch(receipt), service.dispatch(receipt), service.test(row.id)])
+    assert.equal(peak, 1, 'one printer never receives simultaneous jobs/status commands')
+    assert.deepEqual(events, ['status', 'receipt', 'status', 'receipt', 'status', 'receipt'])
+    const failed = service.dispatch({ ...receipt, heightPx: 4001 })
+    const valid = service.dispatch(receipt)
+    await assert.rejects(failed)
+    await valid
+  } finally { queueSender.mockRestore() }
+  console.log('PASS shared status probes, accurate cached times, null defaults and serialized receipt/test jobs with failure recovery')
+}
