@@ -6,7 +6,7 @@
 
 // src/hooks/site/useCheckoutPage.ts
 
-import { type CheckoutItemInput, normalizeCouponCode } from '@sinshin/shared'
+import { type CheckoutItemInput, normalizeCouponCode, parsePaymentTarget } from '@sinshin/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -21,6 +21,7 @@ import { useMenuLive } from '#/hooks/shared/useMenuLive'
 import { tpl, useI18n } from '#/i18n'
 import { checkoutIntentKey, clearCheckoutIntent } from '#/lib/checkout-intent'
 import { rememberPendingCheckout } from '#/lib/pending-checkout'
+import { navigateToPayment } from '#/lib/payment-navigation'
 import { mockPay, processCheckout } from '#/server/checkout'
 import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
@@ -376,8 +377,17 @@ export function useCheckoutPage(deps: {
 			}
 
 			if (res.paymentUrl) {
-				// ── MOCK (URL نسبی) — فلوی برنامه‌ای محیط توسعه ──
-				if (!res.paymentUrl.startsWith('http')) {
+				const target = parsePaymentTarget(res.paymentUrl)
+				if (!target) {
+					showToast(t['checkout.payError'], 'error')
+					if (res.orderId) {
+						rememberPendingCheckout(res.orderId)
+						setActiveOrderId(res.orderId)
+						void navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
+					}
+					return
+				}
+				if (target.method === 'MOCK') {
 					setMockPayPending(true)
 					try {
 						const payResult = await mockPay(res.paymentUrl, true)
@@ -419,7 +429,7 @@ export function useCheckoutPage(deps: {
 				// برگشت از درگاه → /dashboard/orders/:orderId → پول →
 				// اولین SUCCESS با پرچمِ همین سفارش → سبد پاک می‌شود
 				if (res.orderId) rememberPendingCheckout(res.orderId)
-				window.location.href = res.paymentUrl
+				navigateToPayment(res.paymentUrl)
 				return
 			}
 

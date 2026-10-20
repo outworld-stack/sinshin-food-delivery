@@ -2,9 +2,11 @@
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
 import { amountInRial } from './http-util'
+import { parsePaymentTarget } from '@sinshin/shared'
 import type {
   GatewayInitInput,
   GatewayInitResult,
+  GatewayResumeInput,
   GatewayVerifyInput,
   GatewayVerifyResult,
   PaymentGateway,
@@ -118,7 +120,7 @@ const qget = (query: Record<string, string>, name: string): string | undefined =
  *
  * جریان:
  *   ۱) init → bpPayRequest (مبلغ ریال؛ orderId = هش عددیِ پایدار از
- *      شناسه‌ی پرداخت) → RefId؛ کاربر به StartPay/RefId می‌رود.
+ *      شناسه‌ی پرداخت) → RefId؛ مرورگر RefId را به startpay.mellat با POST می‌فرستد.
  *   ۲) برگشت بانک به callback با فرم POST (ResCode/RefId/SaleOrderId/
  *      SaleReferenceId) — فقط ResCode=0 مسیر تایید دارد.
  *   ۳) تایید → bpVerifyRequest و بلافاصله bpSettleRequest سمت سرور؛
@@ -181,9 +183,22 @@ export class MellatAdapter implements PaymentGateway {
       throw Err.conflict(`ایجاد پرداخت ملت ناموفق بود (کد ${code}).`)
     }
     return {
+      // Token-bearing descriptor consumed by the shared payment target parser;
+      // the browser must POST RefId to /pgwchannel/startpay.mellat.
       paymentUrl: `${STARTPAY}/${refId}`,
       gatewayRef: `${orderId}:t:${refId}`,
     }
+  }
+
+  resumeUrl(input: GatewayResumeInput): string | null {
+    const ref = /^(\d{1,15}):([ts]):([A-Za-z0-9]+)$/.exec(input.gatewayRef ?? '')
+    if (!ref || ref[1] !== this.numericOrderId(input.paymentId)) return null
+    const url = input.paymentUrl ?? (ref[2] === 't' ? `${STARTPAY}/${ref[3]}` : null)
+    const target = typeof url === 'string' ? parsePaymentTarget(url) : null
+    if (target?.gateway !== this.id || (ref[2] === 't' && target.token !== ref[3])) return null
+    // Preserve the token-bearing handoff descriptor; the browser posts RefId
+    // to startpay.mellat rather than navigating to the legacy StartPay URL.
+    return `${STARTPAY}/${target.token}`
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {

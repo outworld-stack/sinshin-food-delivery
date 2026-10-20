@@ -37,9 +37,17 @@ export interface GatewayVerifyResult {
   indeterminate?: boolean
 }
 
+export interface GatewayResumeInput {
+  paymentId: PaymentId
+  gatewayRef: string | null
+  paymentUrl: unknown
+}
+
 export interface PaymentGateway {
   id: string
   mode: 'direct' | 'indirect' | 'mock'
   init(input: GatewayInitInput): Promise<GatewayInitResult>
+  /** Reopen the same attempt, validating its destination and stored token. */
+  resumeUrl(input: GatewayResumeInput): string | null
   verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult>
 }

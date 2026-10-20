@@ -38,8 +38,8 @@ import type { PaymentGateway } from './gateway.types'
 /** stage-58 — درگاه‌های واقعیِ پشتیبانی‌شده (منبع واحد بک‌اند؛ پی‌ایر حذف شد) */
 export const REAL_GATEWAY_IDS = ['MELLAT', 'ZARINPAL', 'SEP'] as const
 
-/** Maximum age for replaying the same gateway URL. */
-const RETRY_GRACE_MS = 15 * 60_000
+/** Checkout cache only; authenticated payment retries have no age cutoff. */
+const CHECKOUT_REPLAY_GRACE_MS = 15 * 60_000
 
 class PaymentReviewError extends AppError {
   constructor(readonly payment: PaymentRow, readonly note: string) {
@@ -333,8 +333,9 @@ export class PaymentService {
       .where(and(eq(payments.orderId, order.id), eq(payments.status, 'PENDING')))
     let resume: { id: PaymentId; paymentUrl: string } | undefined
     const resumeExisting = (p: PaymentRow): boolean => {
-      const paymentUrl = p.metadata?.paymentUrl
-      if (p.gateway.toUpperCase() !== gwId || typeof paymentUrl !== 'string' || !paymentUrl.trim()) return false
+      if (p.gateway.toUpperCase() !== gwId) return false
+      const paymentUrl = gw.resumeUrl({ paymentId: p.id, gatewayRef: p.gatewayRef, paymentUrl: p.metadata?.paymentUrl })
+      if (!paymentUrl) return false
       // Multiple unresolved sessions require reconciliation; never choose one
       // arbitrarily or replace an attempt which could already have charged.
       if (resume) throw Err.conflict('چند پرداخت در انتظار بررسی است؛ لطفاً با پشتیبانی تماس بگیرید.')
@@ -397,11 +398,16 @@ export class PaymentService {
       }
       const invalid = this.paymentIntegrity(last, currentOrder)
       if (invalid) throw new PaymentReviewError(last, invalid)
+      const [settled] = await tx.select().from(payments)
+        .where(and(eq(payments.orderId, order.id), eq(payments.status, 'SUCCESS'))).limit(1)
+      if (settled) throw new PaymentReviewError(settled, 'pending order already has a successful payment')
       const currentPending = await tx.select().from(payments)
         .where(and(eq(payments.orderId, order.id), eq(payments.status, 'PENDING'))).for('update')
       if (currentPending.length !== pendingRows.length || currentPending.some((p) => {
         const checked = pendingRows.find((old) => old.id === p.id)
-        return !checked || checked.gatewayRef !== p.gatewayRef || checked.updatedAt.getTime() !== p.updatedAt.getTime()
+        return !checked || checked.gatewayRef !== p.gatewayRef || checked.updatedAt.getTime() !== p.updatedAt.getTime() ||
+          checked.userId !== p.userId || checked.amount !== p.amount || checked.gateway !== p.gateway || checked.mode !== p.mode ||
+          checked.metadata?.paymentUrl !== p.metadata?.paymentUrl || checked.callbackUrl !== p.callbackUrl
       })) {
         throw Err.conflict('وضعیت پرداخت تغییر کرد؛ صفحه سفارش را به‌روز کنید.')
       }
@@ -472,7 +478,7 @@ export class PaymentService {
     if (last.status === 'SUCCESS') return 'success'
     if (last.status !== 'PENDING') return 'failed'
     if (cachedUrl && last.metadata?.paymentUrl !== cachedUrl) return 'stale'
-    return Date.now() - last.updatedAt.getTime() <= RETRY_GRACE_MS ? 'fresh' : 'stale'
+    return Date.now() - last.updatedAt.getTime() <= CHECKOUT_REPLAY_GRACE_MS ? 'fresh' : 'stale'
   }
 
   /**

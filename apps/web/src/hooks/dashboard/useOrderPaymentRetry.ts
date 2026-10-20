@@ -1,9 +1,11 @@
 import { useCallback, useRef } from 'react'
+import { parsePaymentTarget } from '@sinshin/shared'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '#/i18n'
 import { mockPay, retryOrderPayment } from '#/server/checkout'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
+import { navigateToPayment } from '#/lib/payment-navigation'
 
 export function useOrderPaymentRetry(orderId: string) {
   const { t, apiError } = useI18n()
@@ -14,15 +16,16 @@ export function useOrderPaymentRetry(orderId: string) {
   const retryMutation = useMutation({
     mutationFn: () => retryOrderPayment({ orderId }),
     onSuccess: async (res) => {
-      if (!res.paymentUrl) {
+      const target = res.paymentUrl ? parsePaymentTarget(res.paymentUrl) : null
+      if (!target) {
         showToast(apiError(t['dash.orderDetail.pendingRetryNoUrl']), 'error')
         return
       }
-      if (res.paymentUrl.startsWith('http')) {
-        window.location.href = res.paymentUrl
-        return
-      }
       try {
+        if (target.method !== 'MOCK') {
+          navigateToPayment(res.paymentUrl)
+          return
+        }
         const result = await mockPay(res.paymentUrl, true)
         showToast(
           result.paymentStatus === 'SUCCESS' ? t['checkout.paySuccess'] : t['checkout.payFailed'],

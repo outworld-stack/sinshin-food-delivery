@@ -118,7 +118,7 @@ payment.handleRetry()
 payment.handleRetry()
 await Bun.sleep(0)
 assert.equal(retryCalls, 1, 'same-frame retry clicks issue only one request')
-complete({ paymentUrl: '/api/payments/mock/id', displayId: 'order-a' })
+complete({ paymentUrl: '/api/payments/mock/00000000-0000-4000-8000-000000000001.0123456789abcdef0123456789abcdef', displayId: 'order-a' })
 await settled
 assert(toasts.includes('checkout.paySuccess'))
 assert.equal(client.getQueryState(qk.orderDetails('order-a'))?.isInvalidated, true)
@@ -126,7 +126,7 @@ assert.equal(client.getQueryState(qk.orderDetails('order-a'))?.isInvalidated, tr
 for (const outcome of ['conflict', 'lost-mock-response', 'missing-url', 'gateway'] as const) {
   retry = async () => {
     if (outcome === 'conflict') throw new Error('Payment already settled')
-    return { paymentUrl: outcome === 'missing-url' ? '' : outcome === 'gateway' ? 'https://gateway.test/pay/a' : '/api/payments/mock/id', displayId: 'order-a' }
+    return { paymentUrl: outcome === 'missing-url' ? '' : outcome === 'gateway' ? 'https://payment.zarinpal.com/pg/StartPay/authority' : '/api/payments/mock/00000000-0000-4000-8000-000000000001.0123456789abcdef0123456789abcdef', displayId: 'order-a' }
   }
   pay = async () => { throw new Error('Mock response lost') }
   settled = prepare()
@@ -139,6 +139,6 @@ for (const outcome of ['conflict', 'lost-mock-response', 'missing-url', 'gateway
 assert(toasts.includes('Payment already settled'))
 assert(toasts.includes('Mock response lost'))
 assert(toasts.includes('dash.orderDetail.pendingRetryNoUrl'))
-assert.equal(location.href, 'https://gateway.test/pay/a')
+assert.equal(location.href, 'https://payment.zarinpal.com/pg/StartPay/authority')
 client.clear()
 console.log('Wallet browser regressions passed: filtered pagination totals, page-size recovery, bounded referrals, retry double-click guard, conflict/lost-response refresh and gateway redirect.')

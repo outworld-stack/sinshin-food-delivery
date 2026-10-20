@@ -171,6 +171,7 @@ export const paymentRoutes = (deps: PaymentRoutesDeps) => {
           description:
             'stage-58 — makes the checkout error message “پرداخت را از صفحه‌ی سفارش ادامه دهید” actually true. ' +
             'Resumes the saved gateway session when a previous PENDING attempt is unresolved. ' +
+            'Owner retries have no application age cutoff; destinations and stored gateway tokens are validated. ' +
             'Creates a fresh payment row and gateway session only after previous attempts can safely be superseded. ' +
             'gatewayId defaults to the last attempt’s gateway. Rate-limited 6/min/IP.',
         },

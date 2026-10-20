@@ -2,9 +2,11 @@
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
 import { amountInRial, postGatewayJson } from './http-util'
+import { parsePaymentTarget } from '@sinshin/shared'
 import type {
   GatewayInitInput,
   GatewayInitResult,
+  GatewayResumeInput,
   GatewayVerifyInput,
   GatewayVerifyResult,
   PaymentGateway,
@@ -68,6 +70,13 @@ export class ZarinpalAdapter implements PaymentGateway {
       )
     }
     return { paymentUrl: `${this.startPay}/${authority}`, gatewayRef: authority }
+  }
+
+  resumeUrl(input: GatewayResumeInput): string | null {
+    // The authority is sufficient to recover a lost URL without another init.
+    const url = input.paymentUrl ?? `${this.startPay}/${input.gatewayRef ?? ''}`
+    const target = typeof url === 'string' ? parsePaymentTarget(url) : null
+    return target?.gateway === this.id && target.token === input.gatewayRef ? target.url : null
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {

@@ -74,6 +74,7 @@ try {
   let verdict: 'failed' | 'indeterminate' | 'success' = 'failed'
   let verifyHook: () => Promise<void> = async () => undefined
   const gateway: PaymentGateway = {
+    resumeUrl: input => typeof input.paymentUrl === 'string' ? input.paymentUrl : null,
     id: 'ZARINPAL', mode: 'direct',
     init: async (input) => {
       initCalls++
@@ -300,6 +301,7 @@ try {
   const checked: string[] = []
   ;(paymentService as unknown as { gateways: Map<string, PaymentGateway> }).gateways.set('CURSORTEST', {
     id: 'CURSORTEST', mode: 'direct', init: async () => { throw new Error('Unused init') },
+    resumeUrl: () => null,
     verify: async ({ gatewayRef }) => {
       checked.push(gatewayRef!)
       return { gatewayRef, success: gatewayRef === 'cursor-101', indeterminate: gatewayRef !== 'cursor-101' }

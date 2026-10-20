@@ -4,6 +4,7 @@ import { signState } from './state'
 import type {
   GatewayInitInput,
   GatewayInitResult,
+  GatewayResumeInput,
   GatewayVerifyInput,
   GatewayVerifyResult,
   PaymentGateway,
@@ -19,6 +20,11 @@ export class MockAdapter implements PaymentGateway {
   async init(input: GatewayInitInput): Promise<GatewayInitResult> {
     const state = signState(input.paymentId, this.config.jwtSecret)
     return { paymentUrl: `/api/payments/mock/${state}`, gatewayRef: input.paymentId }
+  }
+
+  resumeUrl(input: GatewayResumeInput): string | null {
+    const url = `/api/payments/mock/${signState(input.paymentId, this.config.jwtSecret)}`
+    return input.paymentUrl === url ? url : null
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {

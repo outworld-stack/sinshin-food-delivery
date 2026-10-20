@@ -1,9 +1,11 @@
 //src/domain/payment/sep.adapter.ts
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { parsePaymentTarget } from '@sinshin/shared'
 import type {
   GatewayInitInput,
   GatewayInitResult,
+  GatewayResumeInput,
   GatewayVerifyInput,
   GatewayVerifyResult,
   PaymentGateway,
@@ -98,6 +100,12 @@ export class SepAdapter implements PaymentGateway {
       paymentUrl: `${PAYMENT_PAGE}?Token=${encodeURIComponent(token)}`,
       gatewayRef: null, // RefNum فقط در callback می‌رسد — بالای فایل
     }
+  }
+
+  resumeUrl(input: GatewayResumeInput): string | null {
+    // RefNum is a receipt, not the Token needed to reopen PaymentPage.
+    const target = typeof input.paymentUrl === 'string' ? parsePaymentTarget(input.paymentUrl) : null
+    return target?.gateway === this.id ? target.url : null
   }
 
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {

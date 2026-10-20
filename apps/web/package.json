@@ -32,7 +32,7 @@
     "test:pwa-worker": "bun scripts/test-pwa-worker.ts",
     "test:notification-cache": "bun scripts/test-notification-cache.ts",
     "test:checkout-client": "bun scripts/test-checkout-client.tsx",
-    "test:payment-retry": "bun scripts/test-payment-retry-client.tsx",
+    "test:payment-retry": "bun scripts/test-payment-target.ts && bun scripts/test-payment-retry-client.tsx",
     "test:checkout-intent": "bun scripts/test-checkout-intent.ts",
     "test:referral-client": "bun scripts/test-referral-client.ts",
     "test:wallet-client": "bun scripts/test-wallet-client.tsx",

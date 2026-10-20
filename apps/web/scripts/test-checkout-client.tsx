@@ -127,10 +127,36 @@ assert.notEqual(checkoutRequests.at(-1)!.key, completedWalletKey, 'a new basket 
 
 // External gateway routing survives the same denied sessionStorage getter.
 onlineAmount = 100
-checkoutResponse = { orderCompleted: false, orderId: 'gateway-order', paymentUrl: 'https://gateway.example/pay/1' }
+checkoutResponse = { orderCompleted: false, orderId: 'gateway-order', paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/authority' }
 await submit(renderCheckout())
-assert.equal(location.href, 'https://gateway.example/pay/1')
+assert.equal(location.href, 'https://payment.zarinpal.com/pg/StartPay/authority')
 assert(consumePendingCheckout('gateway-order'))
+
+location.href = ''
+checkoutResponse = { orderCompleted: false, orderId: 'unsafe-url-order', paymentUrl: 'https://attacker.example/pay' }
+await submit(renderCheckout())
+assert.equal(location.href, '')
+assert.equal(navigations.at(-1)?.params?.orderId, 'unsafe-url-order')
+assert(consumePendingCheckout('unsafe-url-order'), 'retain recovery for a created order with an invalid redirect')
+
+let submitted = false
+const bankForm = {
+  method: '', action: '', style: { display: '' }, fields: [] as any[],
+  appendChild(input: any) { this.fields.push(input) },
+  submit() { submitted = true }, remove() {},
+}
+Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+  createElement: (tag: string) => tag === 'form' ? bankForm : {},
+  body: { appendChild: (element: unknown) => assert.equal(element, bankForm) },
+} })
+checkoutResponse = { orderCompleted: false, orderId: 'mellat-order', paymentUrl: 'https://bpm.shaparak.ir/StartPay/REF123' }
+await submit(renderCheckout())
+assert(submitted)
+assert.equal(bankForm.method, 'POST')
+assert.equal(bankForm.action, 'https://bpm.shaparak.ir/pgwchannel/startpay.mellat')
+assert.deepEqual(bankForm.fields, [{ type: 'hidden', name: 'RefId', value: 'REF123' }])
+assert.equal(location.href, '')
+assert(consumePendingCheckout('mellat-order'))
 
 // A replay may contain only the existing order; it is still a valid recovery.
 checkoutResponse = { orderCompleted: false, orderId: 'existing-order' }
@@ -140,7 +166,7 @@ assert.equal(activeOrders.at(-1), 'existing-order')
 assert(consumePendingCheckout('existing-order'))
 
 // Uncertain mock-payment network failure retains the original purchase key.
-checkoutResponse = { orderCompleted: false, orderId: 'uncertain-order', paymentUrl: '/mock/pay/1' }
+checkoutResponse = { orderCompleted: false, orderId: 'uncertain-order', paymentUrl: '/api/payments/mock/00000000-0000-4000-8000-000000000001.0123456789abcdef0123456789abcdef' }
 mockPayment = async () => { throw new Error('Network connection lost') }
 const retryPage = renderCheckout()
 await submit(retryPage)
@@ -164,7 +190,7 @@ assert.equal(checkoutRequests.at(-1)!.key, failedKey)
 // confirms it; only a definite failed payment permits an immediate new try.
 for (const paymentStatus of ['SUCCESS', 'FAILED']) {
   clearCheckoutIntent()
-  checkoutResponse = { orderCompleted: false, orderId: `mock-${paymentStatus}`, paymentUrl: '/mock/pay/terminal' }
+  checkoutResponse = { orderCompleted: false, orderId: `mock-${paymentStatus}`, paymentUrl: '/api/payments/mock/00000000-0000-4000-8000-000000000002.0123456789abcdef0123456789abcdef' }
   mockPayment = async () => ({ paymentStatus, orderDisplayId: `mock-${paymentStatus}` })
   navigationFinished = false
   navigationResult = new Promise<void>((resolve) => { finishNavigation = resolve })

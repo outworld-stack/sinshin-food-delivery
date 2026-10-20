@@ -57,6 +57,7 @@ try {
   let verifyHook = async (input: GatewayVerifyInput): Promise<GatewayVerifyResult> => ({ success: true, gatewayRef: input.gatewayRef })
   const fake: PaymentGateway = {
     id: 'FAKE', mode: 'direct',
+    resumeUrl: input => typeof input.paymentUrl === 'string' ? input.paymentUrl : null,
     init: async (input) => { initCalls++; await initHook(); return { gatewayRef: `receipt-${input.paymentId}`, paymentUrl: `https://example.test/pay/${input.paymentId}` } },
     verify: async (input) => { verifyCalls++; return verifyHook(input) },
   }
@@ -109,6 +110,53 @@ try {
   await assert.rejects(() => service.retryInitiation(initiating.user.id, sepSession.order.displayId))
   await assert.rejects(() => service.retryInitiation(sepSession.user.id, sepSession.order.displayId, 'FAKE'))
   passed('concurrent owner retries reopen the same SEP session without a new charge or wallet movement; other users and gateway switches are rejected')
+
+  for (const gateway of ['ZARINPAL', 'SEP', 'MELLAT']) {
+    const fixture = await make(gateway, null)
+    let requests = 0
+    fetchHandler = async () => {
+      requests++
+      if (gateway === 'ZARINPAL') return json({ data: { code: 100, authority: 'persisted-authority' } })
+      if (gateway === 'SEP') return json({ IsSuccess: true, Token: 'persisted-sep-token' })
+      return new Response('<Envelope><Body><return>0,PERSISTEDREF</return></Body></Envelope>')
+    }
+    const initiated = await service.initiate(fixture.payment.id, gateway, { displayId: fixture.order.displayId, amount: 1 })
+    assert.equal(requests, 1)
+    const old = new Date(Date.now() - 60 * 24 * 60 * 60_000)
+    await db.update(payments).set({ createdAt: old, updatedAt: old }).where(eq(payments.id, fixture.payment.id))
+    fetchHandler = async url => {
+      assert(gateway === 'ZARINPAL' && url.endsWith('/verify.json'), 'Retry must not initialize another PSP session')
+      return json({ errors: { code: -50 } })
+    }
+    const results = await Promise.all([
+      service.retryInitiation(fixture.user.id, fixture.order.displayId),
+      service.retryInitiation(fixture.user.id, fixture.order.displayId),
+    ])
+    assert(results.every(result => result.paymentUrl === initiated.paymentUrl))
+    assert.equal((await db.select().from(payments).where(eq(payments.orderId, fixture.order.id))).length, 1)
+    assert.equal(await orderService.walletBalance(db, fixture.user.id), 80_000)
+    await assert.rejects(() => service.retryInitiation(initiating.user.id, fixture.order.displayId))
+    await assert.rejects(() => service.retryInitiation(fixture.user.id, fixture.order.displayId, gateway === 'SEP' ? 'MELLAT' : 'SEP'))
+
+    const saved = await readPayment(fixture.payment.id)
+    for (const paymentUrl of ['https://attacker.example/pay', 'javascript:alert(1)',
+      gateway === 'ZARINPAL' ? 'https://payment.zarinpal.com/pg/StartPay/different-authority'
+        : gateway === 'MELLAT' ? 'https://bpm.shaparak.ir/StartPay/DIFFERENTREF'
+        : 'https://sep.shaparak.ir/api/v1/Payment/PaymentPage?Token=valid&redirect=https://attacker.example']) {
+      await db.update(payments).set({ metadata: { ...saved.metadata, paymentUrl } }).where(eq(payments.id, fixture.payment.id))
+      await assert.rejects(() => service.retryInitiation(fixture.user.id, fixture.order.displayId))
+      assert.equal((await readPayment(fixture.payment.id)).status, 'PENDING')
+    }
+    await db.update(payments).set({ metadata: saved.metadata }).where(eq(payments.id, fixture.payment.id))
+    if (gateway !== 'SEP') {
+      const { paymentUrl: _url, ...metadata } = saved.metadata ?? {}
+      await db.update(payments).set({ metadata }).where(eq(payments.id, fixture.payment.id))
+      assert.equal((await service.retryInitiation(fixture.user.id, fixture.order.displayId)).paymentUrl, initiated.paymentUrl)
+    }
+    // Keep this fixture out of later, independently stubbed reconciliation cases.
+    await db.update(payments).set({ updatedAt: new Date() }).where(eq(payments.id, fixture.payment.id))
+    passed(`${gateway}: old pending sessions resume concurrently with unchanged amount/hold; foreign owners, gateway switches and unsafe URLs are rejected`)
+  }
 
   const resumable = await make('FAKE', null)
   const resumableInit = await service.initiate(resumable.payment.id, 'FAKE', { displayId: resumable.order.displayId, amount: 80_000 })
@@ -164,6 +212,25 @@ try {
   await racingRejected
   assert.equal((await readOrder(racingResume.order.id)).status, 'PAID')
   passed('a successful callback during retry prevents returning a stale gateway session')
+
+  const changedDuringRetry = await make('FAKE', null)
+  await service.initiate(changedDuringRetry.payment.id, 'FAKE', { displayId: changedDuringRetry.order.displayId, amount: 80_000 })
+  verifyHook = async input => {
+    // Even a maintenance writer that does not bump updatedAt must invalidate
+    // the checked snapshot before a resumable session is returned.
+    await db.update(payments).set({ amount: 1 }).where(eq(payments.id, changedDuringRetry.payment.id))
+    return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+  }
+  await assert.rejects(() => service.retryInitiation(changedDuringRetry.user.id, changedDuringRetry.order.displayId))
+  assert.equal(await orderService.walletBalance(db, changedDuringRetry.user.id), 80_000)
+  passed('financial changes during verification invalidate retry even without an updatedAt change')
+
+  const inconsistentPaid = await make('FAKE', null)
+  await db.update(payments).set({ status: 'SUCCESS' }).where(eq(payments.id, inconsistentPaid.payment.id))
+  const beforeInconsistent = initCalls
+  await assert.rejects(() => service.retryInitiation(inconsistentPaid.user.id, inconsistentPaid.order.displayId))
+  assert.equal(initCalls, beforeInconsistent)
+  passed('a pending order with an existing successful payment cannot create another charge')
 
   const withSibling = await make('FAKE', null)
   const siblingInit = await service.initiate(withSibling.payment.id, 'FAKE', { displayId: withSibling.order.displayId, amount: 80_000 })

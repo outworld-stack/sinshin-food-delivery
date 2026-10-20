@@ -8,7 +8,7 @@ const requests: Array<{ path: string; method: string; body: unknown }> = []
 const invalidations: unknown[] = []
 const toasts: string[] = []
 const location = { href: '' }
-let response: unknown = { paymentUrl: 'https://sep.shaparak.ir/pay/existing-token', displayId: 'ord-retry' }
+let response: unknown = { paymentUrl: 'https://sep.shaparak.ir/api/v1/Payment/PaymentPage?Token=existing-token', displayId: 'ord-retry' }
 let requestError: Error | undefined
 let requestGate: Promise<void> = Promise.resolve()
 let pendingMutation: Promise<void> | undefined
@@ -58,7 +58,7 @@ assert.deepEqual(requests, [{ path: '/payments/retry', method: 'POST', body: { o
 assert.equal(location.href, '', 'wait for the gateway response before navigating')
 release()
 await pendingMutation
-assert.equal(location.href, 'https://sep.shaparak.ir/pay/existing-token')
+assert.equal(location.href, 'https://sep.shaparak.ir/api/v1/Payment/PaymentPage?Token=existing-token')
 assert.deepEqual(invalidations.at(-1), { queryKey: qk.orderDetails('ord-retry') })
 assert.equal(toasts.length, 0)
 
@@ -73,11 +73,11 @@ assert.equal(location.href, '')
 assert.equal(toasts.at(-1), requestError.message)
 assert.equal(invalidations.length, 2)
 requestError = undefined
-response = { paymentUrl: 'https://gateway.example/pay/new-token', displayId: 'ord-retry' }
+response = { paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/new-token', displayId: 'ord-retry' }
 page.handleRetry()
 await pendingMutation
 assert.equal(requests.length, 3)
-assert.equal(location.href, 'https://gateway.example/pay/new-token')
+assert.equal(location.href, 'https://payment.zarinpal.com/pg/StartPay/new-token')
 
 location.href = ''
 response = { displayId: 'ord-retry' }
@@ -86,4 +86,31 @@ await pendingMutation
 assert.equal(location.href, '')
 assert.equal(toasts.at(-1), 'dash.orderDetail.pendingRetryNoUrl')
 assert.equal(invalidations.length, 4)
+for (const paymentUrl of ['https://attacker.example/pay', 'javascript:alert(1)', '/api/payments/not-mock/id']) {
+  response = { paymentUrl, displayId: 'ord-retry' }
+  page.handleRetry()
+  await pendingMutation
+  assert.equal(location.href, '')
+  assert.equal(toasts.at(-1), 'dash.orderDetail.pendingRetryNoUrl')
+}
+
+let submitted = false
+const form = {
+  method: '', action: '', style: { display: '' }, fields: [] as any[],
+  appendChild(input: any) { this.fields.push(input) },
+  submit() { submitted = true }, remove() {},
+}
+Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+  createElement: (tag: string) => tag === 'form' ? form : {},
+  body: { appendChild: (element: unknown) => assert.equal(element, form) },
+} })
+response = { paymentUrl: 'https://bpm.shaparak.ir/StartPay/REF123', displayId: 'ord-retry' }
+page.handleRetry()
+await pendingMutation
+assert(submitted)
+assert.equal(form.method, 'POST')
+assert.equal(form.action, 'https://bpm.shaparak.ir/pgwchannel/startpay.mellat')
+assert.deepEqual(form.fields, [{ type: 'hidden', name: 'RefId', value: 'REF123' }])
+assert.equal(location.href, '', 'Mellat must use form POST, never a GET redirect')
+assert.deepEqual(invalidations.at(-1), { queryKey: qk.orderDetails('ord-retry') })
 console.log('Payment retry client passed: authenticated order request, gateway redirect, double-click guard, recoverable errors and order refresh.')
