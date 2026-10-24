@@ -120,7 +120,7 @@ function isSuppressedPath(pathname: string): boolean {
         )
 }
 
-export function PushAutoPrompt() {
+export function PushAutoPrompt({ suppressPromotion = false }: { suppressPromotion?: boolean }) {
         const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
         const [phase, setPhase] = useState<BannerPhase>('hidden')
         const [failureReason, setFailureReason] = useState<PushFailureReason | null>(
@@ -134,8 +134,8 @@ export function PushAutoPrompt() {
         /** مقدار لحظه‌ای برای تایمرِ mount — رِف تا در fire-time تازه بخوانیم */
         const suppressedRef = useRef(suppressed)
         useEffect(() => {
-                suppressedRef.current = suppressed
-        }, [suppressed])
+                suppressedRef.current = suppressed || suppressPromotion
+        }, [suppressed, suppressPromotion])
         /** زبان بنر — یک‌بار در مانت (تعویض زبان وسطِ بنر، مورد نیست) */
         const [lang] = useState<Lang>(() => {
                 if (typeof window === 'undefined') return 'fa'
@@ -165,7 +165,7 @@ export function PushAutoPrompt() {
                 if (suppressed) return
                 let cancelled = false
                 const timer = window.setTimeout(async () => {
-                        if (cancelled || suppressedRef.current) return
+                        if (cancelled) return
                         if (isIosBrowserWithoutInstall()) return
                         const state = await getPushState().catch(() => null)
                         if (cancelled || !state) return
@@ -175,7 +175,7 @@ export function PushAutoPrompt() {
                                 return
                         }
                         if (
-                                state.state === 'default' &&
+                                !suppressPromotion && state.state === 'default' &&
                                 !dismissedWithin(AUTO_PROMPT_RETRY_DAYS)
                         ) {
                                 setPhase('prompt')
@@ -187,17 +187,17 @@ export function PushAutoPrompt() {
                         cancelled = true
                         window.clearTimeout(timer)
                 }
-        }, [suppressed])
+        }, [suppressed, suppressPromotion])
 
         // ── stage-69 (F1/F2) — ورود به صفحه‌ی متمرکز با بنرِ باز ⇒ فوراً بسته ──
         useEffect(() => {
-                if (!suppressed) return
+                if (!suppressed && !suppressPromotion) return
                 setPhase('hidden')
                 if (hideTimer.current !== null) {
                         window.clearTimeout(hideTimer.current)
                         hideTimer.current = null
                 }
-        }, [suppressed])
+        }, [suppressed, suppressPromotion])
 
         // ── چرخش/انقضای اشتراک از سمت SW — فوراً آشتی کن ──
         useEffect(() => {
@@ -281,7 +281,7 @@ export function PushAutoPrompt() {
                 setPhase('failed')
         }
 
-        if (phase === 'hidden' || suppressed) return null
+        if (phase === 'hidden' || suppressed || suppressPromotion) return null
 
         const busy = phase === 'busy'
 
@@ -290,12 +290,8 @@ export function PushAutoPrompt() {
                 <div
                         role="status"
                         aria-label={t['notify.enable.title']}
-                        // bottom-24: بالاتر از بنرهای نصب/آپدیتِ register-sw (bottom-4)
-                        // تا روی هم نیفتند — هر دو z-90 ولی جاهای متفاوت.
-                        // stage-75 (P3-27) — z-9999 → z-90: بنر دیگر مودال/بات‌شیتِ
-                        // باز (z-100) را نمی‌پوشاند؛ دیالوگِ کاربر همیشه اولویت دارد.
-                        // (هدر z-40 — بنر همچنان بالای محتوای صفحه.)
-                        className="fixed bottom-24 left-1/2 -translate-x-1/2 z-90 flex items-center gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]"
+                        // The shared PwaPrompts stack supplies positioning and spacing.
+                        className="grid w-full max-w-xl shrink-0 grid-cols-[2.5rem_minmax(0,1fr)] sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c]"
                 >
                         <span className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
                                 <BellRing size={20} />
@@ -303,10 +299,10 @@ export function PushAutoPrompt() {
                         <div className="min-w-0 flex-1">
                                 {phase === 'prompt' && (
                                         <>
-                                                <p className="text-[13px] font-DanaDemiBold text-gray-800 dark:text-gray-100 truncate">
+                                                <p className="text-[13px] font-DanaDemiBold text-gray-800 dark:text-gray-100 break-words">
                                                         {t['notify.enable.title']}
                                                 </p>
-                                                <p className="text-[11px] text-gray-500 dark:text-gray-400 font-DanaMedium truncate">
+                                                <p className="text-[11px] text-gray-500 dark:text-gray-400 font-DanaMedium break-words">
                                                         {t['notify.enable.subtitle']}
                                                 </p>
                                         </>
@@ -322,7 +318,7 @@ export function PushAutoPrompt() {
                                         </p>
                                 )}
                                 {phase === 'denied' && (
-                                        <p className="text-[11px] font-DanaMedium text-orange-500 dark:text-orange-400 leading-relaxed line-clamp-3">
+                                        <p className="text-[11px] font-DanaMedium text-orange-500 dark:text-orange-400 leading-relaxed">
                                                 {t['notify.enable.deniedHint']}
                                         </p>
                                 )}
@@ -335,13 +331,13 @@ export function PushAutoPrompt() {
                                                         {(failureReason === null || failureReason === 'register') &&
                                                                 t['notify.enable.errRegister']}
                                                 </p>
-                                                <p className="text-[10px] text-gray-400 dark:text-gray-500 font-DanaMedium leading-relaxed line-clamp-2">
+                                                <p className="text-[10px] text-gray-400 dark:text-gray-500 font-DanaMedium leading-relaxed">
                                                         {t['notify.enable.retryHint']}
                                                 </p>
                                         </>
                                 )}
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="col-span-2 sm:col-span-1 flex items-center justify-end gap-1.5 shrink-0">
                                 {phase === 'prompt' && (
                                         <button
                                                 type="button"

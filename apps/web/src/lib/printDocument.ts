@@ -1,40 +1,7 @@
-// src/lib/printDocument.ts
-// round-12 — موتور چاپ مشترک (گزارشات ادمین + فاکتورهای سفارش).
-//
-// چرا سند مستقل؟ موتور قبلی (کلون DOM داخل #dynamic-print-area + window.print)
-// به CSS صفحهٔ اصلی گره خورده بود: قواعد @media print اپ، max-h-96/overflow
-// لایه‌ها و کلاس‌های dark: همه روی خروجی اثر می‌گذاشتند و نتیجه صفحهٔ سفید/کلیپ‌شده
-// بود. این‌جا سند HTML کامل و خودکفا ساخته می‌شود و در iframe چاپ می‌شود —
-// مصون از استایل‌های اپ، با @page و فونت خودش.
-//
-// round-15 — رفع قفل‌شدن کل سایت بعد از چاپ فاکتور:
-//  • iframe «پایدار» و صفر-پیکسلی شد (position:fixed; width:0; height:0) —
-//    دیگر iframe تمام‌صفحه‌ای روی صفحه نمی‌نشیند که در برخی مرورگرها
-//    (به‌ویژه سامسونگ) حتی مخفی هم روی کلیک‌ها سایه می‌انداخت.
-//  • iframe دیگر «هرگز» حذف نمی‌شود: حذف فریم در afterprint (وسط تعطیل‌کردن
-//    خط لولهٔ چاپ کروم) همان باگ شناخته‌شدهٔ «تب قفل می‌شود، کلیک کار نمی‌کند،
-//    فقط رفرش» است. حالا فقط srcdoc عوض می‌شود.
-//  • focus() روی پنجرهٔ فریم زده نمی‌شود (صفحه را در limbo فوکوس می‌گذاشت)؛
-//    بعد از چاپ window.focus() فوکوس را به اپ برمی‌گرداند.
-//
-// round-14 — دو قالب کاغذ:
-//  • 'a4'     → چاپ A4 (دسکتاپ؛ landscape خودکار با فلگ)
-//  • 'receipt'→ رسیدی 80mm برای پرینترهای ستونی مغازه که از موبایل چاپ
-//    می‌گیرند: آمار به‌صورت ردیف‌های عمودی «برچسب … مقدار»، QR وسط‌چین،
-//    فونت درشت‌تر برای خوانایی از نزدیک.
-//    round-15: طول صفحه 297mm ثابت شد — «80mm auto» در کروم قاعدهٔ معتبر
-//    نیست و بی‌صدا دور انداخته می‌شد (اندازهٔ کاغذ پیش‌فرض می‌افتاد).
-//
-// stage-85 — «رسید فشرده»: فاصله‌های هوایی رسید (line-height ۱.۹،
-//    margin های ۳-۴mm، QR ۲۸mm، حاشیهٔ @page ۲.۵mm و اَسنک ۸mm) باعث
-//    می‌شد چاپِ فیزیکی به‌اندازهٔ محتوا «چند سانتی‌متر» بلندتر باشد. حالا:
-//    حاشیهٔ ۱.۵mm، فاصله‌های نصف، QR ۲۴mm، اَسنک ۳mm + عرض پروب ۲۹۱px
-//    (80 − 2×1.5mm) — طول چاپ ≈ طولِ واقعی محتوا. دو خروجی عمومی تازه:
-//    buildPrintDocumentHtml (همان HTML برای «پیش‌نمایش» داخل مودال) و
-//    measureReceiptHtmlHeightPx (اندازه‌گیری ارتفاعِ سند چاپی).
-//
-// مرورگرها: Chrome/Edge/Firefox/Safari دسکتاپ → مسیر iframe؛
-// iOS Safari (iframe-print ندارد) → پشتیبان: پنجرهٔ جدید با همان سند.
+// Shared invoice/report documents are isolated from application CSS and DOM.
+// Each browser print request owns an immutable document. Chrome may re-render
+// it repeatedly while margins, paper or scaling are changed in print preview.
+// Never use print media-query changes to replace that document mid-preview.
 
 export type PrintPaper = 'a4' | 'receipt'
 
@@ -92,10 +59,9 @@ export interface PrintDocumentSpec {
 	 */
 	receiptStyle?: 'classic' | 'mono'
 	/**
-	 *  stage-84 — طولِ چاپ = طولِ محتوا (نه کلِ رول ۲۹۷mm): بعد از رندرِ
-	 *  iframe، ارتفاعِ واقعی اندازه‌گیری و «همان لحظه» به @page تزریق
-	 *  می‌شود (کرومِ جدید دو-طول را پشتیبانی می‌کند؛ ۴۰ تا ۲۹۷mm کلمپ).
-	 *  فقط با paper:'receipt'؛ پیش‌فرض خاموش (رفتار قبلی حفظ می‌شود).
+	 * Retained for existing spec consumers. Browser printing always leaves page
+	 * height to the selected printer stock; dynamically changing @page dimensions
+	 * destabilizes Chrome preview and rotates receipts shorter than their width.
 	 */
 	fitHeight?: boolean
 }
@@ -206,14 +172,12 @@ table.tbl th, table.tbl td { border: 1px solid #e5e7eb; padding: 2.2mm 2.6mm; }
 .footer { margin-top: 8mm; padding-top: 2mm; font-size: 9.5px; }
 `
 
-// رسیدی 80mm — پرینتر ستونی مغازه / چاپ از موبایل.
-// عرض 80mm و طول 297mm (معتبر در کروم؛ «auto» دور انداخته می‌شد).
-// stage-84 — fitHeight طول را به اندازه‌ی محتوا می‌کاهد (تزریق پویا در چاپ).
-// stage-85 — نسخهٔ «فشرده»: line-height و margin ها نصف شدند، QR کوچکتر،
-// حاشیهٔ @page ۱.۵mm — طول چاپ ≈ طولِ واقعی محتوا (شرح در سربرگ فایل).
+// The driver/browser owns paper size, orientation and adjustable page margins.
+// Content stays 77mm wide at 100% scale (80mm stock minus default 1.5mm margins).
+// No max-width:100%, transforms or measured @page height may shrink/rotate it.
 const RECEIPT_CSS = `
-@page { size: 80mm 297mm; margin: 1.5mm 1.5mm; }
-body { font-size: 11px; }
+@page { size: auto; margin: 1.5mm; }
+body { width: 77mm; min-width: 77mm; max-width: 77mm; font-size: 11px; overflow: visible; }
 .brand { font-size: 15px; }
 .doc-sep { margin: 1mm 0 1.5mm; border-top-width: 2px; }
 .sheet.page-break { page-break-after: always; }
@@ -297,11 +261,7 @@ ${footer}
 </html>`
 }
 
-/**
- * stage-85 — سند چاپی به‌صورت HTML رشته‌ای (همان موتور چاپ) — برای
- * «پیش‌نمایش داخل مودال» (iframe قابل‌مشاهده) و «چاپ مستقیم» از طریق
- * سرویس چاپ محلی (lib/printAgent)؛ خروجی عینِ چیزی است که چاپ می‌شود.
- */
+/** HTML shared by the invoice preview and isolated browser print document. */
 export function buildPrintDocumentHtml(spec: PrintDocumentSpec): string {
 	return documentHtml(spec)
 }
@@ -314,64 +274,43 @@ export function printHtmlDocument(spec: PrintDocumentSpec): void {
 	void printHtmlDocumentAsync(spec)
 }
 
-/**
- * فریم چاپ پایدار — یک بار ساخته می‌شود و برای همیشه می‌ماند (round-15).
- * صفر پیکسل در گوشهٔ پایین: هیچ ناحیه‌ای برای ربودن کلیک/لمس ندارد و
- * display:none هم نیست (که رندر چاپ را در برخی مرورگرها می‌شکند).
- */
-let printFrame: HTMLIFrameElement | null = null
-function getPrintFrame(): HTMLIFrameElement {
-	if (printFrame?.isConnected) return printFrame
-	printFrame = document.createElement('iframe')
-	printFrame.setAttribute('aria-hidden', 'true')
-	printFrame.style.cssText =
-		'position:fixed;inset:auto 0 0 auto;width:0;height:0;border:0;visibility:hidden;'
-	document.body.appendChild(printFrame)
-	return printFrame
-}
+type RetainedPrint = { frame: HTMLIFrameElement; completed: boolean }
+const retainedPrints: RetainedPrint[] = []
 
-/**
- * round-13 — چاپ سند + انتظار برای بسته‌شدن دیالوگ.
- * Promise وقتی تفسیر می‌شود که afterprint روی پنجره‌ی چاپ‌شده (iframe)
- * یا پنجره‌ی والد اجرا شود — یا بعد از سقف زمانی (مرورگرهایی که afterprint
- * نمی‌دهند). پایه‌ی صف چاپ چندسندی است.
- *
- * round-15 — در afterprint هیچ دستی به DOM نمی‌زنیم (فریم پایدار است)؛
- * فقط عنوان صفحه برمی‌گردد و فوکوس به اپ بازمی‌گردد. حذف فریم وسط
- * تعطیل‌کردن چاپِ کروم همان باگ «تب قفل می‌شود، کلیک کار نمی‌کند، فقط
- * رفرش» بود.
- */
-/**
- * stage-84 — طولِ چاپ = طولِ محتوا: ارتفاعِ رندرشده را اندازه می‌گیریم و
- * @pageِ «همان لحظه» با اندازه‌ی واقعی (کلمپ ۴۰..۲۹۷mm + لَخی ۸mm برای
- * حاشیه/فونت‌های در حال لود) بازنویسی می‌شود. مرورگر دو-طولِ اختصاصی
- * (80mm × H) را پشتیبانی می‌کند؛ خطا = ماندن روی ۲۹۷mm (رفتار قبلی).
- */
-/**
- * stage-84 — طولِ چاپ = طولِ محتوا: ارتفاعِ رندرشده را اندازه می‌گیریم و
- * @pageِ «همان لحظه» با اندازهٔ واقعی بازنویسی می‌شود. مرورگر دو-طولِ
- * اختصاصی (80mm × H) را پشتیبانی می‌کند؛ خطا = ماندن روی ۲۹۷mm.
- * stage-85 — نسخهٔ فشرده: اَسنک ۸mm → ۳mm (جای برشِ حرارتی)، حاشیهٔ
- * ۱.۵mm و عرضِ پروبِ ۲۹۱px = عرضِ قابل‌چاپِ واقعی — اندازه‌گیری مشترک
- * با measureReceiptHtmlHeightPx شد (measureDocHeightPx).
- */
-async function fitReceiptHeight(
-	doc: Document | null | undefined,
-): Promise<void> {
-	if (!doc?.head) return
-	const px = await measureDocHeightPx(doc)
-	if (px === null) return
-	const mm = receiptPxToMm(px) + 3
-	const clamped = Math.min(Math.max(mm, 40), 297)
-	const style = doc.createElement('style')
-	style.textContent = `@page { size: 80mm ${clamped}mm; margin: 1.5mm 1.5mm; }`
-	doc.head?.appendChild(style)
+function createPrintFrame(spec: PrintDocumentSpec): RetainedPrint {
+	// Reclaim older, positively completed jobs only when another print is
+	// requested. Keep the latest completed document through browser teardown.
+	// Browsers without afterprint retain their documents until page unload;
+	// guessing that a dialog closed can corrupt its still-open print preview.
+	let keepLatest = true
+	for (let i = retainedPrints.length - 1; i >= 0; i--) {
+		const job = retainedPrints[i]
+		if (!job.frame.isConnected) {
+			retainedPrints.splice(i, 1)
+		} else if (job.completed) {
+			if (keepLatest) keepLatest = false
+			else {
+				job.frame.remove()
+				retainedPrints.splice(i, 1)
+			}
+		}
+	}
+	const frame = document.createElement('iframe')
+	frame.setAttribute('aria-hidden', 'true')
+	frame.setAttribute('tabindex', '-1')
+	frame.setAttribute('title', spec.fileName)
+	const width = spec.paper === 'receipt' ? `${RECEIPT_WIDTH_MM}mm` : '210mm'
+	frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${width};height:1px;border:0;pointer-events:none;`
+	const job = { frame, completed: false }
+	retainedPrints.push(job)
+	return job
 }
 
 /**
  * stage-85 — اندازه‌گیریِ ارتفاعِ یک Document چاپی در «عرضِ قابلِچاپ»
  * (پروبِ ۲۹۱px) با انتظارِ فونت‌ها — زیربنایِ fitHeight و اندازه‌گیریِ
  * عمومیِ measureReceiptHtmlHeightPx. null = اندازه‌گیری ناموفق.
+ * This temporary measurement is never used to change browser print page size.
  */
 async function measureDocHeightPx(
 	doc: Document | null | undefined,
@@ -397,21 +336,31 @@ async function measureDocHeightPx(
 	}
 }
 
-async function waitForPrintFonts(doc: Document): Promise<void> {
-	if (!doc.fonts) return
+async function waitForPrintFonts(doc: Document): Promise<boolean> {
+	if (!doc.fonts) return true
 	let timer: ReturnType<typeof setTimeout> | undefined
 	try {
-		await Promise.race([
-			doc.fonts.ready,
-			new Promise<void>((resolve) => {
-				timer = setTimeout(resolve, 2_500)
+		return await Promise.race([
+			doc.fonts.ready.then(() => true),
+			new Promise<boolean>((resolve) => {
+				timer = setTimeout(() => resolve(false), 2_500)
 			}),
 		])
 	} catch {
-		// A missing font must not prevent printing with the fallback font.
+		return false
 	} finally {
 		clearTimeout(timer)
 	}
+}
+
+async function preparePrintFonts(doc: Document): Promise<void> {
+	if (await waitForPrintFonts(doc)) return
+	// A font that finishes downloading after print() must not reflow the live
+	// preview when the user adjusts margins. Freeze the fallback for this job.
+	const fallback = doc.createElement('style')
+	fallback.textContent =
+		'body, body * { font-family: Tahoma, sans-serif !important; }'
+	doc.head.appendChild(fallback)
 }
 
 /**
@@ -463,157 +412,106 @@ export function printHtmlDocumentAsync(spec: PrintDocumentSpec): Promise<void> {
 	return task
 }
 
-async function performDocumentPrint(spec: PrintDocumentSpec): Promise<void> {
-	const html = documentHtml(spec)
-	const prevTitle = document.title
-	document.title = spec.fileName
-
-	const restore = () => {
-		document.title = prevTitle
-		try {
-			window.focus() // فوکوس به سند اپ — نه لیمبوی فریم مخفی
-		} catch {
-			// Focus restoration is optional in embedded browsers.
-		}
-	}
-
+function invokePrint(win: Window, fileName: string): void {
+	const previousTitle = document.title
+	document.title = fileName
 	try {
-		// iOS Safari — چاپ iframe را پشتیبانی نمی‌کند؛ سند در پنجرهٔ جدید
-		// (زنجیره‌ی afterprint اینجا قابل اعتماد نیست؛ فراخواننده مقصد بعدی را
-		// با تأخیر کوتاه می‌فرستد)
-		if (isIOS()) {
-			return await new Promise<void>((resolve, reject) => {
-				const win = window.open('', '_blank')
-				if (!win) {
-					// ترمیم اسکنِ استیج-۸۴ — بلاکِ پاپ‌آپ دیگر «موفقِ بی‌چاپ»
-					// نیست؛ خطا می‌دهد تا توستِ واقعی دیده شود
-					reject(
-						new Error(
-							'پنجرهٔ چاپ توسط مرورگر بلاک شد — لطفاً پاپ‌آپ را مجاز کنید و دوباره بزنید',
-						),
-					)
-					return
-				}
-				win.document.open()
-				win.document.write(html)
-				win.document.close()
-				let settled = false
-				let timer: ReturnType<typeof setTimeout> | undefined
-				const finish = (error?: unknown) => {
-					if (settled) return
-					settled = true
-					clearTimeout(timer)
-					win.removeEventListener('afterprint', onAfterPrint)
-					if (error !== undefined) reject(error)
-					else resolve()
-				}
-				const onAfterPrint = () => finish()
-				win.addEventListener('afterprint', onAfterPrint)
-				const printNow = async () => {
-					try {
-						if (spec.paper === 'receipt' && spec.fitHeight)
-							await fitReceiptHeight(win.document)
-						else await waitForPrintFonts(win.document)
-						win.focus()
-						win.print()
-						// Safari does not reliably dispatch afterprint on popup windows.
-						if (!settled) timer = setTimeout(() => finish(), 1_500)
-					} catch (error) {
-						finish(error)
-					}
-				}
-				void printNow()
-			})
-		}
-
-		return await new Promise<void>((resolve, reject) => {
-			const iframe = getPrintFrame()
-			let settled = false
-			let started = false
-			let attemptedPrint = false
-			let printingWindow: Window | null = null
-			let timeoutId: ReturnType<typeof setTimeout> | null = null
-			// stage-85 — ترمیمِ «گیرکردن»: اگر afterprint هرگز نیاید (بعضی
-			// نسخه‌های کروم/اندروید بعد از لغوِ دیالوگ)، مودال تا ۹۰ ثانیه
-			// «در حال چاپ» می‌ماند. کروم/فایرفاکس هنگامِ بازشدنِ دیالوگ
-			// مدیاکوئری «print» را روی صفحه فعال و بعدِ بستن غیرفعال
-			// می‌کنند — همان لحظهٔ خروج از چاپ، سیگنالِ اتمام است.
-			const printMedia = window.matchMedia('print')
-			let enteredPrint = false
-			const onPrintMedia = (e: MediaQueryListEvent) => {
-				if (e.matches) enteredPrint = true
-				else if (enteredPrint) done()
-			}
-			const done = (error?: unknown) => {
-				if (settled) return
-				settled = true
-				// ترمیم اسکنِ استیج-۸۴ — تایمرِ سقفِ ۹۰ثانیه‌ای هم پاک شود
-				if (timeoutId !== null) clearTimeout(timeoutId)
-				printMedia.removeEventListener('change', onPrintMedia)
-				window.removeEventListener('afterprint', onAfterPrint)
-				printingWindow?.removeEventListener('afterprint', onAfterPrint)
-				iframe.onload = null
-				if (error !== undefined) reject(error)
-				else resolve()
-			}
-			const onAfterPrint = () => done()
-
-			iframe.onload = () => {
-				if (started || settled) return
-				started = true
-				const fire = async () => {
-					try {
-						if (spec.paper === 'receipt' && spec.fitHeight)
-							await fitReceiptHeight(iframe.contentDocument)
-						else if (iframe.contentDocument)
-							await waitForPrintFonts(iframe.contentDocument)
-						if (settled) return
-						printingWindow = iframe.contentWindow
-						if (!printingWindow)
-							throw new Error('پنجرهٔ چاپ آماده نیست — دوباره تلاش کنید')
-						// Blocking browsers dispatch afterprint before print() returns.
-						window.addEventListener('afterprint', onAfterPrint)
-						printingWindow.addEventListener('afterprint', onAfterPrint)
-						printMedia.addEventListener('change', onPrintMedia)
-						// توجه: focus() روی فریم زده نمی‌شود — صفحهٔ اصلی فوکوس را
-						// نگه می‌دارد و بعد از دیالوگ پاک برمی‌گردد (رفع باگ قفل‌شدن)
-						attemptedPrint = true
-						printingWindow.print()
-					} catch (error) {
-						done(error)
-					}
-				}
-				void fire()
-			}
-
-			// Also bound iframe/font loading, which can fail before printing starts.
-			timeoutId = setTimeout(
-				() =>
-					done(
-						attemptedPrint
-							? undefined
-							: new Error('آماده‌سازی چاپ طولانی شد — دوباره تلاش کنید'),
-					),
-				90_000,
-			)
-			// سند جدید در همان فریم پایدار — تعویض srcdoc فقط وقتی امن است
-			// که دیالوگ قبلی بسته شده (صف چاپ await می‌کند)
-			try {
-				iframe.srcdoc = html
-			} catch (error) {
-				done(error)
-			}
-		})
+		win.print()
 	} finally {
-		restore()
+		document.title = previousTitle
 	}
 }
 
 /**
- * round-13 — صف چاپ چندسندی: هر سند پنجره‌ی چاپ «جداگانه» می‌گیرد تا
- * ادمین بتواند هر فاکتور را روی پرینتر خودش بفرستد (مثلاً فاکتور اشپزخانه
- * روی پرینتر آشپزخانه و فاکتور فروش روی پرینتر میز بیرون‌بر).
- * سند بعدی بعد از بسته‌شدن دیالوگِ قبلی + یک مکث کوتاه ارسال می‌شود.
+ * Completes when the browser's print() call returns, not when paper is printed.
+ * Most desktop browsers block that call until preview closes; other browsers
+ * return immediately. Callers must request only one invoice per user action.
+ */
+async function performDocumentPrint(spec: PrintDocumentSpec): Promise<void> {
+	const html = documentHtml(spec)
+	if (isIOS()) {
+		// A new top-level document is needed on iOS. Leave it open so Safari
+		// can keep rendering its preview; the user can close it after printing.
+		const win = window.open('', '_blank')
+		if (!win) {
+			throw new Error(
+				'پنجرهٔ چاپ توسط مرورگر بلاک شد — لطفاً پاپ‌آپ را مجاز کنید و دوباره بزنید',
+			)
+		}
+		win.document.open()
+		win.document.write(html)
+		win.document.close()
+		await preparePrintFonts(win.document)
+		invokePrint(win, spec.fileName)
+		return
+	}
+
+	return new Promise<void>((resolve, reject) => {
+		const job = createPrintFrame(spec)
+		const iframe = job.frame
+		let settled = false
+		let started = false
+		let attemptedPrint = false
+		const finish = (error?: unknown) => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			iframe.onload = null
+			if (error !== undefined) {
+				if (!attemptedPrint) iframe.remove()
+				reject(error)
+			} else resolve()
+		}
+		// Bound document loading only. A user may legitimately spend minutes
+		// adjusting margins; no timer may finish/replace that live document.
+		const timer = setTimeout(
+			() => finish(new Error('آماده‌سازی چاپ طولانی شد — دوباره تلاش کنید')),
+			15_000,
+		)
+		iframe.onload = () => {
+			if (started || settled) return
+			started = true
+			void (async () => {
+				try {
+					const doc = iframe.contentDocument
+					const win = iframe.contentWindow
+					if (!doc || !win)
+						throw new Error('پنجرهٔ چاپ آماده نیست — دوباره تلاش کنید')
+					await preparePrintFonts(doc)
+					if (settled) return
+					clearTimeout(timer)
+					const onAfterPrint = () => {
+						job.completed = true
+						win.removeEventListener('afterprint', onAfterPrint)
+					}
+					win.addEventListener('afterprint', onAfterPrint)
+					attemptedPrint = true
+					try {
+						invokePrint(win, spec.fileName)
+					} catch (error) {
+						onAfterPrint()
+						throw error
+					}
+					finish()
+				} catch (error) {
+					finish(error)
+				}
+			})()
+		}
+		try {
+			// Set the document before insertion, avoiding an initial about:blank
+			// load. This frame's srcdoc is never written a second time.
+			iframe.srcdoc = html
+			document.body.appendChild(iframe)
+		} catch (error) {
+			finish(error)
+		}
+	})
+}
+
+/**
+ * Legacy batch helper for browsers whose print() blocks until the dialog closes.
+ * Invoice UI requests one document per click because some browsers return early.
  */
 export async function printHtmlDocumentQueue(
 	specs: PrintDocumentSpec[],

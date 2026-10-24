@@ -46,6 +46,7 @@
     "db:test:print": "bun scripts/test-print-service.ts",
     "test:print-transport": "bun scripts/test-print-transport.ts",
     "test:print-routes": "bun scripts/test-print-routes.ts",
+    "db:test:local-print": "bun scripts/test-local-print.ts",
     "test:admin2": "bun scripts/test-admin2-access.ts",
     "db:test:admin2": "bun scripts/test-admin2-safety.ts",
     "db:test:menu": "bun scripts/test-menu-safety.ts"

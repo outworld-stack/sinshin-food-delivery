@@ -14,24 +14,21 @@
 // با paper:'receipt' ساخته می‌شوند: عرض 80mm، طول رول (auto)، آمار به‌صورت
 // ردیف عمودی، QR وسط‌چین. جدول فروش هم باریک‌تر شد (سایز داخل نام محصول).
 //
-// stage-85 — چاپِ «مستقیم بدون دیالوگ»: هر نوع فاکتور می‌تواند پرینترِ
-// پیش‌فرضِ خودش را داشته باشد؛ فاکتورِ دارایِ پرینترِ منتخب بی‌دیالوگ چاپ
-// می‌شود، بقیه همان مسیرِ مرورگر را می‌روند؛ خطای مسیرِ مستقیم هرگز
-// سفارشِ چاپ را نمی‌کُشد — همان فاکتور با دیالوگِ مرورگر چاپ می‌شود و
-// پیامِ خطا برگردانده می‌شود. ساختِ specها عمومی شد (buildInvoicePrintSpecs)
-// تا «پیش‌نمایش» مودال از همان موتور استفاده کند (عینِ چیزی که چاپ می‌شود).
-//
-// stage-88 — مسیرِ مستقیم از QZ Tray (ابزارِ ثالث — کنار گذاشته شد) به
-// «پل چاپِ سرور» رسید: چاپگرهای شبکه در DB ثبت می‌شوند، متنِ فارسی
-// در canvasِ مرورگر شکل‌گیری می‌شود (رسید 1bpp) و API با GS v 0 روی
-// سوکتِ 9100 می‌فرستد — بدونِ هیچ ابزارِ ثالث و با طولِ کاغذ = محتوا.
+// Preview, browser fallback and the Windows print agent share these invoice
+// specs. The primary path queues a bitmap durably for the outbound local agent.
+// A queue/network error never automatically opens browser printing: that could
+// duplicate a job whose response was lost after the server accepted it.
 
+import type {
+	LocalPrintEnqueueInput,
+	LocalPrintTarget,
+	StaffInvoice,
+} from '@sinshin/shared'
 import {
 	type PrintDocumentSpec,
 	printHtmlDocumentAsync,
 } from '#/lib/printDocument'
 import { renderSpecToReceiptBitmap } from '#/lib/receiptCanvas'
-import { printReceiptBitmap, type StaffInvoice } from '#/server/admin'
 import { faNum, formatDate, formatPrice, formatTime } from '#/utils/format'
 import { qrSvgMarkup } from '#/utils/qrSvg'
 
@@ -191,10 +188,9 @@ async function salesSection(inv: StaffInvoice) {
 	}
 }
 
-/** یک spec مستقل به‌ازای هر نوع فاکتور — فرمت رسیدی 80mm (round-14).
- *  stage-84 — استایل حرارتی mono (مشکی بولد + سفیدرومشکی) + طولِ چاپ
- *  برابرِ طولِ فاکتور (fitHeight) — نه کلِ رول.
- *  stage-85 — عمومی شد: مودالِ چاپ از همین خروجی «پیش‌نمایش» می‌سازد. */
+/** Shared invoice content for the 80mm browser preview and local-agent raster.
+ * Browser stock/margins are selected in its dialog; the agent raster uses the
+ * assigned printer width. Each invoice kind has an independent document. */
 export interface InvoicePrintSpec {
 	kind: InvoiceKind
 	spec: PrintDocumentSpec
@@ -236,74 +232,58 @@ export async function buildInvoicePrintSpecs(
 	return specs
 }
 
-/** نتیجهٔ چاپ — مودال بر اساسِ آن توستِ درست را می‌سازد */
+/** Build once, then persist this payload and jobId before enqueueing it. */
+export async function buildLocalInvoiceJob(
+	inv: StaffInvoice,
+	kind: InvoiceKind,
+	target: LocalPrintTarget,
+	jobId: string,
+): Promise<LocalPrintEnqueueInput> {
+	if (!jobId.trim()) throw new Error('شناسهٔ درخواست چاپ مشخص نشده است')
+	const widthDots = target.widthDots
+	const item = (await buildInvoicePrintSpecs(inv, [kind]))[0]
+	if (!item) throw new Error('نوع فاکتور معتبر نیست')
+	const bitmap = await renderSpecToReceiptBitmap(item.spec, widthDots)
+	if (bitmap.widthPx !== widthDots)
+		throw new Error('عرض فاکتور با تنظیم چاپگر مطابقت ندارد')
+	return {
+		jobId,
+		orderId: inv.orderId,
+		kind,
+		widthPx: widthDots,
+		heightPx: bitmap.heightPx,
+		rows: bitmap.rows,
+	}
+}
+
+/** Browser fallback result: a dialog request is not proof of physical printing. */
 export interface InvoicePrintResult {
-	/** فاکتورهایی که بی‌دیالوگ مستقیم چاپ شدند */
 	direct: number
-	/** فاکتورهایی که با دیالوگِ مرورگر چاپ شدند */
 	dialogs: number
-	/** خطاهای مسیرِ مستقیم (هر فاکتورِ خطاخورده با دیالوگ جایگزین شد) */
 	agentErrors: string[]
 }
 
-/** مقصدِ مستقیمِ یک نوع فاکتور — چاپگرِ شبکه از طریقِ پلِ سرور */
+/** Legacy caller shape, retained to reject obsolete server-LAN printing safely. */
 export interface DirectPrintTarget {
 	printerId: string
-	/** عرضِ سرِ چاپ در dot — رسید در همان عرض رندر می‌شود */
 	widthDots: number
 }
 
 /**
- * چاپ فاکتور(های) سفارش — هر نوع فاکتور = یک سند چاپ جداگانه.
- *  • بدونِ پرینترِ منتخب: همان صفِ چاپِ قبل — دیالوگ اول (مثلاً اشپزخانه)
- *    بسته شود، دومی (فروش) خودکار باز می‌شود.
- *  • stage-88 — باِ directTargets: فاکتورِ دارایِ چاپگرِ شبکه از طریقِ
- *    «پل چاپِ سرور» بی‌دیالوگ چاپ می‌شود (canvas فارسی → GS v 0 روی
- *    سوکتِ 9100)؛ خطا = جایگزینیِ همان فاکتور با مسیرِ مرورگر
- *    (سفارشِ چاپ هرگز نمی‌میرد).
+ * Explicit emergency browser action, one selected receipt per click. For local
+ * agent printing use buildLocalInvoiceJob and enqueueLocalPrintJob instead.
  */
 export async function printOrderInvoices(
 	inv: StaffInvoice,
 	kinds: InvoiceKind[],
 	opts?: { directTargets?: Partial<Record<InvoiceKind, DirectPrintTarget>> },
 ): Promise<InvoicePrintResult> {
-	const items = await buildInvoicePrintSpecs(inv, kinds)
-	const result: InvoicePrintResult = { direct: 0, dialogs: 0, agentErrors: [] }
-	const dialogQueue: PrintDocumentSpec[] = []
-	for (const item of items) {
-		const target = opts?.directTargets?.[item.kind]
-		if (target) {
-			try {
-				const bitmap = await renderSpecToReceiptBitmap(
-					item.spec,
-					target.widthDots,
-				)
-				await printReceiptBitmap({
-					printerId: target.printerId,
-					widthPx: bitmap.widthPx,
-					heightPx: bitmap.heightPx,
-					rows: bitmap.rows,
-				})
-				result.direct += 1
-				continue
-			} catch (err) {
-				result.agentErrors.push(
-					err instanceof Error
-						? `چاپ مستقیم «${item.kind === 'kitchen' ? 'آشپزخانه' : 'فروش'}» ناموفق: ${err.message}`
-						: `چاپ مستقیم «${item.kind === 'kitchen' ? 'آشپزخانه' : 'فروش'}» ناموفق`,
-				)
-			}
-		}
-		dialogQueue.push(item.spec)
-	}
-	for (let i = 0; i < dialogQueue.length; i++) {
-		await printHtmlDocumentAsync(dialogQueue[i] as PrintDocumentSpec)
-		result.dialogs += 1
-		if (i < dialogQueue.length - 1) {
-			// مکث کوتاه بین دیالوگ‌ها — برخی مرورگرها برای بازسازی
-			// فعال‌سازی به چند صد میلی‌ثانیه نیاز دارند
-			await new Promise((r) => setTimeout(r, 400))
-		}
-	}
-	return result
+	if (opts?.directTargets && Object.keys(opts.directTargets).length > 0)
+		throw new Error('برای چاپ مستقیم از عامل چاپ محلی استفاده کنید')
+	if (kinds.length !== 1)
+		throw new Error('برای چاپ مرورگر فقط یک فاکتور را انتخاب کنید')
+	const item = (await buildInvoicePrintSpecs(inv, kinds))[0]
+	if (!item) throw new Error('نوع فاکتور معتبر نیست')
+	await printHtmlDocumentAsync(item.spec)
+	return { direct: 0, dialogs: 1, agentErrors: [] }
 }

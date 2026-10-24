@@ -20,8 +20,7 @@ import { Toast } from '#/components/Toast'
 import { type Lang, readLangCookie } from '#/i18n'
 import { siteHead } from '#/lib/seo'
 // stage-58 — پرامپت خودکار مجوز نوتیف (به‌جای دکمه‌ی بنفش هدر)
-import { PushAutoPrompt } from '#/pwa/PushAutoPrompt'
-import { PwaRegister } from '#/pwa/register-sw'
+import { PwaPrompts } from '#/pwa/PwaPrompts'
 import { useThemeStore } from '#/stores/themeStore'
 import appCss from '#/styles.css?url'
 import { captureRefFromUrl } from '#/utils/referralCapture'
@@ -153,8 +152,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 			</head>
 			<body>
 				<Toast />
-				<PwaRegister lang={lang} />
-				<PushAutoPrompt />
+				<PwaPrompts lang={lang} />
 				{children}
 				<Scripts />
 			</body>

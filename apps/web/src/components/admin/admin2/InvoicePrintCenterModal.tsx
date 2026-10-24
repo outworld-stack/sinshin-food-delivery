@@ -1,789 +1,641 @@
-// ═══════════════════════════════════════════════════════════════
-// stage-88 — sinshin-food-delivery
-// مسیر مقصد: apps/web/src/components/admin/admin2/InvoicePrintCenterModal.tsx
-// وضعیت: جایگزینی کامل فایل stage-85
-// «مرکز چاپ فاکتور» نسخهٔ ۳ — پلِ چاپِ سرور (بدونِ هیچ ابزارِ ثالث):
-//
-//  چرا نسخهٔ ۲ (QZ Tray) فقط «دیالوگ مرورگر» نشان می‌داد؟ صفحهٔ وب در
-//  سندباکسِ مرورگر هرگز فهرستِ چاپگرهای سیستم‌عامل را نمی‌بیند — Web
-//  Print API فقط برای Isolated Web Appهای کروم است و QZ Tray ابزارِ
-//  ثالثِ نصب‌شده روی دستگاه بود. حالا «تشخیص/پیکربندی/انتخاب» همه
-//  سمتِ سرور است (apps/api → سوکتِ TCP 9100) و بدونِ هیچ نصبِ
-//  اضافه‌ای کار می‌کند — چاپگرهای شبکهٔ رستوران را API خودش پیدا و
-//  مدیریت می‌کند.
-//
-//  · چاپگرِ هر نوع فاکتور (فروش/آشپزخانه) در سرور ذخیره می‌شود
-//    (settings invoice_printers) — تخصیص بینِ همهٔ ایستگاه‌ها مشترک است.
-//  · چاپِ مستقیم: متنِ فارسی در canvasِ همین مرورگر شکل‌گیری می‌شود
-//    (رسیدِ 1bpp) → GS v 0 روی سوکتِ 9100 — طولِ کاغذ = طولِ محتوا
-//    (کاغذِ هدرِ اضافه صفر؛ برشِ خودکار).
-//  · بدونِ چاپگرِ منتخب: همان صفِ دیالوگ‌های مرورگر (پشتیبانِ همیشگی).
-//  · خطای چاپِ مستقیم هرگز سفارش را نمی‌کُشد — همان فاکتور با دیالوگِ
-//    مرورگر جایگزین می‌شود.
-//  · پیش‌نمایشِ زنده (stage-85) دست‌نخورده — عینِ مسیرِ مرورگر.
-//  · جستجو و انتخاب چاپگر برای ادمین اصلی و ادمین۲ با printingManage.
-//    ویرایش/حذف/تست فقط برای ادمین اصلی در بخش PrinterManager.
-// ═══════════════════════════════════════════════════════════════
-
 import type {
-	InvoicePrinterAssignmentDto,
-	PrinterDiscoveryDto,
-	PrinterDto,
+	LocalPrintEnqueueInput,
+	LocalPrintJobDto,
+	LocalPrintKind,
 } from '@sinshin/shared'
-// src/components/admin/admin2/InvoicePrintCenterModal.tsx
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Printer, Radar, X } from 'reicon-react'
-import { PrinterManager } from '#/components/admin/admin2/PrinterManager'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Printer, X } from 'reicon-react'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import {
+	cancelLocalPrintJob,
+	discardPendingLocalPrintJob,
+	enqueueLocalPrintJob,
+	getLocalPrintAgents,
+	getLocalPrintAssignment,
+	getLocalPrintJob,
+	getLocalPrintJobs,
+} from '#/lib/localPrintQueue'
+import {
 	buildPrintDocumentHtml,
-	measureReceiptHtmlHeightPx,
-	RECEIPT_PROBE_PX,
+	type PrintDocumentSpec,
+	printHtmlDocumentAsync,
 } from '#/lib/printDocument'
-import {
-	discoveryValue,
-	PRINTER_DISCOVERY_KEY,
-	registerDiscoveredPrinter,
-} from '#/lib/printerDiscovery'
-import {
-	discoverAdminPrinters,
-	getStaffOrderInvoice,
-	type StaffInvoice,
-	setAdminPrintAssignment,
-} from '#/server/admin'
-import { useAuthStore } from '#/stores/authStore'
+import { getStaffOrderInvoice } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import {
 	buildInvoicePrintSpecs,
-	type InvoiceKind,
-	printOrderInvoices,
+	buildLocalInvoiceJob,
 } from '#/utils/invoicePrint'
-import {
-	adminPrintAssignmentOptions,
-	adminPrintersOptions,
-} from '#/utils/queryOptions'
+import { LocalPrinterSettings } from './LocalPrinterSettings'
+import { ReceiptPreviewPane } from './ReceiptPreviewPane'
 
 interface InvoicePrintCenterModalProps {
-	/** displayId سفارش (ord-…) */
 	orderId: string
-	/** نوع سفارش برای راهنمای QR (DELIVERY → QR پیک روی فاکتور فروش) —
-	 *  ترمیم اسکن: اختیاری شد تا صفحهٔ سفارشات مقدار هاردکد نفرستد */
 	deliveryType?: string | null
 	onClose: () => void
 }
-
-const KIND_STORAGE_KEY = 'sinshin-invoice-kinds'
-/** عرضِ «کاغذ» پیش‌نمایش (px) — ۸۰mm + کمی حاشیهٔ بصری */
-const PAPER_W = 302
-
-function loadDefaultKinds(): { kitchen: boolean; sales: boolean } {
+const labels = { sales: 'فروش', kitchen: 'آشپزخانه' }
+const statusLabels = {
+	queued: 'در صف صندوق',
+	claimed: 'در حال ارسال به ویندوز',
+	spooled: 'پذیرفته‌شده در صف ویندوز',
+	failed: 'ناموفق',
+	uncertain: 'نتیجه نامشخص؛ چاپگر را بررسی کنید',
+	cancelled: 'لغوشده',
+}
+const agentsKey = ['local-print-agents']
+const assignmentKey = ['local-print-assignment']
+const busyJob = (job: LocalPrintJobDto) =>
+	job.status === 'queued' || job.status === 'claimed'
+const pendingKey = (orderId: string) => `sinshin-pending-print:${orderId}`
+type PendingJobs = Partial<Record<LocalPrintKind, LocalPrintEnqueueInput>>
+function loadPending(orderId: string): PendingJobs {
 	try {
-		const raw = localStorage.getItem(KIND_STORAGE_KEY)
-		if (raw) {
-			const parsed = JSON.parse(raw) as { kitchen?: unknown; sales?: unknown }
-			return {
-				kitchen: parsed.kitchen !== false,
-				sales: parsed.sales !== false,
-			}
+		const raw = JSON.parse(sessionStorage.getItem(pendingKey(orderId)) ?? '{}')
+		const result: PendingJobs = {}
+		for (const kind of ['sales', 'kitchen'] as const) {
+			const item = raw?.[kind]
+			if (
+				item?.kind === kind &&
+				item.orderId === orderId &&
+				typeof item.jobId === 'string' &&
+				/^[a-f0-9-]{36}$/i.test(item.jobId) &&
+				[384, 420, 576].includes(item.widthPx) &&
+				Number.isInteger(item.heightPx) &&
+				item.heightPx > 0 &&
+				item.heightPx <= 4000 &&
+				typeof item.rows === 'string' &&
+				item.rows.length <= 384000
+			)
+				result[kind] = item
 		}
+		return result
 	} catch {
-		// localStorage خراب/مقدار قدیمی — پیش‌فرض
+		return {}
 	}
-	return { kitchen: true, sales: true }
 }
 
-/** پیش‌نمایش کاغذی ۸۰mm — همان HTML چاپی داخل iframe؛ ارتفاع بعد از
- *  لود (و آماده‌شدنِ فونت‌ها) اندازه‌گیری می‌شود؛ در عرض‌های باریک
- *  scale می‌خورد تا کلِ کاغذ جا شود (بدونِ برشِ افقی). */
-function ReceiptPreviewPane({ html }: { html: string | null }) {
-	const wrapRef = useRef<HTMLDivElement | null>(null)
-	const [contentH, setContentH] = useState(360)
-	const [scale, setScale] = useState(1)
-
-	useEffect(() => {
-		if (html === null) return
-		const el = wrapRef.current
-		if (!el) return
-		const update = () =>
-			setScale(Math.min(1, Math.max(0.5, (el.clientWidth - 6) / PAPER_W)))
-		update()
-		window.addEventListener('resize', update)
-		return () => window.removeEventListener('resize', update)
-	}, [html])
-
-	useEffect(() => {
-		if (html === null) return
-		let cancelled = false
-		void measureReceiptHtmlHeightPx(html).then((height) => {
-			if (!cancelled && height !== null) setContentH(height)
-		})
-		return () => {
-			cancelled = true
-		}
-	}, [html])
-
-	if (html === null) {
-		return (
-			<div
-				aria-live="polite"
-				className="h-40 rounded-lg bg-gray-100 dark:bg-[#220d13] animate-pulse flex items-center justify-center text-xs text-gray-400"
-			>
-				در حال آماده‌سازی پیش‌نمایش…
-			</div>
-		)
-	}
-	return (
-		<div
-			ref={wrapRef}
-			className="w-full overflow-hidden"
-			style={{ height: Math.ceil(contentH * scale) + 4 }}
-		>
-			<div
-				className="mx-auto bg-white rounded-lg shadow-md border border-gray-200 dark:border-[#3a151c] overflow-hidden"
-				style={{
-					width: PAPER_W,
-					height: contentH,
-					transform: `scale(${scale})`,
-					transformOrigin: 'top center',
-				}}
-			>
-				<iframe
-					title="پیش‌نمایش فاکتور چاپی"
-					srcDoc={html}
-					className="block mx-auto border-0"
-					style={{ width: RECEIPT_PROBE_PX, height: '100%' }}
-				/>
-			</div>
-		</div>
-	)
-}
-
-/** سلکتِ چاپگرِ یک نوع فاکتور — گزینهٔ اول = دیالوگِ مرورگر؛ بقیه =
- *  چاپگرهای شبکهٔ ثبت‌شده روی سرور (وضعیتِ زنده در متنِ گزینه) */
-function PrinterSelect({
-	id,
-	label,
-	value,
-	printers,
-	discovered,
-	disabled,
-	locked,
-	onChange,
-}: {
-	id: string
-	label: string
-	value: string
-	printers: PrinterDto[]
-	discovered: PrinterDiscoveryDto[]
-	disabled: boolean
-	/** stage-89 — ادمین۲ بدونِ مجوزِ printingManage: قفلِ فقط‌خواندنی */
-	locked?: boolean
-	onChange: (next: string) => void
-}) {
-	return (
-		<div className="flex items-center gap-2">
-			<label
-				htmlFor={id}
-				className="text-[11px] text-gray-400 shrink-0 font-DanaMedium"
-			>
-				{label}
-			</label>
-			<select
-				id={id}
-				value={value}
-				disabled={disabled || locked}
-				title={
-					locked
-						? 'تغییر چاپگر نیاز به مجوز «چاپ و مدیریت چاپگر» دارد — از مدیرِ اصلی بخواهید'
-						: undefined
-				}
-				onChange={(e) => onChange(e.target.value)}
-				className="flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-[#3a151c] bg-white dark:bg-[#1a0a0e] px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed truncate"
-			>
-				<option value="">دیالوگ مرورگر</option>
-				{value &&
-					!printers.some((p) => p.id === value) &&
-					!discovered.some((p) => discoveryValue(p) === value) && (
-						<option value={value} disabled>
-							چاپگرِ حذف‌شده — دوباره انتخاب کنید
-						</option>
-					)}
-				{printers.map((p) => (
-					<option key={p.id} value={p.id}>
-						{p.status === 'online' ? '●' : p.status === 'offline' ? '○' : '◌'}{' '}
-						{p.name} — {p.host}
-						{p.statusDetail ? ` (${p.statusDetail})` : ''}
-					</option>
-				))}
-				{discovered.length > 0 && (
-					<optgroup label="چاپگرهای شناسایی‌شده — انتخاب برای ثبت">
-						{discovered.map((p) => (
-							<option key={discoveryValue(p)} value={discoveryValue(p)}>
-								{p.host}:{p.port} — شناسایی‌شده
-							</option>
-						))}
-					</optgroup>
-				)}
-			</select>
-		</div>
-	)
-}
-
+/** Both admin levels use this center. Printing is queued; browser fallback is explicit. */
 export const InvoicePrintCenterModal = memo(function InvoicePrintCenterModal({
 	orderId,
-	deliveryType,
 	onClose,
 }: InvoicePrintCenterModalProps) {
-	const showToast = useToastStore((s) => s.showToast)
+	const { permissions, isChecking } = usePermissions()
+	const canManage = permissions.printingManage
 	const queryClient = useQueryClient()
-	const role = useAuthStore((s) => s.role)
-	const isMainAdmin = role === 'admin'
-	// stage-89 — مجوزِ اختصاصی: تغییرِ تخصیصِ سراسری + چاپِ مستقیم
-	// (ادمین اصلی همیشه دارد؛ ادمین۲ فقط با مجوزِ صریح — پیش‌فرض خاموش)
-	const { permissions } = usePermissions()
-	const canManagePrint = isMainAdmin || permissions.printingManage
-	const [kinds, setKinds] = useState(loadDefaultKinds)
-	const [printing, setPrinting] = useState(false)
-	const printingRef = useRef(false)
-	const assigningRef = useRef(false)
-	// ترمیم اسکنِ استیج-۸۴ — فاکتور هنگامِ «باز شدنِ» مودال پیش‌واکشی می‌شود:
-	// کلیکِ چاپ دیگر منتظرِ شبکه نمی‌ماند و چاپِ مجدد آنی است
-	const [invoice, setInvoice] = useState<StaffInvoice | null>(null)
-	// stage-85 — پیش‌نمایش زنده
-	const [previewHtmls, setPreviewHtmls] = useState<
-		Partial<Record<InvoiceKind, string>>
+	const showToast = useToastStore((s) => s.showToast)
+	const [kinds, setKinds] = useState({ sales: true, kitchen: true })
+	const [previewKind, setPreviewKind] = useState<LocalPrintKind>('sales')
+	const [specs, setSpecs] = useState<
+		Partial<Record<LocalPrintKind, PrintDocumentSpec>>
 	>({})
-	const [previewKind, setPreviewKind] = useState<InvoiceKind>('sales')
-
-	// ══ stage-88 — چاپگرهای شبکه + تخصیصِ هر فاکتور (سرور منبعِ حقیقت) ══
-	const {
-		data: printers = [],
-		isPending: printersLoading,
-		isError: printersError,
-	} = useQuery(adminPrintersOptions)
-	const {
-		data: serverAssignment,
-		isPending: assignmentLoading,
-		isError: assignmentError,
-	} = useQuery(adminPrintAssignmentOptions)
-	const discovery = useQuery({
-		queryKey: PRINTER_DISCOVERY_KEY,
-		queryFn: () => discoverAdminPrinters(),
-		enabled: canManagePrint,
-		staleTime: 30_000,
+	const [previewError, setPreviewError] = useState('')
+	const [submitting, setSubmitting] = useState(false)
+	const [error, setError] = useState('')
+	const submittingRef = useRef(false)
+	const generation = useRef(0)
+	const pendingRef = useRef(loadPending(orderId))
+	const [pending, setPending] = useState(pendingRef.current)
+	const invoice = useQuery({
+		queryKey: ['staff-invoice', orderId],
+		queryFn: () => getStaffOrderInvoice(orderId),
+		enabled: !isChecking && permissions.orderDetailsRead,
 		retry: false,
-		refetchOnWindowFocus: false,
+		staleTime: 30_000,
 	})
-	const discovered = canManagePrint
-		? (discovery.data?.found ?? []).filter(
-				(found) =>
-					!printers.some((p) => p.host === found.host && p.port === found.port),
-			)
-		: []
-	// نسخهٔ محلی برایِ پاسخِ فوریِ سلکت؛ بعد از موفقیتِ سرور هم‌گام می‌ماند
-	const [assignmentDraft, setAssignmentDraft] =
-		useState<InvoicePrinterAssignmentDto | null>(null)
-	const assignment = assignmentDraft ??
-		serverAssignment ?? {
-			sales: null,
-			kitchen: null,
-		}
-	const printSettingsLoading =
-		canManagePrint && (printersLoading || assignmentLoading)
-
-	const invalidatePrintQueries = useCallback(
-		async () =>
-			Promise.all([
-				queryClient.invalidateQueries({ queryKey: ['admin-printers'] }),
-				queryClient.invalidateQueries({ queryKey: ['admin-print-assignment'] }),
-				queryClient.invalidateQueries({ queryKey: ['admin-print-network'] }),
-			]).then(() => undefined),
-		[queryClient],
+	const agents = useQuery({
+		queryKey: agentsKey,
+		queryFn: getLocalPrintAgents,
+		refetchInterval: 15_000,
+		retry: false,
+	})
+	const assignment = useQuery({
+		queryKey: assignmentKey,
+		queryFn: getLocalPrintAssignment,
+		retry: false,
+	})
+	const jobKey = ['local-print-jobs', orderId]
+	const jobs = useQuery({
+		queryKey: jobKey,
+		queryFn: () => getLocalPrintJobs(orderId),
+		enabled: permissions.orderDetailsRead,
+		refetchInterval: 3_000,
+		retry: false,
+	})
+	const selected = (['sales', 'kitchen'] as const).filter((kind) => kinds[kind])
+	const retryKinds = selected.filter((kind) => pending[kind])
+	const queueKinds = retryKinds.length ? retryKinds : selected
+	const active = (kind: LocalPrintKind) =>
+		jobs.data?.some((job) => job.kind === kind && busyJob(job)) ?? false
+	const unknown = (kind: LocalPrintKind) =>
+		Boolean(
+			pending[kind] &&
+				!jobs.data?.some((job) => job.id === pending[kind]?.jobId),
+		)
+	const spec = specs[previewKind]
+	const html = useMemo(
+		() => (spec ? buildPrintDocumentHtml(spec) : null),
+		[spec],
 	)
 
-	const assignMutation = useMutation({
-		mutationFn: async (draft: InvoicePrinterAssignmentDto) => {
-			const next = { ...draft }
-			for (const kind of ['sales', 'kitchen'] as const) {
-				const detected = discovered.find(
-					(p) => discoveryValue(p) === next[kind],
-				)
-				if (!detected) continue
-				const printer = await registerDiscoveredPrinter(detected, printers)
-				queryClient.setQueryData<PrinterDto[]>(
-					adminPrintersOptions.queryKey,
-					(current = []) => [
-						...current.filter((p) => p.id !== printer.id),
-						printer,
-					],
-				)
-				next[kind] = printer.id
-				setAssignmentDraft({ ...next })
-			}
-			await setAdminPrintAssignment(next)
-			return next
-		},
-		onSuccess: async (next) => {
-			queryClient.setQueryData(adminPrintAssignmentOptions.queryKey, next)
-			setAssignmentDraft(null)
-			await invalidatePrintQueries()
-			showToast('چاپگر پیش‌فرض ذخیره شد')
-		},
-		onError: (err: Error) => {
-			showToast(err.message || 'ذخیرهٔ انتخاب چاپگر ناموفق بود', 'error')
-			// بازگشت به حقیقتِ سرور
-			setAssignmentDraft(null)
-		},
-		onSettled: () => {
-			assigningRef.current = false
-		},
-	})
-
-	// فاکتور سفارش — پیش‌واکشی
 	useEffect(() => {
-		let cancelled = false
-		setInvoice(null)
-		setPreviewHtmls({})
-		getStaffOrderInvoice(orderId)
-			.then((inv) => {
-				if (!cancelled) setInvoice(inv)
-			})
-			.catch(() => {
-				// خطا در همان لحظهٔ چاپ (دوباره تلاش می‌شود) توست می‌شود
-			})
+		pendingRef.current = loadPending(orderId)
+		setPending(pendingRef.current)
+		submittingRef.current = false
+		setSubmitting(false)
+		setError('')
 		return () => {
-			cancelled = true
+			generation.current += 1
 		}
 	}, [orderId])
-
-	// پیش‌ساختِ هر دو فاکتور (شبکه + QR) — پیش‌نمایش و چاپِ آنی
 	useEffect(() => {
-		if (!invoice) return
 		let cancelled = false
-		void buildInvoicePrintSpecs(invoice, ['kitchen', 'sales'])
-			.then((items) => {
-				if (cancelled) return
-				const htmls: Partial<Record<InvoiceKind, string>> = {}
-				for (const item of items) {
-					htmls[item.kind] = buildPrintDocumentHtml(item.spec)
-				}
-				setPreviewHtmls(htmls)
-			})
-			.catch(() => {
-				// پیش‌نمایش اختیاری است — چاپ خودش می‌سازد
-			})
+		setSpecs({})
+		setPreviewError('')
+		if (invoice.data)
+			void buildInvoicePrintSpecs(invoice.data, ['sales', 'kitchen'])
+				.then((items) => {
+					if (!cancelled)
+						setSpecs(
+							Object.fromEntries(items.map((item) => [item.kind, item.spec])),
+						)
+				})
+				.catch((err) => {
+					if (!cancelled)
+						setPreviewError(
+							err instanceof Error
+								? err.message
+								: 'آماده‌سازی فاکتور ناموفق بود',
+						)
+				})
 		return () => {
 			cancelled = true
 		}
-	}, [invoice])
-
-	// Escape برای بستن (چاپ نباید حین دیالوگ مرورگر باز باشد)
+	}, [invoice.data])
 	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape' && !printing) onClose()
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape' && !submittingRef.current) onClose()
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
-	}, [onClose, printing])
-
-	const saveKinds = useCallback(
-		(next: { kitchen: boolean; sales: boolean }) => {
-			try {
-				localStorage.setItem(KIND_STORAGE_KEY, JSON.stringify(next))
-			} catch {
-				// ذخیرهٔ انتخاب اختیاری است
-			}
-		},
-		[],
-	)
-
-	const setPrinter = useCallback(
-		(kind: 'kitchen' | 'sales', printerId: string) => {
-			if (
-				!canManagePrint ||
-				!serverAssignment ||
-				assignMutation.isPending ||
-				assigningRef.current ||
-				printingRef.current
-			)
-				return
-			const next: InvoicePrinterAssignmentDto = {
-				...assignment,
-				[kind]: printerId || null,
-			}
-			setAssignmentDraft(next)
-			assigningRef.current = true
-			assignMutation.mutate(next)
-		},
-		[assignMutation, assignment, canManagePrint, serverAssignment],
-	)
-
-	const handlePrint = useCallback(async () => {
+	}, [onClose])
+	const remember = (next: PendingJobs) => {
+		// Persist the exact bitmap before POST, so a retry after remount cannot
+		// reuse an ID for different invoice data. Clear only on confirmed receipt.
+		sessionStorage.setItem(pendingKey(orderId), JSON.stringify(next))
+		pendingRef.current = next
+		setPending(next)
+	}
+	const forget = (kind: LocalPrintKind) => {
+		const next = { ...pendingRef.current }
+		delete next[kind]
+		remember(next)
+	}
+	const recordJob = (job: LocalPrintJobDto) => {
+		queryClient.setQueryData<LocalPrintJobDto[]>(jobKey, (current = []) => [
+			job,
+			...current.filter((item) => item.id !== job.id),
+		])
+	}
+	const refresh = () =>
+		Promise.all([
+			queryClient.invalidateQueries({ queryKey: agentsKey }),
+			queryClient.invalidateQueries({ queryKey: assignmentKey }),
+			queryClient.invalidateQueries({ queryKey: jobKey }),
+		])
+	const queue = async () => {
 		if (
-			printingRef.current ||
-			printSettingsLoading ||
-			assignMutation.isPending ||
-			assigningRef.current
+			submittingRef.current ||
+			!canManage ||
+			!permissions.orderDetailsRead ||
+			!invoice.data ||
+			!assignment.data ||
+			jobs.isPending ||
+			jobs.isError ||
+			!selected.length
 		)
 			return
-		const selected: InvoiceKind[] = [
-			...(kinds.kitchen ? (['kitchen'] as const) : []),
-			...(kinds.sales ? (['sales'] as const) : []),
-		]
-		if (selected.length === 0) {
-			showToast('حداقل یک فاکتور را انتخاب کنید', 'error')
+		if (!retryKinds.length && selected.some(active)) {
+			setError('برای این فاکتور کار فعالی وجود دارد؛ وضعیت صف را بررسی کنید.')
 			return
 		}
-		saveKinds(kinds)
-		printingRef.current = true
-		setPrinting(true)
+		const repeat =
+			!retryKinds.length &&
+			selected.some(
+				(kind) =>
+					!pendingRef.current[kind] &&
+					jobs.data?.some(
+						(job) =>
+							job.kind === kind &&
+							(job.status === 'spooled' || job.status === 'uncertain'),
+					),
+			)
+		if (
+			repeat &&
+			!window.confirm(
+				'این سفارش قبلاً به چاپگر ارسال شده یا نتیجهٔ آن نامشخص است. پس از بررسی چاپگر، نسخهٔ دیگری ارسال شود؟',
+			)
+		)
+			return
+		submittingRef.current = true
+		setSubmitting(true)
+		setError('')
+		const current = generation.current
 		try {
-			const inv = invoice ?? (await getStaffOrderInvoice(orderId))
-			setInvoice(inv)
-			// چاپگرهای مستقیم — فقط فاکتورهایی که چاپگرِ منتخبِ زنده دارند؛
-			// بقیه با دیالوگِ مرورگر چاپ می‌شوند (خطای مسیرِ مستقیم هم
-			// همان‌جا فرود می‌آید)
-			const directTargets: Partial<
-				Record<InvoiceKind, { printerId: string; widthDots: number }>
-			> = {}
-			for (const kind of selected) {
-				const id = assignment[kind]
-				const printer = printers.find((p) => p.id === id)
-				// stage-89 — چاپِ مستقیم مجوزِ printingManage می‌خواهد؛
-				// بدونِ آن، فاکتورها با دیالوگِ مرورگر چاپ می‌شوند
-				if (id && printer && canManagePrint) {
-					directTargets[kind] = {
-						printerId: printer.id,
-						widthDots: printer.widthDots,
+			if (!retryKinds.length) {
+				const prepared = { ...pendingRef.current }
+				for (const kind of queueKinds) {
+					if (generation.current !== current) return
+					const target = assignment.data[kind]
+					if (!target)
+						throw new Error(`چاپگر ${labels[kind]} را در تنظیمات انتخاب کنید.`)
+					prepared[kind] = await buildLocalInvoiceJob(
+						invoice.data,
+						kind,
+						target,
+						crypto.randomUUID(),
+					)
+				}
+				if (generation.current !== current) return
+				// Commit the entire selection before sending its first receipt. If a
+				// later request fails, retry can recover only the outstanding kinds.
+				remember(prepared)
+			}
+			for (const kind of queueKinds) {
+				if (generation.current !== current) break
+				const payload = pendingRef.current[kind]
+				if (!payload) continue
+				if (retryKinds.length) {
+					try {
+						const job = await getLocalPrintJob(payload.jobId)
+						if (generation.current !== current) break
+						recordJob(job)
+						forget(kind)
+						continue
+					} catch (err) {
+						if ((err as { status?: number }).status !== 404) throw err
 					}
 				}
+				if (generation.current !== current) break
+				const job = await enqueueLocalPrintJob(payload)
+				if (generation.current !== current) break
+				recordJob(job)
+				forget(kind)
 			}
-			const result = await printOrderInvoices(
-				inv,
-				selected,
-				Object.keys(directTargets).length > 0 ? { directTargets } : undefined,
-			)
-			if (result.agentErrors.length > 0) {
+			if (generation.current === current)
 				showToast(
-					`${result.agentErrors[0] ?? 'چاپ مستقیم ناموفق بود'}${result.dialogs > 0 ? ' — با دیالوگ مرورگر جایگزین شد' : ''}`,
-					'error',
+					retryKinds.length
+						? 'وضعیت درخواست‌های قبلی به‌روز شد؛ نتیجهٔ هر فاکتور را در همین پنجره بررسی کنید.'
+						: 'درخواست در صف چاپ ثبت شد؛ نتیجهٔ ارسال به ویندوز در همین پنجره نمایش داده می‌شود.',
 				)
-			} else if (result.dialogs === 0 && result.direct > 0) {
-				showToast('فاکتورها مستقیم به چاپگر شبکه ارسال شد')
-			} else {
-				showToast('چاپ فاکتور ارسال شد')
+		} catch (err) {
+			if (generation.current === current)
+				setError(
+					err instanceof Error
+						? err.message
+						: 'ارسال ناموفق بود؛ وضعیت کار قبلی را بررسی کنید.',
+				)
+		} finally {
+			await refresh().catch(() => {})
+			if (generation.current === current) {
+				submittingRef.current = false
+				setSubmitting(false)
+			}
+		}
+	}
+	const browserPrint = async () => {
+		const current = generation.current
+		if (submittingRef.current || !spec || !permissions.orderDetailsRead) return
+		if (active(previewKind) || unknown(previewKind)) {
+			setError(
+				'ابتدا وضعیت ارسال قبلی را بررسی و کارِ در صف را لغو کنید تا فاکتور دوبار چاپ نشود.',
+			)
+			return
+		}
+		const risk =
+			jobs.isError ||
+			jobs.data?.some(
+				(job) =>
+					job.kind === previewKind &&
+					(job.status === 'spooled' || job.status === 'uncertain'),
+			)
+		if (
+			risk &&
+			!window.confirm(
+				'ممکن است این فاکتور قبلاً چاپ شده باشد. پس از بررسی چاپگر، نسخهٔ مرورگر باز شود؟',
+			)
+		)
+			return
+		submittingRef.current = true
+		setSubmitting(true)
+		setError('')
+		try {
+			await printHtmlDocumentAsync(spec)
+		} catch (err) {
+			if (generation.current === current)
+				setError(
+					err instanceof Error ? err.message : 'بازکردن چاپ مرورگر ناموفق بود',
+				)
+		} finally {
+			if (generation.current === current) {
+				submittingRef.current = false
+				setSubmitting(false)
+			}
+		}
+	}
+	const cancel = async (job: LocalPrintJobDto) => {
+		const current = generation.current
+		if (!canManage || submittingRef.current || job.status !== 'queued') return
+		submittingRef.current = true
+		setSubmitting(true)
+		setError('')
+		try {
+			const cancelled = await cancelLocalPrintJob(job.id)
+			if (generation.current === current) {
+				recordJob(cancelled)
+				await jobs.refetch()
 			}
 		} catch (err) {
-			showToast(
-				err instanceof Error
-					? `چاپ فاکتور ناموفق بود: ${err.message}`
-					: 'چاپ فاکتور ناموفق بود',
-				'error',
-			)
+			if (generation.current === current)
+				setError(err instanceof Error ? err.message : 'لغو کار ناموفق بود')
 		} finally {
-			printingRef.current = false
-			setPrinting(false)
+			if (generation.current === current) {
+				submittingRef.current = false
+				setSubmitting(false)
+			}
 		}
-	}, [
-		assignment,
-		assignMutation.isPending,
-		canManagePrint,
-		invoice,
-		kinds,
-		orderId,
-		printers,
-		printSettingsLoading,
-		saveKinds,
-		showToast,
-	])
-
-	const toggle = (key: 'kitchen' | 'sales') =>
-		setKinds((prev) => {
-			const next = { ...prev, [key]: !prev[key] }
-			saveKinds(next)
-			return next
-		})
-
+	}
+	const discardPending = async (kind: LocalPrintKind) => {
+		const payload = pendingRef.current[kind]
+		if (
+			submittingRef.current ||
+			!canManage ||
+			!permissions.orderDetailsRead ||
+			!payload
+		)
+			return
+		if (
+			!window.confirm(
+				`درخواست ذخیره‌شدهٔ چاپ ${labels[kind]} کنار گذاشته شود؟ کارِ در صف لغو می‌شود؛ اگر صندوق آن را دریافت کرده باشد، باید ابتدا نتیجهٔ چاپ را بررسی کنید.`,
+			)
+		)
+			return
+		const current = generation.current
+		submittingRef.current = true
+		setSubmitting(true)
+		setError('')
+		try {
+			const result = await discardPendingLocalPrintJob({
+				jobId: payload.jobId,
+				orderId,
+			})
+			if (generation.current !== current) return
+			if (result.job) recordJob(result.job)
+			forget(kind)
+			showToast(
+				'درخواست قبلی کنار گذاشته شد. اکنون می‌توانید چاپگر را تنظیم یا چاپ مرورگر را انتخاب کنید.',
+			)
+		} catch (err) {
+			if (generation.current === current)
+				setError(
+					err instanceof Error
+						? err.message
+						: 'کنار گذاشتن درخواست ناموفق بود؛ وضعیت قبلی حفظ شد.',
+				)
+		} finally {
+			await refresh().catch(() => {})
+			if (generation.current === current) {
+				submittingRef.current = false
+				setSubmitting(false)
+			}
+		}
+	}
 	return (
 		<div className="fixed inset-0 z-100 flex items-center justify-center p-3 sm:p-4">
 			<button
 				type="button"
 				aria-label="بستن پنجرهٔ چاپ"
-				onClick={() => !printing && onClose()}
-				className="absolute inset-0 w-full h-full bg-black/50 backdrop-blur-sm cursor-default"
+				disabled={submitting}
+				onClick={onClose}
+				className="absolute inset-0 bg-black/50 backdrop-blur-sm"
 			/>
 			<div
 				role="dialog"
 				aria-modal="true"
 				aria-label={`چاپ فاکتور سفارش ${orderId}`}
-				className="relative bg-white dark:bg-[#2a1015] rounded-2xl shadow-xl w-full max-w-lg flex flex-col max-h-[92dvh]"
+				className="relative w-full max-w-3xl max-h-[92dvh] flex flex-col rounded-2xl bg-white dark:bg-[#2a1015] shadow-xl text-gray-800 dark:text-gray-100"
 			>
-				<div className="flex items-center justify-between p-5 pb-2 shrink-0">
-					<h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white">
-						چاپ فاکتور — {orderId}
-					</h3>
+				<div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-white/10">
+					<h2 className="font-DanaDemiBold text-lg">چاپ فاکتور — {orderId}</h2>
 					<button
 						type="button"
-						onClick={onClose}
-						disabled={printing}
 						aria-label="بستن"
-						className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition cursor-pointer disabled:opacity-50"
+						disabled={submitting}
+						onClick={onClose}
 					>
 						<X size={20} />
 					</button>
 				</div>
-
-				<div className="min-h-0 flex-1 overflow-y-auto">
-					<div className="px-5 pb-3 shrink-0">
-						{printSettingsLoading ? (
-							<div className="text-[11px] text-gray-400 font-DanaMedium">
-								در حال دریافت چاپگرهای شبکه از سرور…
-							</div>
-						) : printersError || assignmentError ? (
-							<p className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium">
-								دریافت تنظیمات چاپگر ناموفق بود؛ چاپ با تنظیمات موجود یا دیالوگ
-								مرورگر انجام می‌شود.
-							</p>
-						) : !canManagePrint ? (
-							<p className="text-[11px] text-gray-400 font-DanaMedium">
-								چاپ فاکتورها با دیالوگ مرورگر انجام می‌شود.
-							</p>
-						) : printers.length > 0 ? (
-							<div
-								aria-live="polite"
-								className="flex items-center gap-2 text-[11px] text-green-600 dark:text-green-400 font-DanaMedium"
+				<div className="overflow-y-auto min-h-0 p-4 space-y-4">
+					<p className="text-sm text-gray-500">
+						چاپ اصلی از طریق عامل ویندوز صندوق انجام می‌شود. دیالوگ مرورگر،
+						پشتیبانِ فاکتورِ انتخاب‌شده در پیش‌نمایش است.
+					</p>
+					{agents.isError || assignment.isError ? (
+						<p role="alert" className="text-sm text-red-600">
+							دریافت وضعیت عامل چاپ ناموفق بود.{' '}
+							<button
+								type="button"
+								onClick={() => void refresh()}
+								className="underline"
 							>
-								<span className="w-2 h-2 rounded-full bg-green-500 dark:bg-green-400 shrink-0" />
-								چاپ مستقیم فعال — {printers.length} چاپگرِ شبکه روی سرور
-							</div>
-						) : (
-							<div className="text-[11px] text-amber-600 dark:text-amber-400 font-DanaMedium leading-relaxed">
-								چاپگری روی سرور ثبت نشده — فعلاً چاپ با دیالوگ مرورگر است.{' '}
-								چاپگر شناسایی‌شده را از فهرست سالن یا آشپزخانه انتخاب کنید تا ثبت و پیش‌فرض شود.
-							</div>
-						)}
-						{canManagePrint && (
-							<div className="mt-2 space-y-1.5 text-[11px] font-DanaMedium text-gray-500 dark:text-gray-400">
-								<div
-									className="flex items-center justify-between gap-2"
-									aria-live="polite"
-								>
-									<span>
-										{discovery.isFetching
-											? 'در حال شناسایی خودکار چاپگرها…'
-											: discovery.isError
-												? 'شناسایی خودکار ناموفق بود'
-												: `${discovery.data?.found.length ?? 0} چاپگر در اسکن شبکه شناسایی شد`}
-									</span>
-									<button
-										type="button"
-										onClick={() => void discovery.refetch()}
-										disabled={
-											discovery.isFetching ||
-											printing ||
-											assignMutation.isPending
-										}
-										className="inline-flex items-center gap-1 rounded-md border px-2 py-1 cursor-pointer disabled:opacity-50"
-									>
-										<Radar size={13} /> اسکن دوباره
-									</button>
-								</div>
-								{discovery.isError && (
-									<p className="text-amber-600 dark:text-amber-400">
-										{discovery.error instanceof Error
-											? discovery.error.message
-											: 'جستجوی چاپگر ناموفق بود؛ دوباره تلاش کنید.'}
-									</p>
-								)}
-								<p>
-									انتخاب هر فهرست به‌عنوان چاپگر پیش‌فرض همان بخش برای همهٔ
-									ایستگاه‌ها ذخیره می‌شود. کاغذ چاپگر تازه ۸۰ میلی‌متر است؛ تنظیمات
-									آن توسط مدیر اصلی قابل ویرایش است.
-								</p>
-							</div>
-						)}
-						{deliveryType === 'DELIVERY' && (
-							<p className="text-[11px] text-gray-400 font-DanaMedium leading-relaxed mt-1.5">
-								فاکتور فروش شامل QR اسکن موقعیت مشتری است (۳ ساعت اعتبار).
-							</p>
-						)}
-					</div>
-
-					{/* انتخاب فاکتورها + چاپگرِ هر کدام (تخصیصِ سروری) */}
-					<div className="px-5 space-y-2 shrink-0">
-						<div
-							className={`rounded-xl border transition p-3 space-y-2 ${
-								kinds.sales
-									? 'border-primary/60 bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/10'
-									: 'border-gray-200 dark:border-[#3a151c] bg-gray-50 dark:bg-[#1a0a0e]'
-							}`}
-						>
-							<label
-								htmlFor="inv-print-sales"
-								className={`flex items-center gap-2.5 ${printing ? '' : 'cursor-pointer'}`}
-							>
-								<input
-									id="inv-print-sales"
-									type="checkbox"
-									checked={kinds.sales}
-									onChange={() => toggle('sales')}
-									disabled={printing}
-									className="w-5 h-5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0"
-								/>
-								<span className="text-right">
-									<span className="block font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-										فاکتور فروش (سالن / مشتری)
-									</span>
-									<span className="block text-[11px] text-gray-400 mt-0.5">
-										اقلام + ریز مبالغ + QR پیک (ارسال با پیک)
-									</span>
-								</span>
-							</label>
-							<PrinterSelect
-								id="inv-printer-sales"
-								label="چاپگر پیش‌فرض:"
-								value={assignment.sales ?? ''}
-								printers={printers}
-								discovered={discovered}
-								disabled={
-									printing ||
-									assignMutation.isPending ||
-									!serverAssignment ||
-									printersLoading
-								}
-								locked={!canManagePrint}
-								onChange={(id) => setPrinter('sales', id)}
-							/>
-						</div>
-
-						<div
-							className={`rounded-xl border transition p-3 space-y-2 ${
-								kinds.kitchen
-									? 'border-primary/60 bg-primary/5 dark:border-dark-primary dark:bg-dark-primary/10'
-									: 'border-gray-200 dark:border-[#3a151c] bg-gray-50 dark:bg-[#1a0a0e]'
-							}`}
-						>
-							<label
-								htmlFor="inv-print-kitchen"
-								className={`flex items-center gap-2.5 ${printing ? '' : 'cursor-pointer'}`}
-							>
-								<input
-									id="inv-print-kitchen"
-									type="checkbox"
-									checked={kinds.kitchen}
-									onChange={() => toggle('kitchen')}
-									disabled={printing}
-									className="w-5 h-5 accent-primary dark:accent-dark-primary cursor-pointer shrink-0"
-								/>
-								<span className="text-right">
-									<span className="block font-DanaDemiBold text-sm text-gray-800 dark:text-white">
-										فاکتور آشپزخانه
-									</span>
-									<span className="block text-[11px] text-gray-400 mt-0.5">
-										اقلام بدون قیمت + جدول درشت
-									</span>
-								</span>
-							</label>
-							<PrinterSelect
-								id="inv-printer-kitchen"
-								label="چاپگر پیش‌فرض:"
-								value={assignment.kitchen ?? ''}
-								printers={printers}
-								discovered={discovered}
-								disabled={
-									printing ||
-									assignMutation.isPending ||
-									!serverAssignment ||
-									printersLoading
-								}
-								locked={!canManagePrint}
-								onChange={(id) => setPrinter('kitchen', id)}
-							/>
-						</div>
-
-						{!canManagePrint && (
-							<p className="text-[10px] text-gray-400 font-DanaMedium leading-relaxed">
-								تغییر چاپگر و چاپِ مستقیم نیازمند مجوزِ «چاپ و مدیریت چاپگر» است
-								(ادمین اصلی) — سفارش با دیالوگِ مرورگر چاپ می‌شود.
-							</p>
-						)}
-					</div>
-
-					{/* پیش‌نمایش — عینِ خروجی چاپ مسیرِ مرورگر (stage-85) */}
-					<div className="px-5 pt-3 pb-1 shrink-0">
-						<div className="flex items-center justify-between mb-1.5 gap-2">
-							<span className="text-xs font-DanaDemiBold text-gray-500 dark:text-gray-400 shrink-0">
-								پیش‌نمایش فاکتور
-							</span>
-							<div className="flex gap-1 p-0.5 rounded-lg bg-gray-100 dark:bg-[#1a0a0e]">
-								<button
-									type="button"
-									onClick={() => setPreviewKind('sales')}
-									aria-pressed={previewKind === 'sales'}
-									className={`px-2.5 py-1 rounded-md text-[11px] font-DanaMedium transition cursor-pointer ${
-										previewKind === 'sales'
-											? 'bg-white dark:bg-[#3a151c] text-gray-800 dark:text-white shadow-sm'
-											: 'text-gray-500 dark:text-gray-400'
-									}`}
-								>
-									فروش
-								</button>
-								<button
-									type="button"
-									onClick={() => setPreviewKind('kitchen')}
-									aria-pressed={previewKind === 'kitchen'}
-									className={`px-2.5 py-1 rounded-md text-[11px] font-DanaMedium transition cursor-pointer ${
-										previewKind === 'kitchen'
-											? 'bg-white dark:bg-[#3a151c] text-gray-800 dark:text-white shadow-sm'
-											: 'text-gray-500 dark:text-gray-400'
-									}`}
-								>
-									آشپزخانه
-								</button>
-							</div>
-						</div>
-					</div>
-					<div className="px-5 pb-3">
-						<div className="rounded-xl bg-gray-50 dark:bg-[#160a0d] border border-gray-100 dark:border-[#3a151c] p-2">
-							<ReceiptPreviewPane html={previewHtmls[previewKind] ?? null} />
-						</div>
-					</div>
-
-					{/* مدیریت چاپگرها — فقط ادمین اصلی */}
-					{isMainAdmin && (
-						<div className="px-5 pb-3 shrink-0">
-							<PrinterManager
-								printers={printers}
-								onChanged={invalidatePrintQueries}
-								onDiscovered={(result) =>
-									queryClient.setQueryData(PRINTER_DISCOVERY_KEY, result)
-								}
-								disabled={printing || assignMutation.isPending}
-							/>
-						</div>
+								تلاش دوباره
+							</button>
+						</p>
+					) : (
+						<output className="block text-sm">
+							{agents.data?.some((agent) => agent.online)
+								? 'عامل چاپ متصل است'
+								: 'عامل چاپ متصل نیست؛ کارها تا اتصال در صف می‌مانند.'}
+						</output>
 					)}
-				</div>
-
-				<div className="flex items-center gap-3 p-4 pt-0 shrink-0">
+					<LocalPrinterSettings
+						agents={agents.data ?? []}
+						assignment={assignment.data}
+						canManage={canManage}
+						disabled={submitting}
+						onSaved={refresh}
+					/>
+					<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+						{(['sales', 'kitchen'] as const).map((kind) => (
+							<label
+								key={kind}
+								className="flex gap-3 items-center rounded-xl border border-gray-200 dark:border-white/10 p-3 text-sm"
+							>
+								<input
+									type="checkbox"
+									disabled={submitting}
+									checked={kinds[kind]}
+									onChange={() =>
+										setKinds((value) => ({ ...value, [kind]: !value[kind] }))
+									}
+								/>
+								<span>
+									فاکتور {labels[kind]}
+									<span className="block text-xs text-gray-500">
+										{assignment.data?.[kind]?.printerName ??
+											'چاپگر انتخاب نشده'}
+									</span>
+								</span>
+							</label>
+						))}
+					</div>
 					<button
 						type="button"
-						onClick={() => void handlePrint()}
+						onClick={() => void queue()}
 						disabled={
-							printing || printSettingsLoading || assignMutation.isPending
+							submitting ||
+							!canManage ||
+							!permissions.orderDetailsRead ||
+							!invoice.data ||
+							!assignment.data ||
+							jobs.isPending ||
+							jobs.isError ||
+							!selected.length ||
+							(!retryKinds.length &&
+								queueKinds.some(
+									(kind) => active(kind) || !assignment.data?.[kind],
+								))
 						}
-						className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-sm cursor-pointer hover:opacity-90 transition disabled:opacity-60"
+						className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary text-white p-3 font-DanaDemiBold disabled:opacity-50"
 					>
 						<Printer size={18} />
-						{printing ? 'در حال ارسال چاپ…' : 'چاپ فاکتورهای انتخابی'}
+						{submitting
+							? 'در حال ارسال…'
+							: retryKinds.length
+								? 'بررسی و تلاش مجدد با همان شناسه'
+								: 'ارسال فاکتورهای انتخابی به صندوق'}
 					</button>
+					{error && (
+						<p role="alert" className="text-sm text-red-600">
+							{error}
+						</p>
+					)}
+					{(Object.keys(pending).length > 0 || jobs.isError) && (
+						<p className="text-sm text-amber-700">
+							وضعیت ارسال قبلی را بررسی کنید. خطای اتصال به معنی چاپ‌نشدن فاکتور
+							نیست.
+						</p>
+					)}
+					{(['sales', 'kitchen'] as const).map(
+						(kind) =>
+							pending[kind] && (
+								<button
+									key={kind}
+									type="button"
+									disabled={
+										submitting || !canManage || !permissions.orderDetailsRead
+									}
+									onClick={() => void discardPending(kind)}
+									className="block text-sm underline disabled:opacity-50"
+								>
+									کنار گذاشتن درخواست قبلی {labels[kind]}
+								</button>
+							),
+					)}
+					<div className="space-y-2 text-xs" aria-live="polite">
+						{jobs.data?.slice(0, 8).map((job) => (
+							<div
+								key={job.id}
+								className="rounded-lg bg-gray-50 dark:bg-white/5 p-2"
+							>
+								<div className="flex flex-wrap justify-between gap-2">
+									<span>
+										{labels[job.kind]} — {statusLabels[job.status]}
+									</span>
+									{job.status === 'queued' && (
+										<button
+											type="button"
+											disabled={!canManage || submitting}
+											className="underline disabled:opacity-50"
+											onClick={() => void cancel(job)}
+										>
+											لغو کار در صف
+										</button>
+									)}
+								</div>
+								{job.error && <p className="mt-1 text-red-600">{job.error}</p>}
+							</div>
+						))}
+						<p className="text-gray-500">
+							پذیرش در صف ویندوز به معنی تأیید خروج کاغذ نیست. برای نتیجهٔ
+							نامشخص، چاپگر را پیش از چاپ مجدد بررسی کنید.
+						</p>
+					</div>
+					<div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 dark:border-white/10 pt-4">
+						<span className="text-sm font-DanaDemiBold">
+							پیش‌نمایش و چاپ اضطراری
+						</span>
+						<div className="flex gap-2">
+							{(['sales', 'kitchen'] as const).map((kind) => (
+								<button
+									key={kind}
+									type="button"
+									disabled={submitting}
+									aria-pressed={previewKind === kind}
+									onClick={() => setPreviewKind(kind)}
+									className={`rounded-lg border px-3 py-2 text-sm ${previewKind === kind ? 'border-primary text-primary' : 'border-gray-200'}`}
+								>
+									{labels[kind]}
+								</button>
+							))}
+						</div>
+					</div>
+					{invoice.isError ? (
+						<p role="alert">
+							دریافت فاکتور ناموفق بود.{' '}
+							<button
+								type="button"
+								className="underline"
+								onClick={() => void invoice.refetch()}
+							>
+								تلاش دوباره
+							</button>
+						</p>
+					) : previewError ? (
+						<p role="alert">{previewError}</p>
+					) : html ? (
+						<div className="max-w-sm mx-auto w-full rounded-xl bg-gray-100 p-2">
+							<ReceiptPreviewPane html={html} />
+						</div>
+					) : (
+						<output className="block text-sm">
+							{permissions.orderDetailsRead
+								? 'در حال آماده‌سازی فاکتور…'
+								: 'دسترسی به فاکتور این سفارش مجاز نیست.'}
+						</output>
+					)}
+					<p className="text-xs leading-relaxed text-gray-500">
+						در دیالوگ مرورگر، کاغذ ۸۰ میلی‌متری و مقیاس ۱۰۰٪ را انتخاب کنید؛
+						سرصفحه و پاصفحه خاموش باشد. حاشیه‌ها را مطابق چاپگر تنظیم کنید. فقط
+						فاکتور پیش‌نمایش‌شده چاپ می‌شود. برای کاغذ ۵۸ میلی‌متری از عامل چاپ
+						استفاده کنید.
+					</p>
 					<button
 						type="button"
-						onClick={onClose}
-						disabled={printing}
-						className="px-4 py-3 rounded-xl border border-gray-200 dark:border-[#3a151c] text-gray-600 dark:text-gray-300 font-DanaMedium text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-[#1a0a0e] transition disabled:opacity-50"
+						onClick={() => void browserPrint()}
+						disabled={
+							submitting ||
+							!spec ||
+							!permissions.orderDetailsRead ||
+							jobs.isPending ||
+							active(previewKind) ||
+							unknown(previewKind)
+						}
+						className="w-full rounded-xl border border-gray-300 dark:border-white/20 p-3 text-sm disabled:opacity-50"
 					>
-						بستن
+						چاپ مرورگر — فقط فاکتور {labels[previewKind]}
 					</button>
 				</div>
 			</div>

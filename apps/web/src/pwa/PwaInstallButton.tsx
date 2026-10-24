@@ -7,7 +7,7 @@ import {
 } from './install'
 
 /** An explicit install entry remains available after dismissing the banner. */
-export function PwaInstallButton() {
+export function PwaInstallButton({ className = '' }: { className?: string }) {
 	const { t } = useI18n()
 	const [installed, setInstalled] = useState(false)
 	useEffect(() => {
@@ -33,7 +33,7 @@ export function PwaInstallButton() {
 		<button
 			type="button"
 			onClick={() => window.dispatchEvent(new Event(PWA_INSTALL_REQUEST_EVENT))}
-			className="px-4 py-2 rounded-xl border border-primary/30 text-primary dark:text-dark-primary text-sm font-DanaMedium cursor-pointer hover:bg-primary/10 transition"
+			className={`inline-flex items-center justify-center min-h-12 px-4 py-3 rounded-2xl border border-primary/30 text-primary dark:text-dark-primary text-sm sm:text-base font-DanaMedium cursor-pointer hover:bg-primary/10 transition ${className}`}
 		>
 			{t['pwa.install']}
 		</button>

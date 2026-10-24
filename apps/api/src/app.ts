@@ -42,6 +42,7 @@ import type { UploadService } from '#/infra/uploads/upload.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { LiveService } from '#/domain/live/live.service'
 import type { PrinterService } from '#/domain/print/print.service'
+import type { LocalPrintService } from '#/domain/print/local-print.service'
 import type { CourierService } from '#/domain/courier/courier.service'
 import type { ReviewService } from '#/domain/review/review.service'
 import type { ReportService } from '#/domain/report/report.service'
@@ -79,6 +80,7 @@ import { uploadRoutes } from '#/http/routes/upload.routes'
 import { admin2Routes } from '#/http/routes/admin2.routes'
 import { liveRoutes } from '#/http/routes/live.routes'
 import { printRoutes } from '#/http/routes/print.routes'
+import { localPrintRoutes } from '#/http/routes/local-print.routes'
 import { courierRoutes } from '#/http/routes/courier.routes'
 import { reviewRoutes } from '#/http/routes/review.routes'
 import { reportRoutes } from '#/http/routes/report.routes'
@@ -125,6 +127,7 @@ export interface AppDeps {
   live: LiveService
   /** stage-88 — پل چاپِ سرور (چاپگرهای شبکهٔ ESC/POS روی 9100) */
   print: PrinterService
+  localPrint: LocalPrintService
   couriers: CourierService
   reviews: ReviewService
   reports: ReportService
@@ -325,6 +328,10 @@ export const buildApp = (deps: AppDeps) => {
         redis: deps.redis,
       }),
     )
+
+  // Local-agent clients use shared DTOs; mount separately to avoid growing
+  // the existing Eden route type past TypeScript's instantiation limit.
+  api.use(localPrintRoutes({ sessions: deps.sessions, admin2: deps.admin2, localPrint: deps.localPrint, audit: deps.audit }))
 
   // round-16 — سقف بدنهٔ درخواست در سطح سوکت (پیش از بافر شدن کامل در حافظه):
   // آپلودها ۲MB هستند؛ ۸MB سقف سخاوتمندانه برای multipart + JSON های بزرگ

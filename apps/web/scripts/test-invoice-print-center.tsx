@@ -1,238 +1,450 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
-import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
-import type { InvoicePrinterAssignmentDto, PrinterDto } from '@sinshin/shared'
+import type { LocalPrintEnqueueInput, LocalPrintJobDto, LocalPrintKind } from '@sinshin/shared'
 
-type QueryResult = { data?: unknown; isPending: boolean; isError: boolean }
-const printers = [
-	{ id: 'sales-printer', name: 'Sales', host: '192.168.1.20', port: 9100, widthDots: 576 },
-	{ id: 'kitchen-printer', name: 'Kitchen', host: '192.168.1.21', port: 9100, widthDots: 384 },
-]
-const savedAssignment = { sales: 'sales-printer', kitchen: 'kitchen-printer' }
-let printerQuery: QueryResult
-let assignmentQuery: QueryResult
-let discoveryQuery: QueryResult
-let discoveryEnabled: boolean | undefined
-let registrationError: Error | null = null
-const registered: unknown[] = []
-const mutations: Promise<unknown>[] = []
-let currentPrinters: unknown[] = printers
-let role = 'admin'
+const react = { ...await import('react') }
+type Cell = { value?: any; deps?: unknown[]; cleanup?: () => void }
+type Host = { cells: Cell[]; cursor: number; effects: Array<() => void>; dirty: boolean; tree: any; render(): void; unmount(): void }
+let host: Host
+mock.module('react', () => ({
+	...react, memo: (component: any) => component,
+	useState(initial: any) {
+		const owner = host
+		const cell = owner.cells[owner.cursor++] ??= { value: typeof initial === 'function' ? initial() : initial }
+		return [cell.value, (next: any) => {
+			const value = typeof next === 'function' ? next(cell.value) : next
+			if (!Object.is(cell.value, value)) { cell.value = value; owner.dirty = true }
+		}]
+	},
+	useRef(initial: any) { return (host.cells[host.cursor++] ??= { value: { current: initial } }).value },
+	useCallback(fn: any) { return fn },
+	useMemo(compute: () => any, deps: unknown[]) {
+		const cell = host.cells[host.cursor++] ??= {}
+		if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) { cell.value = compute(); cell.deps = deps }
+		return cell.value
+	},
+	useEffect(effect: () => (() => void) | void, deps: unknown[]) {
+		const cell = host.cells[host.cursor++] ??= {}
+		if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) {
+			host.effects.push(() => { cell.cleanup?.(); cell.deps = deps; cell.cleanup = effect() || undefined })
+		}
+	},
+}))
+
+type Query = { data: any; isPending: boolean; isError: boolean; refetch(): Promise<any> }
+const invoiceQueries = new Map<string, Query>()
+const jobQueries = new Map<string, Query>()
+const jobs = new Map<string, LocalPrintJobDto>()
+const target = { agentId: 'agent-1', printerName: 'POS Printer', widthDots: 576, mode: 'driver', cut: false }
+const assignmentQuery: Query = { data: { sales: target, kitchen: target }, isPending: false, isError: false, refetch: async () => ({}) }
+const agentsQuery: Query = { data: [{ id: 'agent-1', name: 'POS', online: true, printers: [{ name: 'POS Printer', isDefault: true }], lastSeenAt: null }], isPending: false, isError: false, refetch: async () => ({}) }
+let role: 'admin' | 'admin2' = 'admin'
 let canManage = true
-let mutationPending = false
-const assignments: InvoicePrinterAssignmentDto[] = []
-const printed: Array<{ directTargets?: Record<string, unknown> } | undefined> = []
-
+let canRead = true
+let refreshFails = false
+let syncJobsOnRefresh = false
+const queryCalls: { key: string[]; enabled?: boolean }[] = []
+function jobsFor(orderId: string): Query {
+	let query = jobQueries.get(orderId)
+	if (!query) {
+		query = { data: [], isPending: false, isError: false, refetch: async () => {
+			query!.data = [...jobs.values()].filter(job => job.orderId === orderId).map(job => ({ ...job }))
+			return { data: query!.data }
+		} }
+		jobQueries.set(orderId, query)
+	}
+	return query
+}
+function invoiceFor(orderId: string): Query {
+	let query = invoiceQueries.get(orderId)
+	if (!query) {
+		query = { data: { orderId, revision: 'original' }, isPending: false, isError: false, refetch: async () => ({}) }
+		invoiceQueries.set(orderId, query)
+	}
+	return query
+}
 mock.module('@tanstack/react-query', () => ({
-	useQuery: ({ queryKey, enabled }: { queryKey: string[]; enabled?: boolean }) => {
-		if (queryKey[0] === 'admin-printer-discovery') { discoveryEnabled = enabled; return discoveryQuery }
-		return queryKey[0] === 'admin-printers' ? printerQuery : assignmentQuery
+	useQuery(options: { queryKey: string[]; enabled?: boolean }) {
+		queryCalls.push({ key: options.queryKey, enabled: options.enabled })
+		if (options.queryKey[0] === 'staff-invoice') return invoiceFor(options.queryKey[1])
+		if (options.queryKey[0] === 'local-print-jobs') return jobsFor(options.queryKey[1])
+		return options.queryKey[0] === 'local-print-agents' ? agentsQuery : assignmentQuery
 	},
-	useQueryClient: () => ({ invalidateQueries: async () => {}, setQueryData: (key: string[], value: unknown) => {
-		const query = key[0] === 'admin-printers' ? printerQuery : assignmentQuery
-		query.data = typeof value === 'function' ? value(query.data) : value
+	useQueryClient: () => ({ setQueryData: (queryKey: string[], update: (value: any) => any) => {
+		const query = jobsFor(queryKey[1]); query.data = update(query.data); host.dirty = true
+	}, invalidateQueries: async ({ queryKey }: { queryKey: string[] }) => {
+		if (refreshFails) throw new Error('Refresh failed')
+		if (syncJobsOnRefresh && queryKey[0] === 'local-print-jobs') await jobsFor(queryKey[1]).refetch()
 	} }),
-	useMutation: (options: { mutationFn: (next: InvoicePrinterAssignmentDto) => Promise<InvoicePrinterAssignmentDto>; onSuccess: (next: InvoicePrinterAssignmentDto) => Promise<void>; onError: (error: Error) => void; onSettled: () => void }) => ({
-		isPending: mutationPending,
-		mutate: (next: InvoicePrinterAssignmentDto) => {
-			mutations.push(options.mutationFn(next).then(options.onSuccess, options.onError).finally(options.onSettled))
-		},
-	}),
 }))
-mock.module('#/utils/queryOptions', () => ({
-	adminPrintersOptions: { queryKey: ['admin-printers'] },
-	adminPrintAssignmentOptions: { queryKey: ['admin-print-assignment'] },
-}))
-mock.module('#/hooks/admin/usePermissions', () => ({ usePermissions: () => ({ permissions: { printingManage: canManage } }) }))
-mock.module('#/stores/authStore', () => ({ useAuthStore: (select: (s: unknown) => unknown) => select({ role }) }))
-mock.module('#/stores/toastStore', () => ({ useToastStore: (select: (s: unknown) => unknown) => select({ showToast: () => {} }) }))
-mock.module('#/components/admin/admin2/PrinterManager', () => ({ PrinterManager: () => null }))
-mock.module('#/lib/printDocument', () => ({
-	buildPrintDocumentHtml: () => '', measureReceiptHtmlHeightPx: async () => 200, RECEIPT_PROBE_PX: 291,
-}))
-mock.module('#/server/admin', () => ({
-	getStaffOrderInvoice: async () => ({ orderId: 'ord-1' }),
-	setAdminPrintAssignment: async (next: InvoicePrinterAssignmentDto) => { assignments.push(next) },
-	discoverAdminPrinters: async () => ({ scanned: [], found: [] }),
-	addAdminPrinter: async (input: object) => {
-		registered.push(input)
-		if (registrationError) throw registrationError
-		return { id: 'detected-printer', ...input }
+mock.module('#/hooks/admin/usePermissions', () => ({ usePermissions: () => ({ permissions: { printingManage: role === 'admin' || canManage, orderDetailsRead: canRead }, isChecking: false }) }))
+const toasts: string[] = []
+mock.module('#/stores/toastStore', () => ({ useToastStore: (select: any) => select({ showToast: (message: string) => toasts.push(message) }) }))
+mock.module('reicon-react', () => ({ Printer: () => null, X: () => null }))
+mock.module('#/server/admin', () => ({ getStaffOrderInvoice: async (orderId: string) => invoiceFor(orderId).data }))
+function Settings(_props: any) { return null }
+mock.module('#/components/admin/admin2/LocalPrinterSettings', () => ({ LocalPrinterSettings: Settings }))
+mock.module('#/components/admin/admin2/ReceiptPreviewPane', () => ({ ReceiptPreviewPane: () => null }))
+
+const posted: LocalPrintEnqueueInput[] = []
+const built: LocalPrintEnqueueInput[] = []
+const lookedUp: string[] = []
+const cancelled: string[] = []
+const discarded: { jobId: string; orderId: string }[] = []
+const printed: any[] = []
+const storage = new Map<string, string>()
+let storageBlocked = false
+let acceptResponseLost = false
+let rejectBeforeAccepted = false
+let discardError: Error | null = null
+let buildPause: ((payload: LocalPrintEnqueueInput) => Promise<LocalPrintEnqueueInput>) | null = null
+let enqueuePause: ((payload: LocalPrintEnqueueInput) => Promise<LocalPrintJobDto>) | null = null
+let browserPause: (() => Promise<void>) | null = null
+const jobFrom = (payload: LocalPrintEnqueueInput): LocalPrintJobDto => ({
+	id: payload.jobId, orderId: payload.orderId, kind: payload.kind, agentId: 'agent-1', printerName: 'POS Printer', status: 'queued', error: null,
+	createdAt: '2026-10-24T12:00:00Z', updatedAt: '2026-10-24T12:00:00Z',
+})
+mock.module('#/lib/localPrintQueue', () => ({
+	getLocalPrintAgents: async () => agentsQuery.data,
+	getLocalPrintAssignment: async () => assignmentQuery.data,
+	getLocalPrintJobs: async (orderId: string) => [...jobs.values()].filter(job => job.orderId === orderId),
+	getLocalPrintJob: async (id: string) => {
+		lookedUp.push(id)
+		const job = jobs.get(id)
+		if (!job) throw Object.assign(new Error('Not found'), { status: 404 })
+		return { ...job }
 	},
-	getAdminPrinters: async () => currentPrinters,
+	enqueueLocalPrintJob: async (payload: LocalPrintEnqueueInput) => {
+		const saved = storage.get(`sinshin-pending-print:${payload.orderId}`) ?? ''
+		assert(saved.includes(payload.jobId), 'the job ID must be persisted before POST')
+		assert(saved.includes(payload.rows), 'the exact bitmap must be persisted before POST')
+		posted.push({ ...payload })
+		if (enqueuePause) return enqueuePause(payload)
+		if (rejectBeforeAccepted) throw new Error('Network unavailable')
+		const job = jobs.get(payload.jobId) ?? jobFrom(payload)
+		jobs.set(job.id, job)
+		if (acceptResponseLost) throw new Error('Response lost after acceptance')
+		return { ...job }
+	},
+	cancelLocalPrintJob: async (id: string) => {
+		cancelled.push(id)
+		const job = jobs.get(id)!
+		if (job.status !== 'queued') throw Object.assign(new Error('Already claimed'), { status: 409 })
+		job.status = 'cancelled'
+		return { ...job }
+	},
+	discardPendingLocalPrintJob: async (input: { jobId: string; orderId: string }) => {
+		discarded.push(input)
+		if (discardError) throw discardError
+		const job = jobs.get(input.jobId)
+		if (job && ['claimed', 'spooled', 'uncertain'].includes(job.status))
+			throw Object.assign(new Error('Printing may have started'), { status: 409 })
+		if (job?.status === 'queued') job.status = 'cancelled'
+		return { discarded: true, job: job ? { ...job } : null }
+	},
 }))
 mock.module('#/utils/invoicePrint', () => ({
-	buildInvoicePrintSpecs: async () => [],
-	printOrderInvoices: async (_invoice: unknown, _kinds: unknown, options: { directTargets?: Record<string, unknown> } | undefined) => {
-		printed.push(options)
-		return { direct: options ? 2 : 0, dialogs: options ? 0 : 2, agentErrors: [] }
+	buildInvoicePrintSpecs: async (invoice: any, kinds: LocalPrintKind[]) => kinds.map(kind => ({ kind, spec: { fileName: `${invoice.orderId}-${kind}`, brand: 'Sinshin', sections: [], paper: 'receipt' } })),
+	buildLocalInvoiceJob: async (invoice: any, kind: LocalPrintKind, printTarget: any, jobId: string) => {
+		const payload: LocalPrintEnqueueInput = { jobId, orderId: invoice.orderId, kind, widthPx: printTarget.widthDots, heightPx: 120, rows: `bitmap-${invoice.revision}-${kind}` }
+		built.push(payload)
+		return buildPause ? buildPause(payload) : payload
 	},
 }))
+mock.module('#/lib/printDocument', () => ({
+	buildPrintDocumentHtml: (spec: any) => `<html>${spec.fileName}</html>`,
+	printHtmlDocumentAsync: async (spec: any) => { printed.push(spec); if (browserPause) await browserPause() },
+}))
+
+const originals = new Map(['window', 'sessionStorage', 'crypto'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+let nextId = 0
+let confirmResult = false
+let confirmations = 0
+const browser = Object.assign(new EventTarget(), { confirm: () => { confirmations++; return confirmResult } })
+Object.defineProperty(globalThis, 'window', { configurable: true, value: browser })
+Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: {
+	getItem: (key: string) => storage.get(key) ?? null,
+	setItem: (key: string, value: string) => { if (storageBlocked) throw new Error('Storage unavailable'); storage.set(key, value) },
+	removeItem: (key: string) => storage.delete(key),
+} })
+Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID: () => `00000000-0000-4000-8000-${String(++nextId).padStart(12, '0')}` } })
 
 const { InvoicePrintCenterModal } = await import('../src/components/admin/admin2/InvoicePrintCenterModal')
-type Element = ReactElement<Record<string, unknown>>
-function descendants(node: ReactNode): Element[] {
-	return Children.toArray(node).flatMap((child) => {
-		if (!isValidElement<Record<string, unknown>>(child)) return []
-		return [child, ...descendants(child.props.children as ReactNode)]
-	})
+function nodes(value: any): any[] {
+	if (Array.isArray(value)) return value.flatMap(nodes)
+	if (!value?.props) return []
+	return [value, ...nodes(value.props.children)]
 }
-function renderCenter() {
-	let tree: ReactNode
-	function Probe() {
-		// Invoke the memoized component inside a real React render, retaining its
-		// real state/ref hooks and capturing its event handlers before DOM rendering.
-		tree = (InvoicePrintCenterModal as unknown as { type: (props: unknown) => ReactNode }).type({ orderId: 'ord-1', onClose: () => {} })
-		return tree
+function text(value: any): string {
+	if (Array.isArray(value)) return value.map(text).join('')
+	if (value?.props) return text(value.props.children)
+	return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+const queueButton = (owner: Host) => nodes(owner.tree).find(node => node.type === 'button' && String(node.props.className).includes('flex w-full'))!
+const browserButton = (owner: Host) => nodes(owner.tree).find(node => node.type === 'button' && text(node).startsWith('چاپ مرورگر'))!
+const discardButton = (owner: Host) => nodes(owner.tree).find(node => node.type === 'button' && text(node).startsWith('کنار گذاشتن درخواست قبلی'))!
+const checkboxes = (owner: Host) => nodes(owner.tree).filter(node => node.type === 'input' && node.props.type === 'checkbox')
+const alerts = (owner: Host) => nodes(owner.tree).filter(node => node.props.role === 'alert').map(text).join(' ')
+const hosts: Host[] = []
+function mount(getOrder = () => 'ord-1'): Host {
+	const owner: Host = { cells: [], cursor: 0, effects: [], dirty: false, tree: null,
+		render() {
+			host = owner; owner.cursor = 0; owner.dirty = false
+			owner.tree = InvoicePrintCenterModal({ orderId: getOrder(), onClose() {} })
+			for (const effect of owner.effects.splice(0)) effect()
+		},
+		unmount() { for (const cell of owner.cells) { cell.cleanup?.(); cell.cleanup = undefined } },
 	}
-	const html = renderToStaticMarkup(createElement(Probe))
-	const elements = descendants(tree)
-	const print = elements.find((element) => element.type === 'button' && Children.toArray(element.props.children as ReactNode).includes('چاپ فاکتورهای انتخابی'))
-	const sales = elements.find((element) => element.props.id === 'inv-printer-sales')
-	assert(print)
-	assert(sales)
-	const kitchen = elements.find((element) => element.props.id === 'inv-printer-kitchen')!
-	return { print: print.props, sales: sales.props, kitchen: kitchen.props, html }
+	hosts.push(owner); owner.render(); return owner
+}
+async function flush(owner: Host) {
+	for (let i = 0; i < 40; i++) { await Promise.resolve(); if (owner.dirty) owner.render() }
+}
+async function salesOnly(owner: Host) {
+	checkboxes(owner)[1].props.onChange(); await flush(owner)
 }
 function reset() {
-	printerQuery = { data: printers, isPending: false, isError: false }
-	assignmentQuery = { data: savedAssignment, isPending: false, isError: false }
-	discoveryQuery = { data: { scanned: ['192.168.1.0/24'], found: [{ host: '192.168.1.20', port: 9100 }, { host: '192.168.1.30', port: 9100 }] }, isPending: false, isError: false }
-	currentPrinters = printers
-	registrationError = null
-	registered.length = 0
-	mutations.length = 0
-	mutationPending = false
-	role = 'admin'
-	canManage = true
-	printed.length = 0
-	assignments.length = 0
-}
-async function click(button: Record<string, unknown>) {
-	(button.onClick as () => void)()
-	for (let i = 0; i < 20; i++) await Promise.resolve()
+	for (const owner of hosts) owner.unmount()
+	invoiceQueries.clear(); jobQueries.clear(); jobs.clear(); storage.clear(); posted.length = 0; built.length = 0; lookedUp.length = 0; cancelled.length = 0; discarded.length = 0; printed.length = 0; toasts.length = 0; queryCalls.length = 0
+	discardError = null
+	role = 'admin'; canManage = true; canRead = true; refreshFails = false; syncJobsOnRefresh = false; storageBlocked = false; acceptResponseLost = false; rejectBeforeAccepted = false; buildPause = null; enqueuePause = null; browserPause = null; confirmResult = false; confirmations = 0
 }
 
-reset()
-assignmentQuery = { isPending: true, isError: false }
-let center = renderCenter()
-assert.equal(center.print.disabled, true)
-assert.equal(center.sales.disabled, true)
-await click(center.print)
-;(center.sales.onChange as (id: string) => void)('sales-printer')
-assert.equal(printed.length, 0, 'do not print through the browser before assignments arrive')
-assert.equal(assignments.length, 0, 'do not overwrite an unknown kitchen assignment with null')
+try {
+	reset()
+	let owner = mount(); await flush(owner)
+	const mainShape = JSON.stringify(owner.tree)
+	role = 'admin2'; owner.unmount(); owner = mount(); await flush(owner)
+	assert.equal(JSON.stringify(owner.tree), mainShape, 'both admin levels have the same print center and controls')
+	assert(!queueButton(owner).props.disabled)
+	assert(!browserButton(owner).props.disabled)
+	canManage = false; owner.render(); await flush(owner)
+	assert(queueButton(owner).props.disabled, 'direct printing honors the secondary administrator permission')
+	assert(nodes(owner.tree).some(node => node.type === Settings && node.props.canManage === false), 'hardware settings remain visible with authorization disabled')
+	assert(!browserButton(owner).props.disabled, 'read permission still allows explicit browser fallback')
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 0)
+	checkboxes(owner)[0].props.onChange(); await flush(owner)
+	browserButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(printed.map(spec => spec.fileName), ['ord-1-sales'], 'browser action uses the preview, not the direct-print checkbox selection')
+	assert.equal(posted.length, 0)
+	const kitchenTab = nodes(owner.tree).find(node => node.type === 'button' && node.props['aria-pressed'] !== undefined && text(node) === 'آشپزخانه')!
+	kitchenTab.props.onClick(); await flush(owner)
+	browserButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(printed.map(spec => spec.fileName), ['ord-1-sales', 'ord-1-kitchen'])
+	canRead = false; owner.render(); await flush(owner)
+	assert(browserButton(owner).props.disabled)
+	assert(queryCalls.some(query => query.key[0] === 'staff-invoice' && query.enabled === false))
 
-reset()
-printerQuery = { isPending: true, isError: false }
-center = renderCenter()
-assert.equal(center.print.disabled, true)
-await click(center.print)
-assert.equal(printed.length, 0)
+	reset(); owner = mount(); await flush(owner); await salesOnly(owner)
+	acceptResponseLost = true
+	queueButton(owner).props.onClick(); queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 1, 'rapid clicks submit one durable job')
+	assert.equal(printed.length, 0, 'an ambiguous queue response never triggers browser fallback')
+	assert(browserButton(owner).props.disabled, 'an unresolved submission blocks duplicate browser printing')
+	assert(text(queueButton(owner)).includes('شناسه'))
+	acceptResponseLost = false
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(lookedUp, [posted[0].jobId], 'retry first recovers the same job ID')
+	assert.equal(posted.length, 1, 'an already accepted job is recovered without a second enqueue')
+	assert.equal(built.length, 1)
 
-reset()
-center = renderCenter()
-assert.equal(center.sales.value, savedAssignment.sales, 'cached assignment applies on the first render, before effects')
-await click(center.print)
-assert.deepEqual(printed[0]?.directTargets, {
-	kitchen: { printerId: 'kitchen-printer', widthDots: 384 },
-	sales: { printerId: 'sales-printer', widthDots: 576 },
-})
-// Rerender to release the print guard and exercise a separate user action.
-center = renderCenter()
-;(center.sales.onChange as (id: string) => void)('')
-await Promise.all(mutations)
-assert.deepEqual(assignments[0], { sales: null, kitchen: 'kitchen-printer' })
+	reset(); owner = mount(); await flush(owner); await salesOnly(owner)
+	rejectBeforeAccepted = true
+	queueButton(owner).props.onClick(); await flush(owner)
+	const retainedPayload = { ...posted[0] }
+	assert(retainedPayload.jobId)
+	owner.unmount()
+	invoiceFor('ord-1').data = { orderId: 'ord-1', revision: 'changed-after-close' }
+	rejectBeforeAccepted = false
+	owner = mount(); await flush(owner); await salesOnly(owner)
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(posted[1], retainedPayload, 'closing/reopening must retry the retained bitmap, not regenerate changed invoice content with the old ID')
+	assert.equal(built.length, 1)
+	assert.equal(printed.length, 0)
 
-reset()
-mutationPending = true
-center = renderCenter()
-assert.equal(center.print.disabled, true)
-await click(center.print)
-assert.equal(printed.length, 0, 'do not print using an unsaved printer assignment')
+	reset(); owner = mount(); await flush(owner)
+	enqueuePause = async payload => {
+		if (payload.kind === 'sales') {
+			const saved = JSON.parse(storage.get('sinshin-pending-print:ord-1')!)
+			assert(saved.sales && saved.kitchen, 'both bitmaps are saved atomically before the first receipt is sent')
+		}
+		const job = jobFrom(payload); jobs.set(job.id, job)
+		if (payload.kind === 'kitchen') throw new Error('Kitchen response lost')
+		return job
+	}
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 2)
+	assert(!queueButton(owner).props.disabled, 'a queued sales receipt must not block recovery of the pending kitchen receipt')
+	assert(jobsFor('ord-1').data.some((job: LocalPrintJobDto) => job.kind === 'sales'), 'successful responses are displayed before a refresh')
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(lookedUp, [posted[1].jobId])
+	assert.equal(posted.length, 2, 'recovering kitchen must not create another sales print')
+	assert.equal(built.length, 2)
+	assert.equal(confirmations, 0, 'pending-only recovery is not presented as a reprint')
+	assert.equal(storage.get('sinshin-pending-print:ord-1'), '{}')
 
-reset()
-assignmentQuery = { isPending: false, isError: true }
-center = renderCenter()
-assert.equal(center.print.disabled, false)
-assert.equal(center.sales.disabled, true)
-await click(center.print)
-assert.equal(printed.length, 1)
-assert.equal(printed[0], undefined, 'an unavailable settings API retains the browser fallback')
+	reset(); owner = mount(); await flush(owner)
+	enqueuePause = async payload => {
+		if (payload.kind === 'kitchen') throw Object.assign(new Error('Width changed'), { status: 409 })
+		const job = jobFrom(payload); jobs.set(job.id, job); return job
+	}
+	queueButton(owner).props.onClick(); await flush(owner)
+	const kitchenPayload = { ...posted[1] }
+	owner.unmount(); invoiceFor('ord-1').data = { orderId: 'ord-1', revision: 'new-content' }
+	enqueuePause = null; owner = mount(); await flush(owner)
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(posted[2], kitchenPayload, 'remounted retry sends only the original outstanding kitchen bitmap')
+	assert.equal(posted.filter(payload => payload.kind === 'sales').length, 1)
+	assert.equal(built.length, 2)
 
-reset()
-role = 'admin2'
-canManage = false
-printerQuery = { isPending: true, isError: false }
-assignmentQuery = { isPending: true, isError: false }
-center = renderCenter()
-assert.equal(center.print.disabled, false)
-assert.equal(center.sales.locked, true)
-assert.equal(discoveryEnabled, false, 'staff without hardware authorization never triggers a network scan')
-await click(center.print)
-assert.equal(printed.length, 1)
-assert.equal(printed[0], undefined, 'staff without hardware permission can still print with the browser')
-assert.equal(center.html.includes('اسکن دوباره'), false, 'restricted staff do not see the scan action')
-assert.deepEqual(center.sales.discovered, [], 'cached discoveries are hidden after permission is revoked')
-;(center.sales.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
-assert.equal(registered.length, 0, 'a locked selection cannot register a device')
-assert.equal(assignments.length, 0)
+	reset(); owner = mount(); await flush(owner)
+	buildPause = async payload => {
+		if (payload.kind === 'kitchen') throw new Error('Kitchen preparation failed')
+		return payload
+	}
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 0, 'both invoice preparations finish before any POST')
+	assert.equal(storage.get('sinshin-pending-print:ord-1'), undefined, 'a partial preparation does not leave an incomplete retry batch')
 
-reset()
-role = 'admin2'
-center = renderCenter()
-assert.equal(discoveryEnabled, true, 'authorized Level 2 administrators can search for printers')
-assert.equal(center.sales.locked, false)
-assert.equal(center.html.includes('اسکن دوباره'), true, 'authorized staff can rescan')
-assert.deepEqual(center.sales.discovered, center.kitchen.discovered)
-;(center.kitchen.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
-await Promise.all(mutations)
-assert.equal(registered.length, 1, 'Level 2 staff can register their selected discovery')
-assert.deepEqual(assignments, [{ sales: 'sales-printer', kitchen: 'detected-printer' }])
+	reset(); owner = mount(); await flush(owner); await salesOnly(owner)
+	enqueuePause = async () => { throw Object.assign(new Error('Width changed'), { status: 409 }) }
+	queueButton(owner).props.onClick(); await flush(owner)
+	const rejectedPayload = { ...posted[0] }
+	assert(browserButton(owner).props.disabled, 'a rejected response alone cannot discard the stable pending ID')
+	discardButton(owner).props.onClick(); await flush(owner)
+	assert.equal(discarded.length, 0, 'discard requires explicit confirmation')
+	confirmResult = true; discardError = new Error('Discard response unavailable')
+	discardButton(owner).props.onClick(); await flush(owner)
+	assert(storage.get('sinshin-pending-print:ord-1')?.includes(rejectedPayload.jobId), 'an ambiguous discard response retains the payload')
+	assert(browserButton(owner).props.disabled)
+	discardError = null; discardButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(discarded, [
+		{ jobId: rejectedPayload.jobId, orderId: rejectedPayload.orderId },
+		{ jobId: rejectedPayload.jobId, orderId: rejectedPayload.orderId },
+	], 'discard retries use the original job ID for the atomic server operation')
+	assert.equal(storage.get('sinshin-pending-print:ord-1'), '{}')
+	assert(!browserButton(owner).props.disabled)
+	assert.equal(printed.length, 0, 'successful discard does not automatically print a fallback')
 
-reset()
-role = 'admin2'
-discoveryQuery = { isPending: false, isError: true }
-center = renderCenter()
-assert.equal(center.html.includes('شناسایی خودکار ناموفق بود'), true)
-assert.equal(center.sales.disabled, false, 'failed discovery does not block known printers')
-;(center.sales.onChange as (id: string) => void)('kitchen-printer')
-await Promise.all(mutations)
-assert.deepEqual(assignments, [{ sales: 'kitchen-printer', kitchen: 'kitchen-printer' }])
+	reset(); owner = mount(); await flush(owner); await salesOnly(owner)
+	acceptResponseLost = true; queueButton(owner).props.onClick(); await flush(owner)
+	confirmResult = true; discardButton(owner).props.onClick(); await flush(owner)
+	assert.equal(jobsFor('ord-1').data[0].status, 'cancelled', 'discard directly records an accepted but unclaimed job cancellation')
+	assert(!browserButton(owner).props.disabled)
+	assert.equal(printed.length, 0)
 
-reset()
-center = renderCenter()
-assert.equal(discoveryEnabled, true, 'opening the owner print center enables automatic discovery')
-assert.equal((center.sales.discovered as unknown[]).length, 1, 'registered devices are deduplicated from discovery')
-assert.deepEqual(center.sales.discovered, center.kitchen.discovered, 'both default dropdowns offer detected devices')
-assert.equal((center.html.match(/value="discovered:192\.168\.1\.30:9100"/g) ?? []).length, 2)
-;(center.sales.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
-;(center.kitchen.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
-await click(center.print)
-await Promise.all(mutations)
-assert.equal(registered.length, 1, 'same-frame changes do not race a pending registration/default save')
-assert.deepEqual(assignments, [{ sales: 'detected-printer', kitchen: 'kitchen-printer' }])
-assert.equal(printed.length, 0, 'printing waits for the pending discovered-printer registration')
+	for (const status of ['claimed', 'spooled', 'uncertain'] as const) {
+		reset(); owner = mount(); await flush(owner); await salesOnly(owner)
+		acceptResponseLost = true; queueButton(owner).props.onClick(); await flush(owner)
+		jobs.get(posted[0].jobId)!.status = status
+		confirmResult = true; discardButton(owner).props.onClick(); await flush(owner)
+		assert(storage.get('sinshin-pending-print:ord-1')?.includes(posted[0].jobId), `a ${status} job cannot be forgotten on discard rejection`)
+		assert(browserButton(owner).props.disabled)
+		assert.equal(printed.length, 0)
+	}
 
-reset()
-registrationError = Object.assign(new Error('duplicate'), { status: 409 })
-currentPrinters = [...printers, { id: 'other-station-printer', host: '192.168.1.30', port: 9100 }]
-center = renderCenter()
-;(center.kitchen.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
-await Promise.all(mutations)
-assert.deepEqual(assignments, [{ sales: 'sales-printer', kitchen: 'other-station-printer' }], 'reuse concurrent registrations without losing the other default')
+	reset(); owner = mount(); await flush(owner)
+	const queued = jobFrom({ jobId: 'active-job', orderId: 'ord-1', kind: 'sales', widthPx: 576, heightPx: 1, rows: 'x' })
+	jobs.set(queued.id, queued); await jobsFor('ord-1').refetch(); owner.render(); await flush(owner)
+	assert(queueButton(owner).props.disabled && browserButton(owner).props.disabled, 'active jobs block duplicate queueing and browser fallback')
+	queueButton(owner).props.onClick(); browserButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length + printed.length, 0)
+	const cancelButton = nodes(owner.tree).find(node => node.type === 'button' && text(node) === 'لغو کار در صف')!
+	cancelButton.props.onClick(); await flush(owner)
+	assert.deepEqual(cancelled, ['active-job'])
+	assert(!browserButton(owner).props.disabled)
+	browserButton(owner).props.onClick(); await flush(owner)
+	assert.equal(printed.length, 1, 'the explicit fallback becomes available after successful queued-job cancellation')
+	queued.status = 'claimed'; await jobsFor('ord-1').refetch(); owner.render(); await flush(owner)
+	assert(browserButton(owner).props.disabled)
+	assert(!nodes(owner.tree).some(node => node.type === 'button' && text(node) === 'لغو کار در صف'), 'claimed jobs cannot be cancelled from the UI')
+	queued.status = 'uncertain'; await jobsFor('ord-1').refetch(); owner.render(); await flush(owner)
+	browserButton(owner).props.onClick(); await flush(owner)
+	assert.equal(printed.length, 1, 'uncertain spool state requires an explicit reprint decision')
+	assert.equal(confirmations, 1)
+	confirmResult = true; browserButton(owner).props.onClick(); await flush(owner)
+	assert.equal(printed.length, 2)
 
-reset()
-registrationError = Object.assign(new Error('not authorized'), { status: 403 })
-center = renderCenter()
-;(center.sales.onChange as (id: string) => void)('discovered:192.168.1.30:9100')
-await Promise.all(mutations)
-assert.deepEqual(assignments, [], 'registration failure cannot persist an invalid default')
-assert.deepEqual(assignmentQuery.data, savedAssignment)
+	reset(); storageBlocked = true; owner = mount(); await flush(owner); await salesOnly(owner)
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 0, 'failed persistence stops the request before it can become ambiguous')
+	assert(alerts(owner).includes('Storage unavailable'))
+	assert(!queueButton(owner).props.disabled, 'storage errors release the action state')
 
-const { registerDiscoveredPrinter } = await import('../src/lib/printerDiscovery')
-await registerDiscoveredPrinter({ host: '192.168.1.20', port: 9100 }, printers as PrinterDto[])
-assert.equal(registered.length, 1, 'known devices do not make another registration request')
+	reset()
+	let order = 'ord-old'
+	owner = mount(() => order); await flush(owner); await salesOnly(owner)
+	let releaseBuild!: () => void
+	buildPause = payload => new Promise(resolve => { releaseBuild = () => resolve(payload) })
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert(queueButton(owner).props.disabled)
+	order = 'ord-new'; owner.render(); await flush(owner)
+	assert(!queueButton(owner).props.disabled, 'changing orders resets the old pending UI state')
+	releaseBuild(); await flush(owner)
+	assert.equal(posted.length, 0, 'an obsolete invoice preparation cannot submit after changing orders')
+	assert(!queueButton(owner).props.disabled)
 
-console.log('OK — automatic discovery, both default dropdowns, registration conflicts, pending mutations, printer settings and browser fallback')
+	reset(); owner = mount(); await flush(owner); await salesOnly(owner)
+	buildPause = payload => new Promise(resolve => { releaseBuild = () => resolve(payload) })
+	queueButton(owner).props.onClick(); await flush(owner); owner.unmount()
+	releaseBuild(); await flush(owner)
+	assert.equal(posted.length, 0, 'unmount cancels a prepared-but-unsent invoice')
+	assert.equal(toasts.length, 0)
+
+	reset(); order = 'ord-old'; owner = mount(() => order); await flush(owner); await salesOnly(owner)
+	const releaseEnqueue = new Map<string, () => void>()
+	enqueuePause = payload => new Promise(resolve => {
+		releaseEnqueue.set(payload.orderId, () => resolve(jobFrom(payload)))
+	})
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 1)
+	order = 'ord-new'; owner.render(); await flush(owner)
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 2)
+	const newPending = storage.get('sinshin-pending-print:ord-new')
+	releaseEnqueue.get('ord-old')!(); await flush(owner)
+	assert(queueButton(owner).props.disabled, 'the old queue finalizer cannot unlock the newer request')
+	assert(browserButton(owner).props.disabled)
+	assert.equal(storage.get('sinshin-pending-print:ord-new'), newPending, 'the old result cannot erase the newer order bitmap')
+	assert.equal(toasts.length, 0, 'an obsolete response does not show a success notification for the current invoice')
+	queueButton(owner).props.onClick(); browserButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 2)
+	assert.equal(printed.length, 0)
+	releaseEnqueue.get('ord-new')!(); await flush(owner)
+	assert(!checkboxes(owner)[0].props.disabled, 'the newer operation releases its loading state')
+	assert(queueButton(owner).props.disabled, 'the accepted newer job immediately prevents a second print')
+	assert.equal(storage.get('sinshin-pending-print:ord-new'), '{}')
+	assert(storage.get('sinshin-pending-print:ord-old')?.includes(posted[0].jobId), 'the old order retains its stable ID for later reconciliation')
+	assert.equal(toasts.length, 1)
+
+	reset(); order = 'ord-old'; owner = mount(() => order); await flush(owner)
+	let rejectOldBrowser!: () => void
+	let finishNewBrowser!: () => void
+	browserPause = () => new Promise((_resolve, reject) => { rejectOldBrowser = () => reject(new Error('Obsolete dialog failed')) })
+	browserButton(owner).props.onClick(); await flush(owner)
+	order = 'ord-new'; owner.render(); await flush(owner)
+	browserPause = () => new Promise(resolve => { finishNewBrowser = resolve })
+	browserButton(owner).props.onClick(); await flush(owner)
+	assert.deepEqual(printed.map(spec => spec.fileName), ['ord-old-sales', 'ord-new-sales'])
+	rejectOldBrowser(); await flush(owner)
+	assert(browserButton(owner).props.disabled, 'the old browser finalizer cannot unlock the current dialog')
+	assert(!alerts(owner).includes('Obsolete dialog failed'), 'a stale browser failure cannot replace the current invoice state')
+	finishNewBrowser(); await flush(owner)
+	assert(!browserButton(owner).props.disabled)
+
+	reset(); owner = mount(); await flush(owner); await salesOnly(owner)
+	refreshFails = true
+	queueButton(owner).props.onClick(); await flush(owner)
+	assert.equal(posted.length, 1)
+	assert(!checkboxes(owner)[0].props.disabled, 'refresh failure must not strand the print center in a loading state')
+	assert(queueButton(owner).props.disabled && browserButton(owner).props.disabled, 'the known accepted job still blocks duplicates when refresh fails')
+	console.log('Invoice print center passed: identical admin interface, permission controls, explicit single-receipt fallback, durable retries, ambiguity, queued cancellation and overlapping-operation cleanup.')
+} finally {
+	for (const owner of hosts) owner.unmount()
+	for (const [key, descriptor] of originals) {
+		if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+		else Reflect.deleteProperty(globalThis, key)
+	}
+	mock.restore()
+}

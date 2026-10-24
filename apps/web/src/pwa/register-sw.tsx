@@ -17,10 +17,17 @@
 // آپدیت است.
 
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { PwaInstallGuide } from './PwaInstallGuide'
 import { usePwaInstall } from './usePwaInstall'
 
-export function PwaRegister({ lang = 'fa' }: { lang?: 'fa' | 'ar' }) {
+export function PwaRegister({
+	lang = 'fa',
+	showAutomaticInstall = true,
+}: {
+	lang?: 'fa' | 'ar'
+	showAutomaticInstall?: boolean
+}) {
 	const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null)
 	const [showUpdate, setShowUpdate] = useState(false)
 	const {
@@ -175,15 +182,18 @@ export function PwaRegister({ lang = 'fa' }: { lang?: 'fa' | 'ar' }) {
 
 	return (
 		<>
-			{!standalone && showInstallGuide && (
-				<PwaInstallGuide lang={lang} onClose={closeInstallGuide} />
-			)}
+			{!standalone &&
+				showInstallGuide &&
+				createPortal(
+					<PwaInstallGuide lang={lang} onClose={closeInstallGuide} />,
+					document.body,
+				)}
 			{/* بنر آپدیت — مینیمال + «بعداً» (pwa-۳)
           stage-75 (P3-27) — هر سه بنرِ این فایل z-90: زیرِ مودال/بات‌شیتِ
           باز (z-100) و بالای هدر (z-40) — بنرِ اطلاع‌رسانی هرگز دیالوگِ
           فعالِ کاربر را نمی‌پوشاند. */}
 			{showUpdate && (
-				<div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+				<div className="flex w-full max-w-xl shrink-0 flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c]">
 					<span className="text-[13px] text-gray-700 dark:text-gray-200 text-center font-DanaMedium">
 						{copy.updateReady}
 					</span>
@@ -207,12 +217,13 @@ export function PwaRegister({ lang = 'fa' }: { lang?: 'fa' | 'ar' }) {
 			)}
 
 			{/* install-prompt اندروید — stage-59: موبایل دو ردیف (متن بالا، دکمه‌ها کنار هم پایین) */}
-			{!standalone &&
+			{showAutomaticInstall &&
+				!standalone &&
 				showInstall &&
 				!showIosGuide &&
 				!showUpdate &&
 				!showInstallGuide && (
-					<div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
+					<div className="flex w-full max-w-xl shrink-0 flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c]">
 						<span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold text-center">
 							{copy.installTitle}
 						</span>
@@ -239,36 +250,40 @@ export function PwaRegister({ lang = 'fa' }: { lang?: 'fa' | 'ar' }) {
 
 			{/* راهنمای iOS — بستنش ۳۰ روز پایدار است (pwa-۲)
           stage-59: همان متن گرادیانی نصب + راهنمای Share در خط دوم */}
-			{!standalone && showIosGuide && !showUpdate && !showInstallGuide && (
-				<div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-90 flex flex-col lg:flex-row items-center gap-2.5 lg:gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c] max-w-[calc(100vw-2rem)]">
-					<div className="text-center">
-						<span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold">
-							{copy.installTitle}
-						</span>
-						<span className="block text-[11px] text-gray-500 dark:text-gray-400 font-DanaMedium mt-0.5">
-							{copy.ios}
-						</span>
+			{showAutomaticInstall &&
+				!standalone &&
+				showIosGuide &&
+				!showUpdate &&
+				!showInstallGuide && (
+					<div className="flex w-full max-w-xl shrink-0 flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-[#2a1015] rounded-2xl px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-gray-200 dark:border-[#3a151c]">
+						<div className="text-center">
+							<span className="color-morph-text text-[13px] sm:text-sm font-DanaDemiBold">
+								{copy.installTitle}
+							</span>
+							<span className="block text-[11px] text-gray-500 dark:text-gray-400 font-DanaMedium mt-0.5">
+								{copy.ios}
+							</span>
+						</div>
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={() => {
+									void requestInstall()
+								}}
+								className="px-4 py-1.5 rounded-xl bg-primary text-white text-[13px] font-DanaDemiBold hover:opacity-90 active:scale-95 transition cursor-pointer whitespace-nowrap"
+							>
+								{copy.help}
+							</button>
+							<button
+								type="button"
+								onClick={dismissIosGuide}
+								className="px-3.5 py-1.5 rounded-xl bg-transparent text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#3a151c] text-[13px] font-DanaMedium hover:bg-gray-50 dark:hover:bg-[#1a0a0e] transition cursor-pointer whitespace-nowrap"
+							>
+								{copy.close}
+							</button>
+						</div>
 					</div>
-					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							onClick={() => {
-								void requestInstall()
-							}}
-							className="px-4 py-1.5 rounded-xl bg-primary text-white text-[13px] font-DanaDemiBold hover:opacity-90 active:scale-95 transition cursor-pointer whitespace-nowrap"
-						>
-							{copy.help}
-						</button>
-						<button
-							type="button"
-							onClick={dismissIosGuide}
-							className="px-3.5 py-1.5 rounded-xl bg-transparent text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#3a151c] text-[13px] font-DanaMedium hover:bg-gray-50 dark:hover:bg-[#1a0a0e] transition cursor-pointer whitespace-nowrap"
-						>
-							{copy.close}
-						</button>
-					</div>
-				</div>
-			)}
+				)}
 		</>
 	)
 }

@@ -17,6 +17,8 @@ No website can guarantee an installed app on **every** browser, OS version, or d
 
 Reported message: **“Unsafe app blocked — This app was designed for an older version of Android and does not include the latest privacy protections.”**
 
+The affected user was using **Chrome**. For installation through Chrome's own Install action, investigate Chrome's generated WebAPK and its installation infrastructure. The report is not evidence of a different browser or an APK supplied by this repository. A Chrome installation can still be rejected by Play Protect; the website's install button cannot change the generated Android package's target SDK.
+
 This warning concerns the Android package being installed. It is not a JavaScript or service-worker error. The message alone does not identify the package, its target SDK, or the component that generated it; those details must be checked on an affected device.
 
 ## What this repository controls

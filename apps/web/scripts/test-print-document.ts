@@ -61,7 +61,7 @@ class PrintDocument {
 }
 
 let page: PrintDocument
-let parentWindow: Events & { focus: () => void; matchMedia: () => Events; open: () => Popup | null }
+let parentWindow!: Events & { focus: () => void; matchMedia: () => Events; open: () => Popup | null }
 let media!: Events
 let frames: Frame[] = []
 let printCalls: string[] = []
@@ -115,37 +115,48 @@ const clean = () => {
 	assert.equal(page.title, 'Sinshin admin', 'the app title is restored')
 	assert.equal(timers.size, 0, 'print and font timeouts are cleared')
 	assert.equal(parentWindow.listenerCount + media.listenerCount, 0, 'parent listeners are removed')
-	for (const frame of frames) assert.equal(frame.contentWindow.listenerCount, 0, 'frame listeners are removed')
+	// A nonblocking browser may close preview after the print request resolves.
+	for (const frame of frames) {
+		frame.contentWindow.emit('afterprint')
+		assert.equal(frame.contentWindow.listenerCount, 0, 'completion bookkeeping detaches after the dialog closes')
+	}
 }
 
 try {
-	const { printHtmlDocumentAsync, measureReceiptHtmlHeightPx } = await import('../src/lib/printDocument')
+	const { buildPrintDocumentHtml, printHtmlDocumentAsync, measureReceiptHtmlHeightPx } = await import('../src/lib/printDocument')
 	const spec = { fileName: 'order-123', brand: 'Sinshin', sections: [] }
 	reset()
+	const receiptHtml = buildPrintDocumentHtml({ ...spec, paper: 'receipt', fitHeight: true, landscape: true })
+	assert(receiptHtml.includes('@page { size: auto; margin: 1.5mm; }'), 'the browser and printer driver control invoice paper stock and margins')
+	assert(receiptHtml.includes('width: 77mm; min-width: 77mm; max-width: 77mm;'), 'invoice content keeps its physical width at 100% scale')
+	assert(!receiptHtml.includes('landscape') && !receiptHtml.includes('size: 80mm'), 'short invoices cannot acquire a landscape page from measured height')
+	assert(!receiptHtml.includes('transform:') && !receiptHtml.includes('<script'), 'the print document cannot animate, rotate or remeasure itself')
+	assert(buildPrintDocumentHtml({ ...spec, landscape: true }).includes('size: A4 landscape'), 'A4 reports retain their explicit orientation')
+
 	await printHtmlDocumentAsync(spec)
-	assert.deepEqual(printCalls, ['order-123'], 'synchronous afterprint completes without waiting for a timeout')
+	assert.deepEqual(printCalls, ['order-123'], 'one print request calls the browser once')
 	assert.equal(frames[0].isConnected, true, 'the print iframe stays connected after the dialog closes')
+	assert(frames[0].style.cssText.includes('left:-10000px'), 'the isolated print source cannot cover or intercept the admin page')
 	clean()
 
 	reset()
 	onPrint = () => {}
-	let completed = false
-	const noAfterPrint = printHtmlDocumentAsync(spec).then(() => { completed = true })
-	await flush()
+	await printHtmlDocumentAsync(spec)
+	const firstHtml = frames[0].writes[0]
+	assert.equal(timers.size, 0, 'missing afterprint does not leave a ninety-second loading state')
+	assert.equal(frames[0].isConnected, true, 'a nonblocking preview retains its immutable document')
 	media.emit('change', { matches: false })
-	await flush()
-	assert.equal(completed, false, 'an unrelated false print-media event does not finish a job')
 	media.emit('change', { matches: true })
 	media.emit('change', { matches: false })
-	await noAfterPrint
-	clean()
-
-	reset()
-	onPrint = () => {}
-	const missingEvents = printHtmlDocumentAsync(spec)
+	parentWindow.emit('afterprint')
 	await flush()
 	advance(90_000)
-	await missingEvents
+	assert.deepEqual(frames[0].writes, [firstHtml], 'margin and orientation preview events never rewrite the print source')
+	assert.deepEqual(printCalls, ['order-123'], 'preview setting changes do not reissue printing')
+	await printHtmlDocumentAsync({ ...spec, fileName: 'another' })
+	assert.equal(frames.length, 2, 'each print request receives a separate immutable document')
+	assert.equal(frames[0].isConnected, true, 'a new request cannot remove a preview with no completion signal')
+	assert.deepEqual(frames[0].writes, [firstHtml])
 	clean()
 
 	reset()
@@ -158,15 +169,19 @@ try {
 	clean()
 
 	reset()
-	frameFonts = new Promise<void>(() => {})
+	let finishFont!: () => void
+	frameFonts = new Promise<void>((resolve) => { finishFont = resolve })
 	const hungFonts = printHtmlDocumentAsync({ ...spec, paper: 'receipt', fitHeight: true })
 	await flush()
 	assert.equal(printCalls.length, 0, 'printing waits briefly for receipt fonts')
 	advance(2_500)
 	await hungFonts
 	assert.deepEqual(printCalls, ['order-123'], 'a stalled font still prints using the fallback font')
-	assert(!frames[0].contentDocument.styles.some((style) => style.textContent.includes('!important')), 'measurement probes are removed')
-	assert(frames[0].contentDocument.styles.some((style) => style.textContent.includes('80mm 78mm')), 'receipt height is measured before printing')
+	assert(frames[0].contentDocument.styles.some((style) => style.textContent.includes('font-family: Tahoma, sans-serif !important')), 'a late font cannot change the print-preview layout')
+	assert(!frames[0].contentDocument.styles.some((style) => style.textContent.includes('@page')), 'printing never injects a measured page size')
+	const preparedStyles = frames[0].contentDocument.styles.map((style) => style.textContent)
+	finishFont(); await flush()
+	assert.deepEqual(frames[0].contentDocument.styles.map((style) => style.textContent), preparedStyles)
 	clean()
 
 	reset()
@@ -177,24 +192,34 @@ try {
 	reset()
 	autoLoad = false
 	const noLoad = assert.rejects(printHtmlDocumentAsync(spec), /آماده‌سازی چاپ طولانی شد/)
-	advance(90_000)
+	const lateLoad = frames[0].onload!
+	advance(15_000)
 	await noLoad
 	assert.equal(printCalls.length, 0, 'a receipt that never loaded is reported as a failure')
+	assert.equal(frames[0].isConnected, false, 'a failed preparation can release its unused document')
+	lateLoad(); await flush()
+	assert.equal(printCalls.length, 0, 'a timed-out load cannot unexpectedly open print preview later')
 	clean()
 
 	reset()
-	onPrint = () => {}
+	autoLoad = false
 	const first = printHtmlDocumentAsync({ ...spec, fileName: 'first' })
 	const second = printHtmlDocumentAsync({ ...spec, fileName: 'second' })
 	await flush()
-	assert.equal(frames[0].writes.length, 1, 'a second job cannot replace the document while the first prints')
-	frames[0].contentWindow.emit('afterprint')
+	assert.equal(frames.length, 1, 'document preparation is serialized')
+	frames[0].onload!()
 	await first
 	await flush()
-	assert.equal(frames[0].writes.length, 2)
-	assert.deepEqual(printCalls, ['first', 'second'])
-	frames[0].contentWindow.emit('afterprint')
+	assert.equal(frames.length, 2)
+	assert.equal(frames[0].writes.length, 1, 'the next job never replaces a previous document')
+	frames[1].onload!()
 	await second
+	assert.deepEqual(printCalls, ['first', 'second'])
+	assert.equal(frames[0].isConnected, true, 'the most recent completed job survives browser teardown')
+	autoLoad = true
+	await printHtmlDocumentAsync({ ...spec, fileName: 'third' })
+	assert.equal(frames[0].isConnected, false, 'a later request can reclaim older positively completed jobs')
+	assert.equal(frames[1].isConnected, true, 'reclamation retains the latest completed source')
 	clean()
 
 	reset(true)
@@ -204,10 +229,8 @@ try {
 
 	reset(true)
 	onPrint = () => {}
-	const safariFallback = printHtmlDocumentAsync(spec)
-	await flush()
-	advance(1_500)
-	await safariFallback
+	await printHtmlDocumentAsync(spec)
+	assert.equal(timers.size, 0, 'Safari also completes the request when its print call returns')
 	assert.equal(popup!.listenerCount, 0)
 	clean()
 
@@ -231,7 +254,7 @@ try {
 	assert.equal(frames[0].isConnected, false, 'preview measurement removes its temporary frame')
 	assert.equal(frames[0].contentDocument.styles.length, 0)
 	clean()
-	console.log('Print document: synchronous/missing completion events, failures, font deadlines, load timeout, serialization, iOS and cleanup passed.')
+	console.log('Print document passed: fixed physical invoice width, browser-owned paper and margins, immutable per-job sources, preview reflows, prompt return, font freezing, preparation timeout, queue isolation, iOS and safe cleanup.')
 } finally {
 	for (const [name, descriptor] of originals) {
 		if (descriptor) Object.defineProperty(globalThis, name, descriptor)

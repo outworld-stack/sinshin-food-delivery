@@ -122,7 +122,7 @@ function LandingNotifyButton() {
 			type="button"
 			onClick={handleClick}
 			disabled={busy || !hydrated}
-			className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-2xl font-DanaMedium text-sm sm:text-base transition-all duration-300 border-2 border-gray-200 dark:border-[#3a151c] text-gray-700 dark:text-[#f5e0e6] hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] cursor-pointer disabled:opacity-60"
+			className="inline-flex min-h-12 items-center justify-center gap-2 w-full px-4 py-3 rounded-2xl font-DanaMedium text-sm sm:text-base transition-all duration-300 border-2 border-gray-200 dark:border-[#3a151c] text-gray-700 dark:text-[#f5e0e6] hover:border-primary dark:hover:border-dark-primary hover:bg-gray-50 dark:hover:bg-[#2a1015] cursor-pointer disabled:opacity-60"
 		>
 			<Bell size={18} />
 			{t['landing.notifyButton']}
@@ -262,8 +262,8 @@ function LandingPage({ showBanner }: { showBanner: boolean }) {
 						</div>
 
 						{/* stage-84 — فعال‌سازی نوتیفیکیشن، زیر «دیدن محصولات» */}
-						<div className="mt-4 w-full sm:w-auto flex flex-wrap gap-3 justify-center">
-							<PwaInstallButton />
+						<div className="mt-4 grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(13rem,1fr))]">
+							<PwaInstallButton className="w-full" />
 							<LandingNotifyButton />
 						</div>
 					</div>
