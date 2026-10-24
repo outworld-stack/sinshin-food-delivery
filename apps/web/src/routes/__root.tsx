@@ -153,7 +153,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 			</head>
 			<body>
 				<Toast />
-				<PwaRegister />
+				<PwaRegister lang={lang} />
 				<PushAutoPrompt />
 				{children}
 				<Scripts />

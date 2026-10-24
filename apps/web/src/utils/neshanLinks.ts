@@ -42,7 +42,18 @@ export function neshanViewUrl(lat: number, lng: number, zoom = 15): string {
 }
 
 /**
- * پیوند فقط-مقصد برای فالبکِ GPS؛ کاربر مبدأ را روی نشان انتخاب می‌کند.
+ * Documented point link for the installed Neshan app and its web fallback.
+ * Use this when the origin is unknown: destination-only routing query links
+ * drop the destination, and website routing paths are not the app contract.
+ * https://platform.neshan.org/FAQ/
+ */
+export function neshanPointUrl(lat: number, lng: number): string {
+	return `https://nshn.ir/?lat=${fmtCoord(lat)}&lng=${fmtCoord(lng)}`
+}
+
+/**
+ * Website-only routing view. For an app handoff without an origin, use
+ * neshanPointUrl instead; the native app need not understand website paths.
  */
 export function neshanRouteUrl(lat: number, lng: number): string {
 	return `https://neshan.org/maps/routing/car/destination/${fmtCoord(lat)},${fmtCoord(lng)}`

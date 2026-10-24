@@ -28,6 +28,7 @@ import {
 	type PushState,
 } from '#/lib/push-subscription'
 import { seoHead } from '#/lib/seo'
+import { PwaInstallButton } from '#/pwa/PwaInstallButton'
 import { useAuthStore } from '#/stores/authStore'
 
 export const Route = createFileRoute('/')({
@@ -261,7 +262,8 @@ function LandingPage({ showBanner }: { showBanner: boolean }) {
 						</div>
 
 						{/* stage-84 — فعال‌سازی نوتیفیکیشن، زیر «دیدن محصولات» */}
-						<div className="mt-4 w-full sm:w-auto flex justify-center">
+						<div className="mt-4 w-full sm:w-auto flex flex-wrap gap-3 justify-center">
+							<PwaInstallButton />
 							<LandingNotifyButton />
 						</div>
 					</div>

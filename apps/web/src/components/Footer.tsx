@@ -7,6 +7,7 @@ import { Link } from '@tanstack/react-router'
 import { Brand } from '#/components/Brand'
 import { Instagram, Phone, Pin, Clock } from 'reicon-react'
 import { useI18n, tpl } from '#/i18n'
+import { PwaInstallButton } from '#/pwa/PwaInstallButton'
 
 // لینک‌های ثابت بیرون کامپوننت → بدون ری‌رندر مجدد در هر رندر
 // (رارد ۳۲ — برچسب‌ها از دیکشنری می‌آیند؛ مسیرها ثابت‌اند)
@@ -37,6 +38,7 @@ export const Footer = memo(function Footer() {
                                                 <p className="text-sm text-gray-500 dark:text-gray-400 font-DanaRegular leading-relaxed text-center sm:text-right">
                                                         {t['footer.brandDesc']}
                                                 </p>
+                                                <PwaInstallButton />
                                                 <a
                                                         referrerPolicy="origin"
                                                         target="_blank"                                                        

@@ -1,24 +1,13 @@
-// src/components/site/articles/ArticleRouteButton.tsx
-// stage-98 — «مسیریابی از موقعیت من» با GPS واقعی + فالبکِ تأییدشده.
-//
-// چرا دکمه شد (قبلاً لینکِ ساده بود)؟ لینکِ فقط-مقصد پنلِ مسیریابیِ نشان را
-// با «مبدأ خالی» باز می‌کند و نشان در بارگذاریِ تازه هرگز GPS را خودکار
-// فعال نمی‌کند → از کاربر مبدا (و مقصد) می‌پرسید. داکیومنتِ رسمیِ نشان هم
-// «مبدأ خودکار» ندارد؛ پس خودِ سایت باید GPS بخواند و مبدأ را صریح بگذارد:
-//   • GPS موفق و سالم → لینکِ رسمیِ nshn.ir?origin=…&destination=…&vehicle=d
-//     (اپِ نصب باشد اپ، وگرنه وبِ کامل — راستی‌آزماییِ 301 در استیج-۹۷).
-//   • ردِ پرمیشن / تایم‌اوت / بی‌پشتیبانی / مختصاتِ خراب → توستِ فارسی +
-//     همان لینکِ فقط-مقصد تا کاربر مبدأ را روی نقشهٔ نشان خودش بزند
-//     (تأییدِ صاحبِ کسب‌وکار: «وقتی gps رد شد، مبدا توسط کاربر روی نقشه
-//     نشان انتخاب شود»). الگویِ مقاوم: courierTracking.ts (چکِ پشتیبانی +
-//     پیامِ دقیقِ ردِّ پرمیشن + try/catch).
+// Send a fresh browser position as the origin when available. Without one,
+// hand off the article's destination using Neshan's documented point link.
+// Neshan itself controls live tracking and permissions after the handoff.
 import { memo, useEffect, useRef, useState } from 'react'
 import { useI18n } from '#/i18n'
 import { useToastStore } from '#/stores/toastStore'
 import {
 	isNeshanCoord,
+	neshanPointUrl,
 	neshanRouteFromUrl,
-	neshanRouteUrl,
 } from '#/utils/neshanLinks'
 
 interface ArticleRouteButtonProps {
@@ -34,6 +23,8 @@ export const ArticleRouteButton = memo(function ArticleRouteButton({
 	const showToast = useToastStore((s) => s.showToast)
 	const [locating, setLocating] = useState(false)
 	const pendingRef = useRef<symbol | null>(null)
+	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const valid = isNeshanCoord(lat, lng)
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: changing destination must cancel the previous GPS request.
 	useEffect(() => {
@@ -42,11 +33,13 @@ export const ArticleRouteButton = memo(function ArticleRouteButton({
 			// Geolocation cannot be cancelled. Ignore its result if the article
 			// closes or the block's destination changes while permission is pending.
 			pendingRef.current = null
+			if (timerRef.current !== null) clearTimeout(timerRef.current)
+			timerRef.current = null
 		}
 	}, [lat, lng])
 
 	const handleClick = () => {
-		if (pendingRef.current) return
+		if (pendingRef.current || !valid) return
 		const pending = Symbol('article-route')
 		pendingRef.current = pending
 		setLocating(true)
@@ -54,6 +47,8 @@ export const ArticleRouteButton = memo(function ArticleRouteButton({
 		const finish = (href: string, fallback = false) => {
 			if (pendingRef.current !== pending) return
 			pendingRef.current = null
+			if (timerRef.current !== null) clearTimeout(timerRef.current)
+			timerRef.current = null
 			setLocating(false)
 			if (fallback) showToast(t['article.routeGpsDenied'], 'error')
 			// GPS resolves after browser user activation expires, so a new tab
@@ -61,11 +56,14 @@ export const ArticleRouteButton = memo(function ArticleRouteButton({
 			// prompt, then navigate in this tab; Back still restores the article.
 			window.location.assign(href)
 		}
-		const openFallback = () => finish(neshanRouteUrl(lat, lng), true)
+		const openFallback = () => finish(neshanPointUrl(lat, lng), true)
 		if (typeof navigator === 'undefined' || !navigator.geolocation) {
 			openFallback()
 			return
 		}
+		// The browser's GPS timeout need not include time waiting for permission.
+		// Always release the button, even if the provider never calls us back.
+		timerRef.current = setTimeout(openFallback, 12_000)
 		try {
 			navigator.geolocation.getCurrentPosition(
 				(pos) => {
@@ -78,7 +76,7 @@ export const ArticleRouteButton = memo(function ArticleRouteButton({
 					}
 				},
 				openFallback,
-				{ enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
+				{ enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
 			)
 		} catch {
 			openFallback()
@@ -89,7 +87,7 @@ export const ArticleRouteButton = memo(function ArticleRouteButton({
 		<button
 			type="button"
 			onClick={handleClick}
-			disabled={locating}
+			disabled={locating || !valid}
 			className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium text-sm cursor-pointer hover:opacity-90 transition disabled:opacity-60"
 		>
 			{locating ? t['article.routeLocating'] : t['article.routeMap']}

@@ -108,6 +108,7 @@ export const fa = {
 
         // ── فوتر (رارد ۳۲) ──
         'footer.about': 'درباره ما',
+        'pwa.install': 'نصب سین‌شین',
         'footer.gallery': 'گالری',
         'footer.articles': 'مقالات',
         'footer.contact': 'تماس با ما',
@@ -298,7 +299,7 @@ export const fa = {
         'article.routeMap': 'مسیریابی از موقعیت من',
         'article.routeLocating': 'در حال دریافت موقعیت…',
         'article.routeGpsDenied':
-                'دسترسی به موقعیت دریافت نشد — مبدأ را روی نقشهٔ نشان خودتان انتخاب کنید',
+                'موقعیت شما در دسترس نیست — مقصد در نشان باز می‌شود؛ برای مسیریابی مبدأ را انتخاب کنید',
         'articles.title': 'مقالات سین‌شین',
         'articles.filterSort': 'فیلتر و مرتب‌سازی',
         'articles.filtersTitle': 'فیلترهای مقالات',

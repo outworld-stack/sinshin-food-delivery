@@ -469,8 +469,8 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 			// «مشاهده روی نقشه» به درخواستِ صاحبِ کسب‌وکار حذف شد
 			// (نقشه‌ی داخلی همان نقش را دارد) و «مسیریابی از موقعیت
 			// من» حالا مبدأِ GPS را می‌گیرد و لینکِ رسمیِ nshn.ir
-			// با origin+destination می‌سازد؛ ردِ GPS ⇒ فالبکِ
-			// فقط-مقصد تا کاربر مبدأ را روی نقشهٔ نشان خودش بزند.
+			// با origin+destination می‌سازد؛ ردِ GPS ⇒ لینک رسمیِ
+			// نقطهٔ مقصد تا مختصات در اپ نشان هم حفظ شود.
 			const { lat, lng, title, address } = block.props
 			return (
 				<div className="space-y-3">

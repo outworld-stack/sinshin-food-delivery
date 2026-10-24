@@ -108,6 +108,7 @@ export const ar: Dict = {
 
         // ── التذييل (الجولة ٣٢) ──
         'footer.about': 'من نحن',
+        'pwa.install': 'تثبيت سين‌شين',
         'footer.gallery': 'المعرض',
         'footer.articles': 'المقالات',
         'footer.contact': 'اتصل بنا',
@@ -296,7 +297,7 @@ export const ar: Dict = {
         'article.routeMap': 'المسار من موقعي',
         'article.routeLocating': 'جارٍ تحديد الموقع…',
         'article.routeGpsDenied':
-                'تعذّر الوصول إلى الموقع — اختر نقطة البداية على خريطة نِشان بنفسك',
+                'موقعك غير متاح — ستُفتح الوجهة في نِشان؛ اختر نقطة البداية لتحديد المسار',
         'articles.filterSort': 'تصفية وترتيب',
         'articles.filtersTitle': 'تصفية المقالات',
         'articles.subFilter': 'تصنيف أدق:',
