@@ -3,6 +3,7 @@
 // مسیر مقصد: apps/web/src/components/dashboard/order-detail/PendingPaymentBox.tsx
 // کامیت پیشنهادی: stage fifty-eight
 // ═══════════════════════════════════════════════════════════════
+// stage-98 — پنجرهٔ پرداخت (۱۰ دقیقه): شمارش‌معکوس + پیامِ انقضا.
 
 // src/components/dashboard/order-detail/PendingPaymentBox.tsx
 /**
@@ -23,6 +24,17 @@
  *    می‌کند (PAID/CANCELED ⇒ باکس پرداخت حذف می‌شود).
  *  • خطای 409 (استعلام نامشخص/«چند دقیقه بعد») → توستِ apiError؛
  *    دکمه می‌ماند و کاربر دوباره می‌زند.
+ *
+ * stage-98 — پنجرهٔ پرداخت:
+ *  • شمارش‌معکوسِ m:ss (ارقام فارسی) از `pendingExpiresAt`ی سرور
+ *    (createdAt + PENDING_ORDER_EXPIRY_MINUTES) — نه ساعتِ دستگاهِ
+ *    کاربر به‌تنهایی؛ زیرِ یک دقیقه قرمز می‌شود.
+ *  • صفر ⇒ حالتِ انقضا: دکمه می‌رود و پیامِ صادقانه می‌آید
+ *    («سبد خرید محفوظ است — دوباره سفارش ثبت کنید»)؛ جابِ انقضای سرور
+ *    حداکثر ~۶۰ ثانیه بعد ردیف را CANCELED می‌کند و پولینگِ ۳ثانیه‌ایِ
+ *    خودِ صفحه باکس را برمی‌چیند (وضعیت لغو/فاکتور جایگزین می‌شود).
+ *  • pendingExpiresAt نبود (استقرارِ مخلوطِ قدیم/جدید) ⇒ بدونِ شمارش،
+ *    رفتارِ stage-58 — بدونِ شکستگی.
  */
 import { memo, useEffect, useState } from 'react'
 import { CreditCard } from 'reicon-react'
@@ -32,6 +44,11 @@ import type { UserOrder } from '#/server/user'
 
 interface PendingPaymentBoxProps {
 	order: UserOrder
+}
+
+/** stage-98 — باقی‌ماندهٔ پنجره به ثانیه (برای شمارش‌معکوس) */
+function remainingSeconds(ms: number): number {
+	return Math.max(0, Math.ceil(ms / 1000))
 }
 
 export const PendingPaymentBox = memo(function PendingPaymentBox({
@@ -52,7 +69,51 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 		}
 	}, [])
 
+	// stage-98 — شمارش‌معکوسِ پنجرهٔ پرداخت: مبنای سروری، تیکِ ۱ثانیه‌ای
+	const deadlineMs = order.pendingExpiresAt
+		? new Date(order.pendingExpiresAt).getTime()
+		: null
+	const [nowMs, setNowMs] = useState(() => Date.now())
+	useEffect(() => {
+		if (deadlineMs === null) return
+		const timer = setInterval(() => setNowMs(Date.now()), 1000)
+		return () => clearInterval(timer)
+	}, [deadlineMs])
+	const expired = deadlineMs !== null && nowMs >= deadlineMs
+	const remaining = deadlineMs !== null ? deadlineMs - nowMs : null
+	// ارقامِ بومیِ زبانِ فعال (فا/ع) + padding با صفرِ همان بومی — fmt.num
+	// ورودیِ عددی می‌خواهد، پس دو تکه را جدا می‌سازیم: m:ss
+	const clock = (() => {
+		if (remaining === null) return null
+		const total = remainingSeconds(remaining)
+		const zero = fmt.num(0)
+		const mm = fmt.num(Math.floor(total / 60)).padStart(2, zero)
+		const ss = fmt.num(total % 60).padStart(2, zero)
+		return `${mm}:${ss}`
+	})()
+
 	const amount = order.breakdown?.amountPaidOnline ?? order.totalAmount
+
+	// stage-98 — حالتِ انقضا: پنجره تمام شده؛ دکمه‌ی پرداخت دیگر معنا ندارد
+	if (expired) {
+		return (
+			<div className="bg-yellow-50 dark:bg-yellow-500/10 p-5 rounded-2xl border border-yellow-200 dark:border-yellow-500/20">
+				<div className="flex items-center gap-3">
+					<span className="w-11 h-11 rounded-xl bg-yellow-100 dark:bg-yellow-500/20 text-yellow-500 flex items-center justify-center shrink-0">
+						<CreditCard size={22} />
+					</span>
+					<div className="min-w-0">
+						<h3 className="font-DanaDemiBold text-base text-yellow-600 dark:text-yellow-400">
+							{t['dash.orderDetail.expiredTitle']}
+						</h3>
+						<p className="text-xs text-yellow-600/80 dark:text-yellow-400/80 font-DanaMedium mt-1 leading-relaxed">
+							{t['dash.orderDetail.expiredHint']}
+						</p>
+					</div>
+				</div>
+			</div>
+		)
+	}
 
 	return (
 		<div className="bg-yellow-50 dark:bg-yellow-500/10 p-5 rounded-2xl border border-yellow-200 dark:border-yellow-500/20">
@@ -75,11 +136,25 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 			</div>
 
 			<div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-4 pt-4 border-t border-yellow-200/60 dark:border-yellow-500/20">
-				<p className="text-sm text-yellow-700 dark:text-yellow-300 font-DanaDemiBold flex-1">
-					{tpl(t['dash.orderDetail.pendingAmount'], {
-						n: `${fmt.price(amount)} ${t['common.toman']}`,
-					})}
-				</p>
+				<div className="flex-1 min-w-0">
+					<p className="text-sm text-yellow-700 dark:text-yellow-300 font-DanaDemiBold">
+						{tpl(t['dash.orderDetail.pendingAmount'], {
+							n: `${fmt.price(amount)} ${t['common.toman']}`,
+						})}
+					</p>
+					{clock !== null && remaining !== null && (
+						<p
+							className={
+								remaining < 60_000
+									? 'text-xs text-red-600 dark:text-red-400 font-DanaDemiBold mt-1 tabular-nums'
+									: 'text-xs text-yellow-600/90 dark:text-yellow-400/90 font-DanaMedium mt-1 tabular-nums'
+							}
+							dir="rtl"
+						>
+							{tpl(t['dash.orderDetail.pendingCountdown'], { n: clock })}
+						</p>
+					)}
+				</div>
 				<button
 					type="button"
 					onClick={handleRetry}

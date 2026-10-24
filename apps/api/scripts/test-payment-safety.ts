@@ -453,6 +453,84 @@ try {
   gatewayMap.set('SEP', realSep)
   passed('re-enabling a gateway allows a fresh retry')
 
+  // ── stage-98 — «پنجرهٔ پرداخت»: انقضای قطعیِ سفارشِ PENDING_PAYMENTِ بالای TTL ──
+  // (تورِ اولِ جابِ payment-timeout + گیتِ رِتری — همه با همان finalize اتمیک)
+  {
+    const cutoff = new Date(Date.now() - 11 * 60_000)
+    const backdate = async (orderId: typeof orders.$inferSelect.id) =>
+      db.update(orders).set({ createdAt: cutoff }).where(eq(orders.id, orderId))
+
+    // ۱) سفارشِ رهاشده (استعلامِ نامشخص) → جابِ انقضا: CANCELED + بازگشتِ هولد
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+    const abandoned = await make()
+    await backdate(abandoned.order.id)
+    const sweep = await service.expirePendingOrders(10)
+    assert.equal(sweep.expired, 1)
+    assert.equal(sweep.settled, 0)
+    assert.equal((await readOrder(abandoned.order.id)).status, 'CANCELED')
+    assert.equal((await readPayment(abandoned.payment.id)).status, 'FAILED')
+    const abandonedMeta = ((await readPayment(abandoned.payment.id)).metadata as { fail?: { source?: string } } | null)?.fail
+    assert.equal(abandonedMeta?.source, 'expiry-job')
+    assert.equal(await orderService.walletBalance(db, abandoned.user.id), 100_000, 'expiry returns the wallet hold exactly once')
+    passed('a pending order past the payment window is definitively expired (CANCELED + hold released) by the sweep')
+
+    // ۲) رِتری بعد از ضرب‌الاجل: انقضای inline + پیامِ «دوباره سفارش ثبت کنید»
+    const expiredRetry = await make()
+    await backdate(expiredRetry.order.id)
+    const beforeExpireInit = initCalls
+    await assert.rejects(() => service.retryInitiation(expiredRetry.user.id, expiredRetry.order.displayId), /پنجرهٔ پرداخت/)
+    assert.equal((await readOrder(expiredRetry.order.id)).status, 'CANCELED')
+    assert.equal(initCalls, beforeExpireInit, 'retry past the window never initializes a fresh PSP session')
+    assert.equal(await orderService.walletBalance(db, expiredRetry.user.id), 100_000)
+    passed('retrying past the window expires the order inline and answers with the re-order message')
+
+    // ۳) استعلامِ زندهٔ انقضا اگر «پرداخت‌شده» بگوید ⇒ settle — پول گرفته شده
+    verifyHook = async input => ({ success: true, gatewayRef: input.gatewayRef })
+    const rescued = await make()
+    await backdate(rescued.order.id)
+    const rescueSweep = await service.expirePendingOrders(10)
+    assert.equal(rescueSweep.settled, 1)
+    assert.equal(rescueSweep.expired, 0)
+    assert.equal((await readOrder(rescued.order.id)).status, 'PAID')
+    assert.equal((await readPayment(rescued.payment.id)).status, 'SUCCESS')
+    passed('a live verify that says "paid" settles the order instead of expiring it')
+
+    // ۴) سفارشِ جوان (۹ دقیقه) دست‌نخورده می‌ماند
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+    const young = await make()
+    await db.update(orders).set({ createdAt: new Date(Date.now() - 9 * 60_000) }).where(eq(orders.id, young.order.id))
+    const youngSweep = await service.expirePendingOrders(10)
+    assert.equal(youngSweep.expired, 0)
+    assert.equal((await readOrder(young.order.id)).status, 'PENDING_PAYMENT')
+    assert.equal((await readPayment(young.payment.id)).status, 'PENDING')
+    passed('orders inside the window are untouched by the sweep')
+
+    // ۵) خواهرهای PENDINGِ مانده با برچسبِ expiry-sibling بسته می‌شوند (ضدِ نویزِ R12)
+    const multi = await make()
+    await db.insert(payments).values({ userId: multi.user.id, orderId: multi.order.id,
+      gateway: 'FAKE', mode: 'direct', amount: 80_000, gatewayRef: `receipt-${crypto.randomUUID()}` })
+    await backdate(multi.order.id)
+    await service.expirePendingOrders(10)
+    const multiRows = await db.select().from(payments).where(eq(payments.orderId, multi.order.id))
+    assert.equal(multiRows.filter((r) => r.status === 'FAILED').length, 2)
+    assert(multiRows.some((r) => (r.metadata as { fail?: { source?: string } } | null)?.fail?.source === 'expiry-sibling'),
+      'the non-active sibling is superseded so later reconciliation cannot raise R12 noise for it')
+    passed('leftover sibling attempts are superseded (expiry-sibling) with no pending rows left behind')
+
+    // ۶) قطعیِ شبکه در استعلام ⇒ این دور معلق؛ دورِ بعد با جوابِ درگاه قطعی می‌شود
+    verifyHook = async () => { throw new Error('PSP unreachable') }
+    const unreachable = await make()
+    await backdate(unreachable.order.id)
+    await service.expirePendingOrders(10)
+    assert.equal((await readOrder(unreachable.order.id)).status, 'PENDING_PAYMENT')
+    assert.equal(await orderService.walletBalance(db, unreachable.user.id), 80_000,
+      'a network outage defers the decision — age alone never moves money on an unanswered question')
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+    await service.expirePendingOrders(10)
+    assert.equal((await readOrder(unreachable.order.id)).status, 'CANCELED')
+    passed('a verify outage defers expiry to the next sweep instead of blind-failing')
+  }
+
   const findings = await db.select().from(reconcileFindings)
   assert(findings.length >= 5)
   console.log(`Payment safety: ${checks} passed`)

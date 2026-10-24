@@ -18,7 +18,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/domain/report/report.service.ts
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, lt, ne, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import { orders, users, walletTransactions } from '#/infra/db/schema'
@@ -318,7 +318,10 @@ export class ReportService {
         .select({ o: orders, u: users })
         .from(orders)
         .innerJoin(users, eq(users.id, orders.userId))
-        .where(and(gte(orders.createdAt, from), lt(orders.createdAt, to)))
+        // stage-98 — ردیفِ CSV: سفارشِ در-انتظارِ پرداخت «سفارش» نیست و در
+        // گزارشِ مالی نمی‌آید (لغو‌شده‌ها = بازپرداختِ واقعی، می‌مانند؛
+        // انقضای پنجره هم CANCELED می‌شود و با ردیفِ بازگشتِ کیف‌پولش می‌آید).
+        .where(and(gte(orders.createdAt, from), lt(orders.createdAt, to), ne(orders.status, 'PENDING_PAYMENT')))
         .orderBy(desc(orders.createdAt)),
       this.deps.db
         .select({ w: walletTransactions })

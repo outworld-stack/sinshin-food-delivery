@@ -1190,11 +1190,16 @@ export class OrderService {
                 // round-16 — سقف دفاعی: داشبورد مشتری پشت این اندپوینت است؛
                 // مشتری وفادار با صدها سفارش نباید پاسخ چندمگابایتی + تکثیرِ آیتم‌ها بسازد.
                 // ۲۰۰ سفارش آخر + همهٔ سفارش‌های فعال (همان منطق ادغامِ پروفایل سبک).
+                // stage-98 — همان حذفِ لیست: سفارشِ هرگز-پرداخت‌نشده (CANCELED+FAILED)
+                // در «آخرین‌ها» هم نمی‌آید؛ فعال‌ها از قبل status-فیلتر دارند.
                 const [recent, active] = await Promise.all([
                         this.deps.db
                                 .select()
                                 .from(orders)
-                                .where(eq(orders.userId, userId))
+                                .where(and(
+                                        eq(orders.userId, userId),
+                                        sql`not (${orders.status} = 'CANCELED' and ${orders.paymentStatus} = 'FAILED')`,
+                                ))
                                 .orderBy(desc(orders.createdAt))
                                 .limit(200),
                         this.deps.db
@@ -1238,7 +1243,15 @@ export class OrderService {
                 const page = Math.min(Math.max(1, opts.page ?? 1), 10_000);
                 const limit = Math.min(Math.max(5, opts.limit ?? 10), 100);
                 const sort: MyOrdersSort = opts.sort ?? "newest";
-                const where = eq(orders.userId, userId);
+                // stage-98 — «حذف» از دیدِ مشتری: سفارشِ لغوشده‌ای که هرگز پولِ
+                // موفق نداشته (انقضای پنجرهٔ پرداخت یا شکستِ قطعیِ درگاه) از
+                // لیست و شمارشِ او بیرون می‌ماند — سفارشِ واقعی محسوب نمی‌شود.
+                // بازپرداختِ ادمین (CANCELED + SUCCESS) که پولِ واقعی داشت می‌ماند.
+                // لینکِ مستقیمِ جزئیات همچنان باز می‌شود (صادقانه: «لغو شد»).‌
+                const where = and(
+                        eq(orders.userId, userId),
+                        sql`not (${orders.status} = 'CANCELED' and ${orders.paymentStatus} = 'FAILED')`,
+                );
                 // stage-74 — «مجموع پرداخت‌ها» فقط سفارش‌هایِ «واقعاً پرداخت‌شده»:
                 //   paymentStatus = 'SUCCESS'  → پول واقعاً دریافت شده (settlePayment)
                 //   status <> 'CANCELED'       → سفارشِ لغو‌شده (پرداخت ناموفق) نه
@@ -1295,7 +1308,12 @@ export class OrderService {
                         this.deps.db
                                 .select()
                                 .from(orders)
-                                .where(eq(orders.userId, userId))
+                                // stage-98 — سفارشِ هرگز-پرداخت‌نشده (انقضا/شکستِ
+                                // قطعی) در «۱۰ سفارش آخر»ی پروفایل سبک هم غایب است.
+                                .where(and(
+                                        eq(orders.userId, userId),
+                                        sql`not (${orders.status} = 'CANCELED' and ${orders.paymentStatus} = 'FAILED')`,
+                                ))
                                 .orderBy(desc(orders.createdAt))
                                 .limit(10),
                         this.deps.db
@@ -1528,6 +1546,15 @@ export class OrderService {
                         userFeedback: null, // فاز ۵ (نظرات)
                         customerNote: row.customerNote,
                         paymentStatus: row.paymentStatus,
+                        // stage-98 — ضرب‌الاجلِ پنجرهٔ پرداخت (فقط برای
+                        // PENDING_PAYMENT) — مبنای شمارش‌معکوسِ باکسِ پرداخت
+                        pendingExpiresAt:
+                                row.status === "PENDING_PAYMENT"
+                                        ? new Date(
+                                                        row.createdAt.getTime() +
+                                                                this.deps.config.pendingOrderExpiryMinutes * 60_000,
+                                                )
+                                        : null,
                         breakdown: row.breakdown,
                         queued: row.queuedAt !== null,
                 };

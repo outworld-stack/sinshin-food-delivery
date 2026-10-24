@@ -18,7 +18,7 @@ import {
 	mapBounds,
 	type MapPoint,
 } from '#/utils/mapGeometry'
-import { neshanViewUrl, neshanRouteUrl } from '#/utils/neshanLinks'
+import { neshanRouteFromUrl, neshanViewUrl } from '#/utils/neshanLinks'
 import { useMapPoint } from '#/hooks/shared/useMapPoint'
 
 interface CourierTrackingMapProps {
@@ -259,13 +259,25 @@ export const CourierTrackingMap = memo(function CourierTrackingMap({
 					>
 						{t['map.viewDestination']}
 					</a>
-					<a
-						href={neshanRouteUrl(destination.lat, destination.lng)}
-						target="_blank"
-						rel="noopener noreferrer"
-					>
-						{t['map.routeDestination']}
-					</a>
+					{/* stage-98 — مسیریابی با مبدأِ صریح = موقعیتِ زندهٔ خودِ پیک
+                                            (server-fed — بدونِ GPS در دستگاهِ مشتری) و مقصد = آدرسِ مشتری؛
+                                            مبدأی که نشان از کاربر می‌پرسید دیگر خالی نیست. تا نخستین
+                                            ارسالِ موقعیتِ پیک (پیامِ «در انتظار موقعیت پیک») لینکِ
+                                            مسیر معنایی ندارد (مسیرِ «مشتری تا خانه‌ی خودش»!) و پنهان است. */}
+					{courier && (
+						<a
+							href={neshanRouteFromUrl(
+								courier.lat,
+								courier.lng,
+								destination.lat,
+								destination.lng,
+							)}
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							{t['map.routeDestination']}
+						</a>
+					)}
 				</div>
 			)}
 		</div>

@@ -487,6 +487,9 @@ export interface UserOrder {
   userFeedback?: string | null
   customerNote?: string | null
   paymentStatus: string
+  /** stage-98 — ضرب‌الاجلِ پنجرهٔ پرداخت (createdAt + PENDING_ORDER_EXPIRY_MINUTES) —
+   * فقط برای status='PENDING_PAYMENT'؛ مبنای شمارش‌معکوسِ باکسِ پرداخت مشتری. */
+  pendingExpiresAt?: Date | null
   breakdown: OrderBreakdown
   queued: boolean
 }

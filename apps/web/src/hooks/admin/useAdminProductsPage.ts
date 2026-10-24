@@ -27,10 +27,11 @@ import { pageField, limitField } from '#/utils/searchSchema'
 
 // --- اسکیمای search — فیلترها شهروند URL شدن ---
 // catch: URL دستکاری‌شده با مقدار خراب → پیش‌فرض جایگزین، نه خطای روت
-// (limit پیش‌فرض ۵ — همان رفتار قبلی این صفحه)
+// (stage-98 — پیش‌فرض ۱۰: خواستهٔ صاحب کسب‌وکار؛ هم‌راستا با بقیهٔ
+// لیست‌های ادمین — سفارشات/پیک‌ها — که از قبل ۱۰ هستند)
 export const adminProductsSearchSchema = z.object({
   page: pageField,
-  limit: limitField(5),
+  limit: limitField(10),
   search: searchTextField,
   status: z.string().catch('all').default('all'),
   categoryId: z.string().catch('all').default('all'),

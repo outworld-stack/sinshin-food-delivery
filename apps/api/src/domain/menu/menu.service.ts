@@ -1039,7 +1039,13 @@ export class MenuService {
       .select()
       .from(products)
       .where(where)
-      .orderBy(desc(products.createdAt))
+      // stage-98 — «آخرین تغییر، اولِ صف» در پنل ادمین: updated_at در هر
+      // ویرایش/تغییر وضعیت/دسترس‌پذیری تازه می‌شود (updateProduct/toggle/
+      // availability) → محصولِ ویرایش‌شده فوراً به صدرِ صفحه‌ی ۱ می‌پرد؛
+      // تای‌بریکرِ created_at لغزشِ heap ردیف‌های هم‌تاریخِ seed را می‌بندد.
+      // گریدِ عمومیِ سایت (productsByMain — خط ۵۳۷) عمداً created_at DESC ماند:
+      // لیستِ فروشگاه نباید با هر ویرایشِ ادمین بالا-پایین شود.
+      .orderBy(desc(products.updatedAt), desc(products.createdAt))
       .limit(filters.limit)
       .offset((filters.page - 1) * filters.limit)
 

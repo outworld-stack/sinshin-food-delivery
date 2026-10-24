@@ -23,9 +23,10 @@ import {
 
 import { defaultParseSearch, Link } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
-import { useI18n } from '#/i18n'
-import { neshanRouteUrl, neshanViewUrl } from '#/utils/neshanLinks'
+// stage-98 — useI18n از این فایل رفت: متن‌های بلوک از props می‌آیند و
+// دکمه‌ی مسیریابی (ArticleRouteButton) خودش i18n/toast را می‌خواند.
 import { ArticleLocationMap } from './ArticleLocationMap'
+import { ArticleRouteButton } from './ArticleRouteButton'
 import { observeArticleBlocks } from './articleBlockAnimations'
 
 const cx = (...parts: Array<string | false | undefined>): string =>
@@ -120,7 +121,7 @@ const isRenderableBlock = (value: unknown): value is ArticleBlock => {
 // ═══════════════ رندرِ یک بلوک ═══════════════
 
 function BlockContent({ block }: { block: ArticleBlock }) {
-	const { t } = useI18n()
+	// stage-98 — t دیگر اینجا لازم نیست (دکمه‌ی مسیریابی خودش i18n را می‌خواند)
 	const textStyle = blockVisual(block).color ? { color: 'inherit' } : undefined
 	switch (block.type) {
 		case 'hero': {
@@ -463,15 +464,14 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 			)
 		}
 		case 'location': {
-			// stage-92 — بلوک موقعیت: عنوان/آدرس + نقشه‌ی تعاملی
-			// (کلاینتی — SSR فقط متن) + دو دیپ‌لینکِ راستی‌آزمایی‌شده:
-			// «مشاهده» نقشه را روی نقطه باز می‌کند (@lat,lng) و
-			// «مسیریابی» پینِ مقصد را روی نقطه می‌گذارد و مسیر از
-			// موقعیتِ کنونیِ کاربر می‌کشد (routing/car/destination —
-			// همان «مسیریابی به اینجا» خودِ نشان).
+			// stage-98 — بلوک موقعیت: عنوان/آدرس + نقشه‌ی تعاملی
+			// (کلاینتی — SSR فقط متن) + یک دکمه‌ی مسیریابیِ واقعی با GPS:
+			// «مشاهده روی نقشه» به درخواستِ صاحبِ کسب‌وکار حذف شد
+			// (نقشه‌ی داخلی همان نقش را دارد) و «مسیریابی از موقعیت
+			// من» حالا مبدأِ GPS را می‌گیرد و لینکِ رسمیِ nshn.ir
+			// با origin+destination می‌سازد؛ ردِ GPS ⇒ فالبکِ
+			// فقط-مقصد تا کاربر مبدأ را روی نقشهٔ نشان خودش بزند.
 			const { lat, lng, title, address } = block.props
-			const viewUrl = neshanViewUrl(lat, lng)
-			const routeUrl = neshanRouteUrl(lat, lng)
 			return (
 				<div className="space-y-3">
 					{(title || address) && (
@@ -497,22 +497,7 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 					<ArticleLocationMap lat={lat} lng={lng} />
 					<div style={{ textAlign: block.style?.align }}>
 						<div className="inline-flex flex-wrap items-center gap-2">
-							<a
-								href={viewUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-primary/30 dark:border-dark-primary/30 text-primary dark:text-dark-primary font-DanaMedium text-sm cursor-pointer hover:bg-primary/5 dark:hover:bg-dark-primary/5 transition"
-							>
-								{t['article.viewMap']}
-							</a>
-							<a
-								href={routeUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaMedium text-sm cursor-pointer hover:opacity-90 transition"
-							>
-								{t['article.routeMap']}
-							</a>
+							<ArticleRouteButton lat={lat} lng={lng} />
 						</div>
 					</div>
 				</div>

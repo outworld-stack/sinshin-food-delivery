@@ -7,7 +7,11 @@
 //  · polyline مسیر واقعی (no-traffic) اگر سرور داد؛ وگرنه خط مستقیم
 //  · بدون کلید نقشه → فقط کارت متنی/فاصله (بدون شکستن صفحه)
 import { memo, useEffect, useRef, useState } from 'react'
-import { neshanRouteUrl, neshanViewUrl } from '#/utils/neshanLinks'
+import {
+	neshanRouteFromUrl,
+	neshanRouteUrl,
+	neshanViewUrl,
+} from '#/utils/neshanLinks'
 import { useMapPoint } from '#/hooks/shared/useMapPoint'
 
 import {
@@ -23,6 +27,10 @@ export interface ScanRouteMapProps {
 	destination: { lat: number; lng: number } | null
 	polyline: string | null
 	address?: string | null
+	/** stage-98 — موقعیتِ زندهٔ خودِ پیک (ردیابیِ همین صفحه) — مبدأِ واقعیِ
+	 * لینکِ مسیریابی؛ نبود ⇒ مبدأ = رستوران (prop موجود — بدون نیاز به
+	 * پرمیشنِ جدیدِ GPS: یا استریمِ روشن است یا مختصاتِ رستوران). */
+	courierPosition?: { lat: number; lng: number } | null
 }
 
 function pinEl(color: string, label: string): HTMLElement {
@@ -41,11 +49,13 @@ export const ScanRouteMap = memo(function ScanRouteMap({
 	destination: rawDestination,
 	polyline,
 	address,
+	courierPosition,
 }: ScanRouteMapProps) {
 	const containerRef = useRef<HTMLDivElement>(null)
 	const [failed, setFailed] = useState(false)
 	const destination = useMapPoint(rawDestination)
 	const validOrigin = useMapPoint(origin)
+	const courierPoint = useMapPoint(courierPosition)
 	// ترمیم اسکنِ استیج-۸۴ — map در ref نگه داشته می‌شود تا cleanupِ واقعیِ افکت
 	// (نه داخل .then که React آن را نادیده می‌گیرد) آن را remove کند؛ وگرنه
 	// هر unmount یک WebGL context نشت می‌کرد و re-mount «Container is already
@@ -147,6 +157,18 @@ export const ScanRouteMap = memo(function ScanRouteMap({
 			</div>
 		)
 	}
+	// stage-98 — مبدأِ مسیر: موقعیتِ زندهٔ خودِ پیک (اگر استریم روشن است)
+	// وگرنه رستوران؛ هر دو بدونِ پرمیشنِ جدید. فالبکِ آخر: لینکِ فقط-مقصد
+	// تا پیک خودش روی نقشهٔ نشان مبدأ بزند (رفتارِ تأییدشدهٔ استیج-۹۸).
+	const routeOrigin = courierPoint ?? validOrigin
+	const routeHref = routeOrigin
+		? neshanRouteFromUrl(
+				routeOrigin.lat,
+				routeOrigin.lng,
+				destination.lat,
+				destination.lng,
+			)
+		: neshanRouteUrl(destination.lat, destination.lng)
 	const destinationCard = (
 		<div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] space-y-1">
 			<p
@@ -170,7 +192,7 @@ export const ScanRouteMap = memo(function ScanRouteMap({
 					مشاهده مقصد روی نقشه ↗
 				</a>
 				<a
-					href={neshanRouteUrl(destination.lat, destination.lng)}
+					href={routeHref}
 					target="_blank"
 					rel="noopener noreferrer"
 					className="inline-block text-xs text-primary dark:text-dark-primary font-DanaDemiBold"

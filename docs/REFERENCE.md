@@ -2209,3 +2209,193 @@ docker compose up -d --no-deps api web
   · `ScanRouteMap.tsx` · `i18n/fa.ts` · `i18n/ar.ts` ·
   `scripts/test-article-rendering.tsx` · `scripts/test-articles-admin.tsx`
   · `docs/REFERENCE.md`
+
+## ۲-۱۰-۲۲ — stage-98: «پنجرهٔ پرداخت» — انقضای قطعیِ ۱۰ دقیقه‌ایِ سفارش‌های در انتظار + صدرِ صفحهٔ ۱ در محصولاتِ ادمین + مسیریابیِ واقعیِ نشان با مبدأِ GPS
+
+> زمینه: سه خواستهٔ صاحبِ کسب‌وکار: (۱) «سفارشات در انتظار زیر ۱۰ دقیقه
+> حذف بشن» — سفارشِ رهاشده در PENDING_PAYMENT با مرجعِ فقط-توکن (ملتِ
+> `:t:` / سپِ بدونِ RefNum) هرگز «شکستِ قطعی» نمی‌گیرد و تا ابد
+> کوپن/گرنت/هولدِ کیف‌پول را قفل می‌کند؛ (۲) محصولِ ویرایش/تغییرِ
+> وضعیت‌یافته باید فوراً «اولِ صفحهٔ ۱»ی لیستِ ادمین بیاید و پیش‌فرضِ
+> صفحه هم ۱۰تایی شود؛ (۳) «مسیریابی از موقعیت من» در بلوک موقعیتِ مقاله
+> باید GPS واقعی بخواند — «وقتی gps رد شد، مبدا توسط کاربر روی نقشه نشان
+> انتخاب شود» (فالبکِ تأییدشده).
+
+### ۱) پنجرهٔ پرداخت — بک‌اند (`PENDING_ORDER_EXPIRY_MINUTES`، پیش‌فرض ۱۰)
+
+- env: `num('PENDING_ORDER_EXPIRY_MINUTES', 10)` + فیلدِ readonly در
+  `AppConfig` (env.ts)؛ توکنِ بانک ۱۰–۱۵ دقیقه عمر دارد — پنجرهٔ ۱۰
+  دقیقه‌ای یعنی انقضا هیچ‌وقت دنبالِ توکنِ زنده نمی‌دود. هر دو
+  `.env.example` (ریزه + api) مستند شدند.
+- `PaymentService.expirePendingOrders()` + `expireOnePendingOrder()`
+  (خصوصی): جاروی دسته‌های ۵۰تاییِ سفارش‌هایِ `PENDING_PAYMENT`ِ بالایِ
+  TTL. سنِ «سفارش» ملاک است نه سنِ ردیفِ پرداخت — رِتریِ تازه ردیفِ
+  پرداخت را جوان می‌کند اما پنجرهٔ سفارش همان است.
+- **قاعدهٔ استعلامِ زندهٔ تک‌بار**: انقضا فقط آخرین تلاشِ PENDING را یک
+  بار استعلامِ زنده می‌کند:
+  - «پرداخت‌شده» ⇒ `finalize(true)` → settle — پول گرفته شده و callback
+    گم بود؛ سفارش باید زنده بماند.
+  - نامشخص/قطعی-ناموفق ⇒ مرگِ توکنِ بانک «پرداخت‌نشده بودن» را اثبات
+    کرده (خودِ بانک تکمیل را ناممکن کرده) ⇒ همان مسیرِ اتمیکِ تست‌شدهٔ
+    `finalize(false)` → `failPayment`: CANCELED + FAILED + بازگشتِ دقیقِ
+    هولدِ کیف‌پول + آزادسازیِ کوپن/گرنت + نوتیفِ صادقانه («⌛ پنجرهٔ
+    پرداخت به پایان رسید … می‌توانید دوباره سفارش ثبت کنید.»، سورسِ
+    نوتیف = `payment-expired`؛ مسیرِ شکستِ عادیِ درگاه متنِ قبلیِ خودش را
+    دارد).
+  - **خطای شبکه در استعلام ⇒ این دور معلق** — دقیقهٔ بعد دوباره؛ «سن
+    به‌تنهایی پول را جابه‌جا نمی‌کند»، تصمیمِ مالی همچنان فقط از مسیرِ
+    verify/finalize می‌گذرد.
+- **خواهرهای PENDINGِ مانده** با `supersedePending(tx, p,
+  'expiry-sibling')` بسته می‌شوند (پارامترِ source به `supersedePending`
+  اضافه شد؛ پیش‌فرضِ `retry-superseded` دست‌نخورده) — جاروهایِ بعدی
+  برایشان نویزِ R12 نمی‌سازند.
+- **جاب**: `payment-timeout` حالا هر **۶۰ ثانیه** (قبلاً هر ۵ دقیقه)
+  می‌دود و تورِ انقضا را «قبل از» `reconcilePending(30)` اجرا می‌کند —
+  تورِ ۳۰ دقیقه‌ای/R12 بدونِ تغییر؛ دقتِ ~۱ دقیقه‌ای همان چیزی است که
+  شمارش‌معکوسِ صفحهٔ سفارش به کاربر قول می‌دهد.
+- **گیتِ رِتری**: `retryInitiation` برای سفارشِ بالایِ TTL همان انقضا را
+  درجا اجرا می‌کند و **۴۰۹** جواب می‌دهد: اگر استعلام «پرداخت‌شده» گفت
+  سفارش settle می‌شود («این سفارش هم‌اکنون پرداخت شد — وضعیت صفحه به‌روز
+  می‌شود.») وگرنه «پنجرهٔ پرداخت این سفارش به پایان رسید و سفارش لغو شد —
+  لطفاً دوباره سفارش ثبت کنید.» — کاربر دیگر به صفحهٔ مردهٔ بانک فرستاده
+  نمی‌شود؛ مستندِ روت (payment.routes.ts) هم به‌روز شد.
+- **هم‌ترازیِ چک‌اوت**: `CHECKOUT_REPLAY_GRACE_MS` از ۱۵ → **۱۰ دقیقه**
+  (هم‌عرضِ پنجره) — replayِ کهنه هیچ‌وقت توکنِ بانک برای سفارشِ خارج از
+  پنجره نمی‌گیرد.
+- **R12 دست‌نخورده**: تورِ late-success (موفقیتِ دیرهنگامِ PSP بعد از
+  انقضا/FAILED) همچنان آخرین تورِ اطمینان است — موفقیتِ دیرهنگامِ PSP
+  بعد از انقضا به R12 می‌رود، نه دور ریخته می‌شود.
+
+### ۲) DTO و نگاهِ مشتری/گزارش‌ها
+
+- قرارداد: `UserOrder.pendingExpiresAt?` (contracts.ts) — فقط برای
+  `PENDING_PAYMENT`: createdAt + TTL (mapOne در order.service.ts)؛ مبنای
+  سرور است، نه ساعتِ دستگاهِ کاربر.
+- `PendingPaymentBox`: شمارش‌معکوسِ m:ss با ارقامِ بومیِ زبانِ فعال
+  (fa/ع) از `pendingExpiresAt`؛ زیرِ ۶۰ ثانیه قرمز؛ صفر ⇒ حالتِ انقضا —
+  دکمه می‌رود و «سبد خرید شما محفوظ است — دوباره سفارش ثبت کنید» می‌آید
+  (کلیدهایِ `pendingCountdown`/`expiredTitle`/`expiredHint` در fa+ar)؛
+  جابِ انقضا حداکثر ~۶۰ ثانیه بعد سفارش را CANCELED می‌کند و
+  پولینگِ ۳ثانیه‌ایِ خودِ صفحه باکس را برمی‌چیند. نبودِ
+  `pendingExpiresAt` (استقرارِ مخلوطِ قدیم/جدید) ⇒ رفتارِ stage-58 —
+  بدونِ شکستگی.
+- **«حذف» از دیدِ مشتری**: سفارشِ هرگز-پرداخت‌نشده (CANCELED+FAILED) از
+  هر سه نمایِ مشتری بیرون می‌ماند — `myOrders` (۲۰۰ سفارشِ آخر +
+  فعال‌ها) · `myOrdersPage` (لیست + total) · `myOrdersLight` (۱۰تای
+  پروفایل سبک)؛ بازپرداختِ واقعیِ ادمین (CANCELED+SUCCESS) می‌ماند؛
+  ردیفِ ممیزی سرِ جایش است و لینکِ مستقیمِ جزئیات همچنان باز می‌شود
+  (صادقانه: «لغو شد»).
+- **آمار/گزارش‌ها هم‌تراز شدند**: totalOrders + چارتِ داشبورد + چارتِ
+  کاربر (admin.service.ts) با `notInArray(status,
+  ['CANCELED','PENDING_PAYMENT'])` · ordersCountِ users-report
+  (report-query.service.ts) · ردیف‌هایِ CSVِ روزانه (report.service.ts)
+  PENDING_PAYMENT را نمی‌آورند — لغو‌شده‌ها می‌مانند (بازپرداختِ واقعی +
+  ردیفِ بازگشتِ کیف‌پولِ انقضا).
+
+### ۳) لیستِ محصولاتِ ادمین — «آخرین تغییر، اولِ صف»
+
+- `adminProducts` (menu.service.ts): `orderBy(desc(updatedAt),
+  desc(createdAt))` — ویرایش/تغییرِ وضعیت/دسترس‌پذیری updated_at را تازه
+  می‌کند ⇒ محصول فوراً صدرِ صفحهٔ ۱؛ created_at تای‌بریکرِ ردیف‌هایِ
+  هم‌تاریخِ seed.
+- **گریدِ عمومیِ سایت عمداً دست‌نخورده ماند** (`productsByMain`:
+  created_at DESC) — لیستِ فروشگاه نباید با هر ویرایشِ ادمین بالا-پایین
+  شود.
+- وب: پیش‌فرضِ limit از ۵ → **۱۰** (`limitField(10)` در
+  useAdminProductsPage — هم‌راستا با سفارشات/پیک‌های ادمین) +
+  `pageSizeOptions [10,20,50]` در Pagination صفحهٔ محصولات.
+
+### ۴) نشان — مسیریابی با مبدأِ واقعی (دیپ‌لینکِ رسمیِ nshn.ir)
+
+- `neshanRouteFromUrl(oLat,oLng,dLat,dLng)` در `utils/neshanLinks.ts` =
+  `https://nshn.ir?origin=…&destination=…&vehicle=d` — لینکِ رسمیِ
+  هوشمند: اپِ نصب‌شدهٔ نشان را باز می‌کند وگرنه 301 به وبِ کاملِ
+  neshan.org (راستی‌آزماییِ زندهٔ استیج-۹۷)؛ منبع: پلتفرمِ رسمیِ نشان —
+  «مبدأ خودکار» در داکیومنت وجود ندارد، پس خودِ سایت باید GPS بخواند و
+  مبدأ را صریح بگذارد.
+- **بلوک موقعیتِ مقاله**: دکمهٔ «مشاهده روی نقشه» حذف شد (کلیدِ
+  `article.viewMap` از fa+ar رفت — نقشهٔ داخلیِ بلوک همان نقش را دارد)؛
+  «مسیریابی از موقعیت من» حالا یک دکمهٔ واقعی است
+  (`ArticleRouteButton.tsx` جدید): `getCurrentPosition` (تایم‌اوت ۱۰s) ⇒
+  لینکِ origin-bearing؛ ردِّ پرمیشن/تایم‌اوت/بی‌پشتیبانی/مختصاتِ خراب ⇒
+  توستِ فارسی («دسترسی به موقعیت دریافت نشد — مبدأ را روی نقشهٔ نشان
+  خودتان انتخاب کنید») + فالبکِ فقط-مقصد تا کاربر خودش مبدأ را روی
+  نقشهٔ نشان بزند (تأییدِ صاحبِ کسب‌وکار)؛ `ArticleBlocksRenderer` از
+  useI18n داخلی خالی شد (دکمه خودش i18n/toast را می‌خواند).
+- **پیکِ اسکن** (`ScanRouteMap`): prop جدیدِ `courierPosition` از
+  trackingِ خودِ صفحه — مبدأِ لینکِ مسیر = موقعیتِ زندهٔ پیک، فالبک =
+  رستوران، نبودِ هیچ‌کدام ⇒ لینکِ فقط-مقصد؛ بدونِ پرمیشنِ جدیدِ GPS.
+- **صفحهٔ سفارشِ مشتری** (`CourierTrackingMap`): لینکِ «مسیر تا مقصد» تا
+  نخستین موقعیتِ server-fedِ پیک پنهان است (مسیرِ «مشتری تا خانهٔ خودش»
+  بی‌معناست)؛ بعد از آن origin-bearing: پیک → آدرسِ مشتری.
+
+### ۵) تست‌ها
+
+- `test-payment-safety.ts`: **۶ سناریوی انقضایِ جدید** (سوئیت حالا **۴۲**
+  بندِ سبز): جاروی انقضا (CANCELED + بازگشتِ دقیقِ هولد) · رِتریِ خارج
+  از پنجره (۴۰۹ + انقضای درجا) · استعلامِ «پرداخت‌شده» ⇒ settle (نه
+  انقضا) · سفارشِ داخلِ پنجره دست‌نخورده · خواهرها `expiry-sibling` ·
+  قطعیِ شبکه در استعلام ⇒ تعویق به دورِ بعد (نه شکستِ کور).
+- `test-payment-money-path.ts`: myOrdersPage لغویِ هرگز-پرداخت‌نشده را
+  نمی‌شمارد (total ۴→۳)؛ ادعاهای پولی (totalSpent) دست‌نخورده ·
+  `test-financial-reconcile.ts`: ردیفِ CSVِ PENDING_PAYMENT حذف شد
+  (orders ۶→۵).
+- `test-admin-products-order.ts` (جدید — PG واقعی): toggle/ویرایش ⇒
+  «آخرین تغییر، اولِ صف»، صدرِ صفحهٔ ۱.
+- `test-article-route.tsx` (جدید — وب): GPS موفق ⇒ لینکِ nshn.ir با
+  origin؛ رد/تایم‌اوت/مختصاتِ خراب ⇒ توست + فالبکِ فقط-مقصد ·
+  `test-article-rendering.tsx`: «مشاهده روی نقشه» حذف شد، دکمهٔ مسیریابی
+  رندر می‌شود · `test-maps-client.tsx`: ScanRouteMap (بدونِ GPS ⇒ مبدأِ
+  رستوران؛ با GPS ⇒ مبدأِ خودِ پیک) + CourierTrackingMap (پنهان تا
+  نخستین موقعیت، بعدش origin-bearing).
+- سیم‌کشی: `db:test:products-order` (apps/api/package.json) ·
+  `test-article-route` دُمِ `test:articles` (apps/web/package.json).
+
+### ۶) دروازه‌ها
+
+- tsc×3 (api/web/shared) = **۰**
+- biome web = **592/10/6 — دقیقاً Δ0 نسبت به بیسِ stage-96** (فایل‌های
+  دست‌خورده صفرِ تازه؛ خطاهای باقی‌مانده در touched files همگی
+  pre-existing)
+- سوئیت‌های PG ای‌پی‌آی: **۲۱/۲۱ سبز** — شامل payment-safety **۴۲** (با
+  ۶ سناریوی انقضا)
+- وب: **۲۴/۲۴ اسکریپتِ test:\*** سبز (شامل articles با test-article-routeِ
+  جدید و maps)
+
+### ۷) دیپلوی
+
+- **مایگریشن: هیچ** — `docker compose build api web` سپس
+  `docker compose up -d --no-deps api web`.
+- **env (اختیاری)**: `PENDING_ORDER_EXPIRY_MINUTES` — پیش‌فرض ۱۰؛ فقط
+  اگر پنجرهٔ دیگری می‌خواهید تنظیمش کنید (هر دو .env.example مستند شد).
+- **اولین جارو پس از استقرار**: تورِ انقضا همهٔ سفارش‌هایِ قدیمیِ
+  گیرکرده در PENDING_PAYMENT را می‌بندد (همان استعلامِ زنده؛ در صورتِ
+  لزوم لغو + آزادسازیِ رزروها) — **پاک‌سازیِ مورد انتظارِ انبارِ قدیمی**،
+  نه خطا.
+- راستی‌آزمایی پس از استقرار: ثبتِ سفارش تا درگاه ⇒ شمارش‌معکوس روی
+  صفحهٔ سفارش و سرِ انتهای پنجره پیامِ «سبد خرید محفوظ است» · ادمین ⇒
+  ویرایش/تغییرِ وضعیت یک محصول ⇒ صدرِ صفحهٔ ۱ · مقاله با بلوک موقعیت ⇒
+  تک‌دکمهٔ GPS «مسیریابی از موقعیت من» · اسکنِ پیک (استریمِ روشن) ⇒
+  لینکِ مسیرِ origin-bearing از موقعیتِ خودِ پیک.
+
+### فایل‌ها (۳۴)
+
+- **جدید (۳)**:
+  `apps/web/src/components/site/articles/ArticleRouteButton.tsx` ·
+  `apps/api/scripts/test-admin-products-order.ts` ·
+  `apps/web/scripts/test-article-route.tsx`
+- **بک (۹)**: `payment.service.ts` · `payment-timeout.job.ts` ·
+  `infra/config/env.ts` · `payment.routes.ts` · `order.service.ts` ·
+  `menu.service.ts` · `admin.service.ts` · `report.service.ts` ·
+  `report-query.service.ts`
+- **وب (۱۰)**: `PendingPaymentBox.tsx` · `CourierTrackingMap.tsx` ·
+  `ScanRouteMap.tsx` · `ArticleBlocksRenderer.tsx` · `neshanLinks.ts` ·
+  `useAdminProductsPage.ts` · `routes/admin/products/index.tsx` ·
+  `routes/courier/scan/$orderId.tsx` · `i18n/fa.ts` · `i18n/ar.ts`
+- **اشتراکی (۱)**: `packages/shared/src/contracts.ts`
+- **تست‌ها (۵)**: `test-payment-safety.ts` · `test-payment-money-path.ts`
+  · `test-financial-reconcile.ts` · `test-article-rendering.tsx` ·
+  `test-maps-client.tsx`
+- **کانفیگ (۴)**: `.env.example` · `apps/api/.env.example` ·
+  `apps/api/package.json` · `apps/web/package.json`
+- **مستندات (۲)**: `docs/pending-payment-retries.md` · `docs/REFERENCE.md`

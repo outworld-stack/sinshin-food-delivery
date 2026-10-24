@@ -190,6 +190,8 @@ export class AppConfig {
   readonly sms: SmsConfig
   readonly otp: OtpConfig
   readonly gateway: GatewayConfig
+  /** stage-98 — پنجرهٔ پرداخت (دقیقه): عمرِ سفارشِ PENDING_PAYMENT تا انقضای قطعی */
+  readonly pendingOrderExpiryMinutes: number
   readonly device: DeviceConfig
   readonly healthAlert: HealthAlertConfig
 
@@ -321,6 +323,12 @@ export class AppConfig {
       mellatUserPassword: str('MELLAT_PASSWORD'),
       timeoutMs: num('PAYMENT_TIMEOUT_MS', 15_000),
     }
+
+    // stage-98 — پنجرهٔ پرداخت: سفارشِ PENDING_PAYMENT بعد از این عمر (دقیقه)
+    // در جابِ انقضا قطعی می‌شود (استعلام زندهٔ تک‌بار ⇒ تسویه یا لغو + آزادسازیِ
+    // رزروها). توکنِ بانک ۱۰–۱۵ دقیقه است؛ پیش‌فرضِ ۱۰ دقیقه خواستهٔ صاحبِ
+    // کسب‌وکار است («سفارشات در انتظار زیر ۱۰ دقیقه حذف بشن»).
+    this.pendingOrderExpiryMinutes = num('PENDING_ORDER_EXPIRY_MINUTES', 10)
 
     // stage-60 — سقف شماره‌های هر دستگاه؛ الگوی Number(x) || default عددِ صفر
     // را می‌بلعد، پس جداگانه parse می‌شود. stage-62 — پیش‌فرض ۱:

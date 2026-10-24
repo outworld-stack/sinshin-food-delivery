@@ -13,7 +13,7 @@
 // ═════════════════════════════════════════════════════════════
 
 // src/domain/admin/admin.service.ts
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
 import {
@@ -57,7 +57,9 @@ export class AdminService {
                 db.select({
                     count: sql<number>`count(*)::int`,
                 }).from(orders)
-                    .where(ne(orders.status, 'CANCELED')).then((r) => r[0] ?? { count: 0 }),
+                    // stage-98 — سفارشِ در-انتظارِ پرداخت «سفارش» حساب نمی‌شود
+                    // (خواستهٔ صاحبِ کسب‌وکار: پنجرهٔ ۱۰ دقیقه‌ای)؛ لغو‌شده هم نیست.
+                    .where(notInArray(orders.status, ['CANCELED', 'PENDING_PAYMENT'])).then((r) => r[0] ?? { count: 0 }),
                 // totalRevenue جدا:
                 // رارد C1 — ::bigint (بدون سقف)؛ Number() چون Bun.sql مقدار bigint
                 // را string برمی‌گرداند. الگو: live.service.ts خط 121.
@@ -89,7 +91,8 @@ export class AdminService {
                 // round-16 — داخل همان Promise.all (قبلاً پشتِ آن، موازی نمی‌شد)
                 db.select({ date: orders.createdAt, value: orders.totalAmount })
                     .from(orders)
-                    .where(and(gte(orders.createdAt, currentPeriodStart()), ne(orders.status, 'CANCELED'))),
+                    // stage-98 — چارت هم سفارشِ هرگز-تسویه‌نشده را نمی‌شمارد
+                    .where(and(gte(orders.createdAt, currentPeriodStart()), notInArray(orders.status, ['CANCELED', 'PENDING_PAYMENT']))),
             ])
 
         // stage-72 (P1-۳) — دستگاهِ واقعیِ آخرین کاربران (قبلاً 'web' هاردکد بود)؛
@@ -468,10 +471,12 @@ export class AdminService {
         // رارد ۴۸ (اسکن C3) — چارت فقط بازه‌ی جاری را می‌خواند (سند charts)؛
         // بدون این کران، کل تاریخچه‌ی سفارش کاربر برای نموداری که داده‌های
         // قدیمی‌تر را دور می‌ریخت واکشی می‌شد (کاربر ۸۰۰ سفارشی = ۸۰۰ ردیف).
+        // stage-98 — هم‌تراز با چارت داشبورد: سفارشِ لغو/در-انتظار شمرده نمی‌شود.
         const chartOrders = await db
             .select({ date: orders.createdAt, value: orders.totalAmount })
             .from(orders)
-            .where(and(eq(orders.userId, uid), gte(orders.createdAt, currentPeriodStart())))
+            .where(and(eq(orders.userId, uid), gte(orders.createdAt, currentPeriodStart()),
+                notInArray(orders.status, ['CANCELED', 'PENDING_PAYMENT'])))
 
         return {
             id: uid,

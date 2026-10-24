@@ -444,7 +444,7 @@ export class ReportQueryService {
         const ordersAgg = this.deps.db
             .select({
                 userId: orders.userId,
-                ordersCount: sql<number>`count(*) filter (where ${orders.status} <> 'CANCELED')::int`.as('orders_count'),
+                ordersCount: sql<number>`count(*) filter (where ${orders.status} not in ('CANCELED', 'PENDING_PAYMENT'))::int`.as('orders_count'),
                 totalSpent: sql<number>`coalesce(sum(${orders.totalAmount}) filter (where ${orders.paymentStatus} = 'SUCCESS' and ${orders.status} <> 'CANCELED'), 0)::bigint`.as('total_spent'),
             })
             .from(orders)

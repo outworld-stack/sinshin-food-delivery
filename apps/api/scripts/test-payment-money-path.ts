@@ -185,10 +185,13 @@ async function main(): Promise<void> {
   console.log('\n══ A) «مجموع پرداخت‌ها» — myOrdersPage ══\n')
   const page = await orderService.myOrdersPage(uid, { page: 1, limit: 10, sort: 'newest' })
   ok('A1: totalSpent فقط سفارشِ پرداخت‌شده (۲۵۰٬۰۰۰)', page.totalSpent === 250_000, `got=${page.totalSpent}`)
-  ok('A2: total همه‌ی سفارش‌ها (۴)', page.total === 4, `got=${page.total}`)
+  // stage-98 — سفارشِ «هرگز-پرداخت‌نشده» (status='CANCELED' + paymentStatus='FAILED':
+  // انقضای خودکارِ PENDING یا شکستِ قطعیِ درگاه) از لیستِ سفارشاتِ خودِ مشتری
+  // پنهان می‌شود؛ PENDING_PAYMENTِ زنده، PAID و CANCELED/REFUNDED می‌مانند → ۳.
+  ok('A2: total سفارش‌هایِ واقعی (۳) — لغویِ هرگز-پرداخت‌نشده حذف (stage-98)', page.total === 3, `got=${page.total}`)
   ok(
-    'A3: لیست سفارشات همه را نشان می‌دهد (ردیف کامل)',
-    page.orders.length === 4,
+    'A3: لیست سفارشات: هرگز-پرداخت‌نشده غایب است (stage-98)',
+    page.orders.length === 3,
     `got=${page.orders.length}`,
   )
 

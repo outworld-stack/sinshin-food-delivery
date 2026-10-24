@@ -49,3 +49,20 @@ export function neshanViewUrl(lat: number, lng: number, zoom = 15): string {
 export function neshanRouteUrl(lat: number, lng: number): string {
 	return `https://neshan.org/maps/routing/car/destination/${fmtCoord(lat)},${fmtCoord(lng)}`
 }
+
+/**
+ * stage-98 — لینکِ رسمیِ «مسیریابی با مبدأِ صریح» — nshn.ir (هوشمند):
+ * اپِ نصب‌شدهٔ نشان را باز می‌کند وگرنه به وبِ کامل 301 می‌شود
+ * (راستی‌آزماییِ زندهٔ استیج-۹۷: → neshan.org/maps/routing/d/origin/…/destination/…).
+ * vehicle=d (ماشین) — پیش‌فرضِ رسمیِ خودِ نشان؛ مبدا/مقصد = مختصاتِ ۶رقمی.
+ * منبع: پلتفرم رسمی نشان (بخش دیپ‌لینک FAQ) — «مبدأ خودکار» در داکیومنت
+ * وجود ندارد؛ پس سایت باید GPS بخواند و مبدأ را صریح در لینک بگذارد.
+ */
+export function neshanRouteFromUrl(
+	oLat: number,
+	oLng: number,
+	dLat: number,
+	dLng: number,
+): string {
+	return `https://nshn.ir?origin=${fmtCoord(oLat)},${fmtCoord(oLng)}&destination=${fmtCoord(dLat)},${fmtCoord(dLng)}&vehicle=d`
+}

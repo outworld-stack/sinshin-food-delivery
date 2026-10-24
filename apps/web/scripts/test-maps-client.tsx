@@ -8,28 +8,28 @@ type Cell = { value?: any; deps?: unknown[]; cleanup?: () => void }
 type Host = { cells: Cell[]; cursor: number; effects: Array<() => void>; dirty: boolean; tree?: unknown; render(): void }
 let host: Host
 mock.module('react', () => ({
-	...react, memo: (component: unknown) => component,
-	useState(initial: any) {
-		const owner = host, i = owner.cursor++
-		const cell = owner.cells[i] ??= { value: typeof initial === 'function' ? initial() : initial }
-		return [cell.value, (next: any) => {
-			const value = typeof next === 'function' ? next(cell.value) : next
-			if (!Object.is(value, cell.value)) { cell.value = value; owner.dirty = true }
-		}]
-	},
-	useRef(initial: unknown) { const i = host.cursor++; return (host.cells[i] ??= { value: { current: initial } }).value },
-	useCallback: (fn: unknown) => fn,
-	useMemo(compute: () => unknown, deps: unknown[]) {
-		const cell = host.cells[host.cursor++] ??= {}
-		if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) { cell.value = compute(); cell.deps = deps }
-		return cell.value
-	},
-	useEffect(effect: () => (() => void) | void, deps: unknown[]) {
-		const cell = host.cells[host.cursor++] ??= {}
-		if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) {
-			host.effects.push(() => { cell.cleanup?.(); cell.deps = deps; cell.cleanup = effect() || undefined })
-		}
-	},
+        ...react, memo: (component: unknown) => component,
+        useState(initial: any) {
+                const owner = host, i = owner.cursor++
+                const cell = owner.cells[i] ??= { value: typeof initial === 'function' ? initial() : initial }
+                return [cell.value, (next: any) => {
+                        const value = typeof next === 'function' ? next(cell.value) : next
+                        if (!Object.is(value, cell.value)) { cell.value = value; owner.dirty = true }
+                }]
+        },
+        useRef(initial: unknown) { const i = host.cursor++; return (host.cells[i] ??= { value: { current: initial } }).value },
+        useCallback: (fn: unknown) => fn,
+        useMemo(compute: () => unknown, deps: unknown[]) {
+                const cell = host.cells[host.cursor++] ??= {}
+                if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) { cell.value = compute(); cell.deps = deps }
+                return cell.value
+        },
+        useEffect(effect: () => (() => void) | void, deps: unknown[]) {
+                const cell = host.cells[host.cursor++] ??= {}
+                if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) {
+                        host.effects.push(() => { cell.cleanup?.(); cell.deps = deps; cell.cleanup = effect() || undefined })
+                }
+        },
 }))
 const translation = { t: new Proxy({}, { get: (_target, key) => String(key) }), apiError: (message: string) => message }
 mock.module('#/i18n', () => ({ useI18n: () => translation, useI18nSafe: () => translation }))
@@ -37,7 +37,7 @@ mock.module('#/lib/api', () => ({ apiBase: () => '/api' }))
 mock.module('#/lib/auth-session', () => ({ getAccessToken: () => 'test-token' }))
 const requests: Array<{ url: string; signal: AbortSignal; resolve(body: unknown): void }> = []
 mock.module('#/lib/api-fetch', () => ({ fetchWithTimeout: (url: string, init: RequestInit) => new Promise((resolve) => {
-	requests.push({ url, signal: init.signal!, resolve: (body) => resolve(new Response(JSON.stringify(body))) })
+        requests.push({ url, signal: init.signal!, resolve: (body) => resolve(new Response(JSON.stringify(body))) })
 }) }))
 
 let time = 0, nextTimer = 0
@@ -46,27 +46,27 @@ globalThis.setTimeout = ((callback: () => void, delay = 0) => { const id = ++nex
 globalThis.clearTimeout = ((id: number) => { timers.delete(id) }) as any
 const maps: FakeMap[] = []
 class FakeMap {
-	loaded = false; removed = false; markers = new Set<FakeMarker>(); events = new Map<string, (event: any) => void>()
-	sources = new Map<string, { data: any; setData(data: unknown): void }>()
-	bounds: unknown; jumps: unknown[] = []
-	constructor(readonly options: any) { maps.push(this) }
-	on(event: string, callback: (event: any) => void) { this.events.set(event, callback) }
-	fire(event: string, data: unknown = {}) { if (event === 'load') this.loaded = true; this.events.get(event)?.(data) }
-	remove() { this.removed = true; this.markers.clear() }
-	addSource(id: string, spec: any) {
-		assert(this.loaded, 'route sources must wait for map style load')
-		this.sources.set(id, { data: spec.data, setData(data) { this.data = data } })
-	}
-	getSource(id: string) { return this.sources.get(id) }
-	addLayer() { assert(this.loaded) }
-	fitBounds(bounds: unknown) { this.bounds = bounds }
-	jumpTo(options: unknown) { this.jumps.push(options) }
+        loaded = false; removed = false; markers = new Set<FakeMarker>(); events = new Map<string, (event: any) => void>()
+        sources = new Map<string, { data: any; setData(data: unknown): void }>()
+        bounds: unknown; jumps: unknown[] = []
+        constructor(readonly options: any) { maps.push(this) }
+        on(event: string, callback: (event: any) => void) { this.events.set(event, callback) }
+        fire(event: string, data: unknown = {}) { if (event === 'load') this.loaded = true; this.events.get(event)?.(data) }
+        remove() { this.removed = true; this.markers.clear() }
+        addSource(id: string, spec: any) {
+                assert(this.loaded, 'route sources must wait for map style load')
+                this.sources.set(id, { data: spec.data, setData(data) { this.data = data } })
+        }
+        getSource(id: string) { return this.sources.get(id) }
+        addLayer() { assert(this.loaded) }
+        fitBounds(bounds: unknown) { this.bounds = bounds }
+        jumpTo(options: unknown) { this.jumps.push(options) }
 }
 class FakeMarker {
-	point: any; map?: FakeMap
-	setLngLat(point: unknown) { this.point = point; return this }
-	addTo(map: FakeMap) { this.map = map; map.markers.add(this); return this }
-	remove() { this.map?.markers.delete(this) }
+        point: any; map?: FakeMap
+        setLngLat(point: unknown) { this.point = point; return this }
+        addTo(map: FakeMap) { this.map = map; map.markers.add(this); return this }
+        remove() { this.map?.markers.delete(this) }
 }
 const sdk = { Map: FakeMap, Marker: FakeMarker }
 let sdkLoader = () => Promise.resolve(sdk)
@@ -74,32 +74,32 @@ mock.module('#/lib/neshan-sdk', () => ({ NESHAN_KEY: 'test-key', NESHAN_STYLE: '
 Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({ style: {}, innerHTML: '', textContent: '' }) } })
 type Node = { props: Record<string, any>; type: any }
 function nodes(value: any): Node[] {
-	if (Array.isArray(value)) return value.flatMap(nodes)
-	if (!value?.props) return []
-	return [value, ...nodes(value.props.children)]
+        if (Array.isArray(value)) return value.flatMap(nodes)
+        if (!value?.props) return []
+        return [value, ...nodes(value.props.children)]
 }
 function createHost(component: any, getProps: () => unknown): Host {
-	const owner: Host = { cells: [], cursor: 0, effects: [], dirty: false, render() {
-		host = owner; owner.cursor = 0; owner.dirty = false
-		owner.tree = component(getProps())
-		for (const node of nodes(owner.tree)) if (node.props.ref) node.props.ref.current ??= {}
-		const effects = owner.effects.splice(0)
-		for (const effect of effects) effect()
-	} }
-	owner.render()
-	return owner
+        const owner: Host = { cells: [], cursor: 0, effects: [], dirty: false, render() {
+                host = owner; owner.cursor = 0; owner.dirty = false
+                owner.tree = component(getProps())
+                for (const node of nodes(owner.tree)) if (node.props.ref) node.props.ref.current ??= {}
+                const effects = owner.effects.splice(0)
+                for (const effect of effects) effect()
+        } }
+        owner.render()
+        return owner
 }
 async function flush(owner: Host) {
-	for (let i = 0; i < 12; i++) { await Promise.resolve(); if (owner.dirty) owner.render() }
+        for (let i = 0; i < 12; i++) { await Promise.resolve(); if (owner.dirty) owner.render() }
 }
 async function advance(ms: number, owner: Host) {
-	const end = time + ms
-	while (true) {
-		const next = [...timers].filter(([, timer]) => timer.due <= end).sort((a, b) => a[1].due - b[1].due)[0]
-		if (!next) break
-		time = next[1].due; timers.delete(next[0]); next[1].callback(); await flush(owner)
-	}
-	time = end; await flush(owner)
+        const end = time + ms
+        while (true) {
+                const next = [...timers].filter(([, timer]) => timer.due <= end).sort((a, b) => a[1].due - b[1].due)[0]
+                if (!next) break
+                time = next[1].due; timers.delete(next[0]); next[1].callback(); await flush(owner)
+        }
+        time = end; await flush(owner)
 }
 function unmount(owner: Host) { for (const cell of owner.cells) cell?.cleanup?.() }
 const { MapPicker } = await import('../src/components/shared/MapPicker')
@@ -156,7 +156,24 @@ assert.deepEqual(scanMap.sources.get('scan-route')!.data.geometry.coordinates, [
 scan.render(); await flush(scan)
 assert.equal(maps.length, beforeScan + 1, 'equivalent new coordinate objects do not recreate WebGL maps')
 assert.equal(nodes(scan.tree).filter((node) => node.type === 'a').length, 2, 'navigation links remain available with an embedded map')
+// stage-98 — بدونِ GPS زنده، مبدأِ لینکِ مسیر = رستوران (فقط-مقصد دیگر نیست)
+const scanLinks = nodes(scan.tree).filter((node) => node.type === 'a').map((node) => node.props.href)
+assert(
+        scanLinks.includes('https://nshn.ir?origin=37.000000,49.000000&destination=38.000000,50.000000&vehicle=d'),
+        'stage-98 — route link carries an explicit restaurant origin in the official nshn.ir format',
+)
 unmount(scan)
+
+// stage-98 — با موقعیتِ زندهٔ پیک، مبدأ خودِ پیک است (بدونِ نقشه‌ی جدید —
+// لینک در رندر محاسبه می‌شود؛ نقشه با هر تیکِ GPS بازسازی نمی‌شود)
+const scanWithCourier = createHost(ScanRouteMap, () => ({ origin: { lat: 37, lng: 49 }, destination: { lat: 38, lng: 50 }, polyline: '_', courierPosition: { lat: 37.5, lng: 49.5 } }))
+await flush(scanWithCourier)
+const courierScanLinks = nodes(scanWithCourier.tree).filter((node) => node.type === 'a').map((node) => node.props.href)
+assert(
+        courierScanLinks.includes('https://nshn.ir?origin=37.500000,49.500000&destination=38.000000,50.000000&vehicle=d'),
+        'stage-98 — with live courier GPS the route origin is the courier itself',
+)
+unmount(scanWithCourier)
 
 let courier: { lat: number; lng: number } | null = null
 let destination: { lat: number; lng: number } | null = null
@@ -168,10 +185,26 @@ destination = { lat: 38, lng: 50 }; tracking.render(); await flush(tracking)
 const trackingMap = maps.at(-1)!
 trackingMap.fire('load'); await flush(tracking)
 assert.equal(trackingMap.markers.size, 1, 'waiting for GPS renders only the known destination')
+// stage-98 — تا نخستین موقعیتِ پیک، لینکِ «مسیریابی» معنا ندارد (مسیرِ مشتری
+// تا خانه‌ی خودش!) و فقط «مشاهدهٔ مقصد» هست.
+assert.equal(
+        nodes(tracking.tree).filter((node) => node.type === 'a').length, 1,
+        'stage-98 — before the first courier position only the view link is available',
+)
 const beforeRoute = requests.length
 courier = { lat: 37, lng: 49 }; tracking.render(); await flush(tracking)
 assert.equal(requests.length, beforeRoute + 1)
 assert.equal(trackingMap.markers.size, 2)
+// stage-98 — با رسیدنِ موقعیتِ پیک، لینکِ مسیر با مبدأِ صریح = خودِ پیک ظاهر می‌شود
+// (server-fed — بدونِ GPS در دستگاهِ مشتری).
+assert.deepEqual(
+        nodes(tracking.tree).filter((node) => node.type === 'a').map((node) => node.props.href),
+        [
+                'https://neshan.org/maps/@38.000000,50.000000,15z',
+                'https://nshn.ir?origin=37.000000,49.000000&destination=38.000000,50.000000&vehicle=d',
+        ],
+        'stage-98 — once the courier is live, the route link is origin-bearing (courier → customer address)',
+)
 requests.at(-1)!.resolve({ available: true, polyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@' }); await flush(tracking)
 for (let i = 0; i < 10; i++) { courier = { lat: 37 + i / 100, lng: 49 }; tracking.render(); await flush(tracking) }
 assert.equal(requests.length, beforeRoute + 1, 'GPS updates never bypass the route throttle')
@@ -202,9 +235,9 @@ unmount(loadingTracking)
 let intersect!: (entries: { isIntersecting: boolean }[]) => void
 let disconnected = false
 Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: class {
-	constructor(callback: typeof intersect) { intersect = callback }
-	observe() {}
-	disconnect() { disconnected = true }
+        constructor(callback: typeof intersect) { intersect = callback }
+        observe() {}
+        disconnect() { disconnected = true }
 } })
 const beforeArticle = maps.length
 const article = createHost(ArticleLocationMap, () => ({ lat: 37, lng: 49 }))
@@ -223,8 +256,8 @@ let mutationOptions: any
 let isPending = false
 const submitted: any[] = [], toasts: string[] = []
 mock.module('@tanstack/react-query', () => ({
-	useQueryClient: () => ({ invalidateQueries() {} }),
-	useMutation: (options: any) => { mutationOptions = options; return { isPending, mutate: (data: unknown) => submitted.push(data) } },
+        useQueryClient: () => ({ invalidateQueries() {} }),
+        useMutation: (options: any) => { mutationOptions = options; return { isPending, mutate: (data: unknown) => submitted.push(data) } },
 }))
 mock.module('#/server/user', () => ({ addUserAddress() {}, updateUserAddress() {} }))
 mock.module('#/stores/toastStore', () => ({ useToastStore: (select: any) => select({ showToast: (message: string) => toasts.push(message) }) }))
@@ -243,7 +276,7 @@ assert.deepEqual(submitted.at(-1), { id: 'address-a', title: 'Home', address: 'E
 const manualElement = nodes(broken.tree).find((node) => node.type.name === 'ManualCoordsFallback')!
 const addressPickerProps = () => nodes(addressForm.tree).find((node) => node.type === MapPicker)!.props
 const manualAddress = createHost(manualElement.type, () => ({
-	value: addressPickerProps().value, onChangeRef: { current: addressPickerProps().onChange }, onValidityChange: addressPickerProps().onValidityChange,
+        value: addressPickerProps().value, onChangeRef: { current: addressPickerProps().onChange }, onValidityChange: addressPickerProps().onValidityChange,
 }))
 await flush(manualAddress)
 const manualInputs = () => nodes(manualAddress.tree).filter((node) => node.type === 'input')
