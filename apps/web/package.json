@@ -32,12 +32,12 @@
     "test:pwa-worker": "bun scripts/test-pwa-worker.ts",
     "test:notification-cache": "bun scripts/test-notification-cache.ts",
     "test:checkout-client": "bun scripts/test-checkout-client.tsx",
-    "test:payment-retry": "bun scripts/test-payment-target.ts && bun scripts/test-payment-retry-client.tsx",
+    "test:payment-retry": "bun scripts/test-payment-target.ts && bun scripts/test-payment-retry-client.tsx && bun scripts/test-payment-window-client.tsx",
     "test:checkout-intent": "bun scripts/test-checkout-intent.ts",
     "test:referral-client": "bun scripts/test-referral-client.ts",
     "test:wallet-client": "bun scripts/test-wallet-client.tsx",
     "test:order-money-cache": "bun scripts/test-order-money-cache.ts",
-    "test:products": "bun scripts/test-products-client.tsx",
+    "test:products": "bun scripts/test-products-client.tsx && bun scripts/test-admin-products-client.tsx",
     "test:articles": "bun scripts/test-articles-client.tsx && bun scripts/test-articles-api-client.ts && bun scripts/test-articles-admin.tsx && bun scripts/test-article-rendering.tsx && bun scripts/test-article-route.tsx"
   },
   "dependencies": {

@@ -190,7 +190,7 @@ export class AppConfig {
   readonly sms: SmsConfig
   readonly otp: OtpConfig
   readonly gateway: GatewayConfig
-  /** stage-98 — پنجرهٔ پرداخت (دقیقه): عمرِ سفارشِ PENDING_PAYMENT تا انقضای قطعی */
+  /** Payment initiation window in minutes; expiry still requires PSP verification. */
   readonly pendingOrderExpiryMinutes: number
   readonly device: DeviceConfig
   readonly healthAlert: HealthAlertConfig
@@ -324,11 +324,11 @@ export class AppConfig {
       timeoutMs: num('PAYMENT_TIMEOUT_MS', 15_000),
     }
 
-    // stage-98 — پنجرهٔ پرداخت: سفارشِ PENDING_PAYMENT بعد از این عمر (دقیقه)
-    // در جابِ انقضا قطعی می‌شود (استعلام زندهٔ تک‌بار ⇒ تسویه یا لغو + آزادسازیِ
-    // رزروها). توکنِ بانک ۱۰–۱۵ دقیقه است؛ پیش‌فرضِ ۱۰ دقیقه خواستهٔ صاحبِ
-    // کسب‌وکار است («سفارشات در انتظار زیر ۱۰ دقیقه حذف بشن»).
-    this.pendingOrderExpiryMinutes = num('PENDING_ORDER_EXPIRY_MINUTES', 10)
+    // Invalid durations must not immediately expire orders or disable the
+    // deadline with Infinity. Limit the configurable window to one day.
+    const pendingExpiry = Number(source['PENDING_ORDER_EXPIRY_MINUTES']?.trim())
+    this.pendingOrderExpiryMinutes = Number.isInteger(pendingExpiry) && pendingExpiry >= 1 && pendingExpiry <= 1440
+      ? pendingExpiry : 10
 
     // stage-60 — سقف شماره‌های هر دستگاه؛ الگوی Number(x) || default عددِ صفر
     // را می‌بلعد، پس جداگانه parse می‌شود. stage-62 — پیش‌فرض ۱:

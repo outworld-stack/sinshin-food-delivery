@@ -490,6 +490,8 @@ export interface UserOrder {
   /** stage-98 — ضرب‌الاجلِ پنجرهٔ پرداخت (createdAt + PENDING_ORDER_EXPIRY_MINUTES) —
    * فقط برای status='PENDING_PAYMENT'؛ مبنای شمارش‌معکوسِ باکسِ پرداخت مشتری. */
   pendingExpiresAt?: Date | null
+  /** Server time when the payment window was read; keeps the countdown independent of the device clock. */
+  pendingCheckedAt?: Date | null
   breakdown: OrderBreakdown
   queued: boolean
 }

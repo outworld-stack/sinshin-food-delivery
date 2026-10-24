@@ -29,17 +29,17 @@
  *  • شمارش‌معکوسِ m:ss (ارقام فارسی) از `pendingExpiresAt`ی سرور
  *    (createdAt + PENDING_ORDER_EXPIRY_MINUTES) — نه ساعتِ دستگاهِ
  *    کاربر به‌تنهایی؛ زیرِ یک دقیقه قرمز می‌شود.
- *  • صفر ⇒ حالتِ انقضا: دکمه می‌رود و پیامِ صادقانه می‌آید
- *    («سبد خرید محفوظ است — دوباره سفارش ثبت کنید»)؛ جابِ انقضای سرور
- *    حداکثر ~۶۰ ثانیه بعد ردیف را CANCELED می‌کند و پولینگِ ۳ثانیه‌ایِ
- *    خودِ صفحه باکس را برمی‌چیند (وضعیت لغو/فاکتور جایگزین می‌شود).
+ *  • صفر ⇒ دکمه می‌رود؛ نتیجهٔ پرداخت هنوز باید توسط سرور تأیید شود.
+ *    پولینگِ صفحه نتیجهٔ نهایی را می‌گیرد؛ ساعت به‌تنهایی به معنی لغو نیست.
+ *  • pendingCheckedAt مبنای ساعتِ سرور است؛ گذر زمان در مرورگر با
+ *    performance.now محاسبه می‌شود تا تغییر ساعت دستگاه اثر نگذارد.
  *  • pendingExpiresAt نبود (استقرارِ مخلوطِ قدیم/جدید) ⇒ بدونِ شمارش،
  *    رفتارِ stage-58 — بدونِ شکستگی.
  */
 import { memo, useEffect, useState } from 'react'
 import { CreditCard } from 'reicon-react'
-import { tpl, useI18n } from '#/i18n'
 import { useOrderPaymentRetry } from '#/hooks/dashboard/useOrderPaymentRetry'
+import { tpl, useI18n } from '#/i18n'
 import type { UserOrder } from '#/server/user'
 
 interface PendingPaymentBoxProps {
@@ -49,6 +49,11 @@ interface PendingPaymentBoxProps {
 /** stage-98 — باقی‌ماندهٔ پنجره به ثانیه (برای شمارش‌معکوس) */
 function remainingSeconds(ms: number): number {
 	return Math.max(0, Math.ceil(ms / 1000))
+}
+
+function timestamp(value: Date | null | undefined): number | null {
+	const ms = value ? new Date(value).getTime() : Number.NaN
+	return Number.isFinite(ms) ? ms : null
 }
 
 export const PendingPaymentBox = memo(function PendingPaymentBox({
@@ -69,18 +74,45 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 		}
 	}, [])
 
-	// stage-98 — شمارش‌معکوسِ پنجرهٔ پرداخت: مبنای سروری، تیکِ ۱ثانیه‌ای
-	const deadlineMs = order.pendingExpiresAt
-		? new Date(order.pendingExpiresAt).getTime()
-		: null
-	const [nowMs, setNowMs] = useState(() => Date.now())
+	const deadlineMs = timestamp(order.pendingExpiresAt)
+	const checkedAtMs = timestamp(order.pendingCheckedAt)
+	const orderId = order.id
+	const [countdown, setCountdown] = useState<{
+		orderId: string
+		deadlineMs: number
+		checkedAtMs: number | null
+		remaining: number
+	} | null>(null)
 	useEffect(() => {
 		if (deadlineMs === null) return
-		const timer = setInterval(() => setNowMs(Date.now()), 1000)
+		// Initial SSR/hydration output uses only the serialized server snapshot.
+		// Older API responses fall back to the device clock after hydration.
+		const initialRemaining = deadlineMs - (checkedAtMs ?? Date.now())
+		const startedAt = performance.now()
+		let timer: ReturnType<typeof setInterval> | undefined
+		const tick = () => {
+			const remaining = Math.max(
+				0,
+				initialRemaining - (performance.now() - startedAt),
+			)
+			setCountdown({ orderId, deadlineMs, checkedAtMs, remaining })
+			if (remaining === 0) clearInterval(timer)
+			return remaining
+		}
+		if (tick() > 0) timer = setInterval(tick, 1000)
 		return () => clearInterval(timer)
-	}, [deadlineMs])
-	const expired = deadlineMs !== null && nowMs >= deadlineMs
-	const remaining = deadlineMs !== null ? deadlineMs - nowMs : null
+	}, [orderId, deadlineMs, checkedAtMs])
+	const remaining =
+		deadlineMs === null
+			? null
+			: countdown?.orderId === orderId &&
+					countdown.deadlineMs === deadlineMs &&
+					countdown.checkedAtMs === checkedAtMs
+				? countdown.remaining
+				: checkedAtMs === null
+					? null
+					: Math.max(0, deadlineMs - checkedAtMs)
+	const expired = remaining !== null && remaining <= 0
 	// ارقامِ بومیِ زبانِ فعال (فا/ع) + padding با صفرِ همان بومی — fmt.num
 	// ورودیِ عددی می‌خواهد، پس دو تکه را جدا می‌سازیم: m:ss
 	const clock = (() => {

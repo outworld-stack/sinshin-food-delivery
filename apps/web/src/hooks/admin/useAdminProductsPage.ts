@@ -29,9 +29,11 @@ import { pageField, limitField } from '#/utils/searchSchema'
 // catch: URL دستکاری‌شده با مقدار خراب → پیش‌فرض جایگزین، نه خطای روت
 // (stage-98 — پیش‌فرض ۱۰: خواستهٔ صاحب کسب‌وکار؛ هم‌راستا با بقیهٔ
 // لیست‌های ادمین — سفارشات/پیک‌ها — که از قبل ۱۰ هستند)
+export const adminProductsPageSizes = [10, 20, 50]
 export const adminProductsSearchSchema = z.object({
   page: pageField,
-  limit: limitField(10),
+  // Old bookmarks (limit=5) and unsupported values must agree with the selector.
+  limit: limitField(10).refine((value) => adminProductsPageSizes.includes(value)).catch(10),
   search: searchTextField,
   status: z.string().catch('all').default('all'),
   categoryId: z.string().catch('all').default('all'),
@@ -78,6 +80,12 @@ export function useAdminProductsPage() {
     search: search.search, status: search.status, categoryId: search.categoryId,
   }), enabled: permissions.productsRead })
 
+  // A changed product moves to the first page on the server. Follow it while
+  // preserving the current search/category/status filters and selected size.
+  const handleProductUpdated = useCallback(() => {
+    void navigate({ search: (prev) => ({ ...prev, page: 1 }), replace: true })
+  }, [navigate])
+
   // فعال/غیرفعال کردن — ⬅ NEW: آپدیت اپتیمیستیک با بازگردانی
   // قبلاً: کلیک → انتظار سرور → نامعتبرسازی → رفرش.
   // حالا: کلیک → همان لحظه کلید وضعیت عوض می‌شه → سرور تأیید می‌کنه؛
@@ -118,9 +126,9 @@ export function useAdminProductsPage() {
       showToast('وضعیت محصول تغییر کرد')
       setConfirmToggle(null)
     },
-    onSettled: () => {
+    onSettled: async (_data, error) => {
       // در هر صورت (موفق/ناموفق) با سرور هم‌تراز شو — منبع حقیقت
-      queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
+      const productsRefresh = queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
       // phase-3: وضعیت عمومی محصول عوض شد — منو و جزئیات عمومی هم تازه شوند
       queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
       queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
@@ -130,6 +138,8 @@ export function useAdminProductsPage() {
       // نامعتبر شوند تا رفتارِ دو دکمه از هر منظر «عین همون» باشد.
       queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
       queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
+      await productsRefresh
+      if (!error) handleProductUpdated()
     },
   })
 
@@ -195,6 +205,6 @@ export function useAdminProductsPage() {
     products, total, totalPages, categories,
     handleSearch, handleStatus, handleCategory,
     handlePage, handleLimit,
-    handleRequestToggle, handleConfirmToggle, handleCancelToggle,
+    handleRequestToggle, handleConfirmToggle, handleCancelToggle, handleProductUpdated,
   }
 }

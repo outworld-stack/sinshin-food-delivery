@@ -66,7 +66,7 @@ try {
   const make = async (gateway = 'FAKE', ref: string | null = `receipt-${crypto.randomUUID()}`) => {
     const n = ++sequence
     const [user] = await db.insert(users).values({ phone: `0917${String(n).padStart(7, '0')}` }).returning()
-    const [order] = await db.insert(orders).values({ userId: user!.id, displayId: `ord-paysafe${n}`,
+    const [order] = await db.insert(orders).values({ userId: user!.id, displayId: `ord-p${String(n).padStart(7, '0')}`,
       status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', deliveryType: 'DINE_IN', totalAmount: 100_000,
       breakdown: { foodTotal: 100_000, discount: 0, walletDeduction: 20_000, amountPaidOnline: 80_000,
         deliveryFee: 0, packagingFee: 0, totalAmount: 100_000 },
@@ -460,8 +460,8 @@ try {
     const backdate = async (orderId: typeof orders.$inferSelect.id) =>
       db.update(orders).set({ createdAt: cutoff }).where(eq(orders.id, orderId))
 
-    // ۱) سفارشِ رهاشده (استعلامِ نامشخص) → جابِ انقضا: CANCELED + بازگشتِ هولد
-    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+    // Only a definitive unpaid verdict may cancel and release reservations.
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef })
     const abandoned = await make()
     await backdate(abandoned.order.id)
     const sweep = await service.expirePendingOrders(10)
@@ -505,7 +505,8 @@ try {
     assert.equal((await readPayment(young.payment.id)).status, 'PENDING')
     passed('orders inside the window are untouched by the sweep')
 
-    // ۵) خواهرهای PENDINGِ مانده با برچسبِ expiry-sibling بسته می‌شوند (ضدِ نویزِ R12)
+    // All sibling attempts must be proven unpaid before atomic cancellation.
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef })
     const multi = await make()
     await db.insert(payments).values({ userId: multi.user.id, orderId: multi.order.id,
       gateway: 'FAKE', mode: 'direct', amount: 80_000, gatewayRef: `receipt-${crypto.randomUUID()}` })
@@ -525,10 +526,166 @@ try {
     assert.equal((await readOrder(unreachable.order.id)).status, 'PENDING_PAYMENT')
     assert.equal(await orderService.walletBalance(db, unreachable.user.id), 80_000,
       'a network outage defers the decision — age alone never moves money on an unanswered question')
-    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef })
     await service.expirePendingOrders(10)
     assert.equal((await readOrder(unreachable.order.id)).status, 'CANCELED')
     passed('a verify outage defers expiry to the next sweep instead of blind-failing')
+
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+    const unresolved = await make()
+    await backdate(unresolved.order.id)
+    await assert.rejects(() => service.retryInitiation(unresolved.user.id, unresolved.order.displayId), /هنوز در حال بررسی/)
+    assert.equal((await readOrder(unresolved.order.id)).status, 'PENDING_PAYMENT')
+    assert.equal((await readPayment(unresolved.payment.id)).status, 'PENDING')
+    assert.equal(await orderService.walletBalance(db, unresolved.user.id), 80_000)
+    const [unresolvedFinding] = await db.select().from(reconcileFindings).where(eq(reconcileFindings.entityId, unresolved.payment.id))
+    assert(unresolvedFinding)
+    passed('an indeterminate result after the deadline preserves funds, opens review and never claims cancellation')
+
+    const removed = await make('REMOVEDPSP')
+    await backdate(removed.order.id)
+    await assert.rejects(() => service.retryInitiation(removed.user.id, removed.order.displayId), /هنوز در حال بررسی/)
+    assert.equal((await readPayment(removed.payment.id)).status, 'PENDING')
+    assert.equal(await orderService.walletBalance(db, removed.user.id), 80_000)
+    const tokenOnly = await make('SEP', null)
+    await db.update(payments).set({ metadata: { paymentUrl: 'https://sep.shaparak.ir/api/v1/Payment/PaymentPage?Token=lost-callback' }, callbackUrl: 'https://sinshin.example/callback' }).where(eq(payments.id, tokenOnly.payment.id))
+    await backdate(tokenOnly.order.id)
+    await assert.rejects(() => service.retryInitiation(tokenOnly.user.id, tokenOnly.order.displayId), /هنوز در حال بررسی/)
+    assert.equal((await readPayment(tokenOnly.payment.id)).status, 'PENDING')
+    assert.equal(await orderService.walletBalance(db, tokenOnly.user.id), 80_000)
+    passed('unknown historical gateways and SEP sessions without receipts cannot be expired as unpaid')
+
+    const alreadyCharged = await make()
+    await db.insert(payments).values({ userId: alreadyCharged.user.id, orderId: alreadyCharged.order.id,
+      gateway: 'FAKE', mode: 'direct', amount: 80_000, gatewayRef: 'already-successful', status: 'SUCCESS' })
+    await backdate(alreadyCharged.order.id)
+    verifyHook = async input => ({ success: true, gatewayRef: input.gatewayRef })
+    const beforeDuplicateVerify = verifyCalls
+    await assert.rejects(() => service.retryInitiation(alreadyCharged.user.id, alreadyCharged.order.displayId), /هنوز در حال بررسی/)
+    assert.equal(verifyCalls, beforeDuplicateVerify)
+    assert.equal((await readPayment(alreadyCharged.payment.id)).status, 'PENDING')
+    assert.equal(await orderService.walletBalance(db, alreadyCharged.user.id), 80_000)
+    passed('an expired pending order with an existing success is reviewed before another attempt can settle')
+
+    const adapterOutage = await make('SEP')
+    await backdate(adapterOutage.order.id)
+    fetchHandler = async () => { throw new Error('SEP unavailable') }
+    await assert.rejects(() => service.retryInitiation(adapterOutage.user.id, adapterOutage.order.displayId), /هنوز در حال بررسی/)
+    assert.equal((await readOrder(adapterOutage.order.id)).status, 'PENDING_PAYMENT')
+    assert.equal(await orderService.walletBalance(db, adapterOutage.user.id), 80_000)
+    passed('real adapters that return indeterminate instead of throwing on network errors preserve expired-order funds')
+
+    const mixed = await make()
+    const [mixedSibling] = await db.insert(payments).values({ userId: mixed.user.id, orderId: mixed.order.id,
+      gateway: 'FAKE', mode: 'direct', amount: 80_000, gatewayRef: 'unpaid-sibling', updatedAt: new Date(0) }).returning()
+    await backdate(mixed.order.id)
+    verifyHook = async input => ({ success: false,
+      gatewayRef: input.paymentId === mixedSibling!.id && input.query.state ? 'unpaid-callback-receipt' : input.gatewayRef,
+      indeterminate: input.paymentId !== mixedSibling!.id })
+    await assert.rejects(() => service.retryInitiation(mixed.user.id, mixed.order.displayId), /هنوز در حال بررسی/)
+    await service.reconcilePending(30)
+    assert.equal((await readPayment(mixed.payment.id)).status, 'PENDING')
+    assert.equal((await readPayment(mixedSibling!.id)).status, 'PENDING')
+    assert.equal(await orderService.walletBalance(db, mixed.user.id), 80_000)
+    await service.handleCallback('FAKE', { state: signState(mixedSibling!.id, config.jwtSecret) })
+    assert.equal((await readPayment(mixedSibling!.id)).status, 'FAILED', 'the failure callback retires only its own attempt')
+    assert.equal((await readPayment(mixedSibling!.id)).gatewayRef, 'unpaid-callback-receipt')
+    assert.equal((await readOrder(mixed.order.id)).status, 'PENDING_PAYMENT')
+    assert.equal(await orderService.walletBalance(db, mixed.user.id), 80_000, 'a failure callback cannot release a sibling charge reservation')
+    verifyHook = async input => ({ success: input.paymentId === mixed.payment.id, gatewayRef: input.gatewayRef,
+      indeterminate: input.paymentId !== mixed.payment.id })
+    await assert.rejects(() => service.retryInitiation(mixed.user.id, mixed.order.displayId), /هم‌اکنون پرداخت شد/)
+    assert.equal((await readOrder(mixed.order.id)).status, 'PAID')
+    assert.equal((await readPayment(mixedSibling!.id)).status, 'FAILED')
+    passed('one unpaid sibling cannot cancel an unresolved or successful older charge, including callbacks and the 30-minute pass')
+
+    const failingSiblings = await make()
+    const [otherFailure] = await db.insert(payments).values({ userId: failingSiblings.user.id, orderId: failingSiblings.order.id,
+      gateway: 'FAKE', mode: 'direct', amount: 80_000, gatewayRef: 'other-failure' }).returning()
+    await backdate(failingSiblings.order.id)
+    verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef })
+    await callback(failingSiblings)
+    assert.equal((await readOrder(failingSiblings.order.id)).status, 'PENDING_PAYMENT')
+    await service.handleCallback('FAKE', { state: signState(otherFailure!.id, config.jwtSecret) })
+    assert.equal((await readOrder(failingSiblings.order.id)).status, 'CANCELED')
+    assert.equal(await orderService.walletBalance(db, failingSiblings.user.id), 100_000)
+    await callback(failingSiblings)
+    assert.equal(await orderService.walletBalance(db, failingSiblings.user.id), 100_000)
+    passed('only the last definitive sibling failure cancels and returns the wallet hold exactly once')
+
+    // Network verification precedes transaction locks; changed receipts must
+    // invalidate the entire cancellation snapshot, not just the newest row.
+    const changed = await make()
+    const [changedSibling] = await db.insert(payments).values({ userId: changed.user.id, orderId: changed.order.id,
+      gateway: 'FAKE', mode: 'direct', amount: 80_000, gatewayRef: 'checked-sibling' }).returning()
+    await backdate(changed.order.id)
+    verifyHook = async input => {
+      if (input.paymentId === changedSibling!.id) {
+        await db.update(payments).set({ gatewayRef: 'callback-new-receipt', updatedAt: new Date() }).where(eq(payments.id, changed.payment.id))
+      }
+      return { success: false, gatewayRef: input.gatewayRef }
+    }
+    await assert.rejects(() => service.retryInitiation(changed.user.id, changed.order.displayId), /استعلام جدید لازم/)
+    assert.equal((await readOrder(changed.order.id)).status, 'PENDING_PAYMENT')
+    assert.equal((await readPayment(changedSibling!.id)).status, 'PENDING')
+    assert.equal(await orderService.walletBalance(db, changed.user.id), 80_000)
+    passed('expiry rechecks every verified sibling atomically when a concurrent callback changes a receipt')
+
+    const initInFlight = await make('FAKE', null)
+    const initEntered = gate(), initResume = gate()
+    initHook = async () => { initEntered.release(); await initResume.promise }
+    const slowInit = service.initiate(initInFlight.payment.id, 'FAKE', { displayId: initInFlight.order.displayId, amount: 80_000 })
+    await initEntered.promise
+    const realNow = Date.now
+    Date.now = () => realNow() + 11 * 60_000
+    try {
+      verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef, indeterminate: true })
+      await assert.rejects(() => service.retryInitiation(initInFlight.user.id, initInFlight.order.displayId), /هنوز در حال بررسی/)
+      assert.equal((await readPayment(initInFlight.payment.id)).status, 'PENDING')
+      initResume.release()
+      await assert.rejects(() => slowInit, /مهلت شروع پرداخت/)
+      assert((await readPayment(initInFlight.payment.id)).gatewayRef, 'the completed initialization remains available for reconciliation')
+    } finally {
+      Date.now = realNow
+      initResume.release()
+      initHook = async () => undefined
+    }
+    passed('in-flight initiation preserves funds and cannot return a payment URL after the deadline')
+
+    const neverStarted = await make('FAKE', null)
+    await backdate(neverStarted.order.id)
+    const beforeExpiredInit = initCalls
+    await assert.rejects(() => service.initiate(neverStarted.payment.id, 'FAKE', { displayId: neverStarted.order.displayId, amount: 80_000 }), /مهلت شروع پرداخت/)
+    await assert.rejects(() => service.retryInitiation(neverStarted.user.id, neverStarted.order.displayId), /سفارش لغو شد/)
+    assert.equal(initCalls, beforeExpiredInit)
+    assert.equal(await orderService.walletBalance(db, neverStarted.user.id), 100_000)
+    passed('a never-started order expires safely and cannot initialize a payment after its deadline')
+
+    const crossing = await make()
+    await db.update(payments).set({ metadata: { paymentUrl: 'https://example.test/saved' } }).where(eq(payments.id, crossing.payment.id))
+    verifyHook = async input => {
+      await backdate(crossing.order.id)
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+    }
+    await assert.rejects(() => service.retryInitiation(crossing.user.id, crossing.order.displayId), /مهلت شروع پرداخت/)
+    assert.equal((await readPayment(crossing.payment.id)).status, 'PENDING')
+    passed('a retry whose verification crosses the deadline cannot resume a session')
+
+    const replay = await make()
+    await db.update(payments).set({ metadata: { paymentUrl: 'https://example.test/replay' } }).where(eq(payments.id, replay.payment.id))
+    await backdate(replay.order.id)
+    assert.equal(await service.paymentReplayState(replay.user.id, replay.order.displayId, 'https://example.test/replay'), 'stale')
+    const longerConfig = new AppConfig({ DATABASE_URL: target.toString(), PENDING_ORDER_EXPIRY_MINUTES: '20' })
+    const longerService = new PaymentService({ db, config: longerConfig, orders: orderService, hub: {} as never, notifications: {} as never })
+    assert.equal(await longerService.paymentReplayState(replay.user.id, replay.order.displayId, 'https://example.test/replay'), 'fresh')
+    const dto = await orderService.byDisplayId(replay.user.id, replay.order.displayId)
+    assert.equal(dto.pendingExpiresAt!.getTime(), cutoff.getTime() + config.pendingOrderExpiryMinutes * 60_000)
+    assert(Math.abs(dto.pendingCheckedAt!.getTime() - Date.now()) < 5_000)
+    for (const value of ['', '-1', '0', 'Infinity', 'NaN', '1.5', '1441']) {
+      assert.equal(new AppConfig({ PENDING_ORDER_EXPIRY_MINUTES: value }).pendingOrderExpiryMinutes, 10)
+    }
+    assert.equal(new AppConfig({ PENDING_ORDER_EXPIRY_MINUTES: '5' }).pendingOrderExpiryMinutes, 5)
+    passed('checkout replay uses the order deadline and configured duration; DTOs include server time and invalid durations fall back safely')
   }
 
   const findings = await db.select().from(reconcileFindings)

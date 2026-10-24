@@ -18,8 +18,9 @@ import { eq } from 'drizzle-orm'
 import { Database } from '../src/infra/db/client'
 import { AppConfig } from '../src/infra/config/env'
 import { MenuService } from '../src/domain/menu/menu.service'
+import { asProductId } from '../src/domain/shared/brand'
 import type { RedisService } from '../src/infra/redis/redis'
-import { categories, mainCategories, products } from '../src/infra/db/schema'
+import { categories, mainCategories, productCategories, products } from '../src/infra/db/schema'
 
 const source = new URL(process.env.DATABASE_URL?.startsWith('postgres')
   ? process.env.DATABASE_URL : 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin')
@@ -131,6 +132,56 @@ try {
   assert.deepEqual(tieOrder, [pNew!.id, pOld!.id],
     'تساویِ updated_at با تای‌بریکرِ created_at DESC شکسته می‌شود (نه با ترتیبِ heap)')
   passed('تای‌بریکرِ created_at: تساوی‌ها پایدار مرتب می‌شوند')
+
+  await menu.setProductAvailability(pOld!.id, false)
+  const afterAvailability = await menu.adminProducts({ page: 1, limit: 10 })
+  assert.equal(afterAvailability.products[0]!.id, pOld!.id)
+  assert.equal(afterAvailability.products[0]!.isAvailable, false)
+  const unavailablePublic = await menu.productsByMain('restaurant')
+  assert.deepEqual(unavailablePublic.products.map((p) => p.id), [pNew!.id, pMid!.id, pOld!.id],
+    'Availability edits do not reorder the public menu')
+  passed('Availability edits also move the product first without moving the public menu')
+
+  // All timestamps in one bulk insert can match, including created_at.
+  // Cross page boundaries as well as the ordering inside each page.
+  const [bulkCategory] = await db.insert(categories).values({
+    mainCategoryId: main!.id, name: 'Bulk products', slug: 'bulk',
+  }).returning()
+  const bulkIds = Array.from({ length: 25 }, (_, i) =>
+    asProductId(`00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`))
+  await db.insert(products).values(bulkIds.map((id) => ({
+    id, categoryId: bulkCategory!.id, name: `Bulk ${id.slice(-2)}`, originalPrice: 100,
+    createdAt: tied, updatedAt: tied,
+  })))
+  const expectedIds = [...bulkIds].reverse()
+  const pages = await Promise.all([1, 2, 3].map((page) =>
+    menu.adminProducts({ page, limit: 10, categoryId: bulkCategory!.id })))
+  assert.deepEqual(pages.map((page) => page.products.length), [10, 10, 5])
+  assert(pages.every((page) => page.total === 25))
+  assert.deepEqual(pages.flatMap((page) => page.products.map((p) => p.id)), expectedIds,
+    'A unique ID tie-break prevents duplicates/skipped products between tied pages')
+  passed('Identical timestamps remain deterministic across three pages')
+
+  await menu.updateProduct({ id: bulkIds[0]!, name: 'Edited on page three', description: '',
+    originalPrice: 100, discountPercentage: 0, prepTime: 15 })
+  const editedBulk = await menu.adminProducts({ page: 1, limit: 10, categoryId: bulkCategory!.id })
+  assert.equal(editedBulk.products[0]!.id, bulkIds[0], 'A product from page three moves to page one')
+  passed('Editing a product beyond the first page moves it to the first result')
+
+  // Category filters include primary and linked products without duplication.
+  await db.insert(productCategories).values([
+    { productId: pOld!.id, categoryId: bulkCategory!.id },
+    { productId: bulkIds[0]!, categoryId: bulkCategory!.id },
+  ])
+  const withLinks = await menu.adminProducts({ page: 1, limit: 50, categoryId: bulkCategory!.id })
+  assert.equal(withLinks.total, 26)
+  assert.equal(new Set(withLinks.products.map((p) => p.id)).size, 26)
+  assert(withLinks.products.some((p) => p.id === pOld!.id))
+  const filtered = await menu.adminProducts({ page: 1, limit: 10, categoryId: bulkCategory!.id,
+    search: 'Edited on page three', status: 'ACTIVE' })
+  assert.equal(filtered.total, 1)
+  assert.equal(filtered.products[0]!.id, bulkIds[0])
+  passed('Primary/linked category filters preserve totals, deduplication and search/status filters')
 
   console.log(`\n══ نتیجه: ${count} پاس / 0 خطا ══`)
 } catch (err) {

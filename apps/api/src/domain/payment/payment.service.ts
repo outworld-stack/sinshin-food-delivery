@@ -38,11 +38,6 @@ import type { PaymentGateway } from './gateway.types'
 /** stage-58 — درگاه‌های واقعیِ پشتیبانی‌شده (منبع واحد بک‌اند؛ پی‌ایر حذف شد) */
 export const REAL_GATEWAY_IDS = ['MELLAT', 'ZARINPAL', 'SEP'] as const
 
-/** Checkout cache only. stage-98 — grace is pinned to the pending-order expiry
- * window (PENDING_ORDER_EXPIRY_MINUTES, default 10): a stale replay never
- * hands out a bank token whose order is already past its payment window. */
-const CHECKOUT_REPLAY_GRACE_MS = 10 * 60_000
-
 class PaymentReviewError extends AppError {
   constructor(readonly payment: PaymentRow, readonly note: string) {
     super('CONFLICT', 'اطلاعات مالی پرداخت نیاز به بررسی دارد.', 409)
@@ -52,6 +47,7 @@ class PaymentReviewError extends AppError {
 export class PaymentService {
   private readonly gateways: Map<string, PaymentGateway>
   private reconcileAfterId: PaymentId | null = null
+  private expiryAfterId: OrderRow['id'] | null = null
 
   constructor(
     private readonly deps: {
@@ -108,6 +104,7 @@ export class PaymentService {
       }
       const [order] = await tx.select().from(orders).where(eq(orders.id, pending.orderId))
       if (!order || order.status !== 'PENDING_PAYMENT') throw Err.conflict('این سفارش در انتظار پرداخت نیست.')
+      if (this.paymentWindowClosed(order)) throw Err.conflict('مهلت شروع پرداخت این سفارش به پایان رسیده است.')
       const invalid = this.paymentIntegrity(pending, order)
       if (invalid) throw new PaymentReviewError(pending, invalid)
       const gw = this.gateway(pending.gateway)
@@ -153,6 +150,9 @@ export class PaymentService {
       .where(and(eq(payments.id, paymentId), eq(payments.status, 'PENDING'), sql`${payments.metadata}->>'initToken' = ${initToken}`))
       .returning({ id: payments.id })
     if (saved.length === 0) throw Err.conflict('این تلاش پرداخت جایگزین شده است؛ صفحه سفارش را به‌روز کنید.')
+    // A slow initialization may finish after the order deadline. Keep its
+    // reference for reconciliation, but never hand out an expired session.
+    if (this.paymentWindowClosed(order)) throw Err.conflict('مهلت شروع پرداخت این سفارش به پایان رسیده است.')
 
     return { paymentUrl: r.paymentUrl }
   }
@@ -310,17 +310,16 @@ export class PaymentService {
     if (order.status !== 'PENDING_PAYMENT') {
       throw Err.conflict('این سفارش در انتظار پرداخت نیست.')
     }
-    // stage-98 — پنجرهٔ پرداخت: سفارشِ بالای TTL هرگز resume/توکنِ تازه نمی‌گیرد
-    // (توکنِ بانکِ ۱۰–۱۵ دقیقه‌ای مرده است)؛ همین‌جا انقضای قطعی اجرا می‌شود —
-    // استعلامِ زنده اگر «پرداخت‌شده» بگوید سفارش settle می‌شود، وگرنه همان
-    // مسیرِ failPaymentِ اتمیکِ تست‌شده لغو + رزروها آزاد می‌کند. جوابِ کاربر:
-    // «دوباره سفارش ثبت کنید» — نه صفحهٔ مردهٔ بانک در حلقه.
-    if (Date.now() - order.createdAt.getTime() > this.deps.config.pendingOrderExpiryMinutes * 60_000) {
+    // The deadline stops new/resumed sessions. It cannot establish whether
+    // the bank already charged, so unresolved orders keep their reservations.
+    if (this.paymentWindowClosed(order)) {
       const outcome = await this.expireOnePendingOrder(order)
       throw Err.conflict(
         outcome === 'settled'
           ? 'این سفارش هم‌اکنون پرداخت شد — وضعیت صفحه به‌روز می‌شود.'
-          : 'پنجرهٔ پرداخت این سفارش به پایان رسید و سفارش لغو شد — لطفاً دوباره سفارش ثبت کنید.',
+          : outcome === 'expired'
+            ? 'پنجرهٔ پرداخت این سفارش به پایان رسید و سفارش لغو شد — لطفاً دوباره سفارش ثبت کنید.'
+            : 'مهلت شروع پرداخت به پایان رسیده است؛ نتیجه پرداخت قبلی هنوز در حال بررسی است. لطفاً منتظر به‌روزرسانی وضعیت بمانید.',
       )
     }
 
@@ -411,6 +410,9 @@ export class PaymentService {
       if (currentOrder?.status !== 'PENDING_PAYMENT') {
         throw Err.conflict('این سفارش در انتظار پرداخت نیست.')
       }
+      if (this.paymentWindowClosed(currentOrder)) {
+        throw Err.conflict('مهلت شروع پرداخت به پایان رسیده است؛ وضعیت سفارش را به‌روز کنید.')
+      }
       const invalid = this.paymentIntegrity(last, currentOrder)
       if (invalid) throw new PaymentReviewError(last, invalid)
       const [settled] = await tx.select().from(payments)
@@ -457,7 +459,11 @@ export class PaymentService {
       if (!created) throw Err.internal('ساخت ردیف پرداخت ناموفق بود.')
       return { row: created }
     })
-    if ('paymentUrl' in attempt) return { paymentUrl: attempt.paymentUrl, displayId: order.displayId }
+    if ('paymentUrl' in attempt) {
+      // Payment-row locks and sibling cleanup can also outlast the deadline.
+      if (this.paymentWindowClosed(order)) throw Err.conflict('مهلت شروع پرداخت به پایان رسیده است؛ وضعیت سفارش را به‌روز کنید.')
+      return { paymentUrl: attempt.paymentUrl, displayId: order.displayId }
+    }
 
     const r = await this.initiate(attempt.row.id, gwId, {
       displayId: order.displayId,
@@ -472,7 +478,7 @@ export class PaymentService {
    * چک‌اوت. replayِ ۴۸ساعته paymentUrl کش‌شده را برمی‌گرداند — اگر آن جلسه‌ی
    * بانکی مدتها مصرف/منقضی شده باشد، کاربر به صفحه‌ی مرده‌ی بانک می‌رود.
    * خروجی: 'success' | 'failed' | 'fresh' | 'stale'
-   *   fresh = هنوز PENDING و به‌تازه‌ساخته (≤۱۵ دقیقه) ⇒ replay URL معتبر است
+   *   fresh = هنوز PENDING و داخل پنجرهٔ پرداخت ⇒ replay URL معتبر است
    *   stale = PENDING ولی کهنه ⇒ replay بدون paymentUrl برگردد (رِتری از صفحه سفارش)
    */
   async paymentReplayState(userId: string, displayId: string, cachedUrl?: string): Promise<'success' | 'failed' | 'fresh' | 'stale'> {
@@ -482,6 +488,7 @@ export class PaymentService {
     if (!order) return 'failed'
     if (order.status === 'CANCELED') return 'failed'
     if (order.paymentStatus === 'SUCCESS') return 'success'
+    if (this.paymentWindowClosed(order)) return 'stale'
 
     const [last] = await this.deps.db
       .select({ status: payments.status, updatedAt: payments.updatedAt, metadata: payments.metadata })
@@ -493,7 +500,8 @@ export class PaymentService {
     if (last.status === 'SUCCESS') return 'success'
     if (last.status !== 'PENDING') return 'failed'
     if (cachedUrl && last.metadata?.paymentUrl !== cachedUrl) return 'stale'
-    return Date.now() - last.updatedAt.getTime() <= CHECKOUT_REPLAY_GRACE_MS ? 'fresh' : 'stale'
+    return !this.paymentWindowClosed(order) &&
+      Date.now() - last.updatedAt.getTime() < this.deps.config.pendingOrderExpiryMinutes * 60_000 ? 'fresh' : 'stale'
   }
 
   /**
@@ -519,12 +527,23 @@ export class PaymentService {
 
     let reverified = 0
     let failed = 0
+    const checkedExpiredOrders = new Set<OrderRow['id']>()
     for (const p of rows) {
       try {
         const [order] = await this.deps.db.select().from(orders).where(eq(orders.id, p.orderId))
         const invalid = order ? this.paymentIntegrity(p, order) : 'payment order is missing'
         if (invalid) {
           await this.recordR12(p, invalid)
+          continue
+        }
+        // The older-attempt pass must not cancel an order that the deadline
+        // pass preserved because a sibling payment could already be charged.
+        if (order?.status === 'PENDING_PAYMENT' && this.paymentWindowClosed(order)) {
+          if (checkedExpiredOrders.has(order.id)) continue
+          checkedExpiredOrders.add(order.id)
+          const outcome = await this.expireOnePendingOrder(order)
+          if (outcome === 'settled') reverified++
+          else if (outcome === 'expired') failed++
           continue
         }
         let success = false
@@ -592,21 +611,9 @@ export class PaymentService {
     return { reverified, failed }
   }
 
-  /**
-   * stage-98 — «پنجرهٔ پرداخت»: انقضای قطعیِ سفارش‌هایِ PENDING_PAYMENTِ بالای TTL.
-   *
-   * چرا؟ توکنِ بانک ۱۰–۱۵ دقیقه عمر دارد؛ سفارشِ رهاشده با مرجعِ فقط-توکن
-   * (ملت `:t:` / سپِ بدونِ RefNum) هرگز «شکستِ قطعی» نمی‌گیرد → تا ابد
-   * PENDING_PAYMENT + قفلِ کوپن/گرنت/هولدِ کیف‌پول. این جاب سنِ سفارش را
-   * می‌سنجد (نه سنِ ردیفِ پرداخت — رِتریِ تازه ردیف را جوان می‌کند ولی پنجرهٔ
-   * سفارش همان است): بالای TTL → یک استعلامِ زندهٔ آخرین تلاش؛ موفق ⇒
-   * finalize(true) — پول گرفته شده و سفارش باید PAID شود؛ نامشخص/قطعی-ناموفق ⇒
-   * مرگِ توکنِ بانک «پرداخت‌نشده بودن» را اثبات کرده → همان مسیرِ اتمیکِ
-   * finalize(false) → failPayment: CANCELED + آزادسازیِ کوپن/گرنت/هولد + نوتیف.
-   * خطایِ شبکه در استعلام ⇒ این دور رد (دقیقهٔ بعد دوباره) — «سن به‌تنهایی
-   * پول را جابه‌جا نمی‌کند»؛ تصمیمِ مالی همچنان از مسیرِ verify/finalize می‌گذرد
-   * و تورِ R12 (late PSP success) دست‌نخورده می‌ماند.
-   */
+  /** Reconcile orders beyond their payment window. The deadline blocks new
+   * sessions; only conclusive PSP evidence permits releasing reservations.
+   * Rotate bounded batches so unresolved sessions cannot starve other jobs. */
   async expirePendingOrders(
     olderThanMinutes: number = this.deps.config.pendingOrderExpiryMinutes,
   ): Promise<{ expired: number; settled: number }> {
@@ -621,23 +628,20 @@ export class PaymentService {
       ))
       .orderBy(asc(orders.id))
       .limit(50)
+    let rows = await loadBatch(this.expiryAfterId)
+    if (rows.length === 0 && this.expiryAfterId !== null) rows = await loadBatch(null)
+    this.expiryAfterId = rows.length === 50 ? rows[rows.length - 1]!.id : null
     let expired = 0
     let settled = 0
-    let after: OrderRow['id'] | null = null
-    for (;;) {
-      const rows = await loadBatch(after)
-      for (const order of rows) {
-        after = order.id
-        try {
-          const outcome = await this.expireOnePendingOrder(order)
-          if (outcome === 'expired') expired++
-          else if (outcome === 'settled') settled++
-        } catch (e) {
-          if (e instanceof AppError && e.code === 'CONFLICT') continue // callbackِ رقیب همین حالا نهایی کرد
-          console.error(`[payments] expire ${order.displayId}:`, e)
-        }
+    for (const order of rows) {
+      try {
+        const outcome = await this.expireOnePendingOrder(order)
+        if (outcome === 'expired') expired++
+        else if (outcome === 'settled') settled++
+      } catch (e) {
+        if (e instanceof AppError && e.code === 'CONFLICT') continue // concurrent callback/retry changed the snapshot
+        console.error(`[payments] expire ${order.displayId}:`, e)
       }
-      if (rows.length < 50) break
     }
     if (expired + settled > 0) {
       console.log(`[payments] expiry window: ${expired} expired, ${settled} late-settled`)
@@ -645,55 +649,75 @@ export class PaymentService {
     return { expired, settled }
   }
 
-  /**
-   * stage-98 — انقضای یک سفارشِ PENDING_PAYMENTِ سن‌گذشته (جاب + گیتِ رِتری).
-   * ایدمپوتنت: گاردِ claimِ PENDING + شرطِ status='PENDING_PAYMENT' در
-   * failPayment هرگونهِ دوباره‌اجرایی را بی‌اثر می‌کند.
-   */
+  /** Check every outstanding attempt before canceling an expired order.
+   * A lost callback or an expired token says nothing about an earlier charge. */
   private async expireOnePendingOrder(order: OrderRow): Promise<'settled' | 'expired' | 'none'> {
-    const pendingRows = await this.deps.db
+    const attempts = await this.deps.db
       .select()
       .from(payments)
-      .where(and(eq(payments.orderId, order.id), eq(payments.status, 'PENDING')))
+      .where(eq(payments.orderId, order.id))
       .orderBy(asc(payments.createdAt))
+    const successful = attempts.find(p => p.status === 'SUCCESS')
+    if (successful) {
+      await this.recordR12(successful, 'pending order already has a successful payment')
+      return 'none'
+    }
+    const pendingRows = attempts.filter(p => p.status === 'PENDING')
     const active = pendingRows[pendingRows.length - 1]
-    if (!active) return 'none' // ردیفِ PENDINGِ سالم نیست — کارِ reconcile/R12
-    const gwId = (active.gateway ?? '').toUpperCase()
-    const gw = gwId && gwId !== 'MOCK' ? this.gateways.get(gwId) : undefined
-    const isRealGateway = !!gw && gw.mode !== 'mock'
+    if (!active) {
+      const last = attempts[attempts.length - 1]
+      if (last) await this.recordR12(last, 'pending order has no pending payment — manual review required')
+      return 'none'
+    }
+    let unresolved = false
+    for (const payment of pendingRows) {
+      const invalid = this.paymentIntegrity(payment, order)
+      if (invalid) {
+        await this.recordR12(payment, invalid)
+        unresolved = true
+        continue
+      }
+      const gwId = payment.gateway.toUpperCase()
+      const gateway = this.gateways.get(gwId)
+      if (!gateway) {
+        await this.recordR12(payment, 'unknown/removed gateway — manual PSP review required')
+        unresolved = true
+        continue
+      }
+      if (gwId === 'MOCK') continue
+      // A never-started attempt or a recorded init failure has no payable
+      // session. An init currently in flight must finish before we decide.
+      if (!payment.gatewayRef && !payment.metadata?.paymentUrl && !payment.callbackUrl &&
+        (!payment.metadata?.initToken || payment.metadata?.initFailed === true)) continue
+      let verdict: Awaited<ReturnType<PaymentGateway['verify']>> | null = null
+      try {
+        verdict = await gateway.verify({ paymentId: payment.id, gatewayRef: payment.gatewayRef, amount: payment.amount, query: {} })
+      } catch { /* PSP outages are unresolved, including adapters that throw. */ }
+      if (verdict?.success && !verdict.indeterminate) {
+        await this.finalize(payment.id, true, verdict.gatewayRef ?? payment.gatewayRef, undefined, payment.gatewayRef)
+        return 'settled'
+      }
+      if (!verdict || verdict.indeterminate) {
+        await this.recordR12(payment, 'payment window closed with unresolved PSP result — preserve reservations pending verification/review')
+        unresolved = true
+      }
+    }
+    if (unresolved) return 'none'
     const failInfo: Record<string, unknown> = {
       source: 'expiry-job',
-      gateway: gwId || null,
+      gateway: active.gateway,
       hadGatewayRef: !!active.gatewayRef,
       orderAgeMinutes: Math.round((Date.now() - order.createdAt.getTime()) / 60_000),
     }
-    if (isRealGateway && active.gatewayRef) {
-      let verdict: Awaited<ReturnType<PaymentGateway['verify']>>
-      try {
-        verdict = await gw!.verify({ paymentId: active.id, gatewayRef: active.gatewayRef, amount: active.amount, query: {} })
-      } catch {
-        return 'none' // قطعیِ شبکه در استعلام — این دور معلق؛ دقیقهٔ بعد دوباره
-      }
-      if (verdict.success) {
-        // پول واقعاً گرفته شده و callback گم شده بود — سفارش باید زنده بماند.
-        await this.finalize(active.id, true, verdict.gatewayRef ?? active.gatewayRef, undefined, active.gatewayRef)
-        return 'settled'
-      }
-      // نامشخصِ مرجعِ فقط-توکن: بعد از پنجره، بانکِ خودش تکمیل را ناممکن کرده —
-      // «پرداخت‌نشده» اثبات‌شده است؛ لغو با همان مسیرِ تست‌شده (failInfo = برچسبِ انقضا).
-    }
-    await this.finalize(active.id, false, active.gatewayRef, failInfo, active.gatewayRef)
-    // خواهرهای PENDINGِ مانده را بازنشکن تا reconcileِ بعدی برایشان R12 نویسد.
-    const siblings = pendingRows.filter((p) => p.id !== active.id)
-    if (siblings.length > 0) {
-      await this.deps.db.transaction(async (tx) => {
-        for (const p of siblings) await this.supersedePending(tx, p, 'expiry-sibling')
-      })
-    }
+    await this.finalize(active.id, false, active.gatewayRef, failInfo, active.gatewayRef, pendingRows)
     return 'expired'
   }
 
   // ── داخلی ──
+
+  private paymentWindowClosed(order: Pick<OrderRow, 'createdAt'>): boolean {
+    return Date.now() >= order.createdAt.getTime() + this.deps.config.pendingOrderExpiryMinutes * 60_000
+  }
 
   /** Persist review diagnostics only after rollback frees the transaction's
    * connection and locks. This also works with a one-connection DB pool. */
@@ -785,6 +809,7 @@ export class PaymentService {
     gatewayRef: string | null | undefined,
     failInfo?: Record<string, unknown>,
     expectedReference?: string | null,
+    expirySnapshot?: PaymentRow[],
   ): Promise<{ orderDisplayId: string; paymentStatus: string; userId: string }> {
     const result = await this.moneyTransaction(async (tx) => {
       // metadata فعلی برای ادغام — فقط خواندن؛ تصرف اتمیک همان update
@@ -816,6 +841,35 @@ export class PaymentService {
       const invalid = this.paymentIntegrity(current, orderRow)
       if (invalid || orderRow.status !== 'PENDING_PAYMENT') {
         throw new PaymentReviewError(current, invalid ?? 'payment result for an order that is no longer pending')
+      }
+      let otherPending = false
+      if (!success && !expirySnapshot) {
+        const siblings = await tx.select().from(payments).where(and(
+          eq(payments.orderId, orderRow.id), ne(payments.id, current.id),
+          sql`${payments.status} in ('PENDING', 'SUCCESS')`,
+        )).for('update')
+        const successful = siblings.find(p => p.status === 'SUCCESS')
+        if (successful) throw new PaymentReviewError(successful, 'pending order already has a successful payment')
+        otherPending = siblings.length > 0
+      }
+      if (expirySnapshot) {
+        const attempts = await tx.select().from(payments).where(eq(payments.orderId, orderRow.id)).for('update')
+        const successful = attempts.find(p => p.status === 'SUCCESS')
+        if (successful) throw new PaymentReviewError(successful, 'pending order already has a successful payment')
+        const pending = attempts.filter(p => p.status === 'PENDING')
+        const checked = new Map(expirySnapshot.map(p => [p.id, p]))
+        if (pending.length !== checked.size || pending.some(p => {
+          const old = checked.get(p.id)
+          return !old || p.updatedAt.getTime() !== old.updatedAt.getTime() || p.gatewayRef !== old.gatewayRef ||
+            p.userId !== old.userId || p.amount !== old.amount || p.gateway !== old.gateway || p.mode !== old.mode ||
+            p.callbackUrl !== old.callbackUrl || p.metadata?.paymentUrl !== old.metadata?.paymentUrl ||
+            p.metadata?.initToken !== old.metadata?.initToken || p.metadata?.initFailed !== old.metadata?.initFailed
+        })) throw Err.conflict('وضعیت پرداخت تغییر کرد؛ استعلام جدید لازم است.')
+        // These siblings were all proven unpaid above. Close them in the same
+        // transaction as cancellation, after checking the full verified set.
+        for (const sibling of pending) {
+          if (sibling.id !== current.id) await this.supersedePending(tx, sibling, 'expiry-sibling')
+        }
       }
       const finalRef = gatewayRef ?? current.gatewayRef
       if (success && current.gateway !== 'MOCK') {
@@ -863,6 +917,12 @@ export class PaymentService {
         await this.deps.orders.settlePayment(tx, orderRow)
         return { orderDisplayId: orderRow.displayId, paymentStatus: 'SUCCESS', userId: orderRow.userId }
       }
+      // A failure callback proves only this attempt failed. Keep its receipt
+      // and failed status, but preserve order reservations for other attempts
+      // which may have charged. Their callbacks/expiry will resolve the order.
+      if (otherPending) {
+        return { orderDisplayId: orderRow.displayId, paymentStatus: 'PENDING', userId: orderRow.userId }
+      }
       await this.deps.orders.failPayment(tx, orderRow)
       return { orderDisplayId: orderRow.displayId, paymentStatus: 'FAILED', userId: orderRow.userId }
     })
@@ -886,8 +946,8 @@ export class PaymentService {
           type: 'system',
           title: expired ? '⌛ پنجرهٔ پرداخت به پایان رسید' : '❌ پرداخت سفارش ناموفق بود',
           body: expired
-            ? `پنجرهٔ پرداخت سفارش ${result.orderDisplayId} به پایان رسید و سفارش لغو شد. پولی از حساب شما کسر نشده و رزرو کیف پول/کد تخفیف (در صورت استفاده) آزاد شد — می‌توانید دوباره سفارش ثبت کنید.`
-            : `پرداخت سفارش ${result.orderDisplayId} تکمیل نشد. پولی از حساب شما کسر نشده و رزرو کیف پول/کد تخفیف (در صورت استفاده) آزاد شد — از صفحه‌ی سفارش می‌توانید دوباره تلاش کنید.`,
+            ? `پنجرهٔ پرداخت سفارش ${result.orderDisplayId} به پایان رسید و سفارش لغو شد. رزرو کیف پول/کد تخفیف (در صورت استفاده) آزاد شد — می‌توانید دوباره سفارش ثبت کنید.`
+            : `پرداخت سفارش ${result.orderDisplayId} تکمیل نشد و سفارش لغو شد. رزرو کیف پول/کد تخفیف (در صورت استفاده) آزاد شد — می‌توانید دوباره سفارش ثبت کنید.`,
           url: `/dashboard/orders/${result.orderDisplayId}`,
           data: { order: result.orderDisplayId, source: expired ? 'payment-expired' : 'payment-failed' },
         })

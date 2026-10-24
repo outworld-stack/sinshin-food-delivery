@@ -1555,6 +1555,7 @@ export class OrderService {
                                                                 this.deps.config.pendingOrderExpiryMinutes * 60_000,
                                                 )
                                         : null,
+                        pendingCheckedAt: row.status === "PENDING_PAYMENT" ? new Date() : null,
                         breakdown: row.breakdown,
                         queued: row.queuedAt !== null,
                 };

@@ -64,8 +64,13 @@ mock.module('zustand', () => ({
 }))
 
 const opened: Array<string | undefined> = []
+let inClick = false
 Object.defineProperty(globalThis, 'window', { configurable: true, value: {
-        open: (url?: string) => { opened.push(url) },
+        open: () => {
+                assert(inClick, 'new tabs must not open in an asynchronous GPS callback')
+                assert.fail('opening a foreground tab would hide the document requesting location permission')
+        },
+        location: { assign: (url: string) => { opened.push(url) } },
 } })
 type GeoCb = (pos: { coords: { latitude: number; longitude: number } }) => void
 type GeoErr = (error: { code: number; message: string }) => void
@@ -104,7 +109,10 @@ async function flush(owner: Host) {
 }
 function unmount(owner: Host) { for (const cell of owner.cells) cell?.cleanup?.() }
 const buttonOf = (owner: Host) => nodes(owner.tree).find((node) => node.type === 'button')!
-const click = (owner: Host) => buttonOf(owner).props.onClick()
+const click = (owner: Host) => {
+        inClick = true
+        try { buttonOf(owner).props.onClick() } finally { inClick = false }
+}
 
 try {
         // ۱) GPS موفق ⇒ لینک رسمی nshn.ir با مبدأِ GPS + مقصدِ بلوک
@@ -158,23 +166,73 @@ try {
         // ۵) حینِ دریافت: disable + برچسبِ «در حال دریافت موقعیت…» (GPS کند)
         geoMode = 'slow'
         let releaseSlow!: () => void
+        let rejectSlow!: (error: { code: number; message: string }) => void
+        let gpsRequests = 0
         ;(navigator as unknown as { geolocation: unknown }).geolocation = {
-                getCurrentPosition: (success: GeoCb) => {
+                getCurrentPosition: (success: GeoCb, error: GeoErr) => {
+                        gpsRequests++
                         releaseSlow = () => success({ coords: { latitude: 35.7, longitude: 51.4 } })
+                        rejectSlow = error
                 },
         }
         const slowHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(slowHost); await flush(slowHost)
+        click(slowHost); click(slowHost); await flush(slowHost)
+        assert.equal(gpsRequests, 1, 'rapid clicks before a React render cannot start duplicate GPS requests')
         const pendingButton = buttonOf(slowHost)
         assert.equal(pendingButton.props.disabled, true, 'locating disables the button')
         assert(String(pendingButton.props.children).includes('Locating'), 'locating swaps the label')
-        assert.equal(opened.length, 0, 'nothing opens until the position arrives')
+        assert.equal(opened.length, 0, 'the external map waits until the position arrives')
         releaseSlow(); await flush(slowHost)
         assert.deepEqual(opened, ['https://nshn.ir?origin=35.700000,51.400000&destination=37.000000,49.000000&vehicle=d'])
         assert.equal(buttonOf(slowHost).props.disabled, false)
         unmount(slowHost)
+        opened.length = 0
 
-        console.log('Article route button passed: GPS→official nshn.ir origin link · denial/unsupported/garbage→destination-only fallback + Persian toast · pending state disables the button.')
+        // Real browsers call errors asynchronously too, after permission prompts or timeouts.
+        for (const code of [1, 3]) {
+                const errorHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
+                click(errorHost); await flush(errorHost)
+                rejectSlow({ code, message: 'GPS unavailable' }); await flush(errorHost)
+                assert.deepEqual(opened, ['https://neshan.org/maps/routing/car/destination/37.000000,49.000000'])
+                assert.equal(buttonOf(errorHost).props.disabled, false)
+                unmount(errorHost)
+                opened.length = 0
+        }
+
+        const cancelledHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
+        click(cancelledHost); await flush(cancelledHost)
+        unmount(cancelledHost)
+        releaseSlow()
+        assert.equal(opened.length, 0, 'a late GPS callback cannot navigate after unmount')
+        useToastStore.getState().hideToast()
+        rejectSlow({ code: 1, message: 'Denied' })
+        assert.equal(useToastStore.getState().isVisible, false, 'stale GPS errors do not show toasts on a new page')
+
+        let changingDestination = { lat: 37, lng: 49 }
+        const changedHost = createHost(ArticleRouteButton, () => changingDestination)
+        click(changedHost); await flush(changedHost)
+        const oldGps = releaseSlow
+        changingDestination = { lat: 38, lng: 50 }
+        changedHost.render(); await flush(changedHost)
+        assert.equal(buttonOf(changedHost).props.disabled, false)
+        click(changedHost); await flush(changedHost)
+        oldGps()
+        assert.equal(opened.length, 0, 'the previous destination cannot win a GPS race')
+        releaseSlow(); await flush(changedHost)
+        assert.deepEqual(opened, ['https://nshn.ir?origin=35.700000,51.400000&destination=38.000000,50.000000&vehicle=d'])
+        unmount(changedHost)
+        opened.length = 0
+
+        ;(navigator as unknown as { geolocation: unknown }).geolocation = {
+                getCurrentPosition() { throw new DOMException('Denied', 'SecurityError') },
+        }
+        const throwingHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
+        click(throwingHost); await flush(throwingHost)
+        assert.deepEqual(opened, ['https://neshan.org/maps/routing/car/destination/37.000000,49.000000'])
+        assert.equal(buttonOf(throwingHost).props.disabled, false, 'synchronous geolocation exceptions also recover')
+        unmount(throwingHost)
+
+        console.log('Article route button passed: GPS links and fallbacks, navigation without popup/user-activation dependencies, duplicate clicks, pending states, destination races and unmount cancellation.')
 } finally {
         useToastStore.getState().hideToast()
 }

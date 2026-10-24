@@ -420,7 +420,7 @@ export const ar: Dict = {
         'dash.orderDetail.pendingCountdown': 'الوقت المتبقي للدفع: {n}',
         'dash.orderDetail.expiredTitle': 'انتهت نافذة الدفع',
         'dash.orderDetail.expiredHint':
-                'أُلغي هذا الطلب ولم يُخصم أي مبلغ من حسابك؛ أُفرج عن حجز المحفظة/رمز الخصم. سلّتك محفوظة — أرسل طلباً جديداً.',
+                'انتهت مهلة متابعة الدفع. لا تزال نتيجة الدفع قيد التحقق؛ ستُحدّث حالة الطلب بعد تأكيد البنك. لا تدفع مرة أخرى حتى تتضح النتيجة.',
         'dash.orderDetail.courierRoute': 'مسار حركة الساعي',
         'dash.orderDetail.details': 'تفاصيل الطلب',
         'dash.orderDetail.breakdownTitle': 'تفاصيل مبلغ الطلب',

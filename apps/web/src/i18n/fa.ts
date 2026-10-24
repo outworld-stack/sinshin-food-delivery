@@ -427,7 +427,7 @@ export const fa = {
         'dash.orderDetail.pendingCountdown': 'زمان باقی‌ماندهٔ پرداخت: {n}',
         'dash.orderDetail.expiredTitle': 'پنجرهٔ پرداخت به پایان رسید',
         'dash.orderDetail.expiredHint':
-                'این سفارش لغو شد و پولی از حساب شما کسر نشد؛ رزرو کیف پول/کد تخفیف آزاد شد. سبد خرید شما محفوظ است — دوباره سفارش ثبت کنید.',
+                'مهلت ادامهٔ پرداخت تمام شد. نتیجهٔ پرداخت هنوز در حال بررسی است؛ وضعیت سفارش پس از تأیید بانک به‌روز می‌شود. تا مشخص شدن نتیجه، دوباره پرداخت نکنید.',
         'dash.orderDetail.courierRoute': 'مسیر حرکت پیک',
         'dash.orderDetail.details': 'جزئیات سفارش',
         'dash.orderDetail.breakdownTitle': 'ریز مبلغ سفارش',

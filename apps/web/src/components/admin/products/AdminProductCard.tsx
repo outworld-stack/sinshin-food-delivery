@@ -56,6 +56,7 @@ interface AdminProductCardProps {
 	/** stage-48 — اجازه‌ی موجود/ناموجود کردن (ادمین اصلی یا productsAvailability) */
 	canToggleAvailability: boolean
 	onToggle: (id: string, status: string) => void
+	onAvailabilityChanged?: () => void
 }
 
 // کارت محصول ادمین — دسکتاپ تک‌ردیف + موبایل، اکشن‌ها فقط با write
@@ -65,6 +66,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 	canWrite,
 	canToggleAvailability,
 	onToggle,
+	onAvailabilityChanged,
 }: AdminProductCardProps) {
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
@@ -85,12 +87,12 @@ export const AdminProductCard = memo(function AdminProductCard({
 	const availabilityMut = useMutation({
 		mutationFn: (available: boolean) =>
 			setProductAvailability({ data: { id: product.id, available } }),
-		onSuccess: (res, available) => {
+		onSuccess: async (res, available) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
 				return
 			}
-			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
+			const productsRefresh = queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
 			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
 			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
 			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
@@ -100,6 +102,8 @@ export const AdminProductCard = memo(function AdminProductCard({
 			showToast(
 				res.message ?? (available ? 'محصول موجود شد' : 'محصول فعلاً ناموجود شد'),
 			)
+			await productsRefresh
+			onAvailabilityChanged?.()
 		},
 		onError: () => showToast('تغییر موجودی ناموفق بود', 'error'),
 	})

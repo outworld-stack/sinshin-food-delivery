@@ -14,6 +14,7 @@ import { AdminProductsPageSkeleton } from '#/components/LoadingSkeletons'
 import { Pagination } from '#/components/Pagination'
 import { Can, PermissionGate } from '#/components/shared/PermissionGate'
 import {
+        adminProductsPageSizes,
         adminProductsSearchSchema,
         useAdminProductsPage,
 } from '#/hooks/admin/useAdminProductsPage'
@@ -151,6 +152,7 @@ function AdminProductsPage() {
                                                                                         page.permissions.productsAvailability
                                                                                 }
                                                                                 onToggle={page.handleRequestToggle}
+                                                                                onAvailabilityChanged={page.handleProductUpdated}
                                                                         />
                                                                 ))}
                                                         </div>
@@ -170,7 +172,7 @@ function AdminProductsPage() {
                                                         onPageChange={page.handlePage}
                                                         onItemsPerPageChange={page.handleLimit}
                                                         // stage-98 — ۵ دیگر پیش‌فرضِ این صفحه نیست؛ با پیش‌فرضِ ۱۰ هم‌خوان
-                                                        pageSizeOptions={[10, 20, 50]}
+                                                        pageSizeOptions={adminProductsPageSizes}
                                                 />
                                         )}
                                 </div>

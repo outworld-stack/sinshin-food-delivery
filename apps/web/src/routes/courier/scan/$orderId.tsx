@@ -59,6 +59,7 @@ function CourierScanPage() {
                 const runId = ++runIdRef.current
                 setPhase('scanning')
                 setMessage('')
+                setPosition(null)
                 // ترمیم اسکنِ استیج-۸۴ — قبل از استریمِ جدید، استریمِ قبلی پاک شود
                 // (اسکنِ مجدد/تلاشِ دوباره watchPosition تازه نمی‌ساخت و کهنه می‌ماند)
                 stopTrackingRef.current?.()
@@ -101,7 +102,10 @@ function CourierScanPage() {
                                 onPosition: setPosition,
                                 onSent: () => setSentCount((count) => count + 1),
                                 onMessage: setMessage,
-                                onStopped: () => setPhase('ready'),
+                                onStopped: () => {
+                                        setPosition(null)
+                                        setPhase('ready')
+                                },
                         })
                 } catch (err: unknown) {
                         if (runId !== runIdRef.current) return
@@ -115,6 +119,7 @@ function CourierScanPage() {
                 runIdRef.current += 1
                 stopTrackingRef.current?.()
                 stopTrackingRef.current = null
+                setPosition(null)
                 setPhase('ready')
                 showToast('ارسال موقعیت متوقف شد')
         }, [showToast])

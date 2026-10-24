@@ -1011,43 +1011,35 @@ export class MenuService {
     if (filters.categoryId && filters.categoryId !== 'all') {
       // stage-60 — فیلتر دسته = دسته‌ی اولیه ∪ لینک اضافه (M2M)
       const catId = asCategoryId(filters.categoryId)
-      const linkedIds = [
-        ...new Set(
-          (
-            await this.deps.db
-              .select({ productId: productCategories.productId })
-              .from(productCategories)
-              .where(eq(productCategories.categoryId, catId))
-          ).map((r) => r.productId),
-        ),
-      ]
+      // Keep linked products in SQL; even a large category needs no ID array
+      // or extra round trip before the paginated query can run.
+      const linkedIds = this.deps.db
+        .select({ productId: productCategories.productId })
+        .from(productCategories)
+        .where(eq(productCategories.categoryId, catId))
       conditions.push(
-        linkedIds.length
-          ? or(eq(products.categoryId, catId), inArray(products.id, linkedIds))!
-          : eq(products.categoryId, catId),
+        or(eq(products.categoryId, catId), inArray(products.id, linkedIds))!,
       )
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
-    const total = await this.deps.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(products)
-      .where(where)
-      .then((r) => r[0]?.count ?? 0)
-
-    const rows = await this.deps.db
-      .select()
-      .from(products)
-      .where(where)
-      // stage-98 — «آخرین تغییر، اولِ صف» در پنل ادمین: updated_at در هر
-      // ویرایش/تغییر وضعیت/دسترس‌پذیری تازه می‌شود (updateProduct/toggle/
-      // availability) → محصولِ ویرایش‌شده فوراً به صدرِ صفحه‌ی ۱ می‌پرد؛
-      // تای‌بریکرِ created_at لغزشِ heap ردیف‌های هم‌تاریخِ seed را می‌بندد.
-      // گریدِ عمومیِ سایت (productsByMain — خط ۵۳۷) عمداً created_at DESC ماند:
-      // لیستِ فروشگاه نباید با هر ویرایشِ ادمین بالا-پایین شود.
-      .orderBy(desc(products.updatedAt), desc(products.createdAt))
-      .limit(filters.limit)
-      .offset((filters.page - 1) * filters.limit)
+    const [total, rows] = await Promise.all([
+      this.deps.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(products)
+        .where(where)
+        .then((r) => r[0]?.count ?? 0),
+      this.deps.db
+        .select()
+        .from(products)
+        .where(where)
+        // Latest admin change first; ID breaks ties when both timestamps
+        // match (bulk inserts/seeds), keeping page boundaries deterministic.
+        // The public menu retains its independent created_at ordering.
+        .orderBy(desc(products.updatedAt), desc(products.createdAt), desc(products.id))
+        .limit(filters.limit)
+        .offset((filters.page - 1) * filters.limit),
+    ])
 
     const catIds = [...new Set(rows.map((r) => r.categoryId))]
     const cats = catIds.length

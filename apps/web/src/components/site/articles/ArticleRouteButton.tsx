@@ -12,7 +12,7 @@
 //     (تأییدِ صاحبِ کسب‌وکار: «وقتی gps رد شد، مبدا توسط کاربر روی نقشه
 //     نشان انتخاب شود»). الگویِ مقاوم: courierTracking.ts (چکِ پشتیبانی +
 //     پیامِ دقیقِ ردِّ پرمیشن + try/catch).
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useI18n } from '#/i18n'
 import { useToastStore } from '#/stores/toastStore'
 import {
@@ -33,47 +33,54 @@ export const ArticleRouteButton = memo(function ArticleRouteButton({
 	const { t } = useI18n()
 	const showToast = useToastStore((s) => s.showToast)
 	const [locating, setLocating] = useState(false)
+	const pendingRef = useRef<symbol | null>(null)
 
-	const openFallback = () => {
-		// مقصد پین می‌شود؛ مبدأ را کاربر روی نقشهٔ نشان انتخاب می‌کند.
-		window.open(neshanRouteUrl(lat, lng), '_blank', 'noopener')
-	}
+	// biome-ignore lint/correctness/useExhaustiveDependencies: changing destination must cancel the previous GPS request.
+	useEffect(() => {
+		setLocating(false)
+		return () => {
+			// Geolocation cannot be cancelled. Ignore its result if the article
+			// closes or the block's destination changes while permission is pending.
+			pendingRef.current = null
+		}
+	}, [lat, lng])
 
 	const handleClick = () => {
-		if (locating) return
+		if (pendingRef.current) return
+		const pending = Symbol('article-route')
+		pendingRef.current = pending
+		setLocating(true)
+
+		const finish = (href: string, fallback = false) => {
+			if (pendingRef.current !== pending) return
+			pendingRef.current = null
+			setLocating(false)
+			if (fallback) showToast(t['article.routeGpsDenied'], 'error')
+			// GPS resolves after browser user activation expires, so a new tab
+			// would be blocked. Keep this document visible for the permission
+			// prompt, then navigate in this tab; Back still restores the article.
+			window.location.assign(href)
+		}
+		const openFallback = () => finish(neshanRouteUrl(lat, lng), true)
 		if (typeof navigator === 'undefined' || !navigator.geolocation) {
-			showToast(t['article.routeGpsDenied'], 'error')
 			openFallback()
 			return
 		}
-		setLocating(true)
 		try {
 			navigator.geolocation.getCurrentPosition(
 				(pos) => {
-					setLocating(false)
 					const { latitude: oLat, longitude: oLng } = pos.coords
 					if (isNeshanCoord(oLat, oLng)) {
-						window.open(
-							neshanRouteFromUrl(oLat, oLng, lat, lng),
-							'_blank',
-							'noopener',
-						)
+						finish(neshanRouteFromUrl(oLat, oLng, lat, lng))
 					} else {
 						// GPS ناشناخته/خراب — اعتبارسنجیِ همان ±۹۰/۱۸۰ بلوک
-						showToast(t['article.routeGpsDenied'], 'error')
 						openFallback()
 					}
 				},
-				() => {
-					setLocating(false)
-					showToast(t['article.routeGpsDenied'], 'error')
-					openFallback()
-				},
+				openFallback,
 				{ enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
 			)
 		} catch {
-			setLocating(false)
-			showToast(t['article.routeGpsDenied'], 'error')
 			openFallback()
 		}
 	}

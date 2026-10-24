@@ -175,6 +175,26 @@ assert(
 )
 unmount(scanWithCourier)
 
+// Invalid GPS never enters a navigation URL; successive live updates reuse the map.
+let scanPosition: { lat: number; lng: number } | null = { lat: NaN, lng: 49 }
+let scanOrigin = { lat: 37, lng: 49 }
+const changingScan = createHost(ScanRouteMap, () => ({ origin: scanOrigin, destination: { lat: 38, lng: 50 }, polyline: null, courierPosition: scanPosition }))
+await flush(changingScan)
+const changingScanMap = maps.at(-1)!
+const beforeScanUpdates = maps.length
+const scanRouteHref = () => nodes(changingScan.tree).filter((node) => node.type === 'a').at(-1)!.props.href
+assert.equal(scanRouteHref(), 'https://nshn.ir?origin=37.000000,49.000000&destination=38.000000,50.000000&vehicle=d')
+scanPosition = { lat: 37.5, lng: 49.5 }; changingScan.render(); await flush(changingScan)
+assert.equal(scanRouteHref(), 'https://nshn.ir?origin=37.500000,49.500000&destination=38.000000,50.000000&vehicle=d')
+scanPosition = { lat: 37.6, lng: 49.6 }; changingScan.render(); await flush(changingScan)
+assert.equal(scanRouteHref(), 'https://nshn.ir?origin=37.600000,49.600000&destination=38.000000,50.000000&vehicle=d')
+assert.equal(maps.length, beforeScanUpdates, 'courier GPS changes update links without allocating another WebGL map')
+scanPosition = null
+scanOrigin = { lat: 91, lng: 49 }; changingScan.render(); await flush(changingScan)
+assert(changingScanMap.removed)
+assert.equal(scanRouteHref(), 'https://neshan.org/maps/routing/car/destination/38.000000,50.000000', 'missing valid origins still leave a destination-only navigation fallback')
+unmount(changingScan)
+
 let courier: { lat: number; lng: number } | null = null
 let destination: { lat: number; lng: number } | null = null
 const tracking = createHost(CourierTrackingMap, () => ({ status: 'ON_THE_WAY', courierLocation: courier, customerLocation: destination }))
@@ -317,4 +337,38 @@ nodes(checkoutAddress.tree).find((node) => node.type === MapPicker)!.props.onVal
 control(checkoutAddress, 'form').props.onSubmit({ preventDefault() {} })
 assert.equal(submitted.length, submittedCount + 1, 'checkout also blocks saving an incomplete manual draft over a valid selected point')
 unmount(checkoutAddress)
-console.log('Map client regressions passed: async initialization, reverse races, wrapped clicks, failure fallback, scan lifecycle, style readiness, late GPS, route throttling, destination changes, lazy article maps, cleanup and address draft/save safety.')
+
+// A stopped/restarted scan page must not feed old coordinates into its new live-origin link.
+let scanTracking: { onPosition(point: { lat: number; lng: number }): void; onStopped(): void }
+let scanWatchStops = 0
+mock.module('@tanstack/react-router', () => ({
+        createFileRoute: () => (options: any) => ({ ...options, useParams: () => ({ orderId: 'order-scan' }) }),
+        Link: () => null,
+}))
+mock.module('#/server/courier', () => ({ courierScan: async () => ({
+        success: true, trackingEnabled: true,
+        route: { origin: { lat: 37, lng: 49 }, destination: { lat: 38, lng: 50 }, polyline: null },
+}) }))
+mock.module('#/utils/courierSession', () => ({ getCourierToken: () => 'courier-session' }))
+mock.module('#/utils/courierTracking', () => ({ startCourierTracking: (callbacks: typeof scanTracking) => {
+        scanTracking = callbacks
+        return () => { scanWatchStops++ }
+} }))
+const { Route: scanPageRoute } = await import('../src/routes/courier/scan/$orderId')
+const scanPage = createHost((scanPageRoute as any).component, () => ({}))
+const scanPageButton = () => nodes(scanPage.tree).find((node) => node.type === 'button')!
+const scanPageMap = () => nodes(scanPage.tree).find((node) => node.type === ScanRouteMap)!
+await scanPageButton().props.onClick(); await flush(scanPage)
+assert.equal(scanPageMap().props.courierPosition, null, 'a new delivery uses the restaurant until live GPS arrives')
+scanTracking!.onPosition({ lat: 37.5, lng: 49.5 }); await flush(scanPage)
+assert.deepEqual(scanPageMap().props.courierPosition, { lat: 37.5, lng: 49.5 })
+scanPageButton().props.onClick(); await flush(scanPage)
+assert.equal(scanWatchStops, 1)
+assert.equal(scanPageMap().props.courierPosition, null, 'manually stopping tracking discards its live navigation origin')
+await scanPageButton().props.onClick(); await flush(scanPage)
+assert.equal(scanPageMap().props.courierPosition, null, 'restarting tracking waits for a fresh coordinate')
+scanTracking!.onPosition({ lat: 37.6, lng: 49.6 }); await flush(scanPage)
+scanTracking!.onStopped(); await flush(scanPage)
+assert.equal(scanPageMap().props.courierPosition, null, 'permission/session/server stops also discard stale coordinates')
+unmount(scanPage)
+console.log('Map client regressions passed: async initialization, reverse races, wrapped clicks, failure fallback, scan lifecycle and GPS-origin updates, style readiness, late GPS, route throttling, destination changes, lazy article maps, cleanup and address draft/save safety.')
