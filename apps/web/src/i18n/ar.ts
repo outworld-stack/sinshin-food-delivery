@@ -103,6 +103,8 @@ export const ar: Dict = {
         'header.ordersPanel': 'لوحة الطلبات',
         'header.trackOrder': 'تتبّع الطلب',
         'header.cart': 'سلة الشراء',
+        // stage-100 — زرّ صندوق الإشعارات في الهيدر (مع شارة غير المقروء)
+        'header.notifications': 'صندوق الإشعارات',
         'header.profile': 'الملف الشخصي',
         'header.auth': 'دخول / تسجيل',
 
@@ -183,6 +185,8 @@ export const ar: Dict = {
         'cart.continue': 'متابعة إتمام الشراء',
         'cart.clearedToast': 'تم تفريغ سلة الشراء',
         'cart.removedToast': 'أُزيل المنتج من السلة',
+        // stage-100 — الصندوق الدائري للسلة (صفحة المنتجات · sm/md فقط)
+        'cart.orbLabel': 'سلة الشراء — {n} عنصرًا. انقر للانتقال إلى السلة',
         'cart.clearTitle': 'تفريغ سلة الشراء',
         'cart.clearMessage':
                 'هل أنت متأكد من تفريغ سلة الشراء؟ ستُحذف جميع المنتجات من سلتك.',

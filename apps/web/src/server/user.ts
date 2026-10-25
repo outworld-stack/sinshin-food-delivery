@@ -35,7 +35,10 @@ export type {
 	ProductReviewDto,
 	ProductId,
 }
-export type { OrderBreakdown, UserOrderItem as OrderItem } from '@sinshin/shared'
+export type {
+	OrderBreakdown,
+	UserOrderItem as OrderItem,
+} from '@sinshin/shared'
 // رارد ۴۷ — نام‌های مستعارِ بدون مصرف‌کننده (UserAddress/UserDevice/WalletTransaction/
 // UserReferral) حذف شدند؛ هر مصرف‌کننده‌ی آینده مستقیم از @sinshin/shared می‌خواند.
 
@@ -83,6 +86,12 @@ export async function markNotificationsRead(input: {
 		'POST',
 		input,
 	)
+}
+
+// stage-100 — بج اعلان‌های خوانده‌نشده در هدر: اندپوینت سبکِ مخصوصِ
+// poll (بدون لیست ۳۰تایی) — همان unreadCount سرویس؛ no-store سمت API.
+export async function getUnreadNotifications(): Promise<{ unread: number }> {
+	return authJson<{ unread: number }>('/notifications/unread-count', 'GET')
 }
 
 // round-12 — bind معرف پس از ثبت‌نام (اسکن QR / ورود دستی کد در داشبورد کاربر)

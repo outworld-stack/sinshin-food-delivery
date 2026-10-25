@@ -56,6 +56,11 @@ export const cartItemKey = (productId: string, sizeId: string | null): string =>
 
 interface CartState {
 	items: CartItem[]
+	// stage-100 — شمارنده‌ی «افزودن به سبد»: با هر addItem یک واحد جلو
+	// می‌رود؛ شنونده‌ها (مثل باکس دایره‌ای سبد در صفحه‌ی محصولات) از
+	// همین برای تشخیصِ «کلیکِ تازه» استفاده می‌کنند (رویداد، نه مقدار).
+	// persist نمی‌شود (partialize فقط items را ذخیره می‌کند).
+	addTick: number
 	addItem: (
 		productId: string,
 		quantity?: number,
@@ -72,29 +77,28 @@ export const useCartStore = create<CartState>()(
 	persist(
 		(set, get) => ({
 			items: [],
+			addTick: 0,
 
 			// افزودن — ادغام فقط وقتی محصول و سایز هر دو یکسان باشن
+			// stage-100 — addTick در «هر» addItem (حتی ادغامِ ردیفِ موجود)
+			// جلو می‌رود تا UI رویدادِ کلیک را از تغییرِ مقدار تفکیک کند
 			addItem: (productId, quantity = 1, sizeId = null) =>
 				set((state) => {
 					const key = cartItemKey(productId, sizeId)
 					const existing = state.items.find(
 						(i) => cartItemKey(i.productId, i.sizeId) === key,
 					)
-					if (existing) {
-						return {
-							items: state.items.map((i) =>
+					const items = existing
+						? state.items.map((i) =>
 								cartItemKey(i.productId, i.sizeId) === key
 									? { ...i, quantity: clampQty(i.quantity + quantity) }
 									: i,
-							),
-						}
-					}
-					return {
-						items: [
-							...state.items,
-							{ productId, sizeId, quantity: clampQty(quantity) },
-						],
-					}
+							)
+						: [
+								...state.items,
+								{ productId, sizeId, quantity: clampQty(quantity) },
+							]
+					return { items, addTick: state.addTick + 1 }
 				}),
 
 			// آپدیت تعداد بر اساس کلید ردیف
@@ -131,6 +135,10 @@ export const useCartStore = create<CartState>()(
 		{
 			name: 'sinshin-cart-storage',
 			skipHydration: true,
+			// stage-100 — فقط items ذخیره می‌شود؛ addTick رویدادِ
+			// نشستی است و با رهایتِریت باید از صفر شروع شود
+			// (باز کردنِ صفحه نباید «کلیکِ تازه» جعل کند)
+			partialize: (state) => ({ items: state.items }),
 			// round-12 — نسخهٔ ۱ بدون migrate بود؛ ردیف‌های مرده (محصول حذف‌شده /
 			// id غیر-UUID / quantity خارج بازه) برای همیشه می‌ماندند چون مسیر
 			// سفارشِ مهمان هرگز سبد را نمی‌شوید. migrate = همان sanitize

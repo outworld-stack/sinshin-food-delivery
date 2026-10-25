@@ -42,6 +42,10 @@ export const qk = {
 	// stage-67 — صندوق اعلان‌های من (پروفایل): ۳۰ اعلانِ ۷ روز اخیر + بج.
 	// Prefix for invalidation; query options append the authenticated user ID.
 	myNotifications: ['my-notifications'] as const,
+	// stage-100 — فقط شمارش خوانده‌نشده (بج هدر): اندپوینت سبک unread-count
+	// کلید جدا از my-notifications (شکل داده/نرخ رفرش متفاوت)؛ صفحه‌ی صندوق
+	// بعد از markRead هر دو را نامعتبر می‌کند تا بج همان لحظه صفر شود.
+	notificationsUnread: ['notifications-unread'] as const,
 
 	// --- منو / محصولات ---
 	activeMainCategories: ['active-main-categories'] as const,
@@ -158,6 +162,10 @@ export const qk = {
 	// پرچم‌های صفحه‌ی تنظیمات — بعد از ذخیره نامعتبرسازی می‌شن
 	settingsTracking: ['settings-tracking'] as const,
 	settingsRestaurant: ['settings-restaurant'] as const,
+	// stage-100 — انیمیشن صفحه‌ی محصول ویژه: کلیدِ عمومیِ سایت (خواندنِ
+	// صفحه‌ی محصول) جدا از کلید ادمین (نرخ رفرش/شکل داده فرق دارد)
+	featuredAnimation: ['featured-animation'] as const,
+	settingsFeaturedAnimation: ['settings-featured-animation'] as const,
 	// stage-84 — درگاه‌های پرداخت + شلوغی رستوران
 	settingsGateways: ['settings-gateways'] as const,
 	settingsBusy: ['settings-busy'] as const,

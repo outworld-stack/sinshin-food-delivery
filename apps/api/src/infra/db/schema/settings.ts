@@ -65,6 +65,14 @@ export const SETTING_KEYS = {
    * 'world' = همه‌ی کشورها
    */
   outsideAccessScope: 'outside_access_scope', // 'iraq' | 'world'
+  /**
+   * stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی «محصول ویژه» (انتخاب ادمین اصلی):
+   * 'shader' (پیش‌فرض — WebGL موج‌دار، انیمیشن فعلی) | 'sonar' (شبکه‌ی
+   * نقطه‌ای SonarGrid) | 'sparks' (جرقه‌های دوطرفه DualSparks).
+   * غایب = shader ⇒ هیچ نصبی با این استیج رفتارش عوض نمی‌شود.
+   * خواندن عمومی: GET /menu/featured-animation (کش ETag منو).
+   */
+  featuredAnimation: 'featured_animation', // 'shader' | 'sonar' | 'sparks'
 } as const
 
 export const contentAbout = pgTable('content_about', {

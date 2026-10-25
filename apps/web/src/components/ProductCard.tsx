@@ -169,26 +169,17 @@ export const ProductCard = memo(function ProductCard({
 			: 'bg-primary dark:bg-dark-primary text-white shadow-sm cursor-default'
 
 	// stage-47 — بج + شمارنده (روی تصویر؛ پنل زنده‌ی پیش‌نمایش هم همین را می‌بیند)
-	// stage-78 — ستون گوشه‌ی چپِ بالا: بج «ویژه» بالای بج تخفیف می‌نشیند
-	// (قبلاً بج تخفیف تنها بود؛ حالا دو بج در ستون، بدون روی‌هم‌افتادی)
+	// stage-100 — بج «ویژه» از تصویر جدا شد: حالا به‌صورت نیم‌خارجی روی
+	// «لبه‌ی چپ‌بالا» کل کارت نشسته است (نصف بیرون، نصف درون — خواسته‌ی
+	// کارفرما). داخل تصویر فقط بج تخفیف می‌ماند.
 	const showDiscountBadge = showDiscount && activePct > 0
-	const cornerBadges =
-		aurora || showDiscountBadge ? (
-			<div className="absolute top-3 left-3 flex flex-col items-start gap-1.5">
-				{/* stage-78 — بج «ویژه»: گرادیان سرخابی→آبیِ خانواده‌ی Aurora + ستاره */}
-				{aurora ? (
-					<span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-DanaDemiBold text-white bg-linear-to-l from-[#E54CFF] to-[#00C2FF] shadow-md animate-badge-in">
-						<Star size={11} />
-						{t['common.featuredBadge']}
-					</span>
-				) : null}
-				{showDiscountBadge ? (
-					<span className="bg-white/90 dark:bg-[#1a0a0e]/90 backdrop-blur-sm text-primary dark:text-dark-primary text-xs font-DanaDemiBold px-3 py-1 rounded-full shadow-md animate-badge-in">
-						{tpl(t['common.discountBadge'], { n: fmt.num(activePct) })}
-					</span>
-				) : null}
-			</div>
-		) : null
+	const cornerBadges = showDiscountBadge ? (
+		<div className="absolute top-3 left-3 flex flex-col items-start gap-1.5">
+			<span className="bg-white/90 dark:bg-[#1a0a0e]/90 backdrop-blur-sm text-primary dark:text-dark-primary text-xs font-DanaDemiBold px-3 py-1 rounded-full shadow-md animate-badge-in">
+				{tpl(t['common.discountBadge'], { n: fmt.num(activePct) })}
+			</span>
+		</div>
+	) : null
 
 	const countdown = showDiscount ? (
 		<div className="absolute bottom-3 right-3 left-3 flex justify-center">
@@ -265,167 +256,182 @@ export const ProductCard = memo(function ProductCard({
 	)
 
 	return (
-		<div
-			className={`group flex flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1${aurora ? ' aurora-card' : ''}`}
-		>
-			{/* سئو-۸: <img> واقعی به‌جای تصویر پس‌زمینه — alt + lazy + دیده‌شدن در Google Images
+		// stage-100 — پوششِ نسبی دور کارت: بج «ویژه» باید «نصف بیرون،
+		// نصف درون» کارت دیده شود؛ کارتِ خودش overflow-hidden دارد (برای
+		// قیچِ تصویر و پس‌زمینه‌ی Aurora) پس بج نمی‌تواند داخلش باشد.
+		// بالابرِ هاور (translate) روی همین پوشش است تا کارت و بج با هم
+		// بالا بروند؛ .grid-anim > * هم همین پوشش را می‌گیرد (پلکانی).
+		<div className="group relative transition-all duration-300 hover:-translate-y-1">
+			{aurora && (
+				<span className="absolute top-0 left-4 -translate-y-1/2 z-10 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-DanaDemiBold text-white bg-linear-to-l from-[#E54CFF] to-[#00C2FF] shadow-md animate-badge-in pointer-events-none">
+					<Star size={11} />
+					{t['common.featuredBadge']}
+				</span>
+			)}
+			<div
+				className={`flex flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300${aurora ? ' aurora-card' : ''}`}
+			>
+				{/* سئو-۸: <img> واقعی به‌جای تصویر پس‌زمینه — alt + lazy + دیده‌شدن در Google Images
       round-12 — interactive=false (پیش‌نمایش فرم محصول): بدون Link — لینک با
       id سنتینل «preview»، preload روی هاور/فوکوس می‌ساخت و 422 پترن UUID
       می‌گرفت (نویز کنسول + RouteError روی کلیک) */}
-			{interactive ? (
-				<Link
-					to="/products/$productId"
-					// stage-56 — سئو: slug اگر باشد وگرنه UUID (همان ترجیح canonical/sitemap)
-					params={{ productId: product.slug || product.id }}
-					className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]"
-				>
-					{product.profileImage ? (
-						<img
-							src={product.profileImage}
-							alt={product.name}
-							loading="lazy"
-							decoding="async"
-							className={`h-full w-full object-cover ${unavailable ? 'blur-[2px] saturate-75' : ''}`}
-						/>
-					) : (
-						<div className="absolute inset-0 bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]"></div>
-					)}
-					{cornerBadges}
-					{countdown}
-					{unavailableOverlay}
-				</Link>
-			) : (
-				<div className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]">
-					{product.profileImage ? (
-						<img
-							src={product.profileImage}
-							alt={product.name}
-							decoding="async"
-							className={`h-full w-full object-cover ${unavailable ? 'blur-[2px] saturate-75' : ''}`}
-						/>
-					) : (
-						<div className="absolute inset-0 bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]"></div>
-					)}
-					{cornerBadges}
-					{countdown}
-					{unavailableOverlay}
-				</div>
-			)}
-
-			{/* round-14 — موبایل: پدینگ جمع‌تر، قیمت/«تومان» و آیکون سبد کوچک‌تر تا کارت در عرض کم نشکند */}
-			<div className="p-3 sm:p-4 flex flex-col flex-1">
 				{interactive ? (
 					<Link
 						to="/products/$productId"
+						// stage-56 — سئو: slug اگر باشد وگرنه UUID (همان ترجیح canonical/sitemap)
 						params={{ productId: product.slug || product.id }}
+						className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]"
 					>
+						{product.profileImage ? (
+							<img
+								src={product.profileImage}
+								alt={product.name}
+								loading="lazy"
+								decoding="async"
+								className={`h-full w-full object-cover ${unavailable ? 'blur-[2px] saturate-75' : ''}`}
+							/>
+						) : (
+							<div className="absolute inset-0 bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]"></div>
+						)}
+						{cornerBadges}
+						{countdown}
+						{unavailableOverlay}
+					</Link>
+				) : (
+					<div className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]">
+						{product.profileImage ? (
+							<img
+								src={product.profileImage}
+								alt={product.name}
+								decoding="async"
+								className={`h-full w-full object-cover ${unavailable ? 'blur-[2px] saturate-75' : ''}`}
+							/>
+						) : (
+							<div className="absolute inset-0 bg-linear-to-br from-[#f6339a20] to-[#2fd4d120]"></div>
+						)}
+						{cornerBadges}
+						{countdown}
+						{unavailableOverlay}
+					</div>
+				)}
+
+				{/* round-14 — موبایل: پدینگ جمع‌تر، قیمت/«تومان» و آیکون سبد کوچک‌تر تا کارت در عرض کم نشکند */}
+				<div className="p-3 sm:p-4 flex flex-col flex-1">
+					{interactive ? (
+						<Link
+							to="/products/$productId"
+							params={{ productId: product.slug || product.id }}
+						>
+							<h3
+								className={`font-DanaDemiBold text-lg ${aurora ? 'text-gray-900 dark:text-white' : 'text-gray-800 dark:text-white'} mb-1 hover:text-primary dark:hover:text-dark-primary transition-colors`}
+							>
+								{product.name}
+							</h3>
+						</Link>
+					) : (
 						<h3
-							className={`font-DanaDemiBold text-lg ${aurora ? 'text-gray-900 dark:text-white' : 'text-gray-800 dark:text-white'} mb-1 hover:text-primary dark:hover:text-dark-primary transition-colors`}
+							className={`font-DanaDemiBold text-lg ${aurora ? 'text-gray-900 dark:text-white' : 'text-gray-800 dark:text-white'} mb-1`}
 						>
 							{product.name}
 						</h3>
-					</Link>
-				) : (
-					<h3
-						className={`font-DanaDemiBold text-lg ${aurora ? 'text-gray-900 dark:text-white' : 'text-gray-800 dark:text-white'} mb-1`}
+					)}
+
+					<p
+						className={`text-sm ${aurora ? 'text-gray-600 dark:text-white/75' : 'text-gray-500 dark:text-gray-400'} line-clamp-2 font-DanaRegular mb-2 h-10 overflow-hidden`}
 					>
-						{product.name}
-					</h3>
-				)}
+						{product.description ?? ''}
+					</p>
 
-				<p
-					className={`text-sm ${aurora ? 'text-gray-600 dark:text-white/75' : 'text-gray-500 dark:text-gray-400'} line-clamp-2 font-DanaRegular mb-2 h-10 overflow-hidden`}
-				>
-					{product.description ?? ''}
-				</p>
-
-				{/* stage-53 — بج‌های حالت سفارش: همیشه نمایش (رفع بگ ۱) — چه
+					{/* stage-53 — بج‌های حالت سفارش: همیشه نمایش (رفع بگ ۱) — چه
                                 کالا موجود باشد چه ناموجود، چه حالتی محدود باشد چه آزاد؛
                                 همان سه بجِ صفحه‌ی اختصاصی محصول، اینجا در نسخه‌ی فشرده‌ی کارت */}
-				<div className="mb-2">{modeBadges}</div>
+					<div className="mb-2">{modeBadges}</div>
 
-				{hasSizes && (
-					<div className="flex flex-wrap gap-1.5 mb-2">
-						{product.sizes.map((size) => {
-							const eff = sizeEffective(size)
-							return (
-								<button
-									key={size.id}
-									type="button"
-									onClick={() => setSelectedSizeId(size.id)}
-									className={`px-2.5 py-1 rounded-lg text-[11px] font-DanaMedium transition cursor-pointer ${
-										size.id === effectiveSizeId
-											? 'bg-primary dark:bg-dark-primary text-white shadow-sm'
-											: 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c]'
-									}`}
-								>
-									{size.name}
-									{eff.active && eff.pct > 0 && (
-										<span className="mr-1 opacity-80">٪{fmt.num(eff.pct)}</span>
-									)}
-								</button>
-							)
-						})}
-					</div>
-				)}
-
-				<div className="mt-auto flex items-center justify-between gap-2 pt-3 border-t border-gray-100 dark:border-white/5">
-					<div className="flex flex-col">
-						{showDiscount && crossedPrice > displayPrice && (
-							<span
-								className={`text-[11px] sm:text-xs ${aurora ? 'text-gray-500 dark:text-white/60' : 'text-gray-400'} line-through font-DanaRegular`}
-							>
-								{fmt.price(crossedPrice)}
-							</span>
-						)}
-						<div className="flex items-center gap-1">
-							<span className="font-DanaDemiBold text-[15px] sm:text-lg text-gray-900 dark:text-white">
-								{fmt.price(displayPrice)}
-							</span>
-							<span
-								className={`text-[10px] sm:text-xs ${aurora ? 'text-gray-600 dark:text-white/70' : 'text-gray-500 dark:text-gray-400'} font-DanaMedium mr-0.5 sm:mr-1`}
-							>
-								{t['common.toman']}
-							</span>
+					{hasSizes && (
+						<div className="flex flex-wrap gap-1.5 mb-2">
+							{product.sizes.map((size) => {
+								const eff = sizeEffective(size)
+								return (
+									<button
+										key={size.id}
+										type="button"
+										onClick={() => setSelectedSizeId(size.id)}
+										className={`px-2.5 py-1 rounded-lg text-[11px] font-DanaMedium transition cursor-pointer ${
+											size.id === effectiveSizeId
+												? 'bg-primary dark:bg-dark-primary text-white shadow-sm'
+												: 'bg-gray-100 dark:bg-[#1a0a0e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a151c]'
+										}`}
+									>
+										{size.name}
+										{eff.active && eff.pct > 0 && (
+											<span className="mr-1 opacity-80">
+												٪{fmt.num(eff.pct)}
+											</span>
+										)}
+									</button>
+								)
+							})}
 						</div>
-					</div>
+					)}
 
-					{/* stage-53 — پیش‌نمایش (interactive=false): دکمه‌ی سبد فقط نمایشی
+					<div className="mt-auto flex items-center justify-between gap-2 pt-3 border-t border-gray-100 dark:border-white/5">
+						<div className="flex flex-col">
+							{showDiscount && crossedPrice > displayPrice && (
+								<span
+									className={`text-[11px] sm:text-xs ${aurora ? 'text-gray-500 dark:text-white/60' : 'text-gray-400'} line-through font-DanaRegular`}
+								>
+									{fmt.price(crossedPrice)}
+								</span>
+							)}
+							<div className="flex items-center gap-1">
+								<span className="font-DanaDemiBold text-[15px] sm:text-lg text-gray-900 dark:text-white">
+									{fmt.price(displayPrice)}
+								</span>
+								<span
+									className={`text-[10px] sm:text-xs ${aurora ? 'text-gray-600 dark:text-white/70' : 'text-gray-500 dark:text-gray-400'} font-DanaMedium mr-0.5 sm:mr-1`}
+								>
+									{t['common.toman']}
+								</span>
+							</div>
+						</div>
+
+						{/* stage-53 — پیش‌نمایش (interactive=false): دکمه‌ی سبد فقط نمایشی
                                         است — ایونت کلیک کاملاً برداشته شد (رفع بگ ۲)؛ در سایت عادی،
                                         همان رفتار همیشگیِ add-to-cart باقی است */}
-					<button
-						type="button"
-						onClick={
-							// stage-55 — bump لمسی دکمه‌ی افزودن به سبد: پایان انیمیشن
-							// استیت را برمی‌گرداند تا دفعه‌ی بعد دوباره اجرا شود (CSS-only)
-							interactive
-								? () => {
-										handleAddToCart()
-										setCartBump(true)
-									}
-								: undefined
-						}
-						disabled={cartBlocked}
-						onAnimationEnd={() => setCartBump(false)}
-						tabIndex={interactive ? 0 : -1}
-						aria-label={
-							unavailable
-								? t['common.temporarilyUnavailable']
-								: categoryLocked
-									? t['common.purchaseDisabledBadge']
-									: t['pdetail.addToCart']
-						}
-						title={
-							unavailable
-								? t['common.temporarilyUnavailable']
-								: categoryLocked
-									? t['common.purchaseDisabledBadge']
+						<button
+							type="button"
+							onClick={
+								// stage-55 — bump لمسی دکمه‌ی افزودن به سبد: پایان انیمیشن
+								// استیت را برمی‌گرداند تا دفعه‌ی بعد دوباره اجرا شود (CSS-only)
+								interactive
+									? () => {
+											handleAddToCart()
+											setCartBump(true)
+										}
 									: undefined
-						}
-						className={`${cartBaseClass} ${cartLookClass}${cartBump ? ' animate-cart-bump' : ''}`}
-					>
-						<Cart size={24} className="h-4.5 w-4.5 sm:h-6 sm:w-6" />
-					</button>
+							}
+							disabled={cartBlocked}
+							onAnimationEnd={() => setCartBump(false)}
+							tabIndex={interactive ? 0 : -1}
+							aria-label={
+								unavailable
+									? t['common.temporarilyUnavailable']
+									: categoryLocked
+										? t['common.purchaseDisabledBadge']
+										: t['pdetail.addToCart']
+							}
+							title={
+								unavailable
+									? t['common.temporarilyUnavailable']
+									: categoryLocked
+										? t['common.purchaseDisabledBadge']
+										: undefined
+							}
+							className={`${cartBaseClass} ${cartLookClass}${cartBump ? ' animate-cart-bump' : ''}`}
+						>
+							<Cart size={24} className="h-4.5 w-4.5 sm:h-6 sm:w-6" />
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>

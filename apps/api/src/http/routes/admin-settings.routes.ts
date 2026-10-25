@@ -355,6 +355,56 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       },
     )
 
+    // ═══ stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی «محصول ویژه» ═══
+    // انتخاب یکی از سه انیمیشن برای صفحه‌ی اختصاصی محصول ویژه (صفحه‌ای که
+    // product.isFeatured=true دارد). مقدار غایب = 'shader' = همان انیمیشن
+    // WebGL فعلی ⇒ هیچ نصبی با این استیج رفتارش عوض نمی‌شود. خواندنِ
+    // عمومی از GET /menu/featured-animation (کشِ ETag منو — max-age=30).
+    .get(
+      '/featured-animation',
+      async () => {
+        const raw = await deps.settings.get<string>(
+          SETTING_KEYS.featuredAnimation,
+          'shader',
+        )
+        return { animation: raw === 'sonar' || raw === 'sparks' ? raw : 'shader' }
+      },
+      {
+        detail: {
+          summary: 'Featured-product page animation (shader | sonar | sparks) — main admin only',
+          description:
+            "stage-100: the background animation of the special featured-product page. 'shader' (default) = current WebGL waves; 'sonar' = SonarGrid dot field; 'sparks' = DualSparks corner rays. Customers read it from the public GET /menu/featured-animation (ETag-cached, ~30s).",
+        },
+      },
+    )
+    .post(
+      '/featured-animation',
+      async ({ body, user }) => {
+        await deps.settings.set(SETTING_KEYS.featuredAnimation, body.animation)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'FEATURED_ANIMATION_SET',
+          entity: 'settings',
+          metadata: { animation: body.animation },
+        })
+        return { success: true }
+      },
+      {
+        body: t.Object({
+          animation: t.Union([
+            t.Literal('shader'),
+            t.Literal('sonar'),
+            t.Literal('sparks'),
+          ]),
+        }),
+        detail: {
+          summary: 'Set the featured-product page animation — main admin only',
+          description:
+            "Stores the choice in the settings KV (featured_animation). New visitors see it within ~30s (public menu ETag cache). Audit-logged as FEATURED_ANIMATION_SET.",
+        },
+      },
+    )
+
     // ═══ stage-79 — مجوز ثبت‌نام ویژه (فقط ادمین اصلی) ═══
     // دسترسیِ ویژه: شماره‌ای که اینجا صادر شود می‌تواند یک‌بار (در پنجره‌ی
     // اعتبار) ثبت‌نام کند — حتی از دستگاهِ سوخته/مسدود — و بعد از ثبت‌نامِ

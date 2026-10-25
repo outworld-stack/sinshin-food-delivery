@@ -84,6 +84,9 @@ export function useNotificationInboxPage(userId: string | undefined) {
 
         const invalidate = useCallback(() => {
                 void queryClient.invalidateQueries({ queryKey: qk.myNotifications })
+                // stage-100 — بج هدر (unread-count) هم همان لحظه تازه شود؛
+                // خواندن اعلان در صفحه‌ی صندوق باید بجِ هدر را فوراً صفر کند
+                void queryClient.invalidateQueries({ queryKey: qk.notificationsUnread })
         }, [queryClient])
 
         const markRead = useMutation({

@@ -103,6 +103,8 @@ export const fa = {
         'header.ordersPanel': 'پنل سفارشات',
         'header.trackOrder': 'پیگیری سفارش',
         'header.cart': 'سبد خرید',
+        // stage-100 — دکمه‌ی صندوق اعلان‌ها در هدر (با بج خوانده‌نشده)
+        'header.notifications': 'صندوق اعلان‌ها',
         'header.profile': 'پروفایل',
         'header.auth': 'ورود / ثبت‌نام',
 
@@ -186,6 +188,8 @@ export const fa = {
         'cart.continue': 'ادامه فرآیند خرید',
         'cart.clearedToast': 'سبد خرید خالی شد',
         'cart.removedToast': 'محصول از سبد حذف شد',
+        // stage-100 — باکس دایره‌ای سبد (صفحه‌ی محصولات · فقط sm/md)
+        'cart.orbLabel': 'سبد خرید — {n} قلم. برای رفتن به سبد کلیک کنید',
         'cart.clearTitle': 'خالی کردن سبد خرید',
         'cart.clearMessage':
                 'آیا از خالی کردن سبد خرید خود مطمئن هستید؟ تمام محصولات از سبد شما حذف خواهند شد.',

@@ -20,13 +20,15 @@ import { ChevronRight } from 'reicon-react'
 import { Gallery } from '#/components/Gallery'
 import { ProductDetailSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError, RouteNotFound } from '#/components/shared/RouteFallbacks'
+// stage-100 — دیسپچر انیمیشن: ادمین اصلی یکی از سه انیمیشن (shader پیش‌فرض /
+// sonar / sparks) را انتخاب می‌کند — ShaderBackground جای مستقیمش را داد
+import { FeaturedPageBackground } from '#/components/site/product-detail/FeaturedPageBackground'
 import { ProductInfo } from '#/components/site/product-detail/ProductInfo'
 import { ProductIngredients } from '#/components/site/product-detail/ProductIngredients'
 import { ProductMobileBar } from '#/components/site/product-detail/ProductMobileBar'
 import { ProductPriceBox } from '#/components/site/product-detail/ProductPriceBox'
 import { ProductReviews } from '#/components/site/product-detail/ProductReviews'
 import { ProductSizeSelector } from '#/components/site/product-detail/ProductSizeSelector'
-import { ShaderBackground } from '#/components/site/product-detail/ShaderBackground'
 import { useProductPage } from '#/hooks/site/useProductPage'
 import { useBack } from '#/hooks/useBack'
 import { useI18n } from '#/i18n'
@@ -140,7 +142,7 @@ function ProductDetailContent({ product }: { product: Product }) {
 	// رارد ۳۸ — JSON-LD (Product + BreadcrumbList) به head منتقل شد:
 	// دوزبانه (بومی‌سازی‌شده) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
 
-	// stage-78 — محصول ویژه (ویژه‌سازی ادمین اصلی): پس‌زمینه‌ی متحرکِ WebGL
+	// stage-78 — محصول ویژه (ویژه‌سازی ادمین اصلی): پس‌زمینه‌ی متحرک
 	// در پسِ محتوا (fixed z-0). محتوا «relative» می‌شود تا در ترتیبِ نقاشی
 	// بالای بوم بیفتد — بدون z-index (بدون ساخت stacking-context؛ z ایندکس‌های
 	// فرزندانِ ثابت مثل نوار موبایل z-50 در کانتکست ریشه می‌مانند و تغییری نمی‌کنند)
@@ -148,7 +150,8 @@ function ProductDetailContent({ product }: { product: Product }) {
 
 	return (
 		<>
-			{isFeatured ? <ShaderBackground /> : null}
+			{/* stage-100 — دیسپچر: انیمیشن انتخابی ادمین اصلی (پیش‌فرض = shader) */}
+			{isFeatured ? <FeaturedPageBackground /> : null}
 
 			<div className="relative py-10 px-4 max-w-6xl mx-auto pb-32 lg:pb-10">
 				<button

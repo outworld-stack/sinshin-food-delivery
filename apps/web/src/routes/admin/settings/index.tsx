@@ -14,6 +14,8 @@ import { memo, useCallback, useState } from 'react'
 import { Discover2, Pin } from 'reicon-react'
 import { AboutContentForm } from '#/components/admin/settings/AboutContentForm'
 import { DeliveryZonesManager } from '#/components/admin/settings/DeliveryZonesManager'
+// stage-100 — کارت انتخاب انیمیشن صفحه‌ی محصول ویژه (فقط ادمین اصلی)
+import { FeaturedAnimationCard } from '#/components/admin/settings/FeaturedAnimationCard'
 import { GalleryManager } from '#/components/admin/settings/GalleryManager'
 // رارد ۳۷ — کارت کامل دسترسی جغرافیایی (ایران + عراق) — جانشین کارت ساده‌ی «فقط ایران»
 import { GeoAccessCard } from '#/components/admin/settings/GeoAccessCard'
@@ -37,6 +39,8 @@ import {
 	aboutContentOptions,
 	adminGalleryImagesOptions,
 	deliveryZonesOptions,
+	// stage-100 — انیمیشن صفحه‌ی محصول ویژه (کارت جدید)
+	settingsFeaturedAnimationOptions,
 	settingsIranOnlyOptions,
 	settingsOutsideScopeOptions,
 	settingsRegistrationPermitsOptions,
@@ -104,11 +108,13 @@ const SettingsContent = memo(function SettingsContent() {
 	// رارد ۳۷ — سوییچ «فقط ایران» + انتخاب دامنه عراق → GeoAccessCard
 
 	const handleTrackingToggle = useCallback(() => {
-		if (tracking !== undefined && !trackingMutation.isPending) trackingMutation.mutate(!tracking)
+		if (tracking !== undefined && !trackingMutation.isPending)
+			trackingMutation.mutate(!tracking)
 	}, [tracking, trackingMutation])
 
 	const handleRestaurantToggle = useCallback(() => {
-		if (statusFull && !restaurantMutation.isPending) restaurantMutation.mutate(!statusFull.isOpen)
+		if (statusFull && !restaurantMutation.isPending)
+			restaurantMutation.mutate(!statusFull.isOpen)
 	}, [statusFull, restaurantMutation])
 
 	// stage-84 — ساعت باز شدن از طریق onNextOpenTimeChange باکس وضعیت آپدیت می‌شود
@@ -209,6 +215,10 @@ const SettingsContent = memo(function SettingsContent() {
 							{/* stage-84 — سوئیچ درگاه‌های پرداخت (فقط ادمین اصلی) */}
 							<PaymentGatewaysCard visible={isMainAdmin} />
 
+							{/* stage-100 — انیمیشن صفحه‌ی محصول ویژه
+                  (shader پیش‌فرض / sonar / sparks) — فقط ادمین اصلی */}
+							<FeaturedAnimationCard visible={isMainAdmin} />
+
 							{/* رارد ۳۷ — کارت کامل دسترسی جغرافیایی: سوییچ ایران + باکس مجوز عراق +
                   انتخاب دامنه (فقط عراق / همه کشورها) + وضعیت زنده‌ی رنج‌ها */}
 							<GeoAccessCard />
@@ -302,6 +312,8 @@ export const Route = createFileRoute('/admin/settings/')({
 			context.queryClient.query(settingsOutsideScopeOptions),
 			// stage-79 — فهرست مجوزهای ثبت‌نام (کارت زیرِ کارت جغرافیایی)
 			context.queryClient.query(settingsRegistrationPermitsOptions),
+			// stage-100 — انیمیشن صفحه‌ی محصول ویژه (کارت جدید)
+			context.queryClient.query(settingsFeaturedAnimationOptions),
 		])
 	},
 

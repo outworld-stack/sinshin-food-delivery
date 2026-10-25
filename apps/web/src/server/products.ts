@@ -29,6 +29,11 @@ import type {
 } from '@sinshin/shared'
 import { authJson, getJson, postJson } from '#/lib/api-fetch'
 import type { ProductFormData } from '#/types/forms'
+// stage-100 — قرارداد انیمیشن صفحه‌ی محصول ویژه
+import {
+	type FeaturedAnimation,
+	normalizeFeaturedAnimation,
+} from '#/types/site/featured-animation'
 
 // ─── re-export تایپ‌ها برای صفحات (قرارداد قبلی حفظ) ───
 
@@ -67,6 +72,14 @@ export async function getProductById(input: {
 	data: { id: ProductId | string }
 }): Promise<Product | null> {
 	return getJson<Product | null>(`/menu/products/${input.data.id}`)
+}
+
+// ── stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی محصول ویژه (عمومی) ──
+// ادمین اصلی از پنل انتخاب می‌کند؛ اینجا فقط خواندنِ عمومیِ کش‌شده
+// (ETag منو). مقدار ناشناخته/غایب ⇒ 'shader' (پیش‌فرض = رفتارِ امروز).
+export async function getFeaturedAnimation(): Promise<FeaturedAnimation> {
+	const d = await getJson<{ animation?: string }>('/menu/featured-animation')
+	return normalizeFeaturedAnimation(d?.animation)
 }
 
 // ─── سبد — قیمت‌گذاری سروری ───

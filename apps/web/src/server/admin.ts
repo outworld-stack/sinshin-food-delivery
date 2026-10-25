@@ -34,6 +34,11 @@ import type {
 	SubAdminRecordDto,
 } from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
+// stage-100 — قرارداد انیمیشن صفحه‌ی محصول ویژه (admin/main + عمومی)
+import {
+	type FeaturedAnimation,
+	normalizeFeaturedAnimation,
+} from '#/types/site/featured-animation'
 import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
 
 // رارد ۴۷ — نام‌های مستعارِ قدیمی فرانت حذف شدند (تکمیل خوشه‌ی رارد ۴۶): هر
@@ -492,6 +497,28 @@ export async function setOutsideScope(input: {
 	data: { scope: OutsideScope }
 }): Promise<void> {
 	await authJson<unknown>('/admin/settings/outside-scope', 'POST', input.data)
+}
+
+// ═══ stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی «محصول ویژه» (فقط ادمین اصلی) ═══
+// انتخاب از سه انیمیشن: shader (پیش‌فرض/فعلی) · sonar · sparks —
+// ذخیره در کلید featured_animation؛ عمومی‌خوان با GET /menu/featured-animation.
+
+export async function getFeaturedAnimationAdmin(): Promise<FeaturedAnimation> {
+	const d = await authJson<{ animation?: string }>(
+		'/admin/settings/featured-animation',
+		'GET',
+	)
+	return normalizeFeaturedAnimation(d?.animation)
+}
+
+export async function setFeaturedAnimation(input: {
+	data: { animation: FeaturedAnimation }
+}): Promise<void> {
+	await authJson<unknown>(
+		'/admin/settings/featured-animation',
+		'POST',
+		input.data,
+	)
 }
 
 /** رارد ۳۷ — وضعیت زنده‌ی دروازه برای کارت تنظیمات (رنج‌ها/منبع/به‌روزرسانی) —

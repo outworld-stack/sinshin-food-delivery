@@ -18,10 +18,12 @@ import { Elysia, t } from 'elysia'
 
 import type { MenuService } from '#/domain/menu/menu.service'
 import type { CartService } from '#/domain/cart/cart.service'
+import type { SettingsService } from '#/domain/settings/settings.service'
 import type { RedisService } from '#/infra/redis/redis'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { sha256 } from '#/domain/shared/crypto'
 import { SLUG_OR_ID_PATTERN } from '#/domain/shared/ids'
+import { SETTING_KEYS } from '#/infra/db/schema'
 import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
 import { cartItemSchema } from '#/http/schemas'
 
@@ -31,6 +33,8 @@ export interface MenuRoutesDeps {
   cart: CartService
   /** stage-55 — سقف نرخ IP برای اندپوینت عمومیِ بدون-احرازِ cart/details */
   redis: RedisService
+  /** stage-100 — خواندنِ عمومی انیمیشن صفحه‌ی محصول ویژه (featured_animation) */
+  settings: SettingsService
 }
 
 /** stage-55 — ETag/304 + Cache-Control برای GETهای عمومی منو.
@@ -118,6 +122,34 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
           summary: 'Single product by id or slug (null when not found)',
           description:
             'Accepts product UUID (legacy/cart links) or English slug (SEO URLs). Sizes include per-variant image (stage-56).',
+        },
+      },
+    )
+
+    // stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی «محصول ویژه» (عمومی، فقط-خواندنی):
+    // انتخابِ ادمین اصلی (POST /admin/settings/featured-animation) اینجا به
+    // صفحه‌ی محصول عمومی می‌رسد. مقدار غایب/نامعتبر = 'shader' (پیش‌فرض =
+    // انیمیشن فعلی)؛ کشِ ETag منو (30s) — مقدار زشت اضافه‌بار ندارد.
+    .get(
+      '/featured-animation',
+      (ctx) =>
+        withMenuCache(ctx, async () => {
+          // مقدار غایب/دستکاری‌شده ⇒ 'shader' (پشتیانِ ایمن — صفحه هرگز
+          // نمی‌شکند؛ همان رفتاری که کلاینت هم دارد)
+          const raw = await deps.settings.get<string>(
+            SETTING_KEYS.featuredAnimation,
+            'shader',
+          )
+          return {
+            animation:
+              raw === 'sonar' || raw === 'sparks' ? raw : 'shader',
+          }
+        }),
+      {
+        detail: {
+          summary: 'Featured-product page background animation (public)',
+          description:
+            "stage-100: one of 'shader' (default — current WebGL background) | 'sonar' | 'sparks'. Chosen by the main admin (POST /admin/settings/featured-animation). Unknown/missing value falls back to 'shader'.",
         },
       },
     )

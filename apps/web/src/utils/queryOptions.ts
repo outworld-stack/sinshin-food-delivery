@@ -42,6 +42,8 @@ import {
 	getAdminUsers,
 	getCourierOptions,
 	getCouriersForAssignment,
+	// stage-100 — انیمیشن صفحه‌ی محصول ویژه (کارت ادمین اصلی)
+	getFeaturedAnimationAdmin,
 	getGeoStatus,
 	getIranOnlyAccess,
 	getLiveOrders,
@@ -86,6 +88,8 @@ import {
 	getCartDetails,
 	getCategories,
 	getCategoriesByMain,
+	// stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی محصول ویژه (عمومی)
+	getFeaturedAnimation,
 	getPackagingItems,
 	getProductById,
 	getProductsByMain,
@@ -101,6 +105,7 @@ import {
 	getMyOrders,
 	getOrderDetails,
 	getOrderReviewedProducts,
+	getUnreadNotifications,
 	getUserProfile,
 } from '#/server/user'
 import type { DeliveryType } from '#/types/site/checkout'
@@ -195,6 +200,16 @@ export const myNotificationsOptions = (userId: string | undefined) =>
 		enabled: Boolean(userId),
 		staleTime: 30_000,
 	})
+
+// stage-100 — بج اعلان‌های خوانده‌نشده در هدر: اندپوینت سبکِ unread-count
+// (بدون لیست ۳۰تایی). هدر روی همه‌ی صفحه‌هاست ⇒ staleTime ۳۰s + رفرشِ
+// مرور هر ۶۰s (نبض سبک)؛ خواندن در صفحه‌ی صندوق همان لحظه invalidate می‌کند.
+export const notificationsUnreadOptions = queryOptions({
+	queryKey: qk.notificationsUnread,
+	queryFn: () => getUnreadNotifications(),
+	staleTime: 30_000,
+	refetchInterval: 60_000,
+})
 
 // کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).
 // همان DTO ولی بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها.
@@ -441,6 +456,23 @@ export const settingsTrackingOptions = queryOptions({
 export const settingsGatewaysOptions = queryOptions({
 	queryKey: qk.settingsGateways,
 	queryFn: () => getPaymentGateways(),
+	staleTime: 0,
+})
+
+// ═══ stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی «محصول ویژه» ═══
+// عمومی (صفحه‌ی محصول): تنظیمِ کم‌تغییر — staleTime بلند (۵ دقیقه)؛ عمومی‌خوانِ
+// کش‌شده با ETag؛ بعد از ذخیره‌ی ادمین، بازدیدکننده‌های تازه از نیم‌دقیقه بعد
+// (max-age=30 کش منو) مقدار تازه می‌گیرند.
+export const featuredAnimationOptions = queryOptions({
+	queryKey: qk.featuredAnimation,
+	queryFn: () => getFeaturedAnimation(),
+	staleTime: 5 * 60_000,
+})
+
+// ادمین (کارت تنظیمات): staleTime 0 — انتخاب باید فوری منعکس شود
+export const settingsFeaturedAnimationOptions = queryOptions({
+	queryKey: qk.settingsFeaturedAnimation,
+	queryFn: () => getFeaturedAnimationAdmin(),
 	staleTime: 0,
 })
 

@@ -50,6 +50,8 @@
   --animate-float-soft: float-soft 3s ease-in-out infinite;
   --animate-reveal-up: reveal-up 0.5s ease-out both;
   --animate-badge-in: badge-in 0.3s ease-out both;
+  /* stage-100 — باکس دایره‌ای سبد: پیمایش خط روی محیط (3.2s = ORB_TRAVEL_MS) */
+  --animate-cart-orb-spin: cart-orb-spin 3.2s linear;
 }
 
 @keyframes pop-in {
@@ -550,4 +552,64 @@ html[dir='rtl'] .ab-js [data-anim='slide'].ab-inview { animation-name: ab-slide-
     transform: none !important;
     filter: none !important;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   stage-100 — باکس دایره‌ای سبد خرید (صفحه‌ی محصولات · فقط sm/md)
+   خطِ محوشونده‌ای که کل محیط دایره را می‌پیماید: conic-gradient با
+   دنباله‌ی محوشونده + چرخشِ کل عنصر (بدون @property — سازگار با همه‌ی
+   مرورگرهای مدرن). رنگ از توکن‌های تم می‌آید: لایت = --color-primary،
+   دارک = --color-dark-primary — تعویض تم همان لحظه رنگ خط را عوض می‌کند.
+   مرکز باکس (دایره‌ی توپر داخل) فقط ناحیه‌ی حلقه را نمایان می‌گذارد.
+   مدت پیمایش = 3.2s — همان ORB_TRAVEL_MS در CartPulseOrb.tsx (منبعِ
+   زمان‌سنجِ پنهان‌شدن همان JS است تا reduced-motion هم درست کار کند).
+   ═══════════════════════════════════════════════════════════════ */
+@keyframes cart-orb-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* حلقه — دنباله از شفاف به رنگ و برگشت به شفاف (محو شونده) */
+.cart-orb-ring {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--color-primary) 46deg,
+    transparent 102deg
+  );
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-primary) 45%, transparent));
+}
+
+.dark .cart-orb-ring {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--color-dark-primary) 46deg,
+    transparent 102deg
+  );
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-dark-primary) 45%, transparent));
+}
+
+/* احترام به prefers-reduced-motion — خط ثابت، باکس همچنان بعد از
+   پایان مدت (تایمر JS) ناپدید می‌شود؛ عدد و ناوبری سالم می‌مانند */
+@media (prefers-reduced-motion: reduce) {
+  .cart-orb-ring {
+    background: conic-gradient(
+      from 90deg,
+      transparent 0deg,
+      var(--color-primary) 46deg,
+      transparent 102deg
+    );
+    animation: none !important;
+    filter: none;
+  }
+  .dark .cart-orb-ring {
+    background: conic-gradient(
+      from 90deg,
+      transparent 0deg,
+      var(--color-dark-primary) 46deg,
+      transparent 102deg
+    );
+  }
+  .cart-orb { animation: none !important; }
 }

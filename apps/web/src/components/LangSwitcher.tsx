@@ -40,10 +40,11 @@ function LangButton({
 			onClick={onClick}
 			aria-pressed={active}
 			title={label}
+			// stage-100 — پدینگ موبایل جمع‌تر (px-2): فضا برای دکمه‌ی نوتیفیکیشن هدر در 320/360px؛ از sm به بالا عیناً مانند قبل (px-4)
 			className={
 				active
-					? 'flex h-9 sm:h-10 items-center justify-center rounded-full bg-primary dark:bg-dark-primary text-white border border-transparent shadow-sm transition-all duration-300 hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-dark-primary/20 font-DanaDemiBold text-xs sm:text-sm px-3.5 sm:px-4 whitespace-nowrap cursor-pointer'
-					: 'flex h-9 sm:h-10 items-center justify-center rounded-full bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-white/10 shadow-sm transition-all duration-300 hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-dark-primary/20 text-gray-600 dark:text-gray-300 font-DanaDemiBold text-xs sm:text-sm px-3.5 sm:px-4 whitespace-nowrap cursor-pointer'
+					? 'flex h-9 sm:h-10 items-center justify-center rounded-full bg-primary dark:bg-dark-primary text-white border border-transparent shadow-sm transition-all duration-300 hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-dark-primary/20 font-DanaDemiBold text-xs sm:text-sm px-2 sm:px-4 whitespace-nowrap cursor-pointer'
+					: 'flex h-9 sm:h-10 items-center justify-center rounded-full bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-white/10 shadow-sm transition-all duration-300 hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-dark-primary/20 text-gray-600 dark:text-gray-300 font-DanaDemiBold text-xs sm:text-sm px-2 sm:px-4 whitespace-nowrap cursor-pointer'
 			}
 		>
 			{NATIVE_LABEL[target]}
