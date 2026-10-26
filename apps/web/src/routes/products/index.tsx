@@ -12,7 +12,8 @@ import { z } from 'zod'
 import { CategoryScroller } from '#/components/CategoryScroller'
 import { ProductsPageSkeleton } from '#/components/LoadingSkeletons'
 import { RouteError } from '#/components/shared/RouteFallbacks'
-// stage-100 — باکس دایره‌ای سبد (بعد از افزودنِ هر محصول؛ فقط sm/md)
+// stage-100 — باکس دایره‌ای سبد (بعد از افزودنِ هر محصول)
+// stage-101 — در همه‌ی سایزها ظاهر می‌شود (قبلاً فقط sm/md بود)
 import { CartPulseOrb } from '#/components/site/products/CartPulseOrb'
 import { ProductsDesktopFilter } from '#/components/site/products/ProductsDesktopFilter'
 import { ProductsGrid } from '#/components/site/products/ProductsGrid'
@@ -70,7 +71,8 @@ const ProductsPage = memo(function ProductsPage() {
 			</div>
 
 			{/* stage-100 — باکس دایره‌ای سبد: بعد از کلیکِ «افزودن به سبد»
-                            هر محصول ظاهر می‌شود؛ کلیک ⇒ صفحه‌ی سبد (فقط sm/md) */}
+                            هر محصول ظاهر می‌شود؛ کلیک ⇒ صفحه‌ی سبد
+                            stage-101 — در همه‌ی سایزها (قبلاً فقط sm/md) */}
 			<CartPulseOrb />
 		</div>
 	)

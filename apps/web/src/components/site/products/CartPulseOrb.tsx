@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // stage-100 — sinshin-food-delivery — فایل جدید
 // مسیر مقصد: apps/web/src/components/site/products/CartPulseOrb.tsx
-// باکس دایره‌ای سبد خرید (صفحه‌ی محصولات — فقط سایزهای sm و md):
+// باکس دایره‌ای سبد خرید (صفحه‌ی محصولات):
 //   • بعد از کلیک روی دکمه‌ی سبدِ هر محصول ظاهر می‌شود و «تعداد اقلام
 //     سبد» را نشان می‌دهد؛ دائمی نیست.
 //   • روی محیط دایره، یک خطِ محوشونده به رنگ تم (primary در لایت،
@@ -10,7 +10,11 @@
 //   • اگر در میانه‌ی پیمایش محصول دیگری اضافه شود: عدد داخل باکس
 //     همان لحظه آپدیت می‌شود و «خط تازه‌ای» از ابتدا محیط را می‌پیماید.
 //   • کلیک روی باکس ⇒ هدایت به صفحه‌ی سبد خرید.
-//   • فقط در sm و md دیده می‌شود (hidden sm:flex lg:hidden).
+// ═══ stage-101 — عیب‌یابی «باکس ظاهر نمی‌شود» ═══
+// ریشه: نمایش به «فقط sm و md» (hidden sm:flex lg:hidden) محدود بود — در
+// موبایلِ ریز (<۶۴۰px) و دسکتاپِ بزرگ (≥۱۰۲۴px) بنا به خواسته‌ی اولیه
+// پنهان بود و کارفرما هرجا تست می‌کرد آن را نمی‌دید. حالا در «همه‌ی
+// سایزها» ظاهر می‌شود (چرخ/عدد در موبایل کمی جمع‌وجورتر — w-12 h-12).
 // منبع رویداد: cartStore.addTick (رویدادِ «کلیکِ افزودن»، نه مقدار) —
 // با partialize ذخیره نمی‌شود؛ رفرش صفحه باکس را برنمی‌گرداند.
 // ═══════════════════════════════════════════════════════════════
@@ -88,8 +92,9 @@ export const CartPulseOrb = memo(function CartPulseOrb() {
 			}}
 			aria-label={tpl(t['cart.orbLabel'], { n: fmt.num(totalItems) })}
 			title={t['header.cart']}
-			// فقط sm و md — موبایلِ ریز و دسکتاپِ بزرگ نمی‌بینند
-			className={`cart-orb fixed bottom-6 left-6 z-40 hidden sm:flex lg:hidden w-14 h-14 md:w-16 md:h-16 items-center justify-center rounded-full cursor-pointer transition-opacity transition-transform duration-200 animate-pop-in ${
+			// stage-101 — در همه‌ی سایزها دیده می‌شود (قبلاً فقط
+			// sm/md بود — عیبِ «ظاهر نمی‌شود» در موبایل/دسکتاپ)
+			className={`cart-orb fixed bottom-6 left-6 z-40 flex w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 items-center justify-center rounded-full cursor-pointer transition-opacity transition-transform duration-200 animate-pop-in ${
 				fading ? 'opacity-0 scale-75' : 'opacity-100 scale-100'
 			}`}
 		>

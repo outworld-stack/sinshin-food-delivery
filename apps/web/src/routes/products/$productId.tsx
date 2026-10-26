@@ -147,11 +147,23 @@ function ProductDetailContent({ product }: { product: Product }) {
 	// بالای بوم بیفتد — بدون z-index (بدون ساخت stacking-context؛ z ایندکس‌های
 	// فرزندانِ ثابت مثل نوار موبایل z-50 در کانتکست ریشه می‌مانند و تغییری نمی‌کنند)
 	const isFeatured = product.isFeatured === true
+	// stage-101 — انیمیشن «اختصاصی همین محصول» (انتخاب ادمین در فرم محصول،
+	// همان‌جا که ویژه کرده). NULL = ارث از تنظیم سراسری؛ ناشناخته = همان NULL
+	const productAnimation = product.featuredAnimation
+	const perProductAnimation =
+		productAnimation === 'sonar' ||
+		productAnimation === 'sparks' ||
+		productAnimation === 'shader'
+			? productAnimation
+			: undefined
 
 	return (
 		<>
-			{/* stage-100 — دیسپچر: انیمیشن انتخابی ادمین اصلی (پیش‌فرض = shader) */}
-			{isFeatured ? <FeaturedPageBackground /> : null}
+			{/* stage-100 — دیسپچر: انیمیشن انتخابی ادمین اصلی (پیش‌فرض = shader)
+                            stage-101 — مقدار اختصاصی محصول مقدم است؛ غایب = تنظیم سراسری */}
+			{isFeatured ? (
+				<FeaturedPageBackground animation={perProductAnimation} />
+			) : null}
 
 			<div className="relative py-10 px-4 max-w-6xl mx-auto pb-32 lg:pb-10">
 				<button

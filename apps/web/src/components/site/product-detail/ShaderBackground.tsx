@@ -323,6 +323,8 @@ export function ShaderBackground() {
 
 	return (
 		<div
+			// stage-101 — نشانگر DOM برای تست/E2E: کدام انیمیشن رندر شده
+			data-featured-bg="shader"
 			className="fixed inset-0 z-0 overflow-hidden pointer-events-none"
 			aria-hidden="true"
 		>

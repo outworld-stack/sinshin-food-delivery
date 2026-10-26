@@ -204,6 +204,18 @@ function sanitizeProductSlug(raw: string | null | undefined): string | null {
   return clean.length > 0 ? clean.slice(0, 80) : null
 }
 
+/**
+ * stage-101 — نرمال‌سازی سه‌حالته‌ی انیمیشن اختصاصیِ محصول ویژه:
+ * مقدار معتبر ('shader' | 'sonar' | 'sparks') از ورودی رد می‌شود؛
+ * NULL/undefined/ناشناخته ⇒ NULL = «ارث از تنظیم سراسری». روت
+ * اتحادیه‌ی سفید را نگه می‌دارد، این پشتیبانِ دفاعیِ سرویس است.
+ */
+function normalizeFeaturedAnimation(
+  raw: string | null | undefined,
+): 'shader' | 'sonar' | 'sparks' | null {
+  return raw === 'sonar' || raw === 'sparks' || raw === 'shader' ? raw : null
+}
+
 export type ProductRow = typeof products.$inferSelect
 export type ProductSizeRow = typeof productSizes.$inferSelect
 export type CategoryRow = typeof categories.$inferSelect
@@ -1168,6 +1180,12 @@ export class MenuService {
     slug?: string | null
     /** stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora در فرانت) */
     isFeatured?: boolean
+    /**
+     * stage-101 — انیمیشن پس‌زمینه‌ی صفحه‌ی اختصاصی این محصول ویژه:
+     * 'shader' | 'sonar' | 'sparks'. NULL/نامعتبر = پاک‌سازی (ارث از
+     * تنظیم سراسری). فقط ادمین اصلی می‌تواند ست کند (گارد روت).
+     */
+    featuredAnimation?: string | null
   }): Promise<{ success: boolean; id?: string; message?: string }> {
     const nameAr = nullIfEmpty(input.nameAr)
     const descriptionAr = nullIfEmpty(input.descriptionAr)
@@ -1231,6 +1249,9 @@ export class MenuService {
             dineInAllowed: input.dineInAllowed ?? true,
             // stage-60 — پرچم ویژه/سنجاق
             isFeatured: input.isFeatured ?? false,
+            // stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
+            // (نامعتبر/غایب ⇒ NULL = ارث از تنظیم سراسری)
+            featuredAnimation: normalizeFeaturedAnimation(input.featuredAnimation),
           } as typeof products.$inferInsert)
           .returning()
 
@@ -1315,6 +1336,12 @@ export class MenuService {
     categoryIds?: string[]
     /** stage-60 — پرچم ویژه/سنجاق (undefined = دست‌نخورده) */
     isFeatured?: boolean
+    /**
+     * stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه:
+     * undefined = دست‌نخورده | NULL = پاک‌سازی (ارث از سراسری) | مقدار.
+     * فقط ادمین اصلی می‌تواند ست کند (گارد روت).
+     */
+    featuredAnimation?: string | null
   }): Promise<{ success: boolean; message?: string }> {
     const pid = asProductId(input.id)
     // stage-48 — ردیف قبلی: تشخیص تغییر موجودی/حالت (SSE) + تغییر تخفیف (پخش)
@@ -1395,6 +1422,10 @@ export class MenuService {
             // stage-60 — دسته‌ی اولیه (undefined = حفظ) + پرچم ویژه/سنجاق
             ...(primaryCat !== undefined ? { categoryId: primaryCat } : {}),
             ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
+            // stage-101 — انیمیشن اختصاصی: undefined = حفظ | NULL/مقدار = تنظیم
+            ...(input.featuredAnimation !== undefined
+              ? { featuredAnimation: normalizeFeaturedAnimation(input.featuredAnimation) }
+              : {}),
             profileImage: input.profileImage ?? null,
             galleryImages: input.galleryImages ?? [],
             sizesEnabled: input.sizesEnabled ?? false,
@@ -1739,6 +1770,9 @@ export class MenuService {
       categoryIds: opts?.categoryIdsMap?.get(r.id) ?? [r.categoryId],
       // stage-60 — پرچم ویژه/سنجاق (چینش ۴-آیتم اول + Aurora در فرانت)
       isFeatured: r.isFeatured ?? false,
+      // stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه (NULL = ارث
+      // از تنظیم سراسری — کارت تنظیمات؛ فرانت خودش پشتیبان می‌گیرد)
+      featuredAnimation: normalizeFeaturedAnimation(r.featuredAnimation),
       categoryName: catMap.get(r.categoryId),
       profileImage: r.profileImage,
       galleryImages: r.galleryImages ?? [],

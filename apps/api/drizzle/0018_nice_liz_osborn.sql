@@ -1,0 +1,1 @@
+ALTER TABLE "products" ADD COLUMN "featured_animation" varchar(12);

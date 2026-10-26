@@ -367,6 +367,9 @@ export async function createAdminProduct(input: {
 			// stage-60 — آرایه‌ی دسته‌ها (اولین = اصلی) + پرچم ویژه
 			categoryIds: input.data.categoryIds,
 			isFeatured: input.data.isFeatured ?? false,
+			// stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
+			// (null = ارث از تنظیم سراسری — گارد ادمین اصلی سمت روت)
+			featuredAnimation: input.data.featuredAnimation ?? null,
 			profileImage: input.data.profileImage || null, // '' → null
 			galleryImages: input.data.galleryImages ?? [],
 			sizesEnabled: input.data.sizesEnabled ?? false,
@@ -406,6 +409,9 @@ export async function updateAdminProduct(input: {
 			// stage-60 — سینک کامل دسته‌ها (اولین = اصلی؛ دسته دیگر immutable نیست)
 			categoryIds: input.data.categoryIds,
 			isFeatured: input.data.isFeatured ?? false,
+			// stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
+			// (null = پاک‌سازی/ارث از سراسری — گارد ادمین اصلی سمت روت)
+			featuredAnimation: input.data.featuredAnimation ?? null,
 			profileImage: input.data.profileImage || null,
 			galleryImages: input.data.galleryImages ?? [],
 			sizesEnabled: input.data.sizesEnabled ?? false,

@@ -11,6 +11,8 @@
 // اختیاری بودن تاریخی بود و مانع تایپ‌شدن میوتیشن‌ها (data: any) می‌شد.
 // نتیجه: createArticle/createAdminProduct الان ورودی کاملاً تایپ‌دار می‌گیرن.
 import type { ArticleBlocksDoc, Product } from '@sinshin/shared'
+// stage-101 — قرارداد انیمیشن صفحه‌ی محصول ویژه (اختصاصیِ هر محصول)
+import type { FeaturedAnimation } from '#/types/site/featured-animation'
 
 export interface ArticleFormData {
 	title: string
@@ -85,6 +87,12 @@ export interface ProductFormData {
 	categoryIds: string[]
 	/** stage-60 — پرچم «ویژه/سنجاق» (۴ آیتم اول لیست + پس‌زمینه Aurora) */
 	isFeatured: boolean
+	/**
+	 * stage-101 — انیمیشن پس‌زمینه‌ی صفحه‌ی اختصاصیِ همین محصول ویژه:
+	 * NULL = ارث از تنظیم سراسری (کارت تنظیمات)؛ مقدار = انتخاب اختصاصی
+	 * ادمین در فرم (باکس زیر سوئیچ ویژه). فقط ادمین اصلی.
+	 */
+	featuredAnimation: FeaturedAnimation | null
 	profileImage: string
 	galleryImages: string[]
 	sizesEnabled: boolean

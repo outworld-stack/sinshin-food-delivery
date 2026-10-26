@@ -64,6 +64,20 @@ const sizeInput = t.Object({
   image: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
 })
 
+/**
+ * stage-101 — اتحادیه‌ی سفیدِ انیمیشن پس‌زمینه‌ی صفحه‌ی اختصاصیِ
+ * محصول ویژه (همان قرارداد settings.featured_animation استیج-۱۰۰):
+ *   • shader — شیدر موج‌دار WebGL (پیش‌فرض/انیمیشن فعلی)
+ *   • sonar  — شبکه‌ی نقطه‌ای با حلقه‌های پخش‌شونده
+ *   • sparks — جرقه‌های پخش‌شونده از دو گوشه
+ * مقدار خارجِ اتحادیه ⇒ 422 (دستکاری‌شده ذخیره نمی‌شود).
+ */
+const featuredAnimationInput = t.Union([
+  t.Literal('shader'),
+  t.Literal('sonar'),
+  t.Literal('sparks'),
+])
+
 export interface AdminMenuRoutesDeps {
   sessions: SessionService
   menu: MenuService
@@ -276,8 +290,11 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         // ادمین۲ حذف می‌شود → create ⇒ پیش‌فرض خاموش؛ ویرایش ⇒ دست‌نخورده.
         // ادمین۲ هم محصولِ ویژه‌ی ادمین اصلی را خراب نمی‌کند و هم نمی‌تواند
         // خودش محصولی را ویژه کند (بج/Aura/صفحه‌ی متحرک = تصمیم برند).
-        if (user.role !== 'admin' && body.isFeatured !== undefined) {
-          delete body.isFeatured
+        // stage-101 — انیمیشن اختصاصیِ همان محصول هم تازه‌سازی برند است؛
+        // مثل خودِ پرچم فقط برای ادمین اصلی.
+        if (user.role !== 'admin') {
+          if (body.isFeatured !== undefined) delete body.isFeatured
+          if (body.featuredAnimation !== undefined) delete body.featuredAnimation
         }
         // ترمیم اسکنِ استیج-۸۴ — انتخابِ اقلامِ بسته‌بندی «هزینه‌ی پولی» را تعیین
         // می‌کند (جمعِ اقلام) → مثل ویژه‌سازی فقط با مجوزِ canEditPackagingFee
@@ -343,6 +360,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           slug: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
           // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora در فرانت)
           isFeatured: t.Optional(t.Boolean()),
+          // stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصولِ ویژه
+          // (NULL = ارث از تنظیم سراسری) — فقط ادمین اصلی (گارد بالا)
+          featuredAnimation: t.Optional(t.Nullable(featuredAnimationInput)),
         }),
         detail: { summary: 'Create product (sizes replace-all on update)' },
       },
@@ -352,8 +372,10 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       async ({ params, body, user, admin2: admin2Perms }) => {
         // stage-78 — همان گاردِ ویژه‌سازی POST: ادمین۲ پرچم را تغییر نمی‌دهد
         // (undefined ⇒ دست‌نخورده — مقدار فعلی در دیتابیس می‌ماند)
-        if (user.role !== 'admin' && body.isFeatured !== undefined) {
-          delete body.isFeatured
+        // stage-101 — انیمیشن اختصاصی هم دستِ ادمین اصلی است
+        if (user.role !== 'admin') {
+          if (body.isFeatured !== undefined) delete body.isFeatured
+          if (body.featuredAnimation !== undefined) delete body.featuredAnimation
         }
         // ترمیم اسکنِ استیج-۸۴ — مثل POST: بدونِ canEditPackagingFee انتخابِ
         // اقلام حذف می‌شود ⇒ undefined ⇒ انتخابِ ذخیره‌شده دست‌نخورده می‌ماند
@@ -417,6 +439,9 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           ),
           // stage-60 — پرچم ویژه/سنجاق (نیامد = دست‌نخورده)
           isFeatured: t.Optional(t.Boolean()),
+          // stage-101 — انیمیشن اختصاصیِ همین محصولِ ویژه:
+          // undefined = دست‌نخورده | NULL = پاک‌سازی (ارث از سراسری) | مقدار
+          featuredAnimation: t.Optional(t.Nullable(featuredAnimationInput)),
         }),
         detail: {
           summary:

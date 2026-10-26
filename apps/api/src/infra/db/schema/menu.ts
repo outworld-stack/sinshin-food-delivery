@@ -204,6 +204,14 @@ export const products = pgTable(
      * می‌گیرد. صرفاً پرچم داده است — منطق چینش کامل سمت فرانت است.
      */
     isFeatured: boolean('is_featured').notNull().default(false),
+    /**
+     * stage-101 — انیمیشن پس‌زمینه‌ی «صفحه‌ی اختصاصی این محصول ویژه»:
+     * 'shader' | 'sonar' | 'sparks'. NULL = ارث از تنظیمِ سراسری
+     * (settings.featured_animation — کارت تنظیمات) — تا هر محصولِ ویژه
+     * بتواند انیمیشن مخصوص خودش را داشته باشد (انتخاب در فرم محصول،
+     * همان‌جا که ویژه می‌شود). فقط وقتی isFeatured معنا دارد.
+     */
+    featuredAnimation: varchar('featured_animation', { length: 12 }),
   },
   (t) => [
     index('products_category_idx').on(t.categoryId),

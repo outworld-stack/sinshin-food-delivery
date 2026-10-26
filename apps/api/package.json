@@ -49,7 +49,8 @@
     "db:test:local-print": "bun scripts/test-local-print.ts",
     "test:admin2": "bun scripts/test-admin2-access.ts",
     "db:test:admin2": "bun scripts/test-admin2-safety.ts",
-    "db:test:menu": "bun scripts/test-menu-safety.ts"
+    "db:test:menu": "bun scripts/test-menu-safety.ts",
+    "db:test:featured-animation": "bun scripts/test-featured-animation.ts"
   },
   "dependencies": {
     "@elysia/html": "^1.4.1",

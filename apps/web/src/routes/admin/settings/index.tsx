@@ -131,14 +131,12 @@ const SettingsContent = memo(function SettingsContent() {
 	)
 
 	return (
-		// round-29 — قبلاً max-w-2xl تک‌ستونه بود: در نمایشگرهای بزرگ (۱۹۲۰px) حدود
-		// ۳۵-۴۰٪ عرض خالی می‌ماند. حالا دوسطونه در lg+ با عرض کامل (max-w-6xl).
+		// round-29 — قبلاً max-w-2xl تک‌ستونه بود؛ round-30 دوسطونه شد.
 		//
-		// round-30 — گریدِ row-major مشکل داشت: ارتفاع هر ردیف با بلندترین کارتِ همان
-		// ردیف تنظیم می‌شد و کارت کوتاه ستون کناری وسط ردیف بلند معلق می‌ماند (فاصله‌ی
-		// عمودی نامنظم). حالا صفحه دو بخش دارد: ① تنظیمات عملیاتی در دو ستونِ مستقل —
-		// هر ستون پشته‌ی خودش را با فاصله‌ی یکنواخت می‌سازد؛ ② فرم‌های محتوا (درباره‌ما/
-		// گالری/قوانین) تمام‌عرض زیر هم — در ستونِ نیم‌عرض چند برابر بلند می‌شدند.
+		// stage-101 — بازگشت به تک‌ستونه‌ی تمام‌عرض به خواسته‌ی کارفرما:
+		// در چیدمانِ دوستونه باکسِ «ناحیه‌های ارسال» کوتاه‌تر از ستونِ کناری
+		// می‌ماند و زیرش فضای خالی می‌افتاد. حالا همه‌ی باکس‌ها مرتب،
+		// تمام‌عرض و «زیر هم» چیده می‌شوند — نه فضای خالی سمت چپ، نه راست.
 		<div className="space-y-6 max-w-6xl">
 			<div>
 				<h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white">
@@ -149,86 +147,78 @@ const SettingsContent = memo(function SettingsContent() {
 				</p>
 			</div>
 
-			{/* بخش ۱ — تنظیمات عملیاتی: دو ستونِ مستقل؛ هر ستون پشته‌ی خودش را با فاصله‌ی یکنواخت */}
-			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-				{/* ستون راست (اول در RTL) — کارت بزرگِ مشترک ناحیه‌های ارسال */}
-				<div className="space-y-6">
-					{/* ⬅ ناحیه‌های ارسال — مشترک بین ادمین اصلی و ادمین۲ */}
-					<DeliveryZonesManager />
-				</div>
+			{/* بخش ۱ — تنظیمات عملیاتی: تک‌ستونه‌ی تمام‌عرض، زیر هم (stage-101) */}
+			<div className="space-y-6">
+				{/* ⬅ ناحیه‌های ارسال — مشترک بین ادمین اصلی و ادمین۲ */}
+				<DeliveryZonesManager />
 
-				{/* ستون چپ — باکس وضعیت رستوران + پرچم‌های جمع‌وجور سیستم */}
-				<div className="space-y-6">
-					{/* stage-84 — باکس واحدِ «وضعیت رستوران»: ① باز/بسته دائم (ادمین اصلی)
+				{/* stage-84 — باکس واحدِ «وضعیت رستوران»: ① باز/بسته دائم (ادمین اصلی)
               ② اعلام شلوغی (ادمین اصلی + canAnnounceBusy) ③ بسته موقت (موجود) */}
-					<RestaurantStatusCard
-						isMainAdmin={isMainAdmin}
-						canAnnounceBusy={permissions.canAnnounceBusy === true}
-						canToggleTemporaryClose={
-							permissions.canToggleTemporaryClose === true
-						}
-						hourlyOpen={statusFull?.isOpen ?? restaurant?.isOpen ?? false}
-						busy={statusFull?.isBusy === true}
-						temporarilyClosed={statusFull?.temporarilyClosed === true}
-						onToggleHourly={handleRestaurantToggle}
-						nextOpenTime={nextOpenTime}
-						onNextOpenTimeChange={setNextOpenTime}
-					/>
+				<RestaurantStatusCard
+					isMainAdmin={isMainAdmin}
+					canAnnounceBusy={permissions.canAnnounceBusy === true}
+					canToggleTemporaryClose={permissions.canToggleTemporaryClose === true}
+					hourlyOpen={statusFull?.isOpen ?? restaurant?.isOpen ?? false}
+					busy={statusFull?.isBusy === true}
+					temporarilyClosed={statusFull?.temporarilyClosed === true}
+					onToggleHourly={handleRestaurantToggle}
+					nextOpenTime={nextOpenTime}
+					onNextOpenTimeChange={setNextOpenTime}
+				/>
 
-					{isMainAdmin && (
-						<>
-							{/* آیتم ۱۸: ردیابی زنده پیک */}
-							<div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
-								<div className="flex items-center justify-between">
-									<div className="flex items-center gap-3">
-										<span className="w-11 h-11 rounded-xl bg-blue-100 dark:bg-blue-500/10 text-blue-500 flex items-center justify-center">
-											<Pin size={22} />
-										</span>
-										<div>
-											<p className="font-DanaDemiBold text-gray-800 dark:text-white">
-												نمایش آنلاین مسیر پیک
-											</p>
-											<p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed max-w-xs">
-												با فعال‌سازی، مشتریان می‌توانند مسیر زنده پیک را در صفحه
-												سفارش خود ببینند.
-											</p>
-										</div>
+				{isMainAdmin && (
+					<>
+						{/* آیتم ۱۸: ردیابی زنده پیک */}
+						<div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
+							<div className="flex items-center justify-between">
+								<div className="flex items-center gap-3">
+									<span className="w-11 h-11 rounded-xl bg-blue-100 dark:bg-blue-500/10 text-blue-500 flex items-center justify-center">
+										<Pin size={22} />
+									</span>
+									<div>
+										<p className="font-DanaDemiBold text-gray-800 dark:text-white">
+											نمایش آنلاین مسیر پیک
+										</p>
+										<p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed max-w-xs">
+											با فعال‌سازی، مشتریان می‌توانند مسیر زنده پیک را در صفحه
+											سفارش خود ببینند.
+										</p>
 									</div>
-									<Toggle
-										isOn={tracking ?? false}
-										onToggle={handleTrackingToggle}
-										label="نمایش آنلاین مسیر پیک"
-									/>
 								</div>
-								<div className="mt-4 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-start gap-2">
-									<Discover2
-										size={16}
-										className="text-blue-500 shrink-0 mt-0.5"
-									/>
-									<p className="text-xs text-blue-600 dark:text-blue-400 font-DanaMedium">
-										پیش‌فرض غیرفعال است و فقط برای سفارشات بعد از فعال‌سازی اعمال
-										می‌شود.
-									</p>
-								</div>
+								<Toggle
+									isOn={tracking ?? false}
+									onToggle={handleTrackingToggle}
+									label="نمایش آنلاین مسیر پیک"
+								/>
 							</div>
+							<div className="mt-4 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-start gap-2">
+								<Discover2
+									size={16}
+									className="text-blue-500 shrink-0 mt-0.5"
+								/>
+								<p className="text-xs text-blue-600 dark:text-blue-400 font-DanaMedium">
+									پیش‌فرض غیرفعال است و فقط برای سفارشات بعد از فعال‌سازی اعمال
+									می‌شود.
+								</p>
+							</div>
+						</div>
 
-							{/* stage-84 — سوئیچ درگاه‌های پرداخت (فقط ادمین اصلی) */}
-							<PaymentGatewaysCard visible={isMainAdmin} />
+						{/* stage-84 — سوئیچ درگاه‌های پرداخت (فقط ادمین اصلی) */}
+						<PaymentGatewaysCard visible={isMainAdmin} />
 
-							{/* stage-100 — انیمیشن صفحه‌ی محصول ویژه
-                  (shader پیش‌فرض / sonar / sparks) — فقط ادمین اصلی */}
-							<FeaturedAnimationCard visible={isMainAdmin} />
+						{/* stage-100 — انیمیشن پیش‌فرضِ محصولات ویژه (shader پیش‌فرض /
+								    sonar / sparks) — فقط ادمین اصلی؛ stage-101 — انتخابِ اختصاصیِ هر محصول در فرمِ خودش است */}
+						<FeaturedAnimationCard visible={isMainAdmin} />
 
-							{/* رارد ۳۷ — کارت کامل دسترسی جغرافیایی: سوییچ ایران + باکس مجوز عراق +
+						{/* رارد ۳۷ — کارت کامل دسترسی جغرافیایی: سوییچ ایران + باکس مجوز عراق +
                   انتخاب دامنه (فقط عراق / همه کشورها) + وضعیت زنده‌ی رنج‌ها */}
-							<GeoAccessCard />
+						<GeoAccessCard />
 
-							{/* stage-79 — مجوز ثبت‌نام ویژه: شماره → یک‌بار ثبت‌نام (حتی از
+						{/* stage-79 — مجوز ثبت‌نام ویژه: شماره → یک‌بار ثبت‌نام (حتی از
                   دستگاه سوخته/مسدود) → بلاکِ دستگاه پس از ثبت‌نام */}
-							<RegistrationPermitCard />
-						</>
-					)}
-				</div>
+						<RegistrationPermitCard />
+					</>
+				)}
 			</div>
 
 			{/* بخش ۲ — مدیریت محتوای سایت (تمام‌عرض): این فرم‌ها در ستونِ نیم‌عرض چند برابر

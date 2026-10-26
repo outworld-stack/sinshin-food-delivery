@@ -99,11 +99,12 @@ export const FeaturedAnimationCard = memo(function FeaturedAnimationCard({
 		<div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
 			<h2 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-1 flex items-center gap-2">
 				<Sparkles size={20} className="text-primary dark:text-dark-primary" />
-				انیمیشن صفحه‌ی محصول ویژه
+				انیمیشن پیش‌فرضِ محصولات ویژه
 			</h2>
 			<p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed mb-4">
-				پس‌زمینه‌ی متحرکِ صفحه‌ی اختصاصیِ محصولِ ویژه. انتخاب شما برای همه‌ی
-				بازدیدکنندگان اعمال می‌شود (حدود ۳۰ ثانیه بعد از ذخیره).
+				پیش‌فرضِ سراسریِ پس‌زمینه‌ی متحرکِ صفحه‌ی محصولات ویژه — هر محصولِ ویژه‌ای که در
+				فرمِ خودش انیمیشن اختصاصی نگرفته باشد از همین انتخاب پیروی می‌کند (حدود ۳۰
+				ثانیه بعد از ذخیره برای بازدیدکنندگان تازه).
 			</p>
 			<div
 				className="space-y-2.5"
@@ -168,7 +169,8 @@ export const FeaturedAnimationCard = memo(function FeaturedAnimationCard({
 			</div>
 			<p className="mt-3 text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
 				توجه: انیمیشن فقط روی صفحه‌ی محصولاتی که «ویژه» علامت خورده‌اند نمایش داده
-				می‌شود؛ بقیه‌ی صفحات تغییری نمی‌کنند.
+				می‌شود؛ بقیه‌ی صفحات تغییری نمی‌کنند. برای انیمیشنِ اختصاصیِ یک محصول خاص، در
+				فرمِ همان محصول (همان‌جا که ویژه می‌کنید) انتخابش کنید.
 			</p>
 		</div>
 	)

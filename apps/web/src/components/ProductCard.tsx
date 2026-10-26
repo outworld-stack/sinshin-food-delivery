@@ -261,9 +261,15 @@ export const ProductCard = memo(function ProductCard({
 		// قیچِ تصویر و پس‌زمینه‌ی Aurora) پس بج نمی‌تواند داخلش باشد.
 		// بالابرِ هاور (translate) روی همین پوشش است تا کارت و بج با هم
 		// بالا بروند؛ .grid-anim > * هم همین پوشش را می‌گیرد (پلکانی).
+		//
+		// stage-101 — بج از «نیم‌خارجِ عمودی» به «میانه‌ی دقیق گوشه‌ی
+		// چپ-بالا» منتقل شد (-translate-x/y-1/2 روی top-0 left-0):
+		// حالا افقی هم نصف بیرون و نصف درون است — منتهاالیه سمت
+		// چپِ بالای کارت. گریدِ محصولات هم pl-8 گرفت تا بجِ کارتِ
+		// ستونِ آخر (چپ) هرگز از لبه‌ی دید بریده نشود.
 		<div className="group relative transition-all duration-300 hover:-translate-y-1">
 			{aurora && (
-				<span className="absolute top-0 left-4 -translate-y-1/2 z-10 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-DanaDemiBold text-white bg-linear-to-l from-[#E54CFF] to-[#00C2FF] shadow-md animate-badge-in pointer-events-none">
+				<span className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 z-10 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-DanaDemiBold text-white bg-linear-to-l from-[#E54CFF] to-[#00C2FF] shadow-md animate-badge-in pointer-events-none">
 					<Star size={11} />
 					{t['common.featuredBadge']}
 				</span>

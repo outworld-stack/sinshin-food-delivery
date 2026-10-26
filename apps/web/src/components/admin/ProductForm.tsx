@@ -30,8 +30,10 @@ import {
 	CalendarX,
 	Chair,
 	Plus,
+	Sparkles,
 	Star,
 	Timer,
+	Wifi,
 	X,
 } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
@@ -45,6 +47,8 @@ import type {
 	ProductFormProps,
 	ProductFormSize,
 } from '#/types/forms'
+// stage-101 — انیمیشن اختصاصی صفحه‌ی محصول ویژه (باکس زیر سوئیچ ویژه)
+import type { FeaturedAnimation } from '#/types/site/featured-animation'
 import { formatPrice } from '#/utils/format'
 import {
 	gregorianToJalali,
@@ -54,8 +58,43 @@ import {
 } from '#/utils/persianDate'
 import {
 	adminCategoriesOptions,
+	featuredAnimationOptions,
 	packagingItemsOptions,
 } from '#/utils/queryOptions'
+
+/** stage-101 — انیمیشن اختصاصی محصول: مقدار معتبر | NULL (ارث از سراسری) */
+function toFeaturedAnimation(
+	raw: string | null | undefined,
+): FeaturedAnimation | null {
+	return raw === 'sonar' || raw === 'sparks' || raw === 'shader' ? raw : null
+}
+
+/** stage-101 — گزینه‌های انیمیشن اختصاصی (همان سه‌گانه‌ی کارت تنظیمات) */
+const FEATURED_ANIMATION_OPTIONS: {
+	key: FeaturedAnimation
+	label: string
+	hint: string
+	icon: typeof Star
+}[] = [
+	{
+		key: 'shader',
+		label: 'شیدر موج‌دار',
+		hint: 'موج‌های رنگی WebGL با تعامل اشاره‌گر — انیمیشن پیش‌فرض سایت',
+		icon: Star,
+	},
+	{
+		key: 'sonar',
+		label: 'شبکه‌ی سونار',
+		hint: 'میدان نقطه‌ای با حلقه‌های پخش‌شونده (پینگ‌های محیطی)',
+		icon: Wifi,
+	},
+	{
+		key: 'sparks',
+		label: 'جرقه‌های دوطرفه',
+		hint: 'اشعه‌های جرقه‌ای که از دو گوشه‌ی بالا موج می‌زنند',
+		icon: Sparkles,
+	},
+]
 
 // ═══ stage-47 — ابزارهای پنجره‌ی زمانی تخفیف (شمسی ↔ ISO) ═══
 
@@ -314,6 +353,13 @@ export function ProductForm({
 	const { data: categories } = useQuery(adminCategoriesOptions)
 	// stage-84 — اقلام بسته‌بندی سراسری (چیپ‌های انتخاب + جمعِ زنده)
 	const { data: packagingItems } = useQuery(packagingItemsOptions)
+	// stage-101 — انیمیشن سراسریِ محصول ویژه (کارت تنظیمات): فقط برای
+	// پیش‌انتخابِ رادیو وقتی محصول انیمیشن اختصاصی ندارد (null = ارث).
+	// کوئری عمومیِ سبکِ کش‌شده — فقط برای ادمین اصلی معنا دارد.
+	const { data: globalFeaturedAnimation } = useQuery({
+		...featuredAnimationOptions,
+		enabled: canToggleFeatured,
+	})
 	/** stage-84 — انتخاب/حذف قلم بسته‌بندی (سقف ۱۲ — قرارداد سرور) */
 	const handleTogglePackagingItem = useCallback(
 		(itemId: string) => {
@@ -353,6 +399,8 @@ export function ProductForm({
 		categoryIds: [],
 		// stage-60 — پرچم «ویژه/سنجاق‌شده»
 		isFeatured: false,
+		// stage-101 — انیمیشن اختصاصیِ همین محصولِ ویژه (null = ارث سراسری)
+		featuredAnimation: null,
 		profileImage: '',
 		galleryImages: [],
 		ingredients: [],
@@ -419,6 +467,8 @@ export function ProductForm({
 							: [],
 				// stage-60 — پرچم «ویژه» (نیامد = خاموش)
 				isFeatured: initialData.isFeatured ?? false,
+				// stage-101 — انیمیشن اختصاصی (نامعتبر/غایب = ارث سراسری)
+				featuredAnimation: toFeaturedAnimation(initialData.featuredAnimation),
 				profileImage: initialData.profileImage || '',
 				galleryImages: initialData.galleryImages || [],
 				ingredients: initialData.ingredients || [],
@@ -1042,7 +1092,8 @@ export function ProductForm({
 									</p>
 									<p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
 										همیشه در ۴ آیتم اول لیست + بج «ویژه» و پس‌زمینه‌ی Aurora روی
-										کارت + پس‌زمینه‌ی متحرک در صفحه‌ی اختصاصی. فقط ادمین اصلی.
+										کارت + پس‌زمینه‌ی متحرک در صفحه‌ی اختصاصی. با فعال‌سازی، باکسِ
+										انتخاب انیمیشنِ همین محصول باز می‌شود. فقط ادمین اصلی.
 									</p>
 								</div>
 							</div>
@@ -1051,6 +1102,99 @@ export function ProductForm({
 								onToggle={handleFeaturedToggle}
 								label="محصول ویژه (سنجاق‌شده)"
 							/>
+						</div>
+					) : null}
+
+					{/* stage-101 — باکس انتخاب انیمیشنِ اختصاصیِ همین محصولِ ویژه:
+                                        با روشن‌شدنِ سوئیچ بالا باز می‌شود؛ انتخابِ ادمین فقط برای همین
+                                        محصول ذخیره می‌شود (چند محصول ویژه = چند انیمیشن مستقل).
+                                        تا انتخابِ صریح، رادیوِ همانِ پیش‌فرضِ سراسری (کارت تنظیمات)
+                                        فعال نشان داده می‌شود و ذخیره = «ارث از سراسری» می‌ماند. */}
+					{canToggleFeatured && formData.isFeatured ? (
+						<div className="p-3 rounded-lg border border-primary/30 bg-primary/[0.03] dark:border-dark-primary/30 dark:bg-dark-primary/[0.03] animate-pop-in">
+							<div className="flex items-center gap-2 mb-1">
+								<Sparkles
+									size={15}
+									className="text-primary dark:text-dark-primary shrink-0"
+								/>
+								<p className="text-xs font-DanaDemiBold text-gray-700 dark:text-gray-200">
+									انیمیشن صفحه‌ی اختصاصی این محصول
+								</p>
+							</div>
+							<p className="text-[10px] text-gray-400 leading-relaxed mb-3">
+								پس‌زمینه‌ی متحرکِ صفحه‌ی همین محصول ویژه — انتخاب شما فقط برای این
+								محصول ذخیره می‌شود و بعد از ذخیره بلافاصله روی سایت اعمال می‌شود.
+							</p>
+							<div
+								className="space-y-2.5"
+								role="radiogroup"
+								aria-label="انتخاب انیمیشن صفحه‌ی اختصاصی این محصول ویژه"
+							>
+								{FEATURED_ANIMATION_OPTIONS.map(
+									({ key, label, hint, icon: Icon }) => {
+										// انتخاب صریحِ ادمین؛ تا قبل از آن = ارث از سراسری
+										const inherited = formData.featuredAnimation === null
+										const current =
+											formData.featuredAnimation ??
+											globalFeaturedAnimation ??
+											'shader'
+										const active = key === current
+										return (
+											<label
+												key={key}
+												className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-right transition border focus-within:ring-2 focus-within:ring-primary/30 dark:focus-within:ring-dark-primary/30 ${
+													active
+														? 'bg-primary/5 dark:bg-dark-primary/5 border-primary dark:border-dark-primary shadow-sm'
+														: 'bg-white dark:bg-[#1a0a0e] border-gray-100 dark:border-[#3a151c] hover:border-primary/40 dark:hover:border-dark-primary/40'
+												} cursor-pointer`}
+											>
+												{/* رادیوی ناتیو نامرئی — دسترس‌پذیری/کیبورد */}
+												<input
+													type="radio"
+													name="product-featured-animation"
+													checked={active}
+													onChange={() =>
+														setFormData((prev) => ({
+															...prev,
+															featuredAnimation: key,
+														}))
+													}
+													className="sr-only"
+												/>
+												<span
+													className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg ${
+														active
+															? 'bg-primary dark:bg-dark-primary text-white'
+															: 'bg-gray-100 dark:bg-[#2a1015] text-primary dark:text-dark-primary'
+													}`}
+												>
+													<Icon size={16} />
+												</span>
+												<span className="min-w-0 flex-1">
+													<span className="block text-xs font-DanaDemiBold text-gray-800 dark:text-white">
+														{label}
+														{active && (
+															<span className="mr-2 text-[10px] font-DanaMedium text-primary dark:text-dark-primary">
+																{inherited ? 'پیش‌فرض سراسری' : 'انتخاب شما'}
+															</span>
+														)}
+													</span>
+													<span className="block text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+														{hint}
+													</span>
+												</span>
+												<span
+													className={`shrink-0 w-4 h-4 rounded-full border-2 transition ${
+														active
+															? 'border-primary dark:border-dark-primary bg-primary dark:bg-dark-primary shadow-[inset_0_0_0_2px_#fff]'
+															: 'border-gray-300 dark:border-gray-600'
+													}`}
+												/>
+											</label>
+										)
+									},
+								)}
+							</div>
 						</div>
 					) : null}
 

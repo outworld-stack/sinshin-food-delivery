@@ -149,7 +149,7 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
         detail: {
           summary: 'Featured-product page background animation (public)',
           description:
-            "stage-100: one of 'shader' (default — current WebGL background) | 'sonar' | 'sparks'. Chosen by the main admin (POST /admin/settings/featured-animation). Unknown/missing value falls back to 'shader'.",
+            "stage-100: one of 'shader' (default — current WebGL background) | 'sonar' | 'sparks'. Chosen by the main admin (POST /admin/settings/featured-animation). stage-101: this is the global fallback — each featured product may carry its own featuredAnimation (set in the product form) which takes precedence. Unknown/missing value falls back to 'shader'.",
         },
       },
     )

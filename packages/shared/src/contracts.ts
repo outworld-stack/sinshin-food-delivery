@@ -233,6 +233,12 @@ export interface Product {
    * همیشه جزو ۴ آیتم اول لیست فرانت است + پس‌زمینه Aurora. گذر سروری صرف.
    */
   isFeatured?: boolean
+  /**
+   * stage-101 — انیمیشن پس‌زمینه‌ی «صفحه‌ی اختصاصی این محصول ویژه»:
+   * 'shader' | 'sonar' | 'sparks'. NULL = ارث از تنظیم سراسری
+   * (settings.featured_animation). فقط با isFeatured معنا دارد.
+   */
+  featuredAnimation?: string | null
   /** stage-48 — حالت‌های مؤثر سفارش = دسته AND محصول (سروری) */
   courierAllowed: boolean
   takeawayAllowed: boolean

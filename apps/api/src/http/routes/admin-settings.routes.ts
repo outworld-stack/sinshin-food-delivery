@@ -373,7 +373,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
         detail: {
           summary: 'Featured-product page animation (shader | sonar | sparks) — main admin only',
           description:
-            "stage-100: the background animation of the special featured-product page. 'shader' (default) = current WebGL waves; 'sonar' = SonarGrid dot field; 'sparks' = DualSparks corner rays. Customers read it from the public GET /menu/featured-animation (ETag-cached, ~30s).",
+            "stage-100: the default background animation of the special featured-product pages. 'shader' (default) = current WebGL waves; 'sonar' = SonarGrid dot field; 'sparks' = DualSparks corner rays. stage-101: per-product override lives on the product itself (featuredAnimation in the product form); this KV is the fallback for featured products without their own choice. Customers read it from the public GET /menu/featured-animation (ETag-cached, ~30s).",
         },
       },
     )
