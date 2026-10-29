@@ -1,66 +1,71 @@
 #!/bin/sh
-# ═══════════════════════════════════════════════════════════════
-# stage-57 — sinshin-food-delivery — فاز دیپلوی
-# مسیر مقصد: deploy/backup/restore-drill.sh
-# وضعیت: جایگزینی کامل فایل موجود
-# تغییر: مسیر پیش‌فرض بکاپ → HDD میزبان (BACKUP_DIR_HOST) هم‌راستا
-#        با compose استیج-۵۷ (قبلاً مسیر volume قدیمی بود)
-# ═══════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════
-# restore-drill.sh — رارد H7: تمرین ماهانه‌ی بازیابی بکاپ
-# فایل جدید — آخرین بکاپ را در یک Postgres موقت restore می‌کند و
-# جداول کلیدی را می‌شمارد. خرابیِ خاموش کشف می‌شود، نه در روز حادثه.
-#
-# اجرا روی هاست (نه داخل کانتینر backup):
-#   chmod +x deploy/backup/restore-drill.sh
-#   cron ماهانه:  45 4 1 * *  /opt/sinshin-food-delivery/deploy/backup/restore-drill.sh
-# ═══════════════════════════════════════════════════════════════
+# Restore the latest SQL backup into an isolated PostgreSQL container.
+# Run on the host; an optional argument overrides BACKUP_DIR_HOST.
 set -eu
+umask 077
 
-# stage-57 — بکاپ‌ها روی HDD میزبان (bind-mount سرویس backup در
-# compose)؛ اگر BACKUP_DIR_HOST را در .env عوض کرده‌ای، همین‌جا هم بده:
-BACKUPS_DIR="${1:-/srv/hdd/sinshin/backups}"
-LOG_FILE="/var/log/sinshin-restore-drill.log"
-DRILL_PG="sinshin-postgres-drill"
+BACKUPS_DIR="${1:-${BACKUP_DIR_HOST:-/srv/hdd/sinshin/backups}}"
+LOG_FILE="${RESTORE_DRILL_LOG_FILE:-/var/log/sinshin-restore-drill.log}"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/sinshin-restore.XXXXXX")"
+DRILL_ID=''
 
-log() { echo "[$(date '+%F %T')] $*"; }
+log() {
+    LINE="[$(date '+%F %T')] $*"
+    printf '%s\n' "$LINE" >> "$LOG_FILE"
+    printf '%s\n' "$LINE"
+}
+fail() { log "FAIL: $*" >&2; exit 1; }
+cleanup() {
+    # Only remove the container created by this invocation, including its volume.
+    if [ -n "$DRILL_ID" ]; then docker rm -fv "$DRILL_ID" >/dev/null 2>&1 || true; fi
+    rm -f "$WORK/restore.sql" "$WORK/restore.err"
+    rmdir "$WORK" 2>/dev/null || true
+}
+trap cleanup 0
+trap 'exit 1' HUP INT TERM
 
-# آخرین بکاپ
-LATEST=$(ls -t "$BACKUPS_DIR"/sinshin-*.sql.gz 2>/dev/null | head -1 || true)
-if [ -z "$LATEST" ]; then
-  log "FAIL: هیچ بکاپی در $BACKUPS_DIR پیدا نشد" >> "$LOG_FILE"
-  exit 1
-fi
+LATEST="$(ls -t "$BACKUPS_DIR"/sinshin-*.sql.gz 2>/dev/null | head -1 || true)"
+[ -n "$LATEST" ] && [ -f "$LATEST" ] && [ -s "$LATEST" ] || fail "هیچ بکاپی در $BACKUPS_DIR پیدا نشد"
 log "بکاپ آزمون: $(basename "$LATEST")"
 
-# پاک‌سازی درل قبلی (اگر مانده)
-docker rm -f "$DRILL_PG" >/dev/null 2>&1 || true
+# Decompress before starting psql so a broken gzip cannot be hidden by a pipeline.
+if ! gzip -cd "$LATEST" > "$WORK/restore.sql"; then
+    fail "فایل فشرده خراب است: $(basename "$LATEST")"
+fi
+[ -s "$WORK/restore.sql" ] || fail 'خروجی بکاپ خالی است'
+grep -q '^-- PostgreSQL database dump complete' "$WORK/restore.sql" || fail 'خروجی pg_dump ناقص است'
 
-# PG موقت روی شبکه‌ی موقت خودش
-docker run -d --name "$DRILL_PG" \
-  -e POSTGRES_PASSWORD=drill -e POSTGRES_USER=drill -e POSTGRES_DB=drill \
-  postgres:18.6-alpine >/dev/null
+# A unique name and recorded ID make overlapping drills safe. No ports/network
+# are exposed; docker exec connects over PostgreSQL's local Unix socket.
+if ! DRILL_ID="$(docker create --name "sinshin-postgres-drill-$(basename "$WORK")" --network none \
+    -e POSTGRES_PASSWORD=drill -e POSTGRES_USER=drill -e POSTGRES_DB=drill \
+    postgres:18.6-alpine)"; then
+    fail 'ساخت پایگاه داده آزمایشی شکست خورد'
+fi
+docker start "$DRILL_ID" >/dev/null || fail 'راه‌اندازی پایگاه داده آزمایشی شکست خورد'
 
-# صبر برای آماده شدن
-for i in $(seq 1 30); do
-  if docker exec "$DRILL_PG" pg_isready -U drill >/dev/null 2>&1; then break; fi
-  sleep 1
+READY=0
+ATTEMPT=0
+while [ "$ATTEMPT" -lt 30 ]; do
+    # The image's temporary initialization server only accepts Unix sockets.
+    # TCP readiness identifies the final server after database initialization.
+    if docker exec "$DRILL_ID" pg_isready -h 127.0.0.1 -U drill -d drill >/dev/null 2>&1; then READY=1; break; fi
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 1
 done
+[ "$READY" = 1 ] || fail 'پایگاه داده آزمایشی آماده نشد'
 
-# بازیابی
-if gunzip -c "$LATEST" | docker exec -i "$DRILL_PG" psql -U drill -d drill -v ON_ERROR_STOP=0 >/dev/null 2>&1; then
-  ORDERS=$(docker exec "$DRILL_PG" psql -U drill -d drill -tAc \
-    "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null || echo 0)
-  if [ "$ORDERS" -gt 10 ]; then
-    log "PASS: $(basename "$LATEST") — $ORDERS جدول بازگشت" >> "$LOG_FILE"
-    echo "✅ restore-drill PASS — $ORDERS جداول (لاگ: $LOG_FILE)"
-  else
-    log "FAIL: dump خوانده شد ولی فقط $ORDERS جدول — بکاپ ناقص است" >> "$LOG_FILE"
-    echo "❌ restore-drill FAIL — جزئیات در $LOG_FILE"
-  fi
-else
-  log "FAIL: psql خطا داد — dump خراب است: $(basename "$LATEST")" >> "$LOG_FILE"
-  echo "❌ restore-drill FAIL — dump خراب (لاگ: $LOG_FILE)"
+if ! docker exec -i "$DRILL_ID" psql -X -U drill -d drill -v ON_ERROR_STOP=1 \
+    < "$WORK/restore.sql" > /dev/null 2> "$WORK/restore.err"; then
+    cat "$WORK/restore.err" >> "$LOG_FILE"
+    fail "بازیابی SQL شکست خورد: $(basename "$LATEST")"
 fi
 
-docker rm -f "$DRILL_PG" >/dev/null 2>&1 || true
+TABLES="$(docker exec "$DRILL_ID" psql -X -U drill -d drill -v ON_ERROR_STOP=1 -tAc \
+    "select count(*) from information_schema.tables where table_schema='public'")" || fail 'شمارش جدول‌ها شکست خورد'
+CORE="$(docker exec "$DRILL_ID" psql -X -U drill -d drill -v ON_ERROR_STOP=1 -tAc \
+    "select count(*) from information_schema.tables where table_schema='public' and table_name in ('users','orders','wallet_transactions')")" || fail 'بررسی جدول‌های اصلی شکست خورد'
+if ! [ "$TABLES" -gt 10 ] 2>/dev/null || [ "$CORE" != 3 ]; then
+    fail "بکاپ ناقص است: $TABLES جدول، $CORE جدول اصلی"
+fi
+log "PASS: $(basename "$LATEST") — $TABLES جدول و همه جدول‌های اصلی بازیابی شدند"

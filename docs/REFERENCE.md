@@ -155,7 +155,7 @@
 | `REFERRAL_PERCENT` | 💡 | `10` | درصد سود معرف از پرداخت آنلاین غذاها |
 | `REPORT_TOKEN_TTL_HOURS` | 💡 | `24` | عمر لینک گزارش پیامکی |
 | `REPORT_LOGS_MAX_MB` | 💡 | `20` | سقف لاگ داکر داخل ZIP گزارش |
-| `DOCKER_LOGS_ENABLED` / `DOCKER_LOGS_TRUNCATE` | 💡 | `on`/`on` | جمع‌آوری لاگ داکر در گزارش روزانه |
+| `DOCKER_LOGS_ENABLED` / `DOCKER_LOGS_TRUNCATE` | 💡 | `on`/`off` | جمع‌آوری لاگ داکر در گزارش روزانه؛ پاک‌کردن خودکار غیرفعال است و نگهداری با چرخش لاگ داکر انجام می‌شود |
 | `DOCKER_SOCKET` / `DOCKER_GID` | 💡 | `/var/run/docker.sock`/`999` | gid گروه داکر میزبان: `stat -c '%g' /var/run/docker.sock` |
 | `TRANSLATOR_TOKEN` | 💡 | خالی | راز مشترک api ↔ مترجم (هدر x-translator-token) |
 | `TRANSLATOR_URL` | 💡 | `http://translator:8300` | آدرس داخلی مترجم NLLB |

@@ -53,7 +53,7 @@ export interface SmsSendResult {
 }
 
 export class SmsService {
-  constructor(private readonly config: AppConfig) {}
+  constructor(private readonly config: AppConfig, private readonly fetcher: typeof fetch = fetch) {}
 
   private get sms(): SmsConfig {
     return this.config.sms
@@ -91,6 +91,11 @@ export class SmsService {
     kind: 'daily' | 'weekly',
     token: string,
   ): Promise<boolean> {
+    // A shortened access token can never authorize a download. Fail visibly instead.
+    if (!/^[A-Za-z0-9_-]{24}$/.test(token)) {
+      console.error('[sms] Report token does not fit the SMS template; message was not sent.')
+      return false
+    }
     const template =
       kind === 'daily' ? this.sms.templateDailyReport : this.sms.templateWeeklyReport
     return (await this.sendVerify(phone, template, [{ name: 'TOKEN', value: token }])).ok
@@ -161,7 +166,7 @@ export class SmsService {
     let lastError = 'unknown'
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const res = await Bun.fetch(SMS_IR_SEND_VERIFY, {
+        const res = await this.fetcher(SMS_IR_SEND_VERIFY, {
           method: 'POST',
           headers,
           body,

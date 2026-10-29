@@ -30,6 +30,7 @@ import {
 import { asUserId, asCourierId, asAddressId, type UserId } from '#/domain/shared/brand'
 import { buildRangeCharts, currentPeriodStart, type RangeCharts } from '#/domain/shared/charts'
 import { Err } from '#/domain/shared/errors'
+import { ensureUserReferralCode } from '#/domain/shared/referral-code'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import { normalizePhone } from '#/domain/shared/phone'
 import { isUniqueViolation, likePattern, maskPhone } from '#/domain/shared/pg'
@@ -391,6 +392,7 @@ export class AdminService {
 
         const user = await db.query.users.findFirst({ where: eq(users.id, uid) })
         if (!user) return null
+        if (!user.referralCode?.trim()) user.referralCode = await ensureUserReferralCode(db, user.id)
 
         const [walletRow, spentRow, referralCount, deviceRows, orderRows, refRows, addressRows, eventRows] =
             await Promise.all([

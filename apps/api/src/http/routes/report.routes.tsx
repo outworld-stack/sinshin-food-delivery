@@ -28,38 +28,38 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
 
     .get(
       '/view/:token',
-      async ({ params, query }) => {
-        const kind = deps.links.verifyReport(params.token)
-        if (!kind) return forbidden()
-        const vm =
-          kind === 'daily'
-            ? await deps.reports.dailyViewModel(query.range === 'today' ? 'today' : 'yesterday')
-            : await deps.reports.weeklyViewModel()
-        // phase-4: JSX → سازنده‌ی رشته؛ html() برای رشته‌ی content-type ست می‌کند
-        return ReportPage(vm)
+      async ({ params }) => {
+        if (!deps.links.verifyReport(params.token)) return forbidden()
+        const vm = await deps.reports.snapshotViewModel(params.token)
+        if (!vm) return missingReport()
+        return new Response(ReportPage(vm), {
+          headers: { ...PRIVATE_REPORT_HEADERS, 'content-type': 'text/html; charset=utf-8' },
+        })
       },
       {
         params: t.Object({ token: t.String({ maxLength: 400 }) }),
         query: t.Object({ range: t.Optional(t.String()) }),
         detail: {
-          summary: 'Live HTML report page (signed expiring link from SMS)',
+          summary: 'Saved report page (signed expiring link from SMS)',
           description:
-            'فاز-۲: توکن‌های خانواده‌ی r. (امضاشده + منقضی‌شونده REPORT_TOKEN_TTL_HOURS). توکن‌های قدیمی c. دیگر معتبر نیستند — عمدی.',
+            'The report date and contents are fixed when the SMS is generated.',
         },
       },
     )
 
     .get(
       '/csv/:token',
-      async ({ params, query }) => {
+      async ({ params }) => {
         const kind = deps.links.verifyReport(params.token)
         if (!kind) return forbidden()
-        const range = kind === 'weekly' ? 'week' : query.range === 'today' ? 'today' : 'yesterday'
-        const csv = await deps.reports.csvBody(range as 'yesterday')
+        const csv = await deps.reports.snapshotCsv(params.token)
+        if (csv === null) return missingReport()
         return new Response(csv, {
           headers: {
+            ...PRIVATE_REPORT_HEADERS,
             'content-type': 'text/csv; charset=utf-8',
             'content-disposition': `attachment; filename="sinshin-${kind}-orders.csv"`,
+            'content-length': String(Buffer.byteLength(csv, 'utf8')),
           },
         })
       },
@@ -76,22 +76,16 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
     //   https://…/api/reports/download/#TOKEN#
     .get(
       '/download/:token',
-      async ({ params, query }) => {
-        const kind = deps.links.verifyReport(params.token)
-        if (!kind) return forbidden()
-        const zip =
-          kind === 'daily'
-            ? await deps.reports.dailyBundle(query.range === 'today' ? 'today' : 'yesterday')
-            : await deps.reports.weeklyBundle()
-        const tehranDay = new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
-        }).format(new Date())
-        return new Response(zip as unknown as ArrayBuffer, {
+      async ({ params }) => {
+        if (!deps.links.verifyReport(params.token)) return forbidden()
+        const snapshot = await deps.reports.downloadSnapshot(params.token)
+        if (!snapshot) return missingReport()
+        return new Response(snapshot.bytes as unknown as ArrayBuffer, {
           headers: {
+            ...PRIVATE_REPORT_HEADERS,
             'content-type': 'application/zip',
-            'content-disposition': `attachment; filename="sinshin-${kind}-report-${tehranDay}.zip"`,
-            // لینک منقضی‌شونده است — کش نکند
-            'cache-control': 'no-store',
+            'content-disposition': `attachment; filename="${snapshot.filename}"`,
+            'content-length': String(snapshot.bytes.byteLength),
           },
         })
       },
@@ -101,7 +95,7 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
         detail: {
           summary: 'Download full report bundle (ZIP)',
           description:
-            'daily: docker-logs.txt + orders.csv + new-users.csv + summary.txt | weekly: orders.csv + users.csv + summary.txt. Signed expiring token (r-family).',
+            'daily: docker-logs.txt + orders.csv + new-users.csv + summary.txt | weekly: orders.csv + users.csv + summary.txt. Downloads the saved archive associated with this expiring SMS token.',
         },
       },
     )
@@ -130,7 +124,7 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
         detail: {
           summary: 'Manually run report flow + SMS (admin only)',
           description:
-            'daily flow: collect docker logs → archive → truncate → sign token → SMS admins (TOKEN only). weekly flow: sign token → SMS.',
+            'Generate and verify a saved ZIP before sending its short token to the main administrators. Daily reports also archive Docker logs.',
         },
       },
     )
@@ -168,6 +162,20 @@ export const reportRoutes = (deps: ReportRoutesDeps) => {
 export function forbidden(): Response {
   return new Response(
     JSON.stringify({ error: { code: 'FORBIDDEN', message: 'لینک گزارش نامعتبر یا منقضی شده است.' } }),
-    { status: 403, headers: { 'content-type': 'application/json' } },
+    { status: 403, headers: { ...PRIVATE_REPORT_HEADERS, 'content-type': 'application/json; charset=utf-8' } },
+  )
+}
+
+const PRIVATE_REPORT_HEADERS = {
+  'cache-control': 'private, no-store',
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+  'x-robots-tag': 'noindex, nofollow',
+} as const
+
+function missingReport(): Response {
+  return new Response(
+    JSON.stringify({ error: { code: 'NOT_FOUND', message: 'فایل گزارش در دسترس نیست؛ گزارش تازه‌ای از پنل مدیریت درخواست کنید.' } }),
+    { status: 404, headers: { ...PRIVATE_REPORT_HEADERS, 'content-type': 'application/json; charset=utf-8' } },
   )
 }

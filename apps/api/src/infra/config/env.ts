@@ -376,7 +376,7 @@ export class AppConfig {
       tokenTtlHours: num('REPORT_TOKEN_TTL_HOURS', 24),
       logsMaxMb: num('REPORT_LOGS_MAX_MB', 20),
       dockerLogsEnabled: bool('DOCKER_LOGS_ENABLED', true),
-      dockerLogsTruncate: bool('DOCKER_LOGS_TRUNCATE', true),
+      dockerLogsTruncate: bool('DOCKER_LOGS_TRUNCATE', false),
       dockerSocket: str('DOCKER_SOCKET', '/var/run/docker.sock'),
     }
 

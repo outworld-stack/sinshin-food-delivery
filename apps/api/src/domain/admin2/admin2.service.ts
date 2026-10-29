@@ -26,6 +26,7 @@ import {
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { ensureUserReferralCode } from '#/domain/shared/referral-code'
 import { asUserId } from '#/domain/shared/brand'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
@@ -359,6 +360,7 @@ export class Admin2Service {
                 userId = created.id
             }
             if (!userId) throw Err.internal('ذخیره‌سازی ناموفق بود')
+            if (!existing?.referralCode?.trim()) await ensureUserReferralCode(db, userId)
 
             const profile = {
                 firstName,

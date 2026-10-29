@@ -17,6 +17,7 @@ import { hasAdminPermission } from '#/utils/adminAccess'
 import { PermissionGate, Can } from '#/components/shared/PermissionGate'
 import { Mobile, Monitor } from 'reicon-react'
 import { ChartPanel } from '#/components/shared/ChartPanel'
+import { InviteFriendsBox } from '#/components/shared/InviteFriendsBox'
 import { OrdersBox } from '#/components/admin/user-detail/OrdersBox'
 import { ReferralsBox } from '#/components/admin/user-detail/ReferralsBox'
 import { LogsBox } from '#/components/admin/user-detail/LogsBox'
@@ -66,7 +67,7 @@ function AdminUserDetailPage() {
   const { userId } = Route.useParams()
   const queryClient = useQueryClient()
   const showToast = useToastStore((state) => state.showToast)
-  const { permissions, isChecking } = usePermissions()
+  const { permissions, isMainAdmin, isChecking } = usePermissions()
 
   // ⬅ NEW: اشتراک در کش مشترک با loader (فکتوری مرکزی).
   // حالا نامعتبرسازی زیر، واقعاً این useQuery را ریفچ می‌کند —
@@ -148,6 +149,8 @@ function AdminUserDetailPage() {
           <p className="font-MorabbaBold text-xl text-gray-800 dark:text-white">{faNum(user.referralsCount)}</p>
         </div>
       </div>
+
+      {isMainAdmin && <InviteFriendsBox referralCode={user.referralCode} />}
 
       {/* دستگاه‌های متصل */}
       <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">

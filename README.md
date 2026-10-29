@@ -678,9 +678,14 @@ crontab -e
 نتیجه در `/var/log/sinshin-restore-drill.log` — باید `PASS` ببینی.
 
 **بکاپ خارج از سرور (اختیاری ولی توصیه‌شده — رارد H7):** اگر
-`BACKUP_RCLONE_REMOTE` را در `.env` بگذاری (مثل `b2:sinshin-backup`)، هر
-بکاپ با rclone به مقصد ابری هم کپی می‌شود؛ با `BACKUP_AGE_PUBKEY` حتی
-رمزنگاری سرتاسری (age) هم انجام می‌شود. راهنمای راه‌اندازی: REFERENCE بخش ۵.
+مقصد ابری می‌خواهی، ابتدا rclone و در صورت نیاز age را طبق REFERENCE بخش ۵
+روی میزبان یا یک کانتینر سفارشی آماده کن. ایمیج پیش‌فرض backup این ابزارها را
+ندارد و تنظیم متغیرهای `.env` به‌تنهایی کپی ابری را فعال نمی‌کند؛ متغیرها،
+کانفیگ rclone و دسترسی شبکه هم باید به کانتینر سفارشی داده شوند.
+
+پیامک‌های روزانه و هفتگی فایل ZIP گزارش‌ها را می‌فرستند؛ بکاپ SQL بالا مسیر
+جداگانه دارد. جزئیات فایل‌ها، اصلاح لینک‌ها و روش بررسی دانلود در
+[راهنمای گزارش پیامکی و بکاپ](docs/backup-report-audit.md) آمده است.
 
 > **گواهی‌های TLS و دیتای گیتا هم بکاپ‌پذیرند:** گواهی‌ها در
 > `sinshin_caddy_data` و دیتای گیتا در `sinshin_gitea_data` (هر دو روی SSD)
@@ -805,7 +810,7 @@ docker builder prune -f                      # کش بیلد قدیمی
 | **چند نمونه‌ی api (پشت caddy)** | در `.env`: `API_UPSTREAMS="api:3000 api2:3000 api3:3000"` → `docker compose --profile scaled up -d` (هِلث‌چک و round-robin از قبل آماده است) |
 | **job زمان‌بندی‌شده‌ی جدید** (کرون) | داخل اپ است: `apps/api/src/workers/` (scheduler + jobs) — کد + push؛ زمان‌بندی‌ها از `.env` (مثل `COUPON_SCAN_TIME`) |
 | **تغییر ساعت/تعداد بکاپ** | `BACKUP_HOUR` / `BACKUP_KEEP` در `.env` → `docker compose up -d backup` |
-| **مقصد بکاپ ابری** | `BACKUP_RCLONE_REMOTE` (+ `BACKUP_AGE_PUBKEY` برای رمزنگاری) در `.env` → `docker compose up -d backup` |
+| **مقصد بکاپ ابری** | ابتدا ابزار، کانفیگ مقصد و دسترسی شبکه را طبق REFERENCE بخش ۵ آماده کن؛ متغیرهای `.env` به‌تنهایی کافی نیستند |
 
 ---
 

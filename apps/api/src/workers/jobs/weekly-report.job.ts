@@ -16,25 +16,21 @@ import type { DailyJob } from '#/workers/scheduler'
  * گزارش هفتگی — شنبه ۰۱:۰۵ تهران — فاز-۲:
  * توکن امضاشده + پیامک به ادمین‌های اصلی (فقط TOKEN — SMS.ir لینکِ
  * بسته‌ی ZIP با orders.csv + users.csv هفته را از قالب می‌سازد).
+ * اجرای ازدست‌رفته تا پایان همان هفته جبران می‌شود؛ اجرای موفق تکرار نمی‌شود.
  */
 export class WeeklyReportJob implements DailyJob {
   readonly name = 'weekly-report'
   readonly time = '01:05'
-  readonly catchUp = false
+  readonly catchUp = true
+  readonly recovery = { weekday: 6 as const }
 
   constructor(
     private readonly deps: { config: AppConfig; db: Db; sms: SmsService; reports: ReportService },
   ) {}
 
   async run(): Promise<void> {
-    const day = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Tehran',
-      weekday: 'long',
-    }).format(new Date())
-    if (day !== 'Saturday') {
-      console.log('[cron:weekly-report] not Saturday — skipping')
-      return
-    }
+    // The scheduler deduplicates the Saturday–Friday period and allows recovery
+    // later in that week when the API or Redis was unavailable on Saturday.
     await this.deps.reports.runWeeklyFlow()
     console.log('[cron:weekly-report] flow complete (weekly ZIP link SMS sent)')
   }

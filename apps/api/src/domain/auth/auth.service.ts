@@ -1,11 +1,12 @@
 //src/domain/auth/auth.service.ts
 import { desc, eq, sql } from 'drizzle-orm'
 
-import type { Db, DbOrTx } from '#/infra/db/client'
+import type { Db } from '#/infra/db/client'
 import { devices, deviceEvents, deviceIdentities, users, type UserRow, type DeviceRow } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { AppError, Err } from '#/domain/shared/errors'
 import { isUniqueViolation } from '#/domain/shared/pg'
+import { ensureUserReferralCode, generateUniqueReferralCode } from '#/domain/shared/referral-code'
 import type { OtpService } from './otp.service'
 import type { SessionService, SessionIssue } from './session.service'
 import type { DeviceService } from '#/domain/device/device.service'
@@ -32,15 +33,6 @@ export interface LoginOptions {
   refCode?: string | null
   termsAccepted?: boolean
   termsVersion?: string | null
-}
-
-const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-
-function randomReferralCode(len: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(len))
-  let s = ''
-  for (const b of bytes) s += REF_ALPHABET[b % REF_ALPHABET.length]
-  return `SIN-${s}`
 }
 
 export class AuthService {
@@ -244,7 +236,7 @@ export class AuthService {
               phone,
               role: willBeRole,
               lastLoginAt: new Date(),
-              referralCode: await this.generateUniqueReferralCode(tx),
+              referralCode: await generateUniqueReferralCode(tx),
               referredBy,
               termsAcceptedAt: new Date(),
               termsVersion: opts.termsVersion ?? null,
@@ -306,6 +298,7 @@ export class AuthService {
         await this.deps.devices.assertQuotaOn(tx, phone, effectiveRole, currentPeek.device?.id ?? null)
 
         const patch: Partial<typeof users.$inferInsert> = { lastLoginAt: new Date() }
+        if (!existingUser.referralCode?.trim()) await ensureUserReferralCode(tx, existingUser.id)
         if (config.isSuperAdmin(phone) && existingUser.role !== 'admin') patch.role = 'admin'
         if (opts.termsAccepted && !existingUser.termsAcceptedAt) {
           patch.termsAcceptedAt = new Date()
@@ -421,17 +414,6 @@ export class AuthService {
         deviceModel: r.device.deviceModel,
       })),
     }
-  }
-
-  private async generateUniqueReferralCode(db: DbOrTx): Promise<string> {
-    for (let i = 0; i < 5; i++) {
-      const code = i < 4 ? randomReferralCode(6) : randomReferralCode(10)
-      const clash = await db.query.users.findFirst({
-        where: sql`upper(${users.referralCode}) = ${code}`,
-      })
-      if (!clash) return code
-    }
-    return `SIN-${Date.now().toString(36).toUpperCase()}`
   }
 
   /**

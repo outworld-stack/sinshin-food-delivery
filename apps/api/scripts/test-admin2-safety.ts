@@ -60,6 +60,7 @@ try {
   await db.execute(sql`alter table admin2_profiles add constraint test_admin2_profile_failure check (first_name <> '__FAIL__')`)
   await assert.rejects(service.add({ ...input(ordinary.phone), firstName: '__FAIL__' }))
   assert.equal((await db.query.users.findFirst({ where: eq(users.id, ordinary.id) }))!.role, 'user')
+  assert.equal((await db.query.users.findFirst({ where: eq(users.id, ordinary.id) }))!.referralCode, null)
   assert.equal(await service.profile(ordinary.id), undefined)
   await assert.rejects(service.add({ ...input('09150001004'), firstName: '__FAIL__' }))
   assert.equal(await db.query.users.findFirst({ where: eq(users.phone, '09150001004') }), undefined)
@@ -69,6 +70,8 @@ try {
   assert.equal(await service.permissionsOf(ordinary.id), null, 'cache an absent profile before promotion')
   assert.equal((await service.add(input(ordinary.phone))).userId, ordinary.id)
   const promoted = await service.profile(ordinary.id)
+  const promotedCode = (await db.query.users.findFirst({ where: eq(users.id, ordinary.id) }))!.referralCode
+  assert.match(promotedCode!, /^[A-Z0-9_-]{3,16}$/, 'promoting an account without a code allocates its own usable link')
   assert.equal(promoted!.firstName, 'Admin')
   assert.equal(promoted!.lastName, 'Two')
   assert.equal((await service.permissionsOf(ordinary.id))!.orderDetailsRead, true)
@@ -80,11 +83,16 @@ try {
   const concurrent = await Promise.all(Array.from({ length: 6 }, () => service.add(input('09150001005'))))
   assert.equal(concurrent.filter((result) => result.success).length, 1)
   const secondId = concurrent.find((result) => result.success)!.userId!
+  const secondCode = (await db.query.users.findFirst({ where: eq(users.id, secondId) }))!.referralCode
+  assert.match(secondCode!, /^[A-Z0-9_-]{3,16}$/, 'direct level-2 registration also allocates a referral code')
+  assert.notEqual(secondCode, promotedCode)
   assert.equal((await db.select().from(users).where(eq(users.phone, '09150001005'))).length, 1)
   assert.equal((await db.select().from(admin2Profiles)).length, 2)
   await service.toggleActive(ordinary.id)
   await db.update(users).set({ role: 'user' }).where(eq(users.id, ordinary.id))
   assert.equal((await service.add(input(ordinary.phone))).success, true)
+  assert.equal((await db.query.users.findFirst({ where: eq(users.id, ordinary.id) }))!.referralCode, promotedCode,
+    'promoting an existing account preserves links already shared with friends')
   assert.equal((await service.profile(ordinary.id))!.isActive, true)
   assert.equal((await service.permissionsOf(ordinary.id))!.orderDetailsRead, true)
   passed('concurrent registration creates one profile; promotion restores an inactive legacy profile')

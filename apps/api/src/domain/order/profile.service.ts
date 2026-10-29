@@ -14,6 +14,7 @@ import {
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import { Err } from '#/domain/shared/errors'
+import { ensureUserReferralCode } from '#/domain/shared/referral-code'
 import { asDeviceId } from '#/domain/shared/brand'
 import { signedWalletAmount } from '#/domain/shared/wallet-sql'
 import type { DeviceService } from '#/domain/device/device.service'
@@ -131,6 +132,7 @@ export class ProfileService {
     const { db } = this.deps
     const user = (await db.select().from(users).where(eq(users.id, userId)))[0]
     if (!user) throw Err.unauthorized()
+    if (!user.referralCode?.trim()) user.referralCode = await ensureUserReferralCode(db, user.id)
 
     let referrerCode: string | null = null
     if (user.referredBy) {

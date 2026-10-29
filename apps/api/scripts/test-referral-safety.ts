@@ -6,12 +6,14 @@ import { migrate } from 'drizzle-orm/bun-sql/migrator'
 import { Database } from '../src/infra/db/client'
 import { AppConfig } from '../src/infra/config/env'
 import { AdminService } from '../src/domain/admin/admin.service'
+import { Admin2Service } from '../src/domain/admin2/admin2.service'
 import { AuthService } from '../src/domain/auth/auth.service'
 import { RegistrationPermitService } from '../src/domain/auth/registration-permit.service'
 import { DeviceService } from '../src/domain/device/device.service'
 import { ProfileService } from '../src/domain/order/profile.service'
 import { OrderService } from '../src/domain/order/order.service'
 import { AppError } from '../src/domain/shared/errors'
+import { ensureUserReferralCode } from '../src/domain/shared/referral-code'
 import { deviceEvents, deviceIdentities, deviceLinks, devices, orders, referralProfits, users, walletTransactions } from '../src/infra/db/schema'
 
 const source = new URL(process.env.DATABASE_URL?.startsWith('postgres')
@@ -26,6 +28,16 @@ scratchUrl.pathname = `/${scratch}`
 let database: Database | undefined
 let count = 0
 function passed(name: string) { count++; console.log(`PASS ${name}`) }
+async function within<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error(`Timed out: ${label}`)), 10_000)
+    })])
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 const domainError = (code: AppError['code']) => (error: unknown) => error instanceof AppError && error.code === code
 const savedFetch = globalThis.fetch
 globalThis.fetch = (() => { throw new Error('External requests forbidden in referral safety test') }) as unknown as typeof fetch
@@ -44,6 +56,7 @@ try {
   const orderService = new OrderService({ db, config, coupons: {} as never, settings: {} as never, zones: {} as never, notifications: {} as never })
   const profile = new ProfileService({ db, config, orders: orderService, devices: deviceService })
   const adminService = new AdminService({ db })
+  const admin2Service = new Admin2Service({ db, config, settings: {} as never, hub: {} as never })
   let userNumber = 0
   const makeUser = async (referralCode?: string, referredBy?: string) => (await db.insert(users)
     .values({ phone: `0916${String(++userNumber).padStart(7, '0')}`, referralCode, referredBy }).returning())[0]!
@@ -53,6 +66,34 @@ try {
     audioHash: crypto.randomUUID(), fontsHash: crypto.randomUUID(),
   }).returning())[0]!
   const currentDevice = await makeDevice()
+  const originalGetRandomValues = crypto.getRandomValues
+  try {
+    const occupiedCode = await makeUser('sin-aaaaaa')
+    const caseCollisionUser = await makeUser()
+    let draws = 0
+    crypto.getRandomValues = ((array: Uint8Array) => {
+      if (++draws === 1) return array.fill(0)
+      return originalGetRandomValues.call(crypto, array)
+    }) as typeof crypto.getRandomValues
+    const availableCode = await ensureUserReferralCode(db, caseCollisionUser.id)
+    assert.notEqual(availableCode.toUpperCase(), occupiedCode.referralCode!.toUpperCase())
+
+    const allocationA = await makeUser(), allocationB = await makeUser()
+    draws = 0
+    crypto.getRandomValues = ((array: Uint8Array) => {
+      if (++draws <= 2) return array.fill(1)
+      return originalGetRandomValues.call(crypto, array)
+    }) as typeof crypto.getRandomValues
+    const allocated = await Promise.all([allocationA, allocationB].map((user) => ensureUserReferralCode(db, user.id)))
+    assert.equal(new Set(allocated).size, 2, 'simultaneous identical candidates are retried for different accounts')
+    assert(allocated.includes('SIN-BBBBBB'))
+    assert.equal((await getUser(allocationA.id)).referralCode, allocated[0])
+    assert.equal((await getUser(allocationB.id)).referralCode, allocated[1])
+    assert.equal(await ensureUserReferralCode(db, occupiedCode.id), 'sin-aaaaaa', 'existing custom codes are preserved exactly')
+  } finally {
+    crypto.getRandomValues = originalGetRandomValues
+  }
+  passed('referral allocation preserves custom codes and resolves legacy-case and concurrent identical-code collisions')
   const first = await makeUser('SIN-FIRST')
   const second = await makeUser('SIN-SECOND')
   const legacy = await makeUser('sin-legacy')
@@ -128,7 +169,7 @@ try {
     db, config, devices: deviceService, permits: new RegistrationPermitService({ db }),
     otp: { verify: async () => undefined } as never,
     sessions: { createSession: async () => ({}) } as never,
-    admin2: { assertLoginAllowed: async () => undefined } as never,
+    admin2: { assertLoginAllowed: async () => undefined, onLogin: async () => ({ queueCount: 0 }) } as never,
   })
   const signup = async (phone: string, refCode: string) => {
     const hash = (salt: string) => new Bun.CryptoHasher('sha256').update(`${phone}:${salt}`).digest('hex')
@@ -143,7 +184,45 @@ try {
   assert.equal((await signup('09180000003', 'SIN-LEGACY'.padEnd(40, 'X'))).referredBy, null)
   passed('signup accepts legacy normalized codes and never guesses ambiguous or truncated attribution')
 
+  const directAdmin = await admin2Service.add({
+    phone: '09180000010', firstName: 'Level', lastName: 'Two', scopeHall: true, scopeTakeaway: true,
+  })
+  assert(directAdmin.success && directAdmin.userId)
+  const directAdminCode = (await getUser(directAdmin.userId)).referralCode
+  assert.match(directAdminCode!, /^[A-Z0-9_-]{3,16}$/)
+  assert.equal((await signup('09180000011', directAdminCode!)).referredBy, directAdmin.userId)
+  const existingViews = await within(Promise.all([
+    profile.get(directAdmin.userId, currentDevice.id),
+    profile.get(directAdmin.userId, currentDevice.id, { light: true }),
+    adminService.getAdminUserDetails(directAdmin.userId),
+  ]), 'baseline profiles with existing code')
+  assert(existingViews.every((view) => view?.referralCode === directAdminCode))
+
+  // Simulate an admin created before referral allocation was added, with an existing session.
+  await db.update(users).set({ referralCode: null }).where(eq(users.id, directAdmin.userId))
+  const [ownFull, ownLight, adminView] = await within(Promise.all([
+    profile.get(directAdmin.userId, currentDevice.id),
+    profile.get(directAdmin.userId, currentDevice.id, { light: true }),
+    adminService.getAdminUserDetails(directAdmin.userId),
+  ]), 'profiles needing code repair')
+  assert.match(ownFull.referralCode!, /^[A-Z0-9_-]{3,16}$/)
+  assert.equal(ownLight.referralCode, ownFull.referralCode)
+  assert.equal(adminView!.referralCode, ownFull.referralCode)
+  assert.equal((await getUser(directAdmin.userId)).referralCode, ownFull.referralCode)
+  assert.equal(ownFull.referralLink, `https://sinshin.example/referral/${ownFull.referralCode}`)
+  assert.equal((await profile.get(directAdmin.userId, currentDevice.id)).referralCode, ownFull.referralCode)
+  assert.equal((await signup('09180000012', ownFull.referralCode!)).referredBy, directAdmin.userId)
+  passed('new and legacy level-2 admins get stable links shared by full/light profiles and the main-admin view, with correct signup attribution')
+
+  await db.update(users).set({ referralCode: '' }).where(eq(users.id, directAdmin.userId))
+  const loggedInAdmin = await signup('09180000010', first.referralCode!)
+  assert.match(loggedInAdmin.referralCode!, /^[A-Z0-9_-]{3,16}$/)
+  assert.equal(loggedInAdmin.referredBy, null, 'an existing admin login cannot change referral attribution')
+  assert.equal((await profile.get(directAdmin.userId, currentDevice.id)).referralCode, loggedInAdmin.referralCode)
+  passed('existing level-2 login repairs an empty code and keeps the resulting invite link stable')
+
   const earningsOwner = await makeUser('SIN-EARNINGS'), buyer = await makeUser('SIN-BUYER', earningsOwner.id)
+  await db.update(users).set({ role: 'admin2' }).where(eq(users.id, earningsOwner.id))
   let orderNumber = 0
   const makeOrder = async (userId: string, amount: number, refunded = false) => (await db.insert(orders).values({
     userId, displayId: `ord-referral${++orderNumber}`, deliveryType: 'DINE_IN',

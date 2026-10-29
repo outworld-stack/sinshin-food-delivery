@@ -132,6 +132,41 @@ export class RedisService {
     }
   }
 
+  /** Atomically reserve an unfinished scheduled period across API replicas. */
+  async claimScheduledJob(leaseKey: string, doneKey: string, owner: string, ttlSeconds: number): Promise<boolean | null> {
+    const script = `
+      if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+      if redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2], 'NX') then return 1 end
+      return 0
+    `
+    const result = await this.t<number | null>(this.client.send('EVAL', [
+      script, '2', leaseKey, doneKey, owner, String(ttlSeconds),
+    ]), null)
+    return result === null ? null : result === 1
+  }
+
+  /** Only the owning execution can mark success or replace its lease with a retry delay. */
+  async finishScheduledJob(input: {
+    leaseKey: string; doneKey: string; owner: string; success: boolean
+    doneTtlSeconds: number; retrySeconds: number
+  }): Promise<boolean | null> {
+    const script = `
+      if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+      if ARGV[2] == '1' then
+        redis.call('SET', KEYS[2], '1', 'EX', ARGV[3])
+        redis.call('DEL', KEYS[1])
+      else
+        redis.call('SET', KEYS[1], 'retry', 'EX', ARGV[4])
+      end
+      return 1
+    `
+    const result = await this.t<number | null>(this.client.send('EVAL', [
+      script, '2', input.leaseKey, input.doneKey, input.owner, input.success ? '1' : '0',
+      String(input.doneTtlSeconds), String(input.retrySeconds),
+    ]), null)
+    return result === null ? null : result === 1
+  }
+
   /**
    * رارد H4 — شمارش اعضای متمایز (ضد SMS-bombing): SADD + EXPIRE فقط بار اول.
    * true = عضو جدید | false = از قبل بود | null = ردیس پایین (fail-open)

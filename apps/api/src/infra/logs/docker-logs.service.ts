@@ -5,16 +5,16 @@
 
 // src/infra/logs/docker-logs.service.ts
 /**
- * فاز-۲ — جمع‌آوری + پاک‌سازی لاگ‌های داکر برای گزارش روزانه.
+ * جمع‌آوری لاگ‌های داکر برای گزارش روزانه روی volume پایدار.
  *
  * معماری (بدون docker CLI — فقط HTTP روی سوکت):
  *  • /var/run/docker.sock به کانتینر api مونت می‌شود (compose) و
  *    Bun.fetch با گزینه‌ی unix روی همان سوکت حرف می‌زند.
  *  • «لاگ‌های امروز» = از آخرین جمع‌آوری موفق (marker روی volume)
- *    تا الان — بعد از آرشیو، فایل لاگ کانتینرها truncate می‌شود؛
- *    یعنی چرخه‌ی روزانه دقیقاً «لاگ‌های از‌آخرین‌بار» را نگه می‌دارد.
+ *    تا الان — marker فقط بعد از ذخیره بسته و ارسال پیامک جلو می‌رود.
+ *    فایل زنده لاگ دست‌نخورده می‌ماند؛ داکر با تنظیم rotation آن را نگه می‌دارد.
  *
- * پاک‌سازی (truncate):
+ * متد قدیمی پاک‌سازی (truncate، دیگر از جریان گزارش فراخوانی نمی‌شود):
  *  • docker.sock حذفِ تاریخ-محور لاگ ندارد؛ فایل‌های json-file روی
  *    میزبان‌اند. برای پاک‌سازیِ امن، یک کانتینر «کمکی» یک‌بارمصرف از
  *    «همان ایمیج api» ساخته می‌شود که /var/lib/docker/containers میزبان را
@@ -31,7 +31,7 @@
  *  • سوکت غایب/بی‌دسترسی → { collected: false } و ادامه‌ی سیستم عادی.
  */
 
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { AppConfig } from '#/infra/config/env'
@@ -51,6 +51,7 @@ export interface DockerLogCollectResult {
   skipped: string[]
   /** از چه زمانی جمع شد */
   since: Date
+  until: Date
   /** مسیر فایل آرشیو (اگر collected) */
   archivePath: string | null
   /** تعداد بایت لاگ */
@@ -81,7 +82,7 @@ interface DockerContainerInspect {
 }
 
 export class DockerLogsService {
-  constructor(private readonly config: AppConfig) {}
+  constructor(private readonly config: AppConfig, private readonly fetcher: typeof Bun.fetch = Bun.fetch) {}
 
   private get enabled(): boolean {
     return this.config.reports.dockerLogsEnabled
@@ -92,15 +93,17 @@ export class DockerLogsService {
   }
 
   /** فراخوانی Docker Engine API روی سوکت یونیکس */
-  private async dockerApi<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T | null> {
+  private async dockerApi<T>(path: string, init?: RequestInit & { timeoutMs?: number; responseType?: 'arrayBuffer' }): Promise<T | null> {
     try {
-      const res = await Bun.fetch(`http://docker.local${path}`, {
-        ...init,
+      const { timeoutMs, responseType, ...request } = init ?? {}
+      const res = await this.fetcher(`http://docker.local${path}`, {
+        ...request,
         // Bun — گزینه‌ی unix: سوکت را جایگزین TCP می‌کند
         unix: this.socket,
-        signal: AbortSignal.timeout(init?.timeoutMs ?? 8_000),
+        signal: AbortSignal.timeout(timeoutMs ?? 8_000),
       } as Parameters<typeof Bun.fetch>[1])
       if (!res.ok) return null
+      if (responseType === 'arrayBuffer') return await res.arrayBuffer() as T
       return (await res.json().catch(() => null)) as T | null
     } catch {
       return null
@@ -123,11 +126,15 @@ export class DockerLogsService {
   }
 
   private writeMarker(now: Date): void {
+    const temporary = join(this.archiveDir(), `last-docker-log-collect.${crypto.randomUUID()}.tmp`)
     try {
-      mkdirSync(this.archiveDir(), { recursive: true })
-      writeFileSync(join(this.archiveDir(), 'last-docker-log-collect'), now.toISOString())
+      mkdirSync(this.archiveDir(), { recursive: true, mode: 0o700 })
+      writeFileSync(temporary, now.toISOString(), { mode: 0o600 })
+      renameSync(temporary, join(this.archiveDir(), 'last-docker-log-collect'))
     } catch (err) {
       console.error('[docker-logs] نوشتن marker ناموفق:', err)
+    } finally {
+      try { rmSync(temporary) } catch { /* No temporary marker remains after a successful rename. */ }
     }
   }
 
@@ -145,9 +152,10 @@ export class DockerLogsService {
    * کانتینر نگه داشته می‌شود — جدیدترین لاگ مهم‌ترین است).
    */
   async collectAndArchive(sinceOverride?: Date): Promise<DockerLogCollectResult> {
+    const collectedUntil = new Date()
     const since = sinceOverride ?? this.readMarker() ?? new Date(Date.now() - 24 * 3600_000)
     const empty: DockerLogCollectResult = {
-      collected: false, containers: 0, skipped: [], since, archivePath: null, bytes: 0,
+      collected: false, containers: 0, skipped: [], since, until: collectedUntil, archivePath: null, bytes: 0,
     }
     if (!this.enabled) {
       empty.skipped.push('DOCKER_LOGS_ENABLED=off')
@@ -171,7 +179,7 @@ export class DockerLogsService {
       try {
         const raw = await this.dockerApi<ArrayBuffer | null>(
           `/containers/${c.Id}/logs?stdout=1&stderr=1&timestamps=1&since=${sinceEpoch}&follow=false`,
-          { timeoutMs: 15_000 },
+          { timeoutMs: 15_000, responseType: 'arrayBuffer' },
         )
         if (raw === null) {
           skipped.push(name)
@@ -185,17 +193,18 @@ export class DockerLogsService {
         }
         // سقف سراسری — دم کانتینر را نگه دار
         let text = demux
-        if (totalBytes + text.length > maxBytes) {
+        if (totalBytes + Buffer.byteLength(text, 'utf8') > maxBytes) {
           const room = Math.max(0, maxBytes - totalBytes)
           if (room < 1024) {
             skipped.push(`${name} (سقف حجم)`)
             continue
           }
-          text = text.slice(-room)
+          text = Buffer.from(text, 'utf8').subarray(-room).toString('utf8')
           text = `[... لاگ این کانتینر برای جا شدن در سقف ${this.config.reports.logsMaxMb}MB بریده شد — فقط انتهای آن]\n` + text
+          skipped.push(`${name} (لاگ ناقص به‌علت سقف حجم)`)
         }
         parts.push(`\n════ ${name} (${c.Image}) — از ${since.toISOString()} ════\n${text}`)
-        totalBytes += text.length
+        totalBytes += Buffer.byteLength(text, 'utf8')
       } catch (err) {
         console.error(`[docker-logs] کانتینر ${name} skip شد:`, err)
         skipped.push(name)
@@ -209,30 +218,42 @@ export class DockerLogsService {
       `# لاگ‌های داکر سین‌شین — ${tehranDay}\n` +
       `# بازه: ${since.toISOString()} تا ${new Date().toISOString()}\n` +
       `# کانتینرها: ${containers.length} (${skipped.length} skip)\n` +
-      `# تولیدشده در بک‌اند — بعد از این جمع‌آوری، لاگ کانتینرها روی سرور truncate شده است.\n`
+      `# لاگ‌های سرور با چرخش استاندارد داکر نگهداری می‌شوند و هنگام تهیه گزارش پاک نمی‌شوند.\n`
 
     let archivePath: string | null = null
+    let temporary: string | null = null
     try {
-      mkdirSync(this.archiveDir(), { recursive: true })
-      archivePath = join(this.archiveDir(), `daily-logs-${tehranDay}.txt`)
-      writeFileSync(archivePath, header + parts.join(''), 'utf8')
+      mkdirSync(this.archiveDir(), { recursive: true, mode: 0o700 })
+      // Unique source archive avoids a manual rerun overwriting logs referenced by an in-flight report.
+      archivePath = join(this.archiveDir(), `daily-logs-${tehranDay}-${crypto.randomUUID()}.txt`)
+      temporary = `${archivePath}.tmp`
+      writeFileSync(temporary, header + parts.join(''), { encoding: 'utf8', mode: 0o600 })
+      renameSync(temporary, archivePath)
     } catch (err) {
       console.error('[docker-logs] نوشتن آرشیو ناموفق:', err)
       archivePath = null
+      skipped.push('archive-write-failed')
+    } finally {
+      if (temporary) { try { rmSync(temporary) } catch { /* Already published or not written. */ } }
     }
 
     // پاک‌سازی آرشیوهای قدیمی — ۳ روز آخر بمانَد (لینک ۲۴ ساعته است)
     this.pruneOldArchives(3)
 
-    this.writeMarker(new Date())
     return {
-      collected: true,
+      collected: archivePath !== null,
       containers: containers.length - skipped.length,
       skipped,
       since,
+      until: collectedUntil,
       archivePath,
       bytes: totalBytes,
     }
+  }
+
+  /** Advance only after the containing report is durable and its SMS has succeeded. */
+  completeCollection(result: DockerLogCollectResult): void {
+    if (result.collected && result.archivePath && result.skipped.length === 0) this.writeMarker(result.until)
   }
 
   /** حذف آرشیوهای قدیمی‌تر از N روز */
@@ -253,10 +274,24 @@ export class DockerLogsService {
 
   /** مسیر آرشیو روزِ تهرانِ «امروز» — برای بسته‌ی ZIP */
   todayArchivePath(): string {
+    return this.archivePathFor(new Date())
+  }
+
+  /** Legacy report links retain the log archive belonging to their issue date. */
+  archivePathFor(date: Date): string {
     const tehranDay = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date())
-    return join(this.archiveDir(), `daily-logs-${tehranDay}.txt`)
+    }).format(date)
+    const legacy = join(this.archiveDir(), `daily-logs-${tehranDay}.txt`)
+    try {
+      const latest = readdirSync(this.archiveDir())
+        .filter((name) => name.startsWith(`daily-logs-${tehranDay}-`) && name.endsWith('.txt'))
+        .map((name) => ({ name, time: statSync(join(this.archiveDir(), name)).mtimeMs }))
+        .sort((a, b) => b.time - a.time)[0]
+      return latest ? join(this.archiveDir(), latest.name) : legacy
+    } catch {
+      return legacy
+    }
   }
 
   /** محتوای آرشیو (اگر هست) — null = نبود (لینک دیر باز شده) */
@@ -336,7 +371,7 @@ export class DockerLogsService {
         .join(' ')
 
     try {
-      const res = await Bun.fetch('http://docker.local/containers/create?name=' + name, {
+      const res = await this.fetcher('http://docker.local/containers/create?name=' + name, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -358,7 +393,7 @@ export class DockerLogsService {
         console.error(`[docker-logs] ساخت کانتینر کمکی ناموفق (${res.status}): ${text.slice(0, 300)}`)
         return null
       }
-      const start = await Bun.fetch(`http://docker.local/containers/${name}/start`, {
+      const start = await this.fetcher(`http://docker.local/containers/${name}/start`, {
         method: 'POST',
         unix: this.socket,
         signal: AbortSignal.timeout(10_000),
@@ -380,23 +415,34 @@ export class DockerLogsService {
  * (TTY=false همیشه این قالب را برمی‌گرداند.)
  */
 export function demuxDockerStream(buf: Uint8Array): string {
-  const decoder = new TextDecoder()
+  if (buf.length === 0) return ''
+  // TTY responses contain plain text; multiplexed Docker frames start with a stream identifier.
+  if (buf[0]! > 3) return new TextDecoder().decode(buf)
+  const decoders = new Map<number, TextDecoder>()
   const chunks: string[] = []
   let pos = 0
-  while (pos + 8 <= buf.length) {
+  while (pos < buf.length) {
+    if (buf.length - pos < 8) throw new Error('Truncated Docker log frame header')
+    const stream = buf[pos]!
+    if (stream > 2 || buf[pos + 1] !== 0 || buf[pos + 2] !== 0 || buf[pos + 3] !== 0) {
+      throw new Error('Invalid Docker log frame header')
+    }
     const size =
       (buf[pos + 4]! * 0x1000000) +
       (buf[pos + 5]! * 0x10000) +
       (buf[pos + 6]! * 0x100) +
       buf[pos + 7]!
     pos += 8
-    if (size === 0 || pos + size > buf.length) break
-    chunks.push(decoder.decode(buf.subarray(pos, pos + size)))
+    if (size > buf.length - pos) throw new Error('Truncated Docker log frame payload')
+    // stdout/stderr may interleave while a UTF-8 character spans two frames of the same stream.
+    let decoder = decoders.get(stream)
+    if (!decoder) {
+      decoder = new TextDecoder()
+      decoders.set(stream, decoder)
+    }
+    chunks.push(decoder.decode(buf.subarray(pos, pos + size), { stream: true }))
     pos += size
   }
-  // اگر قالب فریمی نبود (بعضی نسخه‌ها/TTY) — خود بافر متن است
-  if (chunks.length === 0 && buf.length > 0) {
-    return decoder.decode(buf)
-  }
+  for (const decoder of decoders.values()) chunks.push(decoder.decode())
   return chunks.join('')
 }

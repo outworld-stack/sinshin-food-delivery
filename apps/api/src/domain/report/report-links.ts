@@ -1,12 +1,5 @@
-// ═══════════════════════════════════════════════════════════════
-// phase-2 — sinshin-food-delivery
-// مسیر مقصد: apps/api/src/domain/report/report-links.ts
-// وضعیت: جایگزینی کامل فایل موجود (پایه: نسخه‌ی فاز-۱ با M13)
-// تغییر فاز-۲: خانواده‌ی cron → report (r.) با انقضای قابل‌تنظیم
-// ═══════════════════════════════════════════════════════════════
-
 //src/domain/report/report-links.ts
-import { timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 import type { AppConfig } from '#/infra/config/env'
 
@@ -23,11 +16,8 @@ const safeEqual = (a: string, b: string): boolean => {
 /**
  * توکن‌های امضاشده‌ی گزارش — دو خانواده:
  *
- * ۱) report (فاز-۲، جایگزین cron): پیامک گزارش روزانه/هفتگی —
- *    امضاشده + منقضی‌شونده (REPORT_TOKEN_TTL_HOURS؛ پیش‌فرض ۲۴ ساعت)
- *    + iat برای ضد-بازی. پیامک فورواردشده دیگر لینک دائمی نیست.
- *    ⚠️ توکن‌های قدیمیِ خانواده‌ی c. (فاز-۱) دیگر معتبر نیستند —
- *    عمدی است (توکن ثابت روزانه/هفتگی حذف شد).
+ * ۱) report: توکن ۲۴ کاراکتری پیامک روزانه/هفتگی با زمان صدور، عمر و نوع
+ *    داخل امضا. لینک‌های کامل قدیمی r. تا پایان اعتبارشان پذیرفته می‌شوند.
  *
  * ۲) پنل: توکن scope-دار — «کی، چه صفحه‌ای، چه فیلترهایی»
  *    payload داخل امضا → لینک ادمین۲ بین افراد شیر نمی‌شود
@@ -39,6 +29,12 @@ const safeEqual = (a: string, b: string): boolean => {
 const PANEL_TOKEN_TTL_SECONDS = 24 * 60 * 60 // ۲۴ ساعت
 
 export type ReportKind = 'daily' | 'weekly'
+
+export interface ReportTokenDetails {
+  kind: ReportKind
+  issuedAt: number
+  expiresAt: number
+}
 
 export class ReportLinks {
   constructor(private readonly config: AppConfig) {}
@@ -58,24 +54,48 @@ export class ReportLinks {
     return Buffer.from(s, 'base64url').toString('utf8')
   }
 
-  // ── گزارش‌های پیامکی (فاز-۲ — r.) ──
+  // ── گزارش‌های پیامکی ──
 
-  /**
-   * توکن لینک گزارش — این تنها چیزی است که به SMS.ir می‌رود؛
-   * URL کامل از قالب پنل SMS.ir ساخته می‌شود (#TOKEN#).
-   * TTL از کانفیگ: REPORT_TOKEN_TTL_HOURS (پیش‌فرض ۲۴).
+  /** 18 bytes encode to 24 URL-safe characters, within SMS.ir's 25-character limit.
+   * The timestamp, kind and TTL are authenticated; changing config cannot invalidate sent links.
    */
   reportToken(kind: ReportKind, iat = Math.floor(Date.now() / 1000)): string {
-    const ttl = Math.max(1, Math.floor(this.config.reports.tokenTtlHours)) * 3600
-    // exp داخل امضا — تاییدِ انقضا حین verify
-    return `r.${kind}.${iat}.${iat + ttl}.${this.hash(`report:${kind}:${iat}`)}`
+    if (!Number.isInteger(iat) || iat <= 0 || iat > 0xffffffff) {
+      throw new Error('Invalid report issue time')
+    }
+    const configuredTtl = this.config.reports.tokenTtlHours
+    const ttlHours = Number.isFinite(configuredTtl) && configuredTtl >= 1
+      ? Math.min(0x7fff, Math.floor(configuredTtl)) : 24
+    const payload = Buffer.alloc(6)
+    payload.writeUInt32BE(iat, 0)
+    payload.writeUInt16BE(ttlHours | (kind === 'weekly' ? 0x8000 : 0), 4)
+    return Buffer.concat([payload, this.reportMac(payload)]).toString('base64url')
   }
 
-  /**
-   * اعتبار توکن گزارش — امضا + ساختار + انقضا (زمان-ثابت).
-   * iat در آینده (> ۶۰s) هم رد می‌شود (ساعتِ کج).
-   */
+  private reportMac(payload: Uint8Array): Buffer {
+    return createHmac('sha256', this.config.jwtSecret)
+      .update('sinshin-report-v2:').update(payload).digest().subarray(0, 12)
+  }
+
   verifyReport(token: string): ReportKind | null {
+    return this.verifyReportDetails(token)?.kind ?? null
+  }
+
+  verifyReportDetails(token: string): ReportTokenDetails | null {
+    const now = Math.floor(Date.now() / 1000)
+    if (/^[A-Za-z0-9_-]{24}$/.test(token)) {
+      const bytes = Buffer.from(token, 'base64url')
+      const payload = bytes.subarray(0, 6)
+      if (!timingSafeEqual(bytes.subarray(6), this.reportMac(payload))) return null
+      const issuedAt = payload.readUInt32BE(0)
+      const packed = payload.readUInt16BE(4)
+      const ttlHours = packed & 0x7fff
+      const expiresAt = issuedAt + ttlHours * 3600
+      if (!ttlHours || !issuedAt || issuedAt > now + 60 || expiresAt <= now) return null
+      return { kind: packed & 0x8000 ? 'weekly' : 'daily', issuedAt, expiresAt }
+    }
+
+    // Keep unmodified, still-valid links sent before the compact format usable.
     const parts = token.split('.')
     if (parts.length !== 5 || parts[0] !== 'r') return null
     const kind = parts[1] === 'daily' || parts[1] === 'weekly' ? (parts[1] as ReportKind) : null
@@ -84,18 +104,18 @@ export class ReportLinks {
     const exp = Number(parts[3])
     if (!Number.isInteger(iat) || iat <= 0) return null
     if (!Number.isInteger(exp) || exp <= iat) return null
-    const now = Math.floor(Date.now() / 1000)
     if (iat > now + 60) return null
-    if (exp < now) return null
-    if (!safeEqual(this.reportToken(kind, iat), token)) return null
-    return kind
+    if (exp <= now) return null
+    const ttl = Math.max(1, Math.floor(this.config.reports.tokenTtlHours)) * 3600
+    const legacy = `r.${kind}.${iat}.${iat + ttl}.${this.hash(`report:${kind}:${iat}`)}`
+    if (!safeEqual(legacy, token)) return null
+    return { kind, issuedAt: iat, expiresAt: exp }
   }
 
   /** ثانیه‌ی باقی‌مانده‌ی اعتبار توکن (برای هدر/لاگ) — منفی = منقضی */
   reportTokenTtlLeft(token: string): number {
-    const parts = token.split('.')
-    const exp = Number(parts[3])
-    return Number.isInteger(exp) ? exp - Math.floor(Date.now() / 1000) : -1
+    const details = this.verifyReportDetails(token)
+    return details ? details.expiresAt - Math.floor(Date.now() / 1000) : -1
   }
 
   // ── پنل — scope-دار ──
