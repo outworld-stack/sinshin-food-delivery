@@ -16,6 +16,7 @@
     "lint": "biome lint",
     "check": "biome check",
     "test:admin-day": "bun scripts/test-admin-day.ts",
+    "test:restaurant-hours": "bun scripts/test-restaurant-hours-admin.tsx && bun scripts/test-restaurant-hours-footer.tsx",
     "test:printing": "bun scripts/test-print-agent.ts && bun scripts/test-print-document.ts && bun scripts/test-invoice-print-center.tsx && bun scripts/test-printer-discovery-client.ts && bun scripts/test-local-print-queue.ts && bun scripts/test-local-invoice-print.ts",
     "test:admin2": "bun scripts/test-admin2-access.ts && bun scripts/test-admin2-live.tsx && bun scripts/test-admin2-forms.tsx",
     "test:maps": "bun scripts/test-neshan-sdk.ts && bun scripts/test-maps-client.tsx",

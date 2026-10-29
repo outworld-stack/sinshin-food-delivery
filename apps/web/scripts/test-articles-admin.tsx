@@ -24,6 +24,12 @@ mock.module('react', () => ({
     if (!(index in host.cells)) host.cells[index] = { current: initial }
     return host.cells[index]
   },
+  useEffect(effect: () => void | (() => void), deps: unknown[]) {
+    const index = host.cursor++
+    const before = host.cells[index] as unknown[] | undefined
+    if (!before || deps.some((value, at) => !Object.is(value, before[at]))) effect()
+    host.cells[index] = deps
+  },
   useMemo: (compute: () => unknown) => compute(),
   useCallback: (callback: unknown) => callback,
 }))

@@ -1,7 +1,7 @@
 /** Real transactions in an isolated local scratch database; no external services. */
 import assert from 'node:assert/strict'
 import { SQL } from 'bun'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
 import { Elysia } from 'elysia'
 import { Database } from '../src/infra/db/client'
@@ -15,7 +15,7 @@ import { AppError } from '../src/domain/shared/errors'
 import { AppConfig } from '../src/infra/config/env'
 import { CouponService } from '../src/domain/coupon/coupon.service'
 import { adminSettingsRoutes } from '../src/http/routes/admin-settings.routes'
-import { addresses, categories, mainCategories, products, courierDeliveries, courierTrips, couriers, orders, users, walletTransactions } from '../src/infra/db/schema'
+import { addresses, categories, coupons, mainCategories, products, courierDeliveries, courierTrips, couriers, orders, users, walletTransactions, SETTING_KEYS } from '../src/infra/db/schema'
 
 const source = new URL(process.env.DATABASE_URL ?? 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin')
 assert(['localhost', '127.0.0.1', '[::1]'].includes(source.hostname), 'Tests require local PostgreSQL')
@@ -35,12 +35,14 @@ try {
   let matrix: NeshanMatrixElement[][] | null = [[{ status: 'Ok', distanceMeters: 0, durationSeconds: 0 }]]
   let matrixCalls = 0
   let providerThrows = false
+  let waitForMatrix: (() => Promise<void>) | null = null
   const neshan: Pick<NeshanService, 'distanceMatrix'> = {
     distanceMatrix: async (origins, destinations, options) => {
       matrixCalls++
       assert.deepEqual(origins, [await settings.restaurantLocation()])
       assert.equal(destinations.length, 1)
       assert.deepEqual(options, { type: 'car', traffic: false })
+      await waitForMatrix?.()
       if (providerThrows) throw new Error('Neshan timed out')
       return matrix
     },
@@ -186,8 +188,81 @@ try {
   const pickup = await checkoutService.checkout(buyer!.id, { ...input, deliveryType: 'PICKUP' })
   assert.equal(pickup.breakdown.deliveryFee, 0)
   assert.equal(matrixCalls, beforePickup)
+
+  function pauseMatrix() {
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => { enter = resolve })
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    waitForMatrix = async () => { enter(); await pending }
+    return { entered, release: () => { waitForMatrix = null; release() } }
+  }
+  const [sharedCoupon] = await db.insert(coupons).values({
+    code: 'DELIVERYWAIT', discountPercentage: 10, isPublic: true,
+  }).returning()
+  const couponInput = { ...input, couponCode: sharedCoupon!.code }
+  const pickupDb = new Database(scratchUrl.toString(), { max: 1 })
+  matrix = null
+  const stalled = pauseMatrix()
+  const callsBeforeStall = matrixCalls
+  const slowCheckout = checkoutService.checkout(buyer!.id, couponInput)
+  try {
+    await Promise.race([stalled.entered, slowCheckout.then(() => { throw new Error('Expected a pending delivery route') })])
+    // A separate customer using the same public coupon must remain able to
+    // check out while the maps provider is stalled. A short timeout makes the
+    // previous network-under-coupon-lock regression fail deterministically.
+    await pickupDb.db.execute(sql`set lock_timeout = '100ms'`)
+    const independentCheckout = new OrderService({ db: pickupDb.db, config, settings, zones,
+      coupons: new CouponService({ db: pickupDb.db }), notifications: { notifyUser: async () => {} } as never,
+    })
+    const independent = await independentCheckout.checkout(other!.id, { ...couponInput, deliveryType: 'PICKUP' })
+    assert.equal(independent.breakdown.deliveryFee, 0)
+    await restartedZones.setFallbackFee(42_000)
+  } finally {
+    stalled.release()
+    await pickupDb.close()
+  }
+  const afterStall = await slowCheckout
+  assert.equal(afterStall.breakdown.deliveryFee, 42_000, 'provider failure is repriced using the current transactional fallback setting')
+  assert.equal(matrixCalls, callsBeforeStall + 1, 'a failed prefetch is not retried under checkout locks')
+  assert.equal((await db.select().from(coupons).where(eq(coupons.id, sharedCoupon!.id)))[0]!.usedCount, 2)
+  await restartedZones.setFallbackFee(35_000)
+  passed('stalled Neshan requests hold no shared coupon locks and final checkout uses fresh fallback pricing')
+
+  matrix = [[{ status: 'Ok', distanceMeters: 5_001, durationSeconds: 300 }]]
+  const repricing = pauseMatrix()
+  const repricedCheckout = checkoutService.checkout(buyer!.id, input)
+  try {
+    await Promise.race([repricing.entered, repricedCheckout.then(() => { throw new Error('Expected a pending delivery route') })])
+    assert.equal((await zones.update(6, 6, 63_000)).success, true)
+  } finally { repricing.release() }
+  assert.equal((await repricedCheckout).breakdown.deliveryFee, 63_000, 'prepared distance does not freeze old tier prices')
+  assert.equal((await zones.update(6, 6, 60_000)).success, true)
+  passed('delivery route preparation keeps final tier prices fresh')
+
+  const originalOrigin = await settings.restaurantLocation()
+  for (const change of ['address', 'origin', 'owner'] as const) {
+    const beforeOrders = (await db.select().from(orders)).length
+    const beforeUses = (await db.select().from(coupons).where(eq(coupons.id, sharedCoupon!.id)))[0]!.usedCount
+    const changed = pauseMatrix()
+    const changingCheckout = checkoutService.checkout(buyer!.id, couponInput)
+    try {
+      await Promise.race([changed.entered, changingCheckout.then(() => { throw new Error('Expected a pending delivery route') })])
+      if (change === 'address') await db.update(addresses).set({ lat: address!.lat + 0.1 }).where(eq(addresses.id, address!.id))
+      else if (change === 'owner') await db.update(addresses).set({ userId: other!.id }).where(eq(addresses.id, address!.id))
+      else await settings.set(SETTING_KEYS.restaurantLocation, { ...originalOrigin, lat: originalOrigin.lat + 0.1 })
+    } finally { changed.release() }
+    await assert.rejects(changingCheckout, (error) => error instanceof AppError && error.status === (change === 'owner' ? 404 : 409))
+    assert.equal((await db.select().from(orders)).length, beforeOrders, `${change} changes cannot create an order with a stale route`)
+    assert.equal((await db.select().from(coupons).where(eq(coupons.id, sharedCoupon!.id)))[0]!.usedCount, beforeUses, 'rejected quotes roll back coupon reservations')
+    await db.update(addresses).set({ lat: address!.lat, userId: buyer!.id }).where(eq(addresses.id, address!.id))
+    await settings.set(SETTING_KEYS.restaurantLocation, originalOrigin)
+  }
+  passed('checkout rechecks prepared route endpoints and address ownership before charging')
+
   // Keep the existing courier/refund assertions isolated from checkout fixtures.
   await db.delete(orders).where(eq(orders.userId, buyer!.id))
+  await db.delete(orders).where(eq(orders.userId, other!.id))
   passed('preview and checkout agree for road and fallback prices, no-route orders fail, and pickup bypasses Neshan')
   const [courier] = await db.insert(couriers).values({ name: 'Courier', phone: '09153333333' }).returning()
   const service = new OrderService({ db } as ConstructorParameters<typeof OrderService>[0])

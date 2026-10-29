@@ -85,6 +85,7 @@ try {
       isBusy: async () => false,
     } as never,
     zones: {
+      prepareRoute: async () => null,
       feeFor: async () => 10_000,
       quoteFor: async () => ({ status: 'ready', fee: 10_000, radiusKm: 2, distanceKm: 1 }),
     } as never,

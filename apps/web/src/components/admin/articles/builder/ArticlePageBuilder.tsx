@@ -18,7 +18,7 @@ import type {
 	ArticleBlocksDoc,
 } from '@sinshin/shared'
 import { contrastRatio, pickContrastText } from '@sinshin/shared'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
 	ArrowDown,
 	ArrowsRotate,
@@ -745,8 +745,18 @@ export function ArticlePageBuilder({
 	// Upload callbacks can resolve after other edits or a block reorder.
 	const docRef = useRef(doc)
 	docRef.current = doc
+	const mountedRef = useRef(true)
+	useEffect(() => {
+		mountedRef.current = true
+		return () => {
+			// About language changes replace this editor. Its pending uploads
+			// must not publish a stale document over the replacement's edits.
+			mountedRef.current = false
+		}
+	}, [])
 	const commitDoc = useCallback(
 		(next: ArticleBlocksDoc) => {
+			if (!mountedRef.current) return
 			docRef.current = next
 			onChange(next)
 		},
@@ -839,6 +849,7 @@ export function ArticlePageBuilder({
 
 	const patchProps = useCallback(
 		(id: string, patch: PropsPatch) => {
+			if (!mountedRef.current) return
 			const current = docRef.current
 			if (!current.blocks.some((block) => block.id === id)) return
 			pushHistory()

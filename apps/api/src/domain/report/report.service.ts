@@ -20,7 +20,7 @@
 //src/domain/report/report.service.ts
 import { and, desc, eq, gte, lt, ne, sql } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
+import type { Db, DbOrTx } from '#/infra/db/client'
 import { orders, users, walletTransactions } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import type { SmsService } from '#/infra/sms/sms.service'
@@ -73,11 +73,12 @@ export class ReportService {
     to: Date,
     token: string | null,
     range: 'yesterday' | 'today' | 'week',
+    db: DbOrTx = this.deps.db,
   ): Promise<ReportViewModel> {
-    const [orderRows, walletRows] = await this.orderAndWalletRows(from, to)
-    const agg = await this.summaryAggregate(from, to)
+    const [orderRows, walletRows] = await this.orderAndWalletRows(from, to, db)
+    const agg = await this.summaryAggregate(from, to, db)
     // بخش مغایرت‌ها — فقط وقتی چیزی باز است
-    const rec = await this.deps.reconcile.summary().catch(() => {
+    const rec = await this.deps.reconcile.summary(db).catch(() => {
       console.warn('[reports] reconciliation summary unavailable; financial report remains available')
       return { open: 0, byCheck: {} }
     })
@@ -295,12 +296,17 @@ export class ReportService {
     const anchor = new Date(details.issuedAt * 1000)
     const range = details.kind === 'weekly' ? 'week' : 'yesterday'
     const { from, to } = await this.rangeOf(range, anchor)
-    const [ordersCsv, usersCsv, agg, viewModel] = await Promise.all([
-      this.ordersCsv(from, to, false),
-      this.usersCsv(from, to, false),
-      this.summaryAggregate(from, to),
-      this.buildViewModel(details.kind === 'weekly' ? 'گزارش هفتگی' : 'گزارش روزانه', from, to, token, range),
-    ])
+    // Payments/refunds can change past orders while an export is being generated.
+    // Every saved representation must observe the same database snapshot.
+    const [ordersCsv, usersCsv, agg, viewModel] = await this.deps.db.transaction(
+      async (tx) => [
+        await this.ordersCsv(from, to, false, tx),
+        await this.usersCsv(from, to, false, tx),
+        await this.summaryAggregate(from, to, tx),
+        await this.buildViewModel(details.kind === 'weekly' ? 'گزارش هفتگی' : 'گزارش روزانه', from, to, token, range, tx),
+      ] as const,
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    )
     const entries = [
       { name: 'summary.txt', data: this.summaryText(details.kind === 'weekly' ? 'گزارش هفتگی سین‌شین' : 'گزارش روزانه سین‌شین', from, to, agg, range) },
       { name: 'orders.csv', data: ordersCsv },
@@ -335,8 +341,8 @@ export class ReportService {
   }
 
   /** CSV سفارشات بازه — همان قالب csvBody (سقف M22) */
-  private async ordersCsv(from: Date, to: Date, capped = true): Promise<string> {
-    const [allRows] = await this.orderAndWalletRows(from, to)
+  private async ordersCsv(from: Date, to: Date, capped = true, db: DbOrTx = this.deps.db): Promise<string> {
+    const [allRows] = await this.orderAndWalletRows(from, to, db)
     if (capped && allRows.length > MAX_CSV_ROWS) {
       console.warn(`[reports] zip csv capped: ${allRows.length} → ${MAX_CSV_ROWS} rows`)
     }
@@ -351,8 +357,8 @@ export class ReportService {
   }
 
   /** CSV کاربران بازه — ثبت‌نام‌های جدید (روزانه) یا همه‌ی کاربران هفته (هفتگی) */
-  private async usersCsv(from: Date, to: Date, capped = true): Promise<string> {
-    const query = this.deps.db
+  private async usersCsv(from: Date, to: Date, capped = true, db: DbOrTx = this.deps.db): Promise<string> {
+    const query = db
       .select()
       .from(users)
       .where(and(gte(users.createdAt, from), lt(users.createdAt, to)))
@@ -405,9 +411,8 @@ export class ReportService {
     ].join('\n')
   }
 
-  private async orderAndWalletRows(from: Date, to: Date) {
-    return Promise.all([
-      this.deps.db
+  private async orderAndWalletRows(from: Date, to: Date, db: DbOrTx = this.deps.db) {
+    const orderQuery = db
         .select({ o: orders, u: users })
         .from(orders)
         .innerJoin(users, eq(users.id, orders.userId))
@@ -415,8 +420,8 @@ export class ReportService {
         // گزارشِ مالی نمی‌آید (لغو‌شده‌ها = بازپرداختِ واقعی، می‌مانند؛
         // انقضای پنجره هم CANCELED می‌شود و با ردیفِ بازگشتِ کیف‌پولش می‌آید).
         .where(and(gte(orders.createdAt, from), lt(orders.createdAt, to), ne(orders.status, 'PENDING_PAYMENT')))
-        .orderBy(desc(orders.createdAt)),
-      this.deps.db
+        .orderBy(desc(orders.createdAt))
+    const walletQuery = db
         .select({ w: walletTransactions })
         .from(walletTransactions)
         .where(
@@ -424,12 +429,13 @@ export class ReportService {
             gte(walletTransactions.createdAt, from),
             lt(walletTransactions.createdAt, to),
           ),
-        ),
-    ])
+        )
+    // A transaction owns one connection; complete each query before starting the next.
+    return db === this.deps.db ? Promise.all([orderQuery, walletQuery]) : [await orderQuery, await walletQuery] as const
   }
 
-  private async summaryAggregate(from: Date, to: Date) {
-    const r = await this.deps.db
+  private async summaryAggregate(from: Date, to: Date, db: DbOrTx = this.deps.db) {
+    const r = await db
       .select({
         count: sql<number>`count(*)::int`,
         // رارد C1 — سرریز int برای درآمد تجمعی: ::bigint (بدون سقف)؛

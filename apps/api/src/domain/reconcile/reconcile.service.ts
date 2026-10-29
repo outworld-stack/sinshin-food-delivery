@@ -1,7 +1,7 @@
 //src/domain/reconcile/reconcile.service.ts
 import { and, desc, eq, sql } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
+import type { Db, DbOrTx } from '#/infra/db/client'
 import { coupons, orders, payments, reconcileFindings, users } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
 import type { OrderService } from '#/domain/order/order.service'
@@ -624,12 +624,12 @@ export class ReconcileService {
     }
 
     /** خلاصه برای گزارش HTML */
-    async summary(): Promise<{
+    async summary(db: DbOrTx = this.deps.db): Promise<{
         open: number
         critical: number
         byCheck: Record<string, number>
     }> {
-        const rows = (await this.deps.db.execute(sql`
+        const rows = (await db.execute(sql`
       select check_id, severity, count(*)::int as c
       from reconcile_findings
       where status = 'open'

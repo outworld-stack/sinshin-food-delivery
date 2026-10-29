@@ -49,6 +49,7 @@
     "test:print-routes": "bun scripts/test-print-routes.ts",
     "db:test:local-print": "bun scripts/test-local-print.ts",
     "test:admin2": "bun scripts/test-admin2-access.ts",
+    "test:restaurant-hours": "bun scripts/test-restaurant-hours.ts",
     "test:reports": "bun scripts/test-report-links.ts && bun scripts/test-report-scheduler.ts && bun scripts/test-report-docker-logs.ts",
     "db:test:reports": "bun scripts/test-report-downloads.ts",
     "db:test:admin2": "bun scripts/test-admin2-safety.ts",

@@ -80,7 +80,7 @@ import {
         loadPricingBases,
         sizeFinalPriceOf,
 } from "#/domain/menu/menu.service";
-import type { DeliveryZoneService } from "#/domain/delivery/delivery-zone.service";
+import type { DeliveryZoneService, PreparedDeliveryRoute } from "#/domain/delivery/delivery-zone.service";
 import type { SettingsService } from "#/domain/settings/settings.service";
 import type { CouponService } from "../coupon/coupon.service";
 import type { NotificationService } from "../notification/notification.service";
@@ -167,6 +167,20 @@ export class OrderService {
         ): Promise<CheckoutServiceResult> {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
+
+                // A slow maps provider must not hold wallet/user/campaign locks.
+                // Only route measurements are prepared; ownership, coordinates and
+                // current delivery prices are checked again in the transaction.
+                let deliveryRoute: PreparedDeliveryRoute | null = null;
+                if (input.deliveryType === "DELIVERY") {
+                        if (!input.addressId)
+                                throw Err.validation("لطفاً آدرس تحویل را انتخاب کنید.");
+                        const [address] = await db.select().from(addresses).where(and(
+                                eq(addresses.id, asAddressId(input.addressId)), eq(addresses.userId, userId),
+                        ));
+                        if (!address) throw Err.notFound("آدرس تحویل پیدا نشد.");
+                        deliveryRoute = await this.deps.zones.prepareRoute({ lat: address.lat, lng: address.lng });
+                }
 
                 // رارد M9 — نتیجه‌ی tx گرفته می‌شود تا اعطای کوپن بعد از commit اجرا شود
                 const result = await db.transaction(async (tx) => {
@@ -454,6 +468,7 @@ export class OrderService {
                                         ? await this.deps.zones.feeFor(
                                                         addressRow ? { lat: addressRow.lat, lng: addressRow.lng } : null,
                                                         tx,
+                                                        deliveryRoute,
                                                 )
                                         : 0;
                         const packagingFee =

@@ -6,8 +6,8 @@ import type { AboutContent, AboutContentInput } from '../src/types/site/about'
 // Run the real editor and builder handlers with a deterministic hook host.
 // Upload, translation and map SDK boundaries are replaced; draft state is real.
 const react = { ...await import('react') }
-type Host = { cells: unknown[]; cursor: number; effects: (() => void)[]; changed: boolean }
-const freshHost = (): Host => ({ cells: [], cursor: 0, effects: [], changed: false })
+type Host = { cells: unknown[]; cursor: number; effects: (() => void)[]; cleanups: Map<number, () => void>; changed: boolean }
+const freshHost = (): Host => ({ cells: [], cursor: 0, effects: [], cleanups: new Map(), changed: false })
 let host = freshHost()
 mock.module('react', () => ({
 	...react,
@@ -27,11 +27,17 @@ mock.module('react', () => ({
 		if (!(index in host.cells)) host.cells[index] = { current: initial }
 		return host.cells[index]
 	},
-	useEffect(effect: () => void, deps: unknown[]) {
-		const index = host.cursor++
-		const before = host.cells[index] as unknown[] | undefined
-		if (!before || deps.some((value, at) => !Object.is(value, before[at]))) host.effects.push(effect)
-		host.cells[index] = deps
+	useEffect(effect: () => void | (() => void), deps: unknown[]) {
+		const active = host
+		const index = active.cursor++
+		const before = active.cells[index] as unknown[] | undefined
+		if (!before || deps.some((value, at) => !Object.is(value, before[at]))) active.effects.push(() => {
+			active.cleanups.get(index)?.()
+			const cleanup = effect()
+			if (cleanup) active.cleanups.set(index, cleanup)
+			else active.cleanups.delete(index)
+		})
+		active.cells[index] = deps
 	},
 	useCallback: (callback: unknown) => callback,
 	useMemo: (compute: () => unknown) => compute(),
@@ -308,6 +314,39 @@ assert.deepEqual(find(defaultTree, (node) => node.type === MapPicker).props.valu
 assert.equal(find(defaultTree, (node) => node.props.type === 'submit').props.disabled, false)
 await find(defaultTree, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} })
 assert.equal(defaultSaves.at(-1)?.location, null, 'reset restores inheritance from restaurant settings')
+
+// Switching languages remounts the builder. A completed upload from its old
+// instance must never restore the full document over newer edits.
+const languageHost = freshHost()
+const languageInitial: AboutContent = {
+	...initial,
+	blocks: { version: 1, blocks: [
+		{ id: 'photo', type: 'image', props: { src: '/uploads/old.png' } },
+		{ id: 'story', type: 'paragraph', props: { text: 'Original story' } },
+	] },
+}
+const renderLanguages = () => render(languageHost, AboutContentForm, {
+	initialData: languageInitial, isSaving: false,
+	onSave: async () => ({ success: true }),
+})
+let languageTree = renderLanguages()
+const oldBuilderHost = freshHost()
+const oldBuilderProps = find(languageTree, (node) => node.type === ArticlePageBuilder).props
+const oldBuilderTree = render(oldBuilderHost, ArticlePageBuilder, oldBuilderProps as Parameters<typeof ArticlePageBuilder>[0])
+const completeOldUpload = find(oldBuilderTree, (node) => node.props.block?.id === 'photo' && typeof node.props.patchProps === 'function').props.patchProps
+find(languageTree, (node) => node.type === 'button' && node.props.children === 'عربی').props.onClick()
+for (const cleanup of oldBuilderHost.cleanups.values()) cleanup()
+languageTree = renderLanguages()
+find(languageTree, (node) => node.type === 'button' && node.props.children === 'فارسی').props.onClick()
+languageTree = renderLanguages()
+const newBuilderProps = find(languageTree, (node) => node.type === ArticlePageBuilder).props
+const newBuilderTree = render(freshHost(), ArticlePageBuilder, newBuilderProps as Parameters<typeof ArticlePageBuilder>[0])
+find(newBuilderTree, (node) => node.props.block?.id === 'story' && typeof node.props.patchProps === 'function').props.patchProps({ text: 'Newer story after switching back' })
+languageTree = renderLanguages()
+const beforeLateUpload = find(languageTree, (node) => node.type === ArticlePageBuilder).props.doc
+completeOldUpload({ src: '/uploads/late.png' })
+languageTree = renderLanguages()
+assert.deepEqual(find(languageTree, (node) => node.type === ArticlePageBuilder).props.doc, beforeLateUpload, 'uploads from an unmounted language editor cannot overwrite newer content')
 
 // Catch blocks that the normalizer would silently drop or change. Validate
 // the inactive language too, so a bad Arabic pin cannot disappear on save.

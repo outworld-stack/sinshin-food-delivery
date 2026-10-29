@@ -9,6 +9,13 @@ import { isUniqueViolation } from '#/domain/shared/pg'
 import { Err } from '#/domain/shared/errors'
 import type { LatLng, NeshanMatrixElement, NeshanService } from '#/infra/maps/neshan.service'
 
+/** Provider measurement only; prices are always resolved from current settings. */
+export interface PreparedDeliveryRoute {
+  origin: LatLng
+  destination: LatLng
+  route: NeshanMatrixElement | null
+}
+
 /** فاصله‌ی هیورساین — کیلومتر (عین فرانت) */
 export function haversineKm(
   a: { lat: number; lng: number },
@@ -146,7 +153,26 @@ export class DeliveryZoneService {
       : { status: 'unavailable', message: 'ناحیه‌های ارسال هنوز تنظیم نشده‌اند.' }
   }
 
-  async quoteFor(address: LatLng | null, db?: DbOrTx): Promise<DeliveryQuote> {
+  private async readRoute(origin: LatLng, destination: LatLng): Promise<NeshanMatrixElement | null> {
+    try {
+      const matrix = await this.deps.neshan.distanceMatrix([origin], [destination], { type: 'car', traffic: false })
+      return matrix?.[0]?.[0] ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /** Wait for Neshan before opening checkout's wallet/coupon transaction. */
+  async prepareRoute(address: LatLng | null): Promise<PreparedDeliveryRoute | null> {
+    if (!address || !validCoordinate(address)) return null
+    // Bypass the settings cache, just as final checkout does.
+    const origin = await this.deps.settings.restaurantLocation(this.deps.db)
+    if (!validCoordinate(origin)) return null
+    const prepared = { origin: { ...origin }, destination: { ...address } }
+    return { ...prepared, route: await this.readRoute(prepared.origin, prepared.destination) }
+  }
+
+  async quoteFor(address: LatLng | null, db?: DbOrTx, prepared?: PreparedDeliveryRoute | null): Promise<DeliveryQuote> {
     if (!address) return { status: 'address_required', message: 'برای محاسبه هزینه ارسال، آدرس تحویل را انتخاب کنید.' }
     if (!validCoordinate(address)) return { status: 'no_route', message: 'موقعیت آدرس معتبر نیست؛ آن را روی نقشه اصلاح کنید.' }
     const zones = await this.list(db)
@@ -155,13 +181,12 @@ export class DeliveryZoneService {
     const unavailable: DeliveryQuote = { status: 'unavailable', message: 'محاسبه هزینه ارسال موقتاً ممکن نیست؛ دوباره تلاش کنید.' }
     if (!validCoordinate(origin)) return unavailable
     // Successful routes use distance tiers; provider outages use the saved fee.
-    let route: NeshanMatrixElement | undefined
-    try {
-      const matrix = await this.deps.neshan.distanceMatrix([origin], [address], { type: 'car', traffic: false })
-      route = matrix?.[0]?.[0]
-    } catch {
-      return this.fallbackQuote(db)
+    if (prepared !== undefined && (!prepared ||
+      prepared.origin.lat !== origin.lat || prepared.origin.lng !== origin.lng ||
+      prepared.destination.lat !== address.lat || prepared.destination.lng !== address.lng)) {
+      throw Err.conflict('موقعیت ارسال تغییر کرده است؛ هزینه ارسال را دوباره بررسی و تلاش کنید.')
     }
+    const route = prepared !== undefined ? prepared?.route : await this.readRoute(origin, address)
     if (route?.status === 'NoRoute') return { status: 'no_route', message: 'مسیری برای ارسال به این آدرس پیدا نشد؛ موقعیت آدرس را بررسی کنید.' }
     if (route?.status !== 'Ok' || route.distanceMeters === null || !Number.isFinite(route.distanceMeters) || route.distanceMeters < 0) return this.fallbackQuote(db)
     const distanceKm = route.distanceMeters / 1000
@@ -170,8 +195,8 @@ export class DeliveryZoneService {
   }
 
   /** Final checkout must have a valid server quote before charging. */
-  async feeFor(address: LatLng | null, db?: DbOrTx): Promise<number> {
-    const quote = await this.quoteFor(address, db)
+  async feeFor(address: LatLng | null, db?: DbOrTx, prepared?: PreparedDeliveryRoute | null): Promise<number> {
+    const quote = await this.quoteFor(address, db, prepared)
     if (quote.status === 'ready' || quote.status === 'fallback') return quote.fee
     if (quote.status === 'unavailable') throw Err.serviceUnavailable(quote.message)
     throw Err.validation(quote.message)

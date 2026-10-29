@@ -8,8 +8,7 @@ embedded Neshan map is separate from opening the external website or native app.
 The About editor supports uploaded images, optional team content, Persian and
 Arabic content blocks, and a restaurant destination with localized address text.
 The public page renders saved blocks in order and places directions below its map.
-An empty Arabic document explicitly hides those blocks in Arabic; removing that
-document restores the Persian fallback.
+An empty or removed Arabic document restores the Persian fallback.
 
 The admin endpoint returns original editable fields and keeps a nullable custom
 `location` separate from `defaultLocation`, the configured restaurant location.

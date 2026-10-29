@@ -117,7 +117,9 @@ export const ar: Dict = {
         'footer.brandDesc':
                 'سين‌شين فودبارك؛ تجربة مختلفة لطلب الطعام عبر الإنترنت. نكهة الحياة، على باب بيتك، في أسرع وقت ممكن.',
         'footer.address': 'بندر أنزلي، الكيلومتر الأول من پاسداران',
-        'footer.hours': 'كل يوم من ١١ صباحاً حتى ١٢ مساءً',
+        'footer.hours': 'كل يوم من {opening} حتى {closing}',
+        'footer.hoursLoading': 'جارٍ تحميل ساعات العمل…',
+        'footer.hoursUnavailable': 'ساعات العمل غير متاحة',
         'footer.instagram': 'إنستغرام',
         'footer.rights': '© {n} سين‌شين — جميع الحقوق محفوظة',
         'footer.madeWith': 'تصميم وتطوير بـ ❤️ في سين‌شين',

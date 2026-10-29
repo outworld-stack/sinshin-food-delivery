@@ -10,6 +10,7 @@ import { sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
 import { Elysia } from 'elysia'
 import { Database } from '../src/infra/db/client'
+import type { DbOrTx } from '../src/infra/db/client'
 import { AppConfig } from '../src/infra/config/env'
 import { SmsService } from '../src/infra/sms/sms.service'
 import { DockerLogsService, type DockerLogCollectResult } from '../src/infra/logs/docker-logs.service'
@@ -17,6 +18,7 @@ import { ReportArchiveStore } from '../src/infra/report/report-archive'
 import { buildZip } from '../src/infra/report/zip'
 import { ReportLinks } from '../src/domain/report/report-links'
 import { ReportService } from '../src/domain/report/report.service'
+import { ReconcileService } from '../src/domain/reconcile/reconcile.service'
 import { AppError, Err } from '../src/domain/shared/errors'
 import { reportRoutes } from '../src/http/routes/report.routes'
 import { orders, users } from '../src/infra/db/schema'
@@ -368,6 +370,64 @@ try {
   assert.equal((bulkFiles.get('users.csv')!.match(/کاربر آزمایشی/g) ?? []).length, 10001)
   await writeFile(join(downloads, 'weekly-10001.zip'), bulkBytes)
   passed('downloadable weekly exports include all 10,001 orders and users instead of silently truncating at 10,000')
+
+  clock = Date.parse('2026-11-06T21:35:00Z') // A fresh week containing only the concurrent-update fixture.
+  await db.insert(orders).values({
+    userId: buyer.id, displayId: 'ord-refund-race', status: 'PAID', paymentStatus: 'SUCCESS',
+    deliveryType: 'DINE_IN', totalAmount: 1000, breakdown, createdAt: new Date('2026-11-04T10:00:00Z'),
+  })
+  // Commit a refund through another connection after export rows have been read,
+  // before the report view fetches its aggregate. The saved forms must agree.
+  const reads = reports as unknown as {
+    orderAndWalletRows(from: Date, to: Date, readDb?: DbOrTx): Promise<unknown>
+  }
+  const readRows = reads.orderAndWalletRows.bind(reports)
+  let concurrentRefund: Promise<unknown> | undefined
+  reads.orderAndWalletRows = async (...args) => {
+    const rows = await readRows(...args)
+    concurrentRefund ??= db.execute(sql`
+      update orders set status = 'CANCELED', payment_status = 'REFUNDED'
+      where display_id = 'ord-refund-race'
+    `).then(result => result)
+    await concurrentRefund
+    return rows
+  }
+  try {
+    const consistent = await within(reports.runWeeklyFlow(), 'concurrent refund during report generation')
+    const snapshot = (await archiveStore.read(consistent.token))!
+    const files = zipFiles(snapshot.bytes)
+    assert.match(files.get('orders.csv')!, /"ord-refund-race","سرو در سالن","در انتظار تایید"/)
+    assert.equal(snapshot.viewModel.orders.rows.length, 1)
+    assert.equal(snapshot.viewModel.orders.rows[0]![2], 'در انتظار تایید')
+    assert.equal(snapshot.viewModel.stats[0]!.value, (1).toLocaleString('fa-IR'))
+    assert.equal(snapshot.viewModel.stats[1]!.value, (1000).toLocaleString('fa-IR'))
+    assert(files.get('summary.txt')!.includes(`تعداد سفارش پرداخت‌شده: ${(1).toLocaleString('fa-IR')}`))
+    const state = await db.execute(sql`select status from orders where display_id = 'ord-refund-race'`)
+    assert.equal(state[0]!.status, 'CANCELED', 'the concurrent refund committed without blocking the report')
+  } finally {
+    reads.orderAndWalletRows = readRows
+  }
+  passed('concurrent refunds cannot persist inconsistent CSV, summary and report-view totals')
+
+  clock += 1000
+  await db.execute(sql`
+    insert into reconcile_findings (check_id, severity, entity_type, entity_id)
+    values ('R1', 'warning', 'order', 'ord-refund-race')
+  `)
+  const singleConnection = new Database(scratchUrl.toString(), { max: 1 })
+  try {
+    const singleReports = new ReportService({
+      db: singleConnection.db, config, sms, links, dockerLogs,
+      reconcile: new ReconcileService({ db: singleConnection.db, config, orders: undefined as never }),
+    })
+    const singleReport = await within(singleReports.runWeeklyFlow(), 'report and reconciliation with one database connection')
+    const saved = await archiveStore.read(singleReport.token)
+    assert(saved, 'the report completes without waiting for a second pool connection')
+    assert.deepEqual(saved.viewModel.reconcile?.rows, [['R1', '1']], 'real reconciliation results belong to the saved snapshot')
+  } finally {
+    await singleConnection.close()
+  }
+  passed('report reconciliation shares the snapshot transaction and completes with a single database connection')
   console.log(`Report download safety: ${groups} groups passed`)
   console.log(`Synthetic saved ZIP artifacts: ${downloads}`)
 } finally {

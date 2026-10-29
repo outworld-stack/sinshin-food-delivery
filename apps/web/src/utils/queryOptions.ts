@@ -95,6 +95,7 @@ import {
 	getProductsByMain,
 	type Product,
 } from '#/server/products'
+import { getRestaurantHours } from '#/server/restaurant'
 import { getSystemMetrics } from '#/server/system'
 import { getTerms } from '#/server/terms'
 import {
@@ -278,6 +279,14 @@ export const adminAboutContentOptions = queryOptions({
 	queryKey: qk.adminAboutContent,
 	queryFn: () => getAdminAboutContent(),
 	staleTime: 5 * 60_000,
+})
+
+export const restaurantHoursOptions = queryOptions({
+	queryKey: qk.restaurantHours,
+	queryFn: () => getRestaurantHours(),
+	staleTime: 30_000,
+	// Refresh published hours while a customer keeps the site open.
+	refetchInterval: 60_000,
 })
 
 // وضعیت رستوران — loader چک‌اوت پرش می‌کنه

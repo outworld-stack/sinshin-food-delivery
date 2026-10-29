@@ -51,11 +51,12 @@ const withMenuCache = async <T>(
     set: { status?: number | string; headers: Record<string, string | number> }
   },
   load: () => Promise<T>,
+  cacheControl = 'public, max-age=30, stale-while-revalidate=60',
 ): Promise<T | null> => {
   const data = await load()
   const etag = `"m-${sha256(JSON.stringify(data)).slice(0, 40)}"`
   ctx.set.headers.etag = etag
-  ctx.set.headers['cache-control'] = 'public, max-age=30, stale-while-revalidate=60'
+  ctx.set.headers['cache-control'] = cacheControl
   ctx.set.headers.vary = 'x-sinshin-lang'
   if (ctx.headers['if-none-match'] === etag) {
     // 304 — بدنه ندارد؛ ETag تازه در هدر می‌رود تا کش کلاینت معتبر بماند
@@ -67,6 +68,12 @@ const withMenuCache = async <T>(
 
 export const menuRoutes = (deps: MenuRoutesDeps) =>
   new Elysia({ prefix: '/menu', tags: ['Menu'] })
+
+    .get(
+      '/restaurant-hours',
+      (ctx) => withMenuCache(ctx, () => deps.settings.restaurantHours(), 'public, no-cache'),
+      { detail: { summary: 'Regular daily opening and closing hours (public)' } },
+    )
 
     // round-34 — x-sinshin-lang: ar → محتوای عربی (COALESCE(ar, fa))، بدون هدر = فارسی
     .get(

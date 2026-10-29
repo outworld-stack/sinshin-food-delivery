@@ -1,13 +1,12 @@
 // src/components/Footer.tsx
-// stage-69 — ویرایش نقطه‌ای: سال کپی‌رایت با fmt.year (ارقام فارسی بدون
-// جداکننده‌ی هزارگان) — قبلاً fmt.num برای 2026 «۲٬۰۲۶» می‌ساخت (باگ
-// گزارش‌شده‌ی کارفرما). بقیه‌ی فوتر عیناً همان قبل.
+import { useQuery } from '@tanstack/react-query'
 import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Brand } from '#/components/Brand'
 import { Instagram, Phone, Pin, Clock } from 'reicon-react'
 import { useI18n, tpl } from '#/i18n'
 import { PwaInstallButton } from '#/pwa/PwaInstallButton'
+import { restaurantHoursOptions } from '#/utils/queryOptions'
 
 // لینک‌های ثابت بیرون کامپوننت → بدون ری‌رندر مجدد در هر رندر
 // (رارد ۳۲ — برچسب‌ها از دیکشنری می‌آیند؛ مسیرها ثابت‌اند)
@@ -17,9 +16,16 @@ const ABOUT_LINKS: { key: 'footer.about' | 'footer.gallery' | 'footer.articles';
         { key: 'footer.articles', to: '/articles' },
 ] as const
 
-// فوتر کاملا استاتیک → memo برای جلوگیری از هر ری‌رندر
 export const Footer = memo(function Footer() {
         const { t, fmt } = useI18n()
+        const { data: hours, isError } = useQuery(restaurantHoursOptions)
+        // These are restaurant-local clock times, independent of the viewer's timezone.
+        const formatHour = (value: string) => value.replace(/\d/g, (digit) => fmt.num(Number(digit)))
+        const hoursText = hours
+                ? t['footer.hours']
+                        .replace('{opening}', formatHour(hours.openingTime))
+                        .replace('{closing}', formatHour(hours.closingTime))
+                : t[isError ? 'footer.hoursUnavailable' : 'footer.hoursLoading']
 
         return (
                 // stage-78 — relative (بدون z-index ⇒ بدون stacking-context): فوترِ
@@ -125,7 +131,7 @@ export const Footer = memo(function Footer() {
                                                                 <span className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-dark-primary/10 text-primary dark:text-dark-primary flex items-center justify-center shrink-0">
                                                                         <Clock size={16} />
                                                                 </span>
-                                                                <span>{t['footer.hours']}</span>
+                                                                <span>{hoursText}</span>
                                                         </li>
                                                 </ul>
                                         </div>

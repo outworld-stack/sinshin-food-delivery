@@ -27,6 +27,8 @@ export const SETTING_KEYS = {
   /** ساعتی — نوع ۱ */
   restaurantOpen: 'restaurant_open', // boolean
   nextOpenTime: 'next_open_time', // string
+  /** Regular published daily hours, independent of manual open/closed status. */
+  restaurantHours: 'restaurant_hours', // { openingTime, closingTime } in HH:mm
   /** موقت — نوع ۲ */
   temporarilyClosed: 'temporarily_closed', // boolean
   temporaryCloseReason: 'temporary_close_reason', // string — نمایش به کاربر

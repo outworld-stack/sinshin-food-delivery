@@ -12,8 +12,9 @@ import { eq } from 'drizzle-orm'
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
-import type { RestaurantStatusDto } from '@sinshin/shared'
+import { DEFAULT_RESTAURANT_HOURS, isRestaurantHours, type RestaurantHoursDto, type RestaurantStatusDto } from '@sinshin/shared'
 import type { Lang } from '#/domain/shared/lang'
+import { Err } from '#/domain/shared/errors'
 
 // رارد ۴۶ — تایپ inline خروجی restaurantStatus با قرارداد مشترک
 // RestaurantStatusDto جایگزین شد (تولیدکننده حالا تایپ‌چک می‌شود)؛
@@ -87,6 +88,22 @@ export class SettingsService {
       })
     // write-through — رپلیکای خودش بلافاصله مقدار تازه را می‌بیند
     this.cache.set(key, { value, at: Date.now() })
+  }
+
+  /** One KV value keeps the opening and closing times consistent on every read. */
+  async restaurantHours(): Promise<RestaurantHoursDto> {
+    const raw = await this.get<unknown>(SETTING_KEYS.restaurantHours, DEFAULT_RESTAURANT_HOURS)
+    const hours = isRestaurantHours(raw) ? raw : DEFAULT_RESTAURANT_HOURS
+    return { openingTime: hours.openingTime, closingTime: hours.closingTime }
+  }
+
+  async setRestaurantHours(value: RestaurantHoursDto): Promise<RestaurantHoursDto> {
+    if (!isRestaurantHours(value)) {
+      throw Err.validation('ساعت باز و بسته شدن باید معتبر و متفاوت باشند.')
+    }
+    const hours = { openingTime: value.openingTime, closingTime: value.closingTime }
+    await this.set(SETTING_KEYS.restaurantHours, hours)
+    return hours
   }
 
   /** وضعیت کامل رستوران — دو نوع بسته‌بودن

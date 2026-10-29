@@ -139,6 +139,8 @@ export function useCheckoutPage(deps: {
 		data: previewData,
 		isLoading: isDetailsLoading,
 		isFetching: isPreviewFetching,
+		isPlaceholderData: isPreviewPlaceholder,
+		isPaused: isPreviewPaused,
 		isError: isPreviewError,
 		error: previewError,
 		refetch: refetchPreview,
@@ -253,14 +255,22 @@ export function useCheckoutPage(deps: {
 
 	const couponApplied = previewData?.coupon?.valid === true
 	const deliveryQuote = previewData?.deliveryQuote
+	// A paused request can retain the previous address's quote without fetching
+	// or reporting an error. Only the current, completed preview may authorize payment.
+	const isPreviewReady =
+		!!previewData &&
+		!isPreviewFetching &&
+		!isPreviewPlaceholder &&
+		!isPreviewPaused &&
+		!isPreviewError
 	const isDeliveryQuoteReady = state.deliveryType !== 'DELIVERY' || (
-		!!state.selectedAddressId && !isPreviewFetching && !isPreviewError && (deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback')
+		!!state.selectedAddressId && isPreviewReady && (deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback')
 	)
 	const deliveryFeeMessage = state.deliveryType !== 'DELIVERY' || !state.selectedAddressId
 		? t['checkout.deliveryAddressRequired']
 		: isPreviewFetching
 			? t['checkout.deliveryCalculating']
-			: isPreviewError || !deliveryQuote
+			: isPreviewError || isPreviewPlaceholder || isPreviewPaused || !deliveryQuote
 				? t['checkout.priceError']
 				: deliveryQuote.status === 'ready' || deliveryQuote.status === 'fallback'
 					? null
@@ -300,11 +310,9 @@ export function useCheckoutPage(deps: {
 				: blocked.dineInBlockedNames
 	const isDeliveryBlocked = deliveryBlockedFor.length > 0
 	const isSubmitBlocked =
-		!previewData ||
+		!isPreviewReady ||
 		!isDeliveryQuoteReady ||
-		isPreviewFetching ||
 		(state.couponStatus === 'HAVE' && !couponApplied) ||
-		isPreviewError ||
 		hasUnavailableItems ||
 		isDeliveryBlocked
 
@@ -471,8 +479,7 @@ export function useCheckoutPage(deps: {
 		if (
 			checkoutMutation.isPending ||
 			mockPayPending ||
-			isPreviewFetching ||
-			!previewData
+			!isPreviewReady
 		)
 			return
 		// stage-48 — گارد ناموجودی (سروری): پرداخت قفل تا رفع/حذف آیتم
@@ -540,8 +547,7 @@ export function useCheckoutPage(deps: {
 		showToast,
 		checkoutMutation,
 		mockPayPending,
-		isPreviewFetching,
-		previewData,
+		isPreviewReady,
 		t,
 		hasUnavailableItems,
 		isDeliveryBlocked,

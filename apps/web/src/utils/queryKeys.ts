@@ -70,6 +70,7 @@ export const qk = {
 	galleryImages: ['gallery-images'] as const,
 	adminGalleryImages: ['admin-gallery-images'] as const,
 	termsContent: ['terms-content'] as const,
+	restaurantHours: ['restaurant-hours'] as const,
 
 	// --- چک‌اوت ---
 	// phase-3: preview — قیمت‌گذاری کامل سروری (کوپن/ناحیه/بسته‌بندی/کیف پول)

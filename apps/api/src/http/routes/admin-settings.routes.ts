@@ -7,6 +7,7 @@
 
 // src/http/routes/admin-settings.routes.ts
 import { Elysia, t } from 'elysia'
+import { RESTAURANT_TIME_PATTERN } from '@sinshin/shared'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
@@ -127,6 +128,35 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
   // (دو نمونه‌ی جدا — .use وسط زنجیره به روت‌های بعدی نشت می‌کند)
   const ownerOnly = new Elysia({ prefix: '/admin/settings', tags: ['Admin / Settings'] })
     .use(requireAdmin(deps.sessions))
+
+    .get(
+      '/restaurant-hours',
+      () => deps.settings.restaurantHours(),
+      { detail: { summary: 'Regular daily opening and closing hours — main admin only' } },
+    )
+    .post(
+      '/restaurant-hours',
+      async ({ body, user }) => {
+        const hours = await deps.settings.setRestaurantHours(body)
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'RESTAURANT_HOURS_SET',
+          entity: 'settings',
+          metadata: { ...hours },
+        })
+        return hours
+      },
+      {
+        body: t.Object({
+          openingTime: t.String({ pattern: RESTAURANT_TIME_PATTERN, minLength: 5, maxLength: 5 }),
+          closingTime: t.String({ pattern: RESTAURANT_TIME_PATTERN, minLength: 5, maxLength: 5 }),
+        }),
+        detail: {
+          summary: 'Set regular daily opening and closing hours — main admin only',
+          description: '24-hour HH:mm values. Closing earlier than opening means the following day. Does not change the manual open/closed status.',
+        },
+      },
+    )
 
     .post(
       '/delivery-zones/fallback-fee',

@@ -117,7 +117,9 @@ export const fa = {
         'footer.brandDesc':
                 'فودپارک سین شین؛ تجربه‌ای متفاوت از سفارش آنلاین غذا. طعم زندگی، درِ خانه شما، در سریع‌ترین زمان ممکن.',
         'footer.address': 'بندرانزلی ، کیلومتر یک پاسداران',
-        'footer.hours': 'هر روز ۱۱ صبح تا ۱۲ شب',
+        'footer.hours': 'هر روز از {opening} تا {closing}',
+        'footer.hoursLoading': 'در حال دریافت ساعات کاری…',
+        'footer.hoursUnavailable': 'ساعات کاری در دسترس نیست',
         'footer.instagram': 'اینستاگرام',
         'footer.rights': '© {n} سین شین — تمامی حقوق محفوظ است',
         'footer.madeWith': 'طراحی و توسعه با ❤️ در سین شین',

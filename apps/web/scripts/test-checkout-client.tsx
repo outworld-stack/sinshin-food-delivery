@@ -4,6 +4,8 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { CheckoutInput, DeliveryQuote } from '@sinshin/shared'
 
+const { QueryClient, QueryObserver, keepPreviousData, onlineManager } = await import('@tanstack/react-query')
+
 const navigations: Array<{ to: string; params?: { orderId: string } }> = []
 const activeOrders: string[] = []
 const toasts: string[] = []
@@ -17,6 +19,8 @@ let pendingMutation: Promise<void> | null = null
 let navigationResult: Promise<void> = Promise.resolve()
 let deliveryQuote: DeliveryQuote | null = null
 let previewFetching = false
+let previewPlaceholder = false
+let previewPaused = false
 let previewFailed = false
 let refetches = 0
 const previewAddresses: Array<string | null> = []
@@ -35,7 +39,8 @@ mock.module('@tanstack/react-query', () => ({
         coupon: { valid: Boolean(code), discount: 5 },
         deliveryQuote,
       },
-      isLoading: false, isFetching: previewFetching, isError: previewFailed, refetch: async () => { refetches++ },
+      isLoading: false, isFetching: previewFetching, isPlaceholderData: previewPlaceholder,
+      isPaused: previewPaused, isError: previewFailed, refetch: async () => { refetches++ },
     }
   },
   useMutation: (options: any) => ({
@@ -264,6 +269,72 @@ assert(changingAddress.isSubmitBlocked, 'address changes wait for the new server
 assert.equal(changingAddress.deliveryDistanceKm, null, 'stale distance is hidden while recalculating')
 assert.equal(changingAddress.deliveryFeeMessage, 'checkout.deliveryCalculating')
 previewFetching = false
+
+// Exercise React Query's real offline transition: the old address remains as
+// successful placeholder data even though no fetch is running for the new one.
+const quoteClient = new QueryClient()
+quoteClient.mount()
+const wasOnline = onlineManager.isOnline()
+const nextQuote: DeliveryQuote = { status: 'ready', distanceKm: 9, radiusKm: 10, fee: 90_000 }
+const quoteOptions = {
+  queryKey: ['shipping-quote', 'home'],
+  queryFn: async () => nextQuote,
+  staleTime: Infinity,
+  placeholderData: keepPreviousData,
+}
+quoteClient.setQueryData(quoteOptions.queryKey, deliveryQuote)
+const quoteObserver = new QueryObserver(quoteClient, quoteOptions)
+const stopQuotes = quoteObserver.subscribe(() => {})
+try {
+  onlineManager.setOnline(false)
+  quoteObserver.setOptions({ ...quoteOptions, queryKey: ['shipping-quote', 'work'] })
+  const paused = quoteObserver.getCurrentResult()
+  assert.equal(paused.status, 'success')
+  assert.equal(paused.fetchStatus, 'paused')
+  assert.equal(paused.isFetching, false)
+  assert.equal(paused.isError, false)
+  assert.equal(paused.isPlaceholderData, true)
+  assert.equal(paused.data?.fee, 60_000)
+  previewPlaceholder = paused.isPlaceholderData
+  previewPaused = paused.isPaused
+  const pausedDelivery = renderCheckout(undefined, { addressId: 'work' })
+  assert(pausedDelivery.isSubmitBlocked, 'an offline address change cannot authorize the previous shipping fee')
+  assert.equal(pausedDelivery.isDeliveryQuoteReady, false)
+  assert.equal(pausedDelivery.deliveryDistanceKm, null)
+  assert.equal(pausedDelivery.deliveryFeeMessage, 'checkout.priceError')
+  assert(pausedDelivery.canRetryDelivery)
+  const beforePausedSubmit = checkoutRequests.length
+  pausedDelivery.handleFinalSubmit()
+  assert.equal(checkoutRequests.length, beforePausedSubmit, 'the handler cannot queue checkout with a placeholder quote')
+
+  // Cached current-key data can also have a paused refresh without being
+  // placeholder data; pickup and wallet/coupon changes must remain blocked too.
+  previewPlaceholder = false
+  const pausedPickup = renderCheckout()
+  assert(pausedPickup.isSubmitBlocked)
+  pausedPickup.handleFinalSubmit()
+  assert.equal(checkoutRequests.length, beforePausedSubmit)
+
+  onlineManager.setOnline(true)
+  const refreshed = await quoteObserver.refetch()
+  assert.equal(refreshed.isPlaceholderData, false)
+  assert.equal(refreshed.isPaused, false)
+  deliveryQuote = refreshed.data!
+  previewPlaceholder = refreshed.isPlaceholderData
+  previewPaused = refreshed.isPaused
+  const refreshedDelivery = renderCheckout(undefined, { addressId: 'work' })
+  assert.equal(refreshedDelivery.isSubmitBlocked, false)
+  assert.equal(refreshedDelivery.deliveryDistanceKm, 9)
+  assert.equal(refreshedDelivery.calc.deliveryFee, 90_000, 'reconnection uses the selected address quote')
+} finally {
+  stopQuotes()
+  quoteClient.unmount()
+  quoteClient.clear()
+  onlineManager.setOnline(wasOnline)
+  previewPlaceholder = false
+  previewPaused = false
+}
+
 previewFailed = true
 const failedRefresh = renderCheckout(undefined, { addressId: 'work' })
 assert(failedRefresh.isSubmitBlocked)
@@ -317,5 +388,5 @@ assert(unavailableSummary.includes('checkout.deliveryRetry'))
 assert(unavailableSummary.includes('disabled=""'))
 assert(!unavailableSummary.includes('60000'), 'previous shipping price is hidden')
 assert(!unavailableSummary.includes('160000'), 'incomplete total is not presented as a payable amount')
-console.log('PASS shipping selection/recalculation, failed-quote submit guard, retry, pickup and visible road-distance pricing')
+console.log('PASS shipping selection/recalculation, offline address changes, paused-preview submit guard, retry, pickup and visible road-distance pricing')
 console.log('Checkout client regressions passed: denied/quota-limited storage, wallet/redirect/replay routing, retry idempotency and Persian/Arabic coupon digits.')

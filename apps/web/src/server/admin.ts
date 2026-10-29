@@ -27,6 +27,7 @@ import type {
 	PrinterDto,
 	PrinterNetworkReportDto,
 	RegistrationPermitDto,
+	RestaurantHoursDto,
 	RestaurantStatusDto,
 	StaffInvoice,
 	StaffInvoiceItem,
@@ -543,6 +544,16 @@ export async function setRestaurantOpen(input: {
 }): Promise<{ success: boolean }> {
 	await authJson<unknown>('/admin/settings/restaurant', 'POST', input.data)
 	return { success: true }
+}
+
+export function setRestaurantHours(input: {
+	data: RestaurantHoursDto
+}): Promise<RestaurantHoursDto> {
+	return authJson<RestaurantHoursDto>(
+		'/admin/settings/restaurant-hours',
+		'POST',
+		input.data,
+	)
 }
 
 // ============= round-13 — بسته/باز موقت با علت (هر دو نقش) =============

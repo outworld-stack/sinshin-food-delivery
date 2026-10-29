@@ -716,6 +716,13 @@ export type ArticleSummaryDto = Omit<
 
 // ═══════════ تنظیمات / رستوران ═══════════
 
+/** Regular daily hours in restaurant-local, 24-hour HH:mm format. */
+export interface RestaurantHoursDto {
+  openingTime: string
+  /** A time earlier than openingTime means closing on the following day. */
+  closingTime: string
+}
+
 export interface RestaurantStatusDto {
   isOpen: boolean
   temporarilyClosed: boolean

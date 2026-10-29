@@ -20,6 +20,7 @@ import { setRestaurantBusy } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
 import { settingsBusyOptions } from '#/utils/queryOptions'
+import { RestaurantHoursForm } from './RestaurantHoursForm'
 import { TemporaryCloseCard } from './TemporaryCloseCard'
 
 interface RestaurantStatusCardProps {
@@ -112,9 +113,11 @@ export const RestaurantStatusCard = memo(function RestaurantStatusCard({
 				</div>
 			</div>
 
+			{isMainAdmin && <RestaurantHoursForm />}
+
 			{/* ① باز/بسته دائم (ساعتی) — فقط ادمین اصلی */}
 			{isMainAdmin && (
-				<div className="p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c]">
+				<div className="mt-3 p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c]">
 					<div className="flex items-center justify-between gap-3">
 						<div className="flex items-center gap-3 min-w-0">
 							<Store
@@ -139,11 +142,15 @@ export const RestaurantStatusCard = memo(function RestaurantStatusCard({
 					</div>
 					{!hourlyOpen && (
 						<div className="mt-3">
-							<label className="flex items-center gap-1.5 text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+							<label
+								htmlFor="restaurant-next-open-time"
+								className="flex items-center gap-1.5 text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
+							>
 								<Clock size={14} />
 								ساعت باز شدن بعدی (به مشتریان نمایش داده می‌شود)
 							</label>
 							<input
+								id="restaurant-next-open-time"
 								type="text"
 								value={nextOpenTime}
 								onChange={(e) => onNextOpenTimeChange(e.target.value)}
