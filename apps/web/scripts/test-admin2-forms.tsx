@@ -36,7 +36,7 @@ mock.module('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: noop }),
   useMutation: (options: { mutationFn: (value: unknown) => unknown }) => ({ isPending, mutate: options.mutationFn }),
 }))
-const optionNames = ['aboutContentOptions', 'adminGalleryImagesOptions', 'deliveryZonesOptions', 'settingsFeaturedAnimationOptions', 'settingsIranOnlyOptions', 'settingsOutsideScopeOptions', 'settingsRegistrationPermitsOptions', 'settingsRestaurantOptions', 'settingsRestaurantStatusOptions', 'settingsTrackingOptions']
+const optionNames = ['adminAboutContentOptions', 'adminGalleryImagesOptions', 'deliveryZonesOptions', 'settingsFeaturedAnimationOptions', 'settingsIranOnlyOptions', 'settingsOutsideScopeOptions', 'settingsRegistrationPermitsOptions', 'settingsRestaurantOptions', 'settingsRestaurantStatusOptions', 'settingsTrackingOptions']
 mock.module('#/utils/queryOptions', () => ({
   ...Object.fromEntries(optionNames.map(name => [name, { queryKey: [name] }])),
   adminProductDetailsOptions: () => ({ queryKey: ['product'] }),

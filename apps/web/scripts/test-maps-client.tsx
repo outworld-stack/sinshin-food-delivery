@@ -81,7 +81,10 @@ function nodes(value: any): Node[] {
 function createHost(component: any, getProps: () => unknown): Host {
         const owner: Host = { cells: [], cursor: 0, effects: [], dirty: false, render() {
                 host = owner; owner.cursor = 0; owner.dirty = false
+                const previousRefs = nodes(owner.tree).map(node => node.props.ref).filter(Boolean)
                 owner.tree = component(getProps())
+                const currentRefs = nodes(owner.tree).map(node => node.props.ref).filter(Boolean)
+                for (const ref of previousRefs) if (!currentRefs.includes(ref)) ref.current = null
                 for (const node of nodes(owner.tree)) if (node.props.ref) node.props.ref.current ??= {}
                 const effects = owner.effects.splice(0)
                 for (const effect of effects) effect()
@@ -268,6 +271,32 @@ assert.equal(maps.length, beforeArticle + 1)
 assert(disconnected)
 maps.at(-1)!.fire('load'); await flush(article); unmount(article)
 assert(maps.at(-1)!.removed)
+
+sdkLoader = () => Promise.reject(new Error('Map CDN unavailable'))
+let articleDestination = { lat: 37, lng: 49 }
+const failedArticle = createHost(ArticleLocationMap, () => articleDestination)
+intersect([{ isIntersecting: true }]); await flush(failedArticle)
+assert(nodes(failedArticle.tree).some(node => node.type === 'output' && node.props.children === 'map.directionsUnavailable'), 'articles explain map failures while the independent directions action remains available')
+assert.equal(timers.size, 0, 'a rejected SDK releases the map deadline')
+sdkLoader = () => Promise.resolve(sdk)
+articleDestination = { lat: 38, lng: 50 }; failedArticle.render(); await flush(failedArticle)
+const recoveredArticleMap = maps.at(-1)!
+assert.deepEqual(recoveredArticleMap.options.center, [50, 38], 'changing a failed map destination can initialize immediately with the cached SDK')
+recoveredArticleMap.fire('load'); await flush(failedArticle)
+assert(!nodes(failedArticle.tree).some(node => node.type === 'output'))
+assert(nodes(failedArticle.tree).some(node => node.props['aria-label'] === 'map.locationLabel'), 'map descriptions follow the selected language')
+unmount(failedArticle)
+assert(recoveredArticleMap.removed)
+
+const stalledArticle = createHost(ArticleLocationMap, () => ({ lat: 37, lng: 49, unavailableMessage: 'About map unavailable' }))
+intersect([{ isIntersecting: true }]); await flush(stalledArticle)
+const stalledArticleMap = maps.at(-1)!
+await advance(20_000, stalledArticle)
+assert(stalledArticleMap.removed, 'a stalled article map releases its WebGL context')
+assert(nodes(stalledArticle.tree).some(node => node.props.children === 'About map unavailable'), 'About can supply its own translated fallback')
+stalledArticleMap.fire('load'); await flush(stalledArticle)
+assert(nodes(stalledArticle.tree).some(node => node.type === 'output'), 'a late load cannot revive a timed-out map')
+unmount(stalledArticle)
 assert.equal(timers.size, 0, 'all map lifecycles release their timers')
 
 // Address drafts are independent from profile object identity and keep the

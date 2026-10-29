@@ -856,6 +856,13 @@ export interface TermsContentDto {
 
 // ═══════════ درباره ═══════════
 
+export interface AboutLocationDto {
+  lat: number
+  lng: number
+  address: string
+  addressAr?: string | null
+}
+
 export interface AboutContentDto {
   id: number
   heroTitle: string
@@ -869,6 +876,13 @@ export interface AboutContentDto {
   heroTextAr?: string | null
   teamTitleAr?: string | null
   teamAltAr?: string | null
+  /** Additional page sections; Arabic falls back to the Persian document. */
+  blocks?: ArticleBlocksDoc | null
+  blocksAr?: ArticleBlocksDoc | null
+  /** Resolved public destination; admin reads return the stored override. Null resets it to the restaurant setting. */
+  location?: AboutLocationDto | null
+  /** Admin only: current restaurant destination used when the override is null. */
+  defaultLocation?: AboutLocationDto | null
   /** پرچم «ترجمه خودکار» — رارد ۳۵ */
   arAuto?: boolean
   updatedAt: string

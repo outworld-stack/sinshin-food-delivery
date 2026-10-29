@@ -7,7 +7,7 @@ import {
   addGalleryImage, updateGalleryImage,
   deleteGalleryImage, reorderGalleryImage,
 } from '#/server/gallery'
-import { aboutContentOptions, adminGalleryImagesOptions } from '#/utils/queryOptions'
+import { adminAboutContentOptions, adminGalleryImagesOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import type { AboutContentInput } from '#/types/site/about'
 import type {
@@ -25,10 +25,8 @@ export function useSiteContentSettings({ enabled }: Options) {
 
 
 
-  // ⬅ NEW: کوئری‌ها از فکتوری مرکزی — قبلاً کلید از contentKeys (شیم بک‌ورد) بود؛
-  // حالا با صفحه‌ی عمومی «درباره ما» (aboutContentOptions) یک کش مشترک:
-  // ذخیره‌ی محتوا در پنل، سایت عمومی را هم بلافاصله تازه می‌کند
-  const aboutQuery = useQuery({ ...aboutContentOptions, enabled })
+  // Keep original editable fields separate from localized public content.
+  const aboutQuery = useQuery({ ...adminAboutContentOptions, enabled })
 
   // گالری ادمین — staleTime ۵ دقیقه داخل فکتوری
   const galleryQuery = useQuery({ ...adminGalleryImagesOptions, enabled })
@@ -42,8 +40,11 @@ export function useSiteContentSettings({ enabled }: Options) {
   const aboutMutation = useMutation({
     mutationFn: (input: AboutContentInput) =>
       updateAboutContent({ ...input }),
-    onSuccess: () => {
-      invalidateContent()
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.aboutContent }),
+        queryClient.invalidateQueries({ queryKey: qk.adminAboutContent }),
+      ])
       showToast('محتوای «درباره ما» ذخیره شد')
     },
   })
@@ -78,8 +79,8 @@ export function useSiteContentSettings({ enabled }: Options) {
   })
 
   const saveAbout = useCallback(
-    (input: AboutContentInput) => aboutMutation.mutate(input),
-    [aboutMutation.mutate],
+    (input: AboutContentInput) => aboutMutation.mutateAsync(input),
+    [aboutMutation.mutateAsync],
   )
   const addImage = useCallback(
     (input: AddGalleryImageInput) => addMutation.mutate(input),

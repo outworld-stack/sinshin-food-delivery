@@ -66,6 +66,7 @@ export const qk = {
 
 	// --- محتوای سایت ---
 	aboutContent: ['about-content'] as const,
+	adminAboutContent: ['admin-about-content'] as const,
 	galleryImages: ['gallery-images'] as const,
 	adminGalleryImages: ['admin-gallery-images'] as const,
 	termsContent: ['terms-content'] as const,

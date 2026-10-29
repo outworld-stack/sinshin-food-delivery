@@ -240,6 +240,16 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     drop table if exists "printers";
     -- stage-89 — اشیاءِ ۰۰۱۶: مجوزِ printingManage ادمین۲
     alter table "admin2_profiles" drop column if exists "printing_manage";
+    -- Restore 0017–0019 objects before replaying the legacy chain.
+    drop table if exists "local_print_jobs";
+    drop table if exists "local_print_discards";
+    drop table if exists "local_print_assignments";
+    drop table if exists "local_print_agents";
+    alter table "products" drop column if exists "featured_animation";
+    alter table "content_about"
+      drop column if exists "blocks",
+      drop column if exists "blocks_ar",
+      drop column if exists "location";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
@@ -263,6 +273,9 @@ async function buildLegacyAt0004(url: string): Promise<void> {
   await q(url, DUP_SQL)
   await q(url, LEGACY_SQL)
   await q(url, `update "devices" set "device_memory" = 8 where "fingerprint_hash" = 'f-ip'`)
+  await q(url, `insert into "content_about"
+    ("id", "hero_title", "hero_text", "hero_gradient", "team_title", "team_gradient", "team_alt")
+    values (1, 'Existing restaurant story', 'Original copy', '', 'Our team', '', '')`)
 }
 
 /** مقادیر (device_type, device_brand) یک ردیف */
@@ -326,6 +339,13 @@ await withScratch('a', async (url) => {
   ok('A2: ایندکس یکتای ۰۰۰۵ ساخته شد', uidx === 1)
   const journalRows = await scalar(url, `select count(*)::int as n from "drizzle"."__drizzle_migrations"`)
   ok(`A2: زنجیره‌ی journal (${CHAIN_COUNT} ورودی) اعمال شد`, journalRows === CHAIN_COUNT)
+  const aboutColumns = await scalar(url, `select count(*)::int as n from information_schema.columns
+    where table_name = 'content_about' and column_name in ('blocks', 'blocks_ar', 'location') and data_type = 'jsonb'`)
+  ok('A2: About sections and destination columns are added to an existing database', aboutColumns === 3)
+  const preservedAbout = await scalar(url, `select count(*)::int as n from content_about
+    where id = 1 and hero_title = 'Existing restaurant story' and hero_text = 'Original copy'
+      and blocks is null and blocks_ar is null and location is null`)
+  ok('A2: About migration preserves existing content and leaves new fields unset', preservedAbout === 1)
   const memoryType = await scalar(url, `select data_type from information_schema.columns
     where table_schema = 'public' and table_name = 'devices' and column_name = 'device_memory'`)
   ok('A2: device memory upgrades from integer to double precision', memoryType === 'double precision')

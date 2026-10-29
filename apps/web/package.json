@@ -39,7 +39,8 @@
     "test:wallet-client": "bun scripts/test-wallet-client.tsx",
     "test:order-money-cache": "bun scripts/test-order-money-cache.ts",
     "test:products": "bun scripts/test-products-client.tsx && bun scripts/test-admin-products-client.tsx && bun scripts/test-cart-orb.tsx && bun scripts/test-featured-animation-client.tsx && bun scripts/test-featured-backgrounds.tsx",
-    "test:articles": "bun scripts/test-articles-client.tsx && bun scripts/test-articles-api-client.ts && bun scripts/test-articles-admin.tsx && bun scripts/test-article-rendering.tsx && bun scripts/test-article-route.tsx"
+    "test:articles": "bun scripts/test-articles-client.tsx && bun scripts/test-articles-api-client.ts && bun scripts/test-articles-admin.tsx && bun scripts/test-article-rendering.tsx && bun scripts/test-article-route.tsx",
+    "test:about": "bun scripts/test-about-client.tsx && bun scripts/test-about-admin.tsx"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",

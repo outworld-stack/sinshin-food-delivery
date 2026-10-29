@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { useI18n } from '#/i18n'
 import {
 	loadNeshanSdk,
 	NESHAN_KEY,
@@ -12,13 +13,16 @@ interface ArticleLocationMapProps {
 	lat: number
 	lng: number
 	zoom?: number
+	unavailableMessage?: string
 }
 
 export const ArticleLocationMap = memo(function ArticleLocationMap({
 	lat,
 	lng,
 	zoom = 15,
+	unavailableMessage,
 }: ArticleLocationMapProps) {
+	const { t } = useI18n()
 	const containerRef = useRef<HTMLDivElement>(null)
 	const [visible, setVisible] = useState(false)
 	const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
@@ -94,17 +98,29 @@ export const ArticleLocationMap = memo(function ArticleLocationMap({
 		}
 	}, [lat, lng, zoom, valid, visible])
 
-	if (!NESHAN_KEY || !valid) return null
+	if (!valid) return null
+	const unavailable = !NESHAN_KEY || state === 'failed'
 	return (
 		<div
-			ref={containerRef}
-			hidden={state === 'failed'}
 			className={
 				'relative w-full h-56 sm:h-64 rounded-2xl overflow-hidden border border-gray-200 dark:border-[#3a151c] bg-gray-100 dark:bg-[#1a0a0e] ' +
-				(state === 'loading' ? 'animate-pulse' : '')
+				(!unavailable && state === 'loading' ? 'animate-pulse' : '')
 			}
-			role="img"
-			aria-label="نقشه‌ی موقعیت"
-		/>
+		>
+			{/* Keep a sized container mounted when a failed map is retried with a
+			    new destination, even if the cached SDK resolves before React renders. */}
+			<div
+				ref={containerRef}
+				className="absolute inset-0"
+				role="img"
+				aria-label={t['map.locationLabel']}
+				aria-hidden={unavailable}
+			/>
+			{unavailable && (
+				<output className="absolute inset-0 flex items-center justify-center bg-gray-50 p-6 text-center text-sm leading-7 text-gray-500 dark:bg-[#1a0a0e] dark:text-gray-400">
+					{unavailableMessage ?? t['map.directionsUnavailable']}
+				</output>
+			)}
+		</div>
 	)
 })

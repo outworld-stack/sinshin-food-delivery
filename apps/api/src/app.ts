@@ -289,7 +289,7 @@ export const buildApp = (deps: AppDeps) => {
     )
     .use(termsRoutes({ sessions: deps.sessions, termsService: deps.termsService }))
     .use(galleryRoutes({ sessions: deps.sessions, gallery: deps.gallery }))
-    .use(aboutRoutes({ db: deps.db.db, sessions: deps.sessions }))
+    .use(aboutRoutes({ db: deps.db.db, sessions: deps.sessions, settings: deps.settings }))
     .use(reportRoutes({ sessions: deps.sessions, reports: deps.reports, links: deps.links }))
     .use(reportPanelRoutes({ db: deps.db.db, links: deps.links }))
     .use(adminReportRoutes({ sessions: deps.sessions, reports: deps.reportQueries }))

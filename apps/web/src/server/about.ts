@@ -5,34 +5,30 @@
 // کامیت پیشنهادی: stage thirty
 // ═══════════════════════════════════════════════════════════════
 
+import type { AboutContentDto } from '@sinshin/shared'
 // src/server/about.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
-import type { AboutContentDto } from '@sinshin/shared'
+import type { AboutContentInput } from '#/types/site/about'
 
 // ─── عمومی ───
 export async function getAboutContent(): Promise<AboutContentDto> {
-  return getJson<AboutContentDto>('/about')
+	return getJson<AboutContentDto>('/about')
+}
+
+/** The editor must read original Persian fields regardless of the site language. */
+export async function getAdminAboutContent(): Promise<AboutContentDto> {
+	return authJson<AboutContentDto>('/admin/about', 'GET')
 }
 
 // ─── ادمین ───
-export async function updateAboutContent(input: {
-  heroTitle: string
-  heroText: string
-  heroGradient: string
-  teamTitle: string
-  teamGradient: string
-  teamAlt: string
-  /** round-34 — محتوای عربی ('' → null = حذف ترجمه = بازگشت به فارسی) */
-  heroTitleAr: string
-  heroTextAr: string
-  teamTitleAr: string
-  teamAltAr: string
-}): Promise<{ success: boolean }> {
-  return authJson<{ success: boolean }>('/admin/about', 'PATCH', {
-    ...input,
-    heroTitleAr: input.heroTitleAr.trim() || null,
-    heroTextAr: input.heroTextAr.trim() || null,
-    teamTitleAr: input.teamTitleAr.trim() || null,
-    teamAltAr: input.teamAltAr.trim() || null,
-  })
+export async function updateAboutContent(
+	input: AboutContentInput,
+): Promise<{ success: boolean }> {
+	return authJson<{ success: boolean }>('/admin/about', 'PATCH', {
+		...input,
+		heroTitleAr: input.heroTitleAr.trim() || null,
+		heroTextAr: input.heroTextAr.trim() || null,
+		teamTitleAr: input.teamTitleAr.trim() || null,
+		teamAltAr: input.teamAltAr.trim() || null,
+	})
 }

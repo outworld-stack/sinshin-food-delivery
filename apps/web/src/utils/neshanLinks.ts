@@ -75,3 +75,78 @@ export function neshanRouteFromUrl(
 ): string {
 	return `https://nshn.ir?origin=${fmtCoord(oLat)},${fmtCoord(oLng)}&destination=${fmtCoord(dLat)},${fmtCoord(dLng)}&vehicle=d`
 }
+
+export type NeshanTarget = 'web' | 'app'
+export type NeshanPlatform = 'android' | 'ios' | 'other'
+export interface NeshanOrigin {
+	lat: number
+	lng: number
+}
+
+/** Explicit website route: do not send the website choice through app links. */
+export function neshanWebDirectionsUrl(
+	lat: number,
+	lng: number,
+	origin: NeshanOrigin | null,
+): string {
+	return origin
+		? `https://neshan.org/maps/routing/car/origin/${fmtCoord(origin.lat)},${fmtCoord(origin.lng)}/destination/${fmtCoord(lat)},${fmtCoord(lng)}`
+		: neshanRouteUrl(lat, lng)
+}
+
+/**
+ * Neshan's official FAQ documents the HTTPS Android links and iOS schemes.
+ * The Android package is linked by https://neshan.org/ (Google Play/Bazaar).
+ * Chrome's intent fallback opens the same route if that package is absent.
+ */
+export function neshanAppDirectionsUrl(
+	lat: number,
+	lng: number,
+	origin: NeshanOrigin | null,
+	platform: NeshanPlatform,
+): string {
+	if (platform === 'ios') {
+		return origin
+			? `neshan://?origin=${fmtCoord(origin.lat)},${fmtCoord(origin.lng)}&destination=${fmtCoord(lat)},${fmtCoord(lng)}&vehicle=d`
+			: `neshan://?ll=${fmtCoord(lat)},${fmtCoord(lng)}`
+	}
+	const appLink = origin
+		? neshanRouteFromUrl(origin.lat, origin.lng, lat, lng)
+		: neshanPointUrl(lat, lng)
+	if (platform !== 'android') return appLink
+	const fallback = encodeURIComponent(neshanWebDirectionsUrl(lat, lng, origin))
+	return `${appLink.replace('https://', 'intent://')}#Intent;scheme=https;package=org.rajman.neshan.traffic.tehran.navigator;S.browser_fallback_url=${fallback};end`
+}
+
+export function neshanPlatform(
+	device: Pick<Navigator, 'userAgent' | 'platform' | 'maxTouchPoints'>,
+): NeshanPlatform {
+	if (/Android/i.test(device.userAgent)) return 'android'
+	if (
+		/iPad|iPhone|iPod/i.test(device.userAgent) ||
+		(device.platform === 'MacIntel' && device.maxTouchPoints > 1)
+	)
+		return 'ios'
+	return 'other'
+}
+
+const NESHAN_PREFERENCE_KEY = 'sinshin.neshan-directions-target.v1'
+
+/** Store a destination preference only; never persist location coordinates. */
+export function readNeshanPreference(): NeshanTarget | null {
+	try {
+		const value = window.localStorage.getItem(NESHAN_PREFERENCE_KEY)
+		return value === 'web' || value === 'app' ? value : null
+	} catch {
+		return null
+	}
+}
+
+export function saveNeshanPreference(value: NeshanTarget | null): void {
+	try {
+		if (value) window.localStorage.setItem(NESHAN_PREFERENCE_KEY, value)
+		else window.localStorage.removeItem(NESHAN_PREFERENCE_KEY)
+	} catch {
+		/* Private browsing/storage restrictions must not block directions. */
+	}
+}

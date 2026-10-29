@@ -6,6 +6,9 @@
 
 @import "tailwindcss";
 
+/* Legacy About images store these seeded gradient classes in the database. */
+@source inline("from-orange-400 to-red-500 from-purple-400 to-pink-500");
+
 /* ═══════════════════════════════════════════════════════════════
    stage-55 — sinshin-food-delivery
    مسیر مقصد: apps/web/src/styles.css

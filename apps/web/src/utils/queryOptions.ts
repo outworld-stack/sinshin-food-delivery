@@ -26,7 +26,7 @@ import type {
 // مزیت: loader سرور و useQuery کلاینت از همین تعریف استفاده می‌کنن؛
 // staleTime/کلید/queryFn هیچ‌وقت از هم دیگه جدا نمی‌شن
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
-import { getAboutContent } from '#/server/about'
+import { getAboutContent, getAdminAboutContent } from '#/server/about'
 import {
 	getAdmin2Options,
 	getAdmin2Stats,
@@ -271,6 +271,12 @@ export const galleryImagesOptions = queryOptions({
 export const aboutContentOptions = queryOptions({
 	queryKey: qk.aboutContent,
 	queryFn: () => getAboutContent(),
+	staleTime: 5 * 60_000,
+})
+
+export const adminAboutContentOptions = queryOptions({
+	queryKey: qk.adminAboutContent,
+	queryFn: () => getAdminAboutContent(),
 	staleTime: 5 * 60_000,
 })
 

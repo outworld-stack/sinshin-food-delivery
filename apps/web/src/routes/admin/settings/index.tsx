@@ -36,7 +36,7 @@ import { useToastStore } from '#/stores/toastStore'
 import type { UpdateGalleryImageInput } from '#/types/site/gallery'
 import { qk } from '#/utils/queryKeys'
 import {
-	aboutContentOptions,
+	adminAboutContentOptions,
 	adminGalleryImagesOptions,
 	deliveryZonesOptions,
 	// stage-100 — انیمیشن صفحه‌ی محصول ویژه (کارت جدید)
@@ -294,7 +294,7 @@ export const Route = createFileRoute('/admin/settings/')({
 		await Promise.all([
 			context.queryClient.query(settingsTrackingOptions),
 			context.queryClient.query(settingsRestaurantOptions),
-			context.queryClient.query(aboutContentOptions),
+			context.queryClient.query(adminAboutContentOptions),
 			context.queryClient.query(adminGalleryImagesOptions),
 			// رارد ۳۷ — هر دو پرچم کارت جغرافیایی (وضعیت زنده‌ی رنج‌ها خودش داخل
 			// GeoAccessCard لود می‌شود — refetchInterval دارد، پری‌فچ لازم نیست)

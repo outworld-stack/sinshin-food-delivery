@@ -1,7 +1,4 @@
-/** Behavioral coverage for fresh GPS routing and Neshan's documented point
- * fallback, including stalled providers, stale callbacks and lifecycle cleanup.
- * The deterministic React/GPS/timer host needs no browser or external network.
- */
+/** Deterministic React/GPS host for shared About/article navigation behavior. */
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
 
@@ -10,310 +7,236 @@ type Cell = { value?: any; deps?: unknown[]; cleanup?: () => void }
 type Host = { cells: Cell[]; cursor: number; effects: Array<() => void>; dirty: boolean; tree?: any; render(): void }
 let host: Host
 mock.module('react', () => ({
-        ...react, memo: (component: any) => component,
-        useState(initial: any) {
-                const owner = host, i = owner.cursor++
-                const cell = owner.cells[i] ??= { value: typeof initial === 'function' ? initial() : initial }
-                return [cell.value, (next: any) => {
-                        const value = typeof next === 'function' ? next(cell.value) : next
-                        if (!Object.is(value, cell.value)) { cell.value = value; owner.dirty = true }
-                }]
-        },
-        useRef(initial: any) { const i = host.cursor++; return (host.cells[i] ??= { value: { current: initial } }).value },
-        useCallback: (fn: any) => fn,
-        useMemo(compute: () => any, deps: unknown[]) {
-                const cell = host.cells[host.cursor++] ??= {}
-                if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) { cell.value = compute(); cell.deps = deps }
-                return cell.value
-        },
-        useEffect(effect: () => (() => void) | void, deps: unknown[]) {
-                const cell = host.cells[host.cursor++] ??= {}
-                if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) {
-                        host.effects.push(() => { cell.cleanup?.(); cell.deps = deps; cell.cleanup = effect() || undefined })
-                }
-        },
+	...react, memo: (component: any) => component,
+	useId: () => `id-${host.cursor++}`,
+	useState(initial: any) {
+		const owner = host, i = owner.cursor++
+		const cell = owner.cells[i] ??= { value: typeof initial === 'function' ? initial() : initial }
+		return [cell.value, (next: any) => {
+			const value = typeof next === 'function' ? next(cell.value) : next
+			if (!Object.is(value, cell.value)) { cell.value = value; owner.dirty = true }
+		}]
+	},
+	useRef(initial: any) { const i = host.cursor++; return (host.cells[i] ??= { value: { current: initial } }).value },
+	useEffect(effect: () => (() => void) | void, deps: unknown[]) {
+		const cell = host.cells[host.cursor++] ??= {}
+		if (!cell.deps || deps.some((value, i) => !Object.is(value, cell.deps![i]))) {
+			host.effects.push(() => { cell.cleanup?.(); cell.deps = deps; cell.cleanup = effect() || undefined })
+		}
+	},
 }))
-const translation = { t: {
-        'article.routeMap': 'Route from me',
-        'article.routeLocating': 'Locating…',
-        'article.routeGpsDenied': 'Pick the origin on the map yourself',
-} }
-mock.module('#/i18n', () => ({ useI18n: () => ({ t: translation.t }) }))
-// zustand پشتِ میزبانِ هوک‌هایِ mock شده کار نمی‌کند (react واقعی می‌خواهد) —
-// همان قراردادِ ToastState با store ساختگی: selector(getState()) + getState
-const toastState: { message: string; type: 'success' | 'error'; isVisible: boolean; showToast: (m: string, t?: 'success' | 'error') => void; hideToast: () => void } = {
-        message: '', type: 'success', isVisible: false,
-        showToast: (message, type = 'success') => { Object.assign(toastState, { message, type, isVisible: true }) },
-        hideToast: () => { Object.assign(toastState, { isVisible: false }) },
-}
-mock.module('zustand', () => ({
-        create: () => {
-                const useStore = (selector: (s: typeof toastState) => unknown) => selector(toastState)
-                useStore.getState = () => toastState
-                return useStore
-        },
-}))
+mock.module('#/i18n', () => ({ useI18n: () => ({ t: new Proxy({}, { get: (_, key) => key }) }) }))
 
 const realSetTimeout = globalThis.setTimeout
 const realClearTimeout = globalThis.clearTimeout
-let clock = 0, nextTimer = 0
+let clock = 0, nextTimer = 0, openedDialogs = 0, closedDialogs = 0, restoredFocus = 0
 const timers = new Map<number, { due: number; callback(): void }>()
 globalThis.setTimeout = ((callback: () => void, delay = 0) => {
-        const id = ++nextTimer
-        timers.set(id, { due: clock + delay, callback })
-        return id
+	const id = ++nextTimer; timers.set(id, { due: clock + delay, callback }); return id
 }) as unknown as typeof setTimeout
 globalThis.clearTimeout = ((id: number) => { timers.delete(id) }) as unknown as typeof clearTimeout
 
-const opened: Array<string | undefined> = []
-let inClick = false
+const opened: string[] = []
+const storage = new Map<string, string>()
+let inClick = false, blockStorage = false
+Object.defineProperty(globalThis, 'document', { configurable: true, value: { body: { style: { overflow: 'auto' } } } })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: {
-        open: () => {
-                assert(inClick, 'new tabs must not open in an asynchronous GPS callback')
-                assert.fail('opening a foreground tab would hide the document requesting location permission')
-        },
-        location: { assign: (url: string) => { opened.push(url) } },
+	location: { assign: (url: string) => { assert(inClick, 'all navigation requires a fresh chooser click, never a GPS callback'); opened.push(url) } },
+	localStorage: {
+		getItem(key: string) { if (blockStorage) throw new Error('blocked'); return storage.get(key) ?? null },
+		setItem(key: string, value: string) { if (blockStorage) throw new Error('blocked'); storage.set(key, value) },
+		removeItem(key: string) { if (blockStorage) throw new Error('blocked'); storage.delete(key) },
+	},
 } })
-type GeoCb = (pos: { coords: { latitude: number; longitude: number } }) => void
-type GeoErr = (error: { code: number; message: string }) => void
-let geoMode: 'ok' | 'denied' | 'unsupported' | 'garbage' | 'slow' = 'ok'
-let geoOptions: PositionOptions | undefined
+type GeoRequest = { success(pos: { coords: { latitude: number; longitude: number } }): void; error(error: { code: number }): void; options: PositionOptions }
+const requests: GeoRequest[] = []
+const geolocation = { getCurrentPosition: (success: GeoRequest['success'], error: GeoRequest['error'], options: PositionOptions) => requests.push({ success, error, options }) }
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {
-        geolocation: {
-                getCurrentPosition: (success: GeoCb, error: GeoErr, options: PositionOptions) => {
-                        geoOptions = options
-                        if (geoMode === 'ok') success({ coords: { latitude: 35.7, longitude: 51.4 } })
-                        else if (geoMode === 'garbage') success({ coords: { latitude: 999, longitude: 51.4 } })
-                        else error({ code: 1, message: 'Permission denied' })
-                },
-        },
+	userAgent: 'Mozilla Android Chrome', platform: 'Linux', maxTouchPoints: 5, geolocation,
 } })
-
+const device = navigator as unknown as { userAgent: string; platform: string; maxTouchPoints: number; geolocation: unknown }
 const { ArticleRouteButton } = await import('../src/components/site/articles/ArticleRouteButton')
-const { useToastStore } = await import('../src/stores/toastStore')
+const { NeshanDirectionsButton } = await import('../src/components/shared/NeshanDirectionsButton')
+const { neshanAppDirectionsUrl, neshanPlatform } = await import('../src/utils/neshanLinks')
+assert.equal(ArticleRouteButton, NeshanDirectionsButton, 'article and About use one shared chooser')
 
 type Node = { props: Record<string, any>; type: any }
 function nodes(value: any): Node[] {
-        if (Array.isArray(value)) return value.flatMap(nodes)
-        if (!value?.props) return []
-        return [value, ...nodes(value.props.children)]
+	if (Array.isArray(value)) return value.flatMap(nodes)
+	if (!value?.props) return []
+	return [value, ...nodes(value.props.children)]
 }
-function createHost(component: any, getProps: () => unknown): Host {
-        const owner: Host = { cells: [], cursor: 0, effects: [], dirty: false, render() {
-                host = owner; owner.cursor = 0; owner.dirty = false
-                owner.tree = component(getProps())
-                const effects = owner.effects.splice(0)
-                for (const effect of effects) effect()
-        } }
-        owner.render()
-        return owner
+function createHost(getProps = () => ({ lat: 37, lng: 49 })): Host {
+	const owner: Host = { cells: [], cursor: 0, effects: [], dirty: false, render() {
+		host = owner; owner.cursor = 0; owner.dirty = false
+		owner.tree = ArticleRouteButton(getProps())
+		const trigger = nodes(owner.tree).find(node => node.type === 'button' && node.props.ref)
+		if (trigger && !trigger.props.ref.current) trigger.props.ref.current = { focus(options: FocusOptions) { assert.equal(options.preventScroll, true); restoredFocus++ } }
+		const dialog = nodes(owner.tree).find(node => node.type === 'dialog')
+		if (dialog && !dialog.props.ref.current) dialog.props.ref.current = { showModal() { openedDialogs++ }, close() { closedDialogs++ } }
+		for (const effect of owner.effects.splice(0)) effect()
+	} }
+	owner.render(); return owner
 }
 async function flush(owner: Host) {
-        for (let i = 0; i < 12; i++) { await Promise.resolve(); if (owner.dirty) owner.render() }
+	for (let i = 0; i < 12; i++) { await Promise.resolve(); if (owner.dirty) owner.render() }
 }
 async function advance(ms: number, owner: Host) {
-        const end = clock + ms
-        while (true) {
-                const next = [...timers].filter(([, timer]) => timer.due <= end).sort((a, b) => a[1].due - b[1].due)[0]
-                if (!next) break
-                clock = next[1].due
-                timers.delete(next[0])
-                next[1].callback()
-                await flush(owner)
-        }
-        clock = end
-        await flush(owner)
+	const end = clock + ms
+	while (true) {
+		const next = [...timers].filter(([, timer]) => timer.due <= end).sort((a, b) => a[1].due - b[1].due)[0]
+		if (!next) break
+		clock = next[1].due; timers.delete(next[0]); next[1].callback(); await flush(owner)
+	}
+	clock = end; await flush(owner)
 }
 function unmount(owner: Host) {
-        for (const cell of owner.cells) cell?.cleanup?.()
-        assert.equal(timers.size, 0, 'unmount releases remaining GPS timers')
+	for (const cell of owner.cells) cell?.cleanup?.()
+	assert.equal(timers.size, 0, 'unmount releases GPS timers')
+	assert.equal(document.body.style.overflow, 'auto', 'closing restores scrolling')
 }
-const buttonOf = (owner: Host) => nodes(owner.tree).find((node) => node.type === 'button')!
-const click = (owner: Host) => {
-        inClick = true
-        try { buttonOf(owner).props.onClick() } finally { inClick = false }
+const button = (owner: Host, key: string) => nodes(owner.tree).find(node => node.type === 'button' && node.props.children === key)!
+function click(owner: Host, key = 'article.routeMap') {
+	inClick = true
+	try { button(owner, key).props.onClick() } finally { inClick = false }
 }
+async function choose(owner: Host, target: 'web' | 'app') {
+	nodes(owner.tree).find(node => node.type === 'input' && node.props.value === target)!.props.onChange()
+	await flush(owner)
+}
+const selected = (owner: Host) => nodes(owner.tree).find(node => node.type === 'input' && node.props.checked)?.props.value
+const gpsSuccess = (request = requests.at(-1)!) => request.success({ coords: { latitude: 35.7, longitude: 51.4 } })
+const webRoute = 'https://neshan.org/maps/routing/car/origin/35.700000,51.400000/destination/37.000000,49.000000'
+const webPoint = 'https://neshan.org/maps/routing/car/destination/37.000000,49.000000'
+const storageKey = 'sinshin.neshan-directions-target.v1'
 
 try {
-        // ۱) GPS موفق ⇒ لینک رسمی nshn.ir با مبدأِ GPS + مقصدِ بلوک
-        geoMode = 'ok'
-        const gpsHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        assert.equal(buttonOf(gpsHost).props.disabled, false)
-        click(gpsHost); await flush(gpsHost)
-        assert.deepEqual(opened, ['https://nshn.ir?origin=35.700000,51.400000&destination=37.000000,49.000000&vehicle=d'],
-                'GPS success opens the official origin-bearing nshn.ir route link')
-        assert.deepEqual(geoOptions, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
-                'request a fresh position rather than accepting a cached location')
-        assert.equal(timers.size, 0, 'a synchronous GPS result clears its watchdog')
-        assert.equal(useToastStore.getState().isVisible, false, 'successful GPS needs no toast')
-        unmount(gpsHost)
-        opened.length = 0
+	const owner = createHost()
+	click(owner); click(owner); await flush(owner)
+	assert.equal(requests.length, 1, 'rapid clicks cannot start duplicate GPS requests')
+	assert.equal(openedDialogs, 1, 'the chooser uses the native modal top layer')
+	assert.equal(document.body.style.overflow, 'hidden')
+	assert(nodes(owner.tree).some(node => node.type === 'dialog' && node.props['aria-labelledby'] && node.props['aria-describedby']))
+	assert.equal(selected(owner), 'web')
+	assert.equal(button(owner, 'article.routeOnce').props.disabled, true)
+	click(owner, 'article.routeOnce'); assert.equal(opened.length, 0)
+	assert.deepEqual(requests[0].options, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 })
+	gpsSuccess(); await flush(owner)
+	assert.equal(opened.length, 0, 'GPS only prepares coordinates; it never redirects')
+	assert.equal(timers.size, 0)
+	click(owner, 'article.routeOnce'); await flush(owner)
+	assert.deepEqual(opened.splice(0), [webRoute], 'website choice explicitly opens the Neshan website with both endpoints')
+	assert.equal(storage.size, 0, 'one-off choices are not persisted')
+	assert.equal(closedDialogs, 1)
+	assert.equal(restoredFocus, 1, 'closing returns keyboard focus to the directions button without scrolling')
+	unmount(owner)
 
-        // Permission denial still hands the actual article destination to the app.
-        geoMode = 'denied'
-        const deniedHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(deniedHost); await flush(deniedHost)
-        assert.deepEqual(opened, ['https://nshn.ir/?lat=37.000000&lng=49.000000'],
-                'denied GPS uses the documented app point link, preserving the article destination')
-        assert.equal(useToastStore.getState().message, 'Pick the origin on the map yourself')
-        assert.equal(buttonOf(deniedHost).props.disabled, false, 'the button recovers after denial')
-        assert.equal(timers.size, 0, 'GPS denial clears its watchdog')
-        unmount(deniedHost)
-        opened.length = 0
+	const app = createHost()
+	click(app); await flush(app); gpsSuccess(); await flush(app); await choose(app, 'app')
+	const staleAlways = button(app, 'article.routeAlways').props.onClick
+	click(app, 'article.routeAlways'); await flush(app)
+	const intent = opened[0]
+	assert(intent.startsWith('intent://nshn.ir?origin=35.700000,51.400000&destination=37.000000,49.000000&vehicle=d#Intent;'))
+	assert(intent.includes('package=org.rajman.neshan.traffic.tehran.navigator;'))
+	assert.equal(decodeURIComponent(intent.split('S.browser_fallback_url=')[1].split(';end')[0]), webRoute)
+	assert.equal(nodes(app.tree).find(node => node.type === 'a')?.props.href, webRoute, 'an explicit website fallback remains if the browser cannot launch the app')
+	assert.equal(storage.get(storageKey), 'app')
+	inClick = true; staleAlways(); inClick = false
+	assert.equal(opened.length, 1, 'duplicate launch events cannot launch the app twice')
+	opened.length = 0
+	click(app, 'common.cancel'); await flush(app)
+	click(app); await flush(app)
+	assert.equal(selected(app), 'app', 'Always preselects the saved choice before the next handoff')
+	assert.equal(opened.length, 0, 'saved preference still presents a prompt and preserves user activation')
+	gpsSuccess(); await flush(app); await choose(app, 'web'); click(app, 'article.routeOnce'); await flush(app)
+	assert.equal(opened.pop(), webRoute)
+	assert.equal(storage.get(storageKey), 'app', 'one-off override does not replace the remembered choice')
+	click(app); await flush(app); click(app, 'article.routeForget'); await flush(app)
+	assert.equal(storage.size, 0)
+	click(app, 'common.cancel'); await flush(app); unmount(app)
 
-        // ۳) بدونِ Geolocation ⇒ همان فالبک
-        ;(navigator as unknown as { geolocation: unknown }).geolocation = undefined
-        const noGeoHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(noGeoHost); await flush(noGeoHost)
-        assert.deepEqual(opened, ['https://nshn.ir/?lat=37.000000&lng=49.000000'],
-                'browsers without geolocation get the same documented point fallback')
-        assert.equal(timers.size, 0, 'unsupported GPS does not leave a watchdog')
-        unmount(noGeoHost)
-        opened.length = 0
-        ;(navigator as unknown as { geolocation: unknown }).geolocation = {
-                getCurrentPosition: (success: GeoCb, error: GeoErr) => {
-                        if (geoMode === 'ok') success({ coords: { latitude: 35.7, longitude: 51.4 } })
-                        else if (geoMode === 'garbage') success({ coords: { latitude: 999, longitude: 51.4 } })
-                        else error({ code: 1, message: 'Permission denied' })
-                },
-        }
+	storage.set(storageKey, 'javascript:garbage')
+	const corrupt = createHost(); click(corrupt); await flush(corrupt)
+	assert.equal(selected(corrupt), 'web', 'invalid stored choices are ignored')
+	click(corrupt, 'common.cancel'); await flush(corrupt); unmount(corrupt); storage.clear()
+	blockStorage = true
+	const blocked = createHost(); click(blocked); await flush(blocked); gpsSuccess(); await flush(blocked)
+	click(blocked, 'article.routeAlways'); await flush(blocked)
+	assert.equal(opened.pop(), webRoute, 'restricted storage cannot prevent a one-time handoff')
+	unmount(blocked); blockStorage = false
 
-        // ۴) GPS خراب (±۹۰/۱۸۰) ⇒ فالبک + توست — مختصاتِ غلط هرگز واردِ لینک نمی‌شود
-        geoMode = 'garbage'
-        const garbageHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(garbageHost); await flush(garbageHost)
-        assert.deepEqual(opened, ['https://nshn.ir/?lat=37.000000&lng=49.000000'],
-                'invalid GPS coordinates never leak into the route link')
-        assert.equal(useToastStore.getState().message, 'Pick the origin on the map yourself')
-        unmount(garbageHost)
-        opened.length = 0
+	for (const problem of ['denied', 'unavailable', 'timeout', 'invalid', 'missing', 'throwing'] as const) {
+		device.geolocation = problem === 'missing' ? undefined : problem === 'throwing'
+			? { getCurrentPosition() { throw new DOMException('Denied', 'SecurityError') } } : geolocation
+		const fallback = createHost(); click(fallback); await flush(fallback)
+		if (problem === 'invalid') requests.at(-1)!.success({ coords: { latitude: NaN, longitude: 49 } })
+		else if (problem === 'denied' || problem === 'unavailable' || problem === 'timeout') requests.at(-1)!.error({ code: ['denied', 'unavailable', 'timeout'].indexOf(problem) + 1 })
+		await flush(fallback)
+		assert.equal(timers.size, 0)
+		assert(nodes(fallback.tree).some(node => node.props.children === 'article.routeGpsUnavailable'))
+		assert.equal(opened.length, 0, `${problem}: location failure does not skip the chooser`)
+		await choose(fallback, 'app'); click(fallback, 'article.routeOnce'); await flush(fallback)
+		assert(opened[0].startsWith('intent://nshn.ir/?lat=37.000000&lng=49.000000#Intent;'))
+		assert.equal(decodeURIComponent(opened[0].split('S.browser_fallback_url=')[1].split(';end')[0]), webPoint)
+		opened.length = 0; unmount(fallback)
+	}
+	device.geolocation = geolocation
 
-        // ۵) حینِ دریافت: disable + برچسبِ «در حال دریافت موقعیت…» (GPS کند)
-        geoMode = 'slow'
-        let releaseSlow!: () => void
-        let rejectSlow!: (error: { code: number; message: string }) => void
-        let gpsRequests = 0
-        ;(navigator as unknown as { geolocation: unknown }).geolocation = {
-                getCurrentPosition: (success: GeoCb, error: GeoErr) => {
-                        gpsRequests++
-                        releaseSlow = () => success({ coords: { latitude: 35.7, longitude: 51.4 } })
-                        rejectSlow = error
-                },
-        }
-        const slowHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(slowHost); click(slowHost); await flush(slowHost)
-        assert.equal(gpsRequests, 1, 'rapid clicks before a React render cannot start duplicate GPS requests')
-        const pendingButton = buttonOf(slowHost)
-        assert.equal(pendingButton.props.disabled, true, 'locating disables the button')
-        assert(String(pendingButton.props.children).includes('Locating'), 'locating swaps the label')
-        assert.equal(opened.length, 0, 'the external map waits until the position arrives')
-        assert.equal(timers.size, 1, 'duplicate clicks share one watchdog')
-        releaseSlow(); await flush(slowHost)
-        assert.deepEqual(opened, ['https://nshn.ir?origin=35.700000,51.400000&destination=37.000000,49.000000&vehicle=d'])
-        assert.equal(buttonOf(slowHost).props.disabled, false)
-        assert.equal(timers.size, 0, 'an asynchronous GPS result clears its watchdog')
-        useToastStore.getState().hideToast()
-        releaseSlow()
-        rejectSlow({ code: 1, message: 'Late duplicate callback' })
-        await advance(12_000, slowHost)
-        assert.equal(opened.length, 1, 'duplicate callbacks and expired watchdogs cannot navigate twice')
-        assert.equal(useToastStore.getState().isVisible, false, 'late error callbacks cannot show a misleading toast')
-        unmount(slowHost)
-        opened.length = 0
+	const stalled = createHost(); click(stalled); await flush(stalled)
+	const late = requests.at(-1)!
+	await advance(11_999, stalled); assert.equal(button(stalled, 'article.routeOnce').props.disabled, true)
+	await advance(1, stalled); assert.equal(button(stalled, 'article.routeOnce').props.disabled, false)
+	gpsSuccess(late); late.error({ code: 1 }); await flush(stalled)
+	assert.equal(opened.length, 0)
+	click(stalled, 'article.routeOnce'); await flush(stalled); assert.equal(opened.pop(), webPoint, 'late GPS cannot override the timeout fallback')
+	click(stalled); await flush(stalled); gpsSuccess(late); assert.equal(timers.size, 1, 'stale GPS cannot clear the retry watchdog')
+	gpsSuccess(); await flush(stalled); click(stalled, 'article.routeOnce'); await flush(stalled); assert.equal(opened.pop(), webRoute)
+	unmount(stalled)
 
-        // Real browsers call errors asynchronously too, after permission prompts or timeouts.
-        for (const code of [1, 2, 3]) {
-                const errorHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-                click(errorHost); await flush(errorHost)
-                rejectSlow({ code, message: 'GPS unavailable' }); await flush(errorHost)
-                assert.deepEqual(opened, ['https://nshn.ir/?lat=37.000000&lng=49.000000'])
-                assert.equal(buttonOf(errorHost).props.disabled, false)
-                assert.equal(timers.size, 0, 'every GPS error clears its watchdog')
-                unmount(errorHost)
-                opened.length = 0
-        }
+	const cancelled = createHost(); click(cancelled); await flush(cancelled)
+	const cancelledGps = requests.at(-1)!
+	const dialog = nodes(cancelled.tree).find(node => node.type === 'dialog')!
+	let prevented = false
+	dialog.props.onCancel({ preventDefault() { prevented = true } }); await flush(cancelled)
+	assert(prevented); assert.equal(timers.size, 0)
+	assert.equal(restoredFocus, closedDialogs, 'Escape also restores keyboard focus')
+	gpsSuccess(cancelledGps); cancelledGps.error({ code: 1 }); await flush(cancelled)
+	assert.equal(opened.length, 0, 'Escape cancellation ignores late GPS')
+	unmount(cancelled)
 
-        const stalledHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(stalledHost); await flush(stalledHost)
-        const stalledSuccess = releaseSlow
-        const stalledError = rejectSlow
-        await advance(11_999, stalledHost)
-        assert.equal(opened.length, 0, 'a stalled provider is allowed its full deadline')
-        assert.equal(buttonOf(stalledHost).props.disabled, true)
-        await advance(1, stalledHost)
-        assert.deepEqual(opened, ['https://nshn.ir/?lat=37.000000&lng=49.000000'],
-                'the watchdog preserves the article destination when GPS never calls back')
-        assert.equal(buttonOf(stalledHost).props.disabled, false, 'the watchdog releases the pending button')
-        assert.equal(timers.size, 0)
-        useToastStore.getState().hideToast()
-        stalledSuccess()
-        stalledError({ code: 1, message: 'Permission answered after deadline' })
-        assert.equal(opened.length, 1, 'late GPS cannot replace the destination opened by the watchdog')
-        assert.equal(useToastStore.getState().isVisible, false)
-        opened.length = 0
-        click(stalledHost); await flush(stalledHost)
-        stalledSuccess()
-        assert.equal(opened.length, 0, 'a timed-out request cannot complete a subsequent retry')
-        assert.equal(timers.size, 1, 'the stale request must not clear the retry watchdog')
-        releaseSlow(); await flush(stalledHost)
-        assert.deepEqual(opened, ['https://nshn.ir?origin=35.700000,51.400000&destination=37.000000,49.000000&vehicle=d'])
-        unmount(stalledHost)
-        opened.length = 0
+	let destination = { lat: 37, lng: 49 }
+	const changed = createHost(() => destination); click(changed); await flush(changed)
+	const oldGps = requests.at(-1)!
+	destination = { lat: 38, lng: 50 }; changed.render(); await flush(changed)
+	assert.equal(timers.size, 0); assert.equal(button(changed, 'article.routeMap').props.disabled, false)
+	click(changed); await flush(changed); gpsSuccess(oldGps); assert.equal(timers.size, 1)
+	gpsSuccess(); await flush(changed); click(changed, 'article.routeOnce'); await flush(changed)
+	assert.equal(opened.pop(), webRoute.replace('destination/37.000000,49.000000', 'destination/38.000000,50.000000'))
+	unmount(changed)
 
-        const cancelledHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(cancelledHost); await flush(cancelledHost)
-        unmount(cancelledHost)
-        await advance(12_000, cancelledHost)
-        releaseSlow()
-        assert.equal(opened.length, 0, 'a late GPS callback cannot navigate after unmount')
-        useToastStore.getState().hideToast()
-        rejectSlow({ code: 1, message: 'Denied' })
-        assert.equal(useToastStore.getState().isVisible, false, 'stale GPS errors do not show toasts on a new page')
+	const removed = createHost(); click(removed); await flush(removed)
+	const removedGps = requests.at(-1)!
+	unmount(removed); gpsSuccess(removedGps); removedGps.error({ code: 1 }); await advance(12_000, removed)
+	assert.equal(opened.length, 0, 'unmount invalidates callbacks and timer')
+	const count = requests.length
+	for (const invalid of [{ lat: NaN, lng: 49 }, { lat: 91, lng: 49 }, { lat: 37, lng: -181 }, { lat: 37, lng: Infinity }]) {
+		const bad = createHost(() => invalid); assert.equal(button(bad, 'article.routeMap').props.disabled, true)
+		click(bad); await flush(bad); assert.equal(requests.length, count); assert.equal(opened.length, 0); unmount(bad)
+	}
 
-        let changingDestination = { lat: 37, lng: 49 }
-        const changedHost = createHost(ArticleRouteButton, () => changingDestination)
-        click(changedHost); await flush(changedHost)
-        const oldGps = releaseSlow
-        changingDestination = { lat: 38, lng: 50 }
-        changedHost.render(); await flush(changedHost)
-        assert.equal(buttonOf(changedHost).props.disabled, false)
-        assert.equal(timers.size, 0, 'changing destination clears the old request watchdog')
-        click(changedHost); await flush(changedHost)
-        oldGps()
-        assert.equal(opened.length, 0, 'the previous destination cannot win a GPS race')
-        assert.equal(timers.size, 1, 'a stale destination callback does not cancel the active watchdog')
-        releaseSlow(); await flush(changedHost)
-        assert.deepEqual(opened, ['https://nshn.ir?origin=35.700000,51.400000&destination=38.000000,50.000000&vehicle=d'])
-        unmount(changedHost)
-        opened.length = 0
-
-        const beforeInvalidRequests = gpsRequests
-        for (const destination of [
-                { lat: NaN, lng: 49 }, { lat: 91, lng: 49 },
-                { lat: 37, lng: -181 }, { lat: 37, lng: Infinity },
-        ]) {
-                const invalidHost = createHost(ArticleRouteButton, () => destination)
-                assert.equal(buttonOf(invalidHost).props.disabled, true, 'invalid destinations disable routing')
-                click(invalidHost); await flush(invalidHost)
-                assert.equal(opened.length, 0, 'invalid coordinates cannot reach an external map')
-                assert.equal(gpsRequests, beforeInvalidRequests, 'invalid destinations do not request location')
-                assert.equal(timers.size, 0)
-                unmount(invalidHost)
-        }
-
-        ;(navigator as unknown as { geolocation: unknown }).geolocation = {
-                getCurrentPosition() { throw new DOMException('Denied', 'SecurityError') },
-        }
-        const throwingHost = createHost(ArticleRouteButton, () => ({ lat: 37, lng: 49 }))
-        click(throwingHost); await flush(throwingHost)
-        assert.deepEqual(opened, ['https://nshn.ir/?lat=37.000000&lng=49.000000'])
-        assert.equal(buttonOf(throwingHost).props.disabled, false, 'synchronous geolocation exceptions also recover')
-        assert.equal(timers.size, 0, 'synchronous geolocation exceptions clear the watchdog')
-        unmount(throwingHost)
-
-        console.log('Article route button passed: fresh GPS routes, documented point fallback, all GPS errors, stalled-provider deadline, retries, duplicate callbacks, invalid destinations and timer/lifecycle cleanup.')
+	device.userAgent = 'Mozilla iPhone'; device.platform = 'iPhone'
+	const ios = createHost(); click(ios); await flush(ios); gpsSuccess(); await flush(ios); await choose(ios, 'app')
+	click(ios, 'article.routeOnce'); await flush(ios)
+	assert.equal(opened.pop(), 'neshan://?origin=35.700000,51.400000&destination=37.000000,49.000000&vehicle=d')
+	assert.equal(nodes(ios.tree).find(node => node.type === 'a')!.props.href, webRoute)
+	unmount(ios)
+	assert.equal(neshanAppDirectionsUrl(37, 49, null, 'ios'), 'neshan://?ll=37.000000,49.000000')
+	assert.equal(neshanAppDirectionsUrl(37, 49, null, 'other'), 'https://nshn.ir/?lat=37.000000&lng=49.000000')
+	assert.equal(neshanPlatform({ userAgent: 'Macintosh Safari', platform: 'MacIntel', maxTouchPoints: 5 }), 'ios')
+	assert.equal(neshanPlatform({ userAgent: 'Windows Chrome', platform: 'Win32', maxTouchPoints: 0 }), 'other')
+	assert.equal(openedDialogs, closedDialogs, 'every native dialog is closed during cleanup')
+	console.log('Neshan chooser passed: web/app routes, native intent fallback, iOS links, Always/once/reset, storage failures, user activation, GPS failures/deadlines/retries, cancellation, destination changes and cleanup.')
 } finally {
-        useToastStore.getState().hideToast()
-        globalThis.setTimeout = realSetTimeout
-        globalThis.clearTimeout = realClearTimeout
+	globalThis.setTimeout = realSetTimeout
+	globalThis.clearTimeout = realClearTimeout
 }

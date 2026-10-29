@@ -41,6 +41,7 @@
     "test:otp-limit": "bun scripts/test-otp-distinct-limit.ts",
     "db:test:blocks": "bun scripts/test-article-blocks.ts",
     "db:test:articles": "bun scripts/test-articles.ts",
+    "db:test:about": "bun scripts/test-about.ts",
     "db:test:purchase": "bun scripts/test-category-purchase.ts",
     "db:test:products-order": "bun scripts/test-admin-products-order.ts",
     "db:test:print": "bun scripts/test-print-service.ts",

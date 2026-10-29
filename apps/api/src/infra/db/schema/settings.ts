@@ -7,6 +7,7 @@
 
 //src/infra/db/schema/settings.ts
 import { boolean, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core'
+import type { AboutLocationDto, ArticleBlocksDoc } from '@sinshin/shared'
 
 /**
  * تنظیمات کلید-مقدار.
@@ -90,6 +91,9 @@ export const contentAbout = pgTable('content_about', {
   heroTextAr: text('hero_text_ar'),
   teamTitleAr: text('team_title_ar'),
   teamAltAr: text('team_alt_ar'),
+  blocks: jsonb('blocks').$type<ArticleBlocksDoc>(),
+  blocksAr: jsonb('blocks_ar').$type<ArticleBlocksDoc>(),
+  location: jsonb('location').$type<AboutLocationDto>(),
   /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
   arAuto: boolean('ar_auto').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

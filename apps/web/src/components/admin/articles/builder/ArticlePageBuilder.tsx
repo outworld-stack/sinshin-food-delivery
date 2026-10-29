@@ -102,6 +102,7 @@ const inputCls =
 interface BuilderProps {
 	doc: ArticleBlocksDoc
 	onChange: (doc: ArticleBlocksDoc) => void
+	requireText?: boolean
 }
 
 /** یک دکمه‌ی پله‌ای (عرض/انیمیشن/پد/چینش) */
@@ -735,7 +736,11 @@ function BlockSettings({
 
 // ═══════════════ ادیتورِ اصلی ═══════════════
 
-export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
+export function ArticlePageBuilder({
+	doc,
+	onChange,
+	requireText = true,
+}: BuilderProps) {
 	const showToast = useToastStore((s) => s.showToast)
 	// Upload callbacks can resolve after other edits or a block reorder.
 	const docRef = useRef(doc)
@@ -1000,7 +1005,7 @@ export function ArticlePageBuilder({ doc, onChange }: BuilderProps) {
 					dir="rtl"
 				>
 					{doc.blocks.length} بلوک · {textBlocks} متنی
-					{textBlocks === 0 && (
+					{requireText && textBlocks === 0 && (
 						<span className="text-amber-500">
 							{' '}
 							— حداقل یک بلوکِ متنی لازم است

@@ -306,6 +306,19 @@ export const fa = {
         // stage-98 — «مشاهده روی نقشه» حذف شد (نقشه‌ی داخلی همان نقش را دارد)
         'article.routeMap': 'مسیریابی از موقعیت من',
         'article.routeLocating': 'در حال دریافت موقعیت…',
+        'article.routeChooseTitle': 'مسیریابی را با کدام گزینه باز کنیم؟',
+        'article.routeChooseHint': 'مقصد شما برای مسیریابی به نشان فرستاده می‌شود.',
+        'article.routeWebsite': 'وب‌سایت نشان',
+        'article.routeApp': 'اپلیکیشن نشان',
+        'article.routeAppHint': 'باز کردن برنامهٔ نصب‌شده؛ اگر در دسترس نبود، از وب‌سایت استفاده کنید.',
+        'article.routeAlways': 'همیشه',
+        'article.routeOnce': 'فقط همین بار',
+        'article.routeRememberHint': '«همیشه» انتخاب شما را در این مرورگر به خاطر می‌سپارد. هر بار می‌توانید آن را تغییر دهید.',
+        'article.routeForget': 'پاک کردن انتخاب ذخیره‌شده',
+        'article.routeSaved': 'انتخاب ذخیره‌شدهٔ شما مشخص شده است.',
+        'article.routeAppContinue': 'ادامه در نشان',
+        'article.routeAppFallback': 'اگر برنامه باز نشد، در وب‌سایت نشان ادامه دهید.',
+        'article.routeGpsUnavailable': 'موقعیت فعلی شما در دسترس نیست. مبدأ مسیر را در نشان انتخاب کنید.',
         'article.routeGpsDenied':
                 'موقعیت شما در دسترس نیست — مقصد در نشان باز می‌شود؛ برای مسیریابی مبدأ را انتخاب کنید',
         'articles.title': 'مقالات سین‌شین',
@@ -331,6 +344,13 @@ export const fa = {
 
         // ── درباره ما (رارد ۳۲) ──
         'about.heroAlt': 'محیط رستوران سین‌شین',
+        'about.eyebrow': 'سین‌شین، از نزدیک',
+        'about.title': 'درباره سین‌شین',
+        'about.menu': 'دیدن منو',
+        'about.visit': 'موقعیت رستوران',
+        'about.locationTitle': 'ما را روی نقشه پیدا کنید',
+        'about.locationText': 'برای مسیریابی از موقعیت خود، وب‌سایت یا اپلیکیشن نشان را انتخاب کنید.',
+        'about.mapUnavailable': 'نقشه در حال حاضر در دسترس نیست. با دکمهٔ مسیریابی، موقعیت رستوران را در نشان باز کنید.',
 
         // ── مدال قوانین (رارد ۳۲) ──
         'terms.title': 'قوانین و شرایط سین‌شین',
@@ -578,6 +598,8 @@ export const fa = {
 
         // ── نقشه (رارد ۳۳) ──
         'map.pickLocation': 'انتخاب موقعیت روی نقشه',
+        'map.locationLabel': 'نقشهٔ موقعیت',
+        'map.directionsUnavailable': 'نقشه در حال حاضر در دسترس نیست. با دکمهٔ مسیریابی، مقصد را در نشان باز کنید.',
         'map.unavailable': 'نقشه در دسترس نیست. می‌توانید از مختصات یا پیوند نقشه استفاده کنید.',
         'map.invalidCoordinates': 'هر دو مختصات را کامل و معتبر وارد کنید تا موقعیت قابل ذخیره باشد.',
         'map.waitingLocation': 'در انتظار دریافت موقعیت پیک…',

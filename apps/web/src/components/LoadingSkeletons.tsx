@@ -754,20 +754,33 @@ export function GalleryPageSkeleton() {
 // ۳۲. اسکلتون صفحه درباره ما
 export function AboutPageSkeleton() {
   return (
-    <div className="py-10 lg:py-20">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row gap-8 mb-24">
-          <Skeleton className="w-full md:w-2/5 h-69.25 md:h-101 rounded-3xl" />
-          <div className="flex-1 space-y-4 pt-8">
-            <Skeleton className="h-12 w-64" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-11/12" />
-            <Skeleton className="h-4 w-4/5" />
+    <div className="py-8 sm:py-12 lg:py-20" aria-busy="true">
+      <div className="mx-auto max-w-7xl space-y-12 px-4 sm:space-y-16 sm:px-6 lg:space-y-24 lg:px-8">
+        <div className="grid overflow-hidden rounded-3xl border border-gray-200 lg:grid-cols-2 dark:border-[#3a151c]">
+          <div className="flex flex-col justify-center gap-6 p-6 sm:p-10 lg:p-14">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-12 w-3/4" />
+            <div className="space-y-4">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-11/12" />
+              <Skeleton className="h-4 w-4/5" />
+            </div>
+            <div className="flex gap-3">
+              <Skeleton className="h-12 w-28 rounded-xl" />
+              <Skeleton className="h-12 w-32 rounded-xl" />
+            </div>
           </div>
+          <Skeleton className="aspect-[4/3] w-full rounded-none lg:aspect-[4/5]" />
         </div>
-        <div className="py-14">
-          <Skeleton className="h-10 w-40 mx-auto mb-12" />
-          <Skeleton className="h-69.25 md:h-101 w-full rounded-3xl" />
+        <div className="space-y-7">
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="aspect-video max-h-128 w-full rounded-3xl" />
+        </div>
+        <div className="space-y-6 rounded-3xl border border-gray-200 p-6 sm:p-8 dark:border-[#3a151c]">
+          <Skeleton className="h-8 w-3/5 max-w-72" />
+          <Skeleton className="h-4 w-4/5 max-w-lg" />
+          <Skeleton className="h-60 w-full rounded-xl" />
+          <Skeleton className="h-12 w-52 rounded-xl" />
         </div>
       </div>
     </div>

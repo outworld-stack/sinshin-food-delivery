@@ -304,6 +304,19 @@ export const ar: Dict = {
         // stage-98 — حُذف «عرض على الخريطة» — الخريطةُ المدمجةُ تقومُ بدورها
         'article.routeMap': 'المسار من موقعي',
         'article.routeLocating': 'جارٍ تحديد الموقع…',
+        'article.routeChooseTitle': 'كيف تريد فتح المسار؟',
+        'article.routeChooseHint': 'ستُرسل وجهتك إلى نِشان لتحديد المسار.',
+        'article.routeWebsite': 'موقع نِشان',
+        'article.routeApp': 'تطبيق نِشان',
+        'article.routeAppHint': 'افتح التطبيق المثبّت؛ وإن لم يكن متاحًا، استخدم الموقع.',
+        'article.routeAlways': 'دائمًا',
+        'article.routeOnce': 'هذه المرة فقط',
+        'article.routeRememberHint': 'يحفظ «دائمًا» اختيارك في هذا المتصفح. يمكنك تغييره في أي مرة.',
+        'article.routeForget': 'مسح الاختيار المحفوظ',
+        'article.routeSaved': 'اختيارك المحفوظ محدّد.',
+        'article.routeAppContinue': 'المتابعة في نِشان',
+        'article.routeAppFallback': 'إذا لم يُفتح التطبيق، تابع على موقع نِشان.',
+        'article.routeGpsUnavailable': 'موقعك الحالي غير متاح. اختر نقطة البداية في نِشان.',
         'article.routeGpsDenied':
                 'موقعك غير متاح — ستُفتح الوجهة في نِشان؛ اختر نقطة البداية لتحديد المسار',
         'articles.filterSort': 'تصفية وترتيب',
@@ -327,6 +340,13 @@ export const ar: Dict = {
 
         // ── من نحن (الجولة ٣٢) ──
         'about.heroAlt': 'أجواء مطعم سين‌شين',
+        'about.eyebrow': 'سين‌شين عن قرب',
+        'about.title': 'عن سين‌شين',
+        'about.menu': 'تصفّح القائمة',
+        'about.visit': 'موقع المطعم',
+        'about.locationTitle': 'اعثر علينا على الخريطة',
+        'about.locationText': 'للوصول من موقعك، اختر موقع نِشان أو تطبيقه.',
+        'about.mapUnavailable': 'الخريطة غير متاحة حاليًا. افتح موقع المطعم في نِشان باستخدام زر المسار.',
 
         // ── نافذة القواعد (الجولة ٣٢) ──
         'terms.title': 'القواعد وشروط سين‌شين',
@@ -569,6 +589,8 @@ export const ar: Dict = {
 
         // ── الخريطة (الجولة ٣٣) ──
         'map.pickLocation': 'اختيار الموقع على الخريطة',
+        'map.locationLabel': 'خريطة الموقع',
+        'map.directionsUnavailable': 'الخريطة غير متاحة حاليًا. افتح الوجهة في نِشان باستخدام زر المسار.',
         'map.unavailable': 'الخريطة غير متاحة. يمكنك استخدام الإحداثيات أو رابط الخريطة.',
         'map.invalidCoordinates': 'أدخل إحداثيات مكتملة وصحيحة لحفظ الموقع.',
         'map.waitingLocation': 'بانتظار موقع الساعي…',
