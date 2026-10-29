@@ -14,9 +14,10 @@ mock.module('@tanstack/react-router', () => ({
 	Link: ({ to, children, ...props }: { to: string; children: ReactNode }) =>
 		createElement('a', { ...props, href: to }, children),
 }))
-mock.module('#/components/site/articles/ArticleLocationMap', () => ({
-	ArticleLocationMap: ({ lat, lng }: { lat: number; lng: number }) =>
-		createElement('div', { 'data-map': `${lat},${lng}` }),
+mock.module('#/lib/neshan-sdk', () => ({
+	NESHAN_KEY: undefined,
+	NESHAN_STYLE: 'test-style',
+	loadNeshanSdk: () => { throw new Error('About SSR must not load the browser map SDK') },
 }))
 mock.module('#/components/site/articles/ArticleRouteButton', () => ({
 	ArticleRouteButton: ({ lat, lng }: { lat: number; lng: number }) =>
@@ -36,19 +37,37 @@ const base: AboutContentDto = {
 }
 const render = (patch: Partial<AboutContentDto> = {}) =>
 	renderToStaticMarkup(createElement(AboutContentView, { content: { ...base, ...patch } }))
+function embeddedMap(markup: string) {
+	const frame = markup.match(/<iframe\b[^>]*>/)?.[0]
+	assert(frame, 'About renders a real embedded map without a Neshan key')
+	const src = frame.match(/\bsrc="([^"]+)"/)?.[1]
+	assert(src, 'embedded map has a source URL')
+	const url = new URL(src.replaceAll('&amp;', '&'))
+	assert.equal(url.origin, 'https://www.openstreetmap.org')
+	assert.equal(url.pathname, '/export/embed.html')
+	assert.equal(url.searchParams.get('layer'), 'mapnik')
+	assert(frame.includes('loading="lazy"'), 'map loads lazily below the About content')
+	return { frame, url }
+}
 const html = render()
 assert(html.includes('<img src="/uploads/restaurant.webp"'), 'uploaded hero uses an actual image')
 assert(html.includes('src="https://example.com/team.webp"') && html.includes('alt="Kitchen team"'))
 assert(html.includes('whitespace-pre-line') && html.includes('First paragraph\nSecond paragraph'))
 assert(html.indexOf('Added story') < html.indexOf('Our values'), 'blocks retain their saved order')
-assert(html.includes('data-map="37.4822056,49.4418273"'))
+const map = embeddedMap(html)
+assert.equal(map.url.searchParams.get('marker'), '37.4822056,49.4418273')
+assert(map.frame.includes(`title="${fa['about.locationTitle']}"`), 'Persian map title describes the restaurant location')
 assert(html.includes('data-directions="37.4822056,49.4418273"'))
-assert(html.indexOf('data-map=') < html.indexOf('data-directions='), 'directions appears below the map')
+assert(html.indexOf('<iframe') < html.indexOf('data-directions='), 'directions appears below the map')
 assert(html.includes('Restaurant address') && html.includes('href="#restaurant-location"'))
+
+const customLocation = render({ location: { lat: 37.501234, lng: 49.401234, address: 'Saved custom address' } })
+assert.equal(embeddedMap(customLocation).url.searchParams.get('marker'), '37.501234,49.401234', 'map follows the saved restaurant location')
+assert(customLocation.includes('data-directions="37.501234,49.401234"') && customLocation.includes('Saved custom address'))
 
 const removed = render({ heroGradient: '', teamTitle: '', teamGradient: '', blocks: null })
 assert(!removed.includes('<img') && !removed.includes('about-team-heading') && !removed.includes('Added story'))
-assert(removed.includes('data-map='), 'removing optional content retains restaurant map')
+assert.equal(embeddedMap(removed).url.searchParams.get('marker'), '37.4822056,49.4418273', 'removing optional content retains restaurant map')
 const reordered = render({ blocks: { version: 1, blocks: [...base.blocks!.blocks].reverse() } })
 assert(reordered.indexOf('Our values') < reordered.indexOf('Added story'))
 const gradient = render({ heroGradient: 'from-rose-400 to-red-700' })
@@ -58,11 +77,14 @@ const escaped = render({ heroTitle: '<script>alert(1)</script>', heroText: '<img
 assert(!escaped.includes('<script>') && escaped.includes('&lt;script&gt;'))
 for (const location of [null, { lat: 91, lng: 49, address: '' }, { lat: 37, lng: Number.NaN, address: '' }]) {
 	const invalid = render({ location })
-	assert(!invalid.includes('data-map=') && !invalid.includes('data-directions='), 'invalid destinations never reach maps/directions')
+	assert(!invalid.includes('<iframe') && !invalid.includes('data-directions='), 'invalid destinations never reach maps/directions')
 }
 dictionary = ar
 const arabic = render({ heroTitle: 'عن المطعم', location: { ...base.location!, address: 'عنوان المطعم' } })
 assert(arabic.includes('عن المطعم') && arabic.includes('عنوان المطعم') && arabic.includes(ar['about.locationTitle']))
+const arabicMap = embeddedMap(arabic)
+assert(arabicMap.frame.includes(`title="${ar['about.locationTitle']}"`), 'Arabic map title is localized')
+assert.equal(arabicMap.url.searchParams.get('marker'), '37.4822056,49.4418273', 'localization preserves the restaurant marker')
 
 type RequestCall = { path: string; method?: string; body?: unknown }
 const calls: RequestCall[] = []

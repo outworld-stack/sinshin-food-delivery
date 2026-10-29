@@ -494,7 +494,7 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 							)}
 						</div>
 					)}
-					<ArticleLocationMap lat={lat} lng={lng} />
+					<ArticleLocationMap lat={lat} lng={lng} label={title || address} />
 					<div style={{ textAlign: block.style?.align }}>
 						<div className="inline-flex flex-wrap items-center gap-2">
 							<ArticleRouteButton lat={lat} lng={lng} />

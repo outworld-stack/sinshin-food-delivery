@@ -14,6 +14,8 @@ mock.module('@tanstack/react-router', () => ({
         },
 }))
 mock.module('#/i18n', () => ({ useI18n: () => ({ t: { 'article.routeMap': 'Route from me', 'article.routeLocating': 'Locating…', 'article.routeGpsDenied': 'Pick the origin on the map yourself' } }) }))
+// Public locations must render an actual map even without a configured SDK key.
+mock.module('#/lib/neshan-sdk', () => ({ NESHAN_KEY: undefined, NESHAN_STYLE: '', loadNeshanSdk: () => { throw new Error('SSR must not load the SDK') } }))
 const { ArticleBlocksRenderer } = await import('../src/components/site/articles/ArticleBlocksRenderer')
 const render = (blocks: unknown[]) => renderToStaticMarkup(createElement(ArticleBlocksRenderer, {
         doc: { version: 1, blocks } as ArticleBlocksDoc,
@@ -76,6 +78,17 @@ assert(linked.includes('href="/articles/test?lang=ar#location"'))
 assert(linked.includes('target="_blank" rel="noopener noreferrer"'))
 assert(!linked.includes('Unsafe'))
 assert(linked.includes('Test address') && linked.includes('Route from me'))
+const mapSources = [...linked.matchAll(/<iframe[^>]*src="([^"]+)"/g)].map(match => new URL(match[1]!.replaceAll('&amp;', '&')))
+assert.equal(mapSources.length, 1, 'only valid location blocks render an embedded map')
+assert.equal(mapSources[0]!.origin, 'https://www.openstreetmap.org')
+assert.equal(mapSources[0]!.searchParams.get('marker'), '37,49', 'the article map shows the admin-selected coordinates without a map key')
+assert(linked.includes('title="Test address"') && linked.includes('loading="lazy"'))
+const multipleLocations = render([
+        { id: 'first-location', type: 'location', props: { lat: 37.4822056, lng: 49.4418273, title: 'Restaurant' } },
+        { id: 'second-location', type: 'location', props: { lat: 38, lng: 50, title: 'Another place' } },
+])
+const markers = [...multipleLocations.matchAll(/<iframe[^>]*src="([^"]+)"/g)].map(match => new URL(match[1]!.replaceAll('&amp;', '&')).searchParams.get('marker'))
+assert.deepEqual(markers, ['37.4822056,49.4418273', '38,50'], 'each location block keeps its own saved pin and coordinate precision')
 // stage-98 — «مشاهده روی نقشه» حذف شد؛ «مسیریابی از موقعیت من» دکمه‌ی واقعی
 // با GPS شد (SSR: <button> بدون href — لینک در لحظه‌ی کلیک ساخته می‌شود؛
 // رفتارِ GPS موفق/ردشده در test-article-route.tsx تستِ رفتاری تست می‌شود)

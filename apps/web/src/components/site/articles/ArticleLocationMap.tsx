@@ -13,20 +13,36 @@ interface ArticleLocationMapProps {
 	lat: number
 	lng: number
 	zoom?: number
-	unavailableMessage?: string
+	label?: string
+}
+
+function fallbackMapUrl(lat: number, lng: number, zoom: number): string {
+	const scale = 2 ** (15 - Math.max(2, Math.min(21, zoom)))
+	const params = new URLSearchParams({
+		bbox: [
+			Math.max(-180, lng - 0.008 * scale),
+			Math.max(-90, lat - 0.004 * scale),
+			Math.min(180, lng + 0.008 * scale),
+			Math.min(90, lat + 0.004 * scale),
+		].join(','),
+		layer: 'mapnik',
+		marker: `${lat},${lng}`,
+	})
+	return `https://www.openstreetmap.org/export/embed.html?${params}`
 }
 
 export const ArticleLocationMap = memo(function ArticleLocationMap({
 	lat,
 	lng,
 	zoom = 15,
-	unavailableMessage,
+	label,
 }: ArticleLocationMapProps) {
 	const { t } = useI18n()
 	const containerRef = useRef<HTMLDivElement>(null)
 	const [visible, setVisible] = useState(false)
 	const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
 	const valid = isNeshanCoord(lat, lng)
+	const embedUrl = valid ? fallbackMapUrl(lat, lng, zoom) : ''
 
 	// Long articles can contain many locations. Defer SDK/WebGL/tile work until
 	// each block approaches the viewport; leave its text and links server-rendered.
@@ -99,12 +115,13 @@ export const ArticleLocationMap = memo(function ArticleLocationMap({
 	}, [lat, lng, zoom, valid, visible])
 
 	if (!valid) return null
-	const unavailable = !NESHAN_KEY || state === 'failed'
+	const useFallback = !NESHAN_KEY || state === 'failed'
+	const mapLabel = label || t['map.locationLabel']
 	return (
 		<div
 			className={
 				'relative w-full h-56 sm:h-64 rounded-2xl overflow-hidden border border-gray-200 dark:border-[#3a151c] bg-gray-100 dark:bg-[#1a0a0e] ' +
-				(!unavailable && state === 'loading' ? 'animate-pulse' : '')
+				(!useFallback && state === 'loading' ? 'animate-pulse' : '')
 			}
 		>
 			{/* Keep a sized container mounted when a failed map is retried with a
@@ -113,13 +130,20 @@ export const ArticleLocationMap = memo(function ArticleLocationMap({
 				ref={containerRef}
 				className="absolute inset-0"
 				role="img"
-				aria-label={t['map.locationLabel']}
-				aria-hidden={unavailable}
+				aria-label={mapLabel}
+				aria-hidden={useFallback}
 			/>
-			{unavailable && (
-				<output className="absolute inset-0 flex items-center justify-center bg-gray-50 p-6 text-center text-sm leading-7 text-gray-500 dark:bg-[#1a0a0e] dark:text-gray-400">
-					{unavailableMessage ?? t['map.directionsUnavailable']}
-				</output>
+			{/* The public map remains usable without an API key or WebGL. Native
+			    iframe lazy loading also keeps offscreen article blocks inexpensive. */}
+			{useFallback && (
+				<iframe
+					key={embedUrl}
+					title={mapLabel}
+					src={embedUrl}
+					loading="lazy"
+					referrerPolicy="no-referrer"
+					className="absolute inset-0 h-full w-full border-0"
+				/>
 			)}
 		</div>
 	)

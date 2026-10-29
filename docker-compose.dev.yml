@@ -148,6 +148,7 @@ services:
       target: dev
       # round-49 — کلید نقشهٔ نشان از ‎.env ریشه به بیلد دِو هم می‌رسد
       args:
+        VITE_NESHAN_MAP_KEY: ${VITE_NESHAN_MAP_KEY:-}
         VITE_NESHAN_API_KEY: ${VITE_NESHAN_API_KEY:-}
     image: sinshin/web:dev
     container_name: sinshin-dev-web

@@ -150,7 +150,7 @@ export function AboutContentView({ content }: { content: AboutContentDto }) {
 							<ArticleLocationMap
 								lat={location.lat}
 								lng={location.lng}
-								unavailableMessage={t['about.mapUnavailable']}
+								label={t['about.locationTitle']}
 							/>
 						</div>
 						<div className="flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">

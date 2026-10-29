@@ -1,7 +1,7 @@
 # Neshan directions on About Us and article blocks
 
 Both pages use `NeshanDirectionsButton`; `ArticleRouteButton` is an alias. The
-embedded Neshan map is separate from opening the external website or native app.
+embedded location map is separate from opening the external website or native app.
 
 ## About content and location
 
@@ -36,11 +36,17 @@ it), focus trapping and inert background. Closing explicitly restores focus to
 the directions button after React removes the dialog. Escape, Cancel and backdrop
 click close it. Text is available in Persian and Arabic.
 
-Embedded maps load near the viewport, show a translated fallback if the map key
-or SDK is unavailable, and keep the directions button usable. Failed maps release
-their WebGL resources and can recover when their destination changes. The map
-container stays mounted and sized during recovery so a cached SDK cannot race
-React's rendering of the replacement destination.
+Embedded maps load near the viewport and mark the admin-selected article location
+or the saved restaurant location on About Us. Neshan is used when its web key and
+SDK are available. Without a key, or if the Neshan CDN, WebGL initialization or map
+loading fails, an OpenStreetMap iframe displays the same destination. This fallback
+needs no API key or WebGL, preserves the saved coordinates, and has a translated
+title. Viewing a saved location does not request the visitor's GPS position.
+
+The directions button remains below the map and stays usable independently of the
+map provider. Failed Neshan maps release their WebGL resources and can recover when
+their destination changes. The map container stays mounted and sized during recovery
+so a cached SDK cannot race React's rendering of the replacement destination.
 
 ## Position and routing
 
@@ -92,8 +98,9 @@ Automated article tests cover chooser selection, persisted/default/one-off/reset
 behavior, corrupted or blocked storage, explicit web routes, Android intent and
 web fallback coordinates, iOS schemes, user-gesture-only launch, GPS errors and
 deadlines, retries, stale callbacks, cancellation, destination changes and cleanup.
-The article rendering and map tests cover lazy loading, failure messages, stalled
-loads, recovery after destination changes, translated labels and resource cleanup.
+The article, About and map tests cover embedded fallback maps without a key,
+preserved marker coordinates, lazy loading, stalled loads, recovery after destination
+changes, translated labels and resource cleanup.
 
 Actual native launch and Neshan's start-navigation button require device testing:
 
