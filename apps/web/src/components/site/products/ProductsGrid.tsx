@@ -36,11 +36,8 @@ export const ProductsGrid = memo(function ProductsGrid({
 
 	return (
 		<div className="flex-1">
-			{/* stage-55 — ورود پلکانی کارت‌ها (grid-anim — CSS-only)
-          stage-101 — pl-8: ناودانِ بج «ویژه» — بج نیم‌خارجِ گوشه‌ی چپ-بالای
-          کارت است؛ این پدینگ تضمین می‌کند بجِ کارتِ ستونِ آخر (چپ) از لبه‌ی
-          دید بریده نشود (container px-4/6/8 + pl-8 ≥ نصفِ عرضِ بج در همه‌ی سایزها) */}
-			<div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 grid-anim pl-8">
+			{/* Reserve space around the grid for the featured badges' small overhang. */}
+			<div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 grid-anim p-2">
 				{products.map((product) => (
 					<ProductCard key={product.id} product={product} />
 				))}

@@ -57,6 +57,8 @@ mock.module('@tanstack/react-query', () => ({ useQuery: (options: { queryKey: re
 } }))
 mock.module('#/utils/queryOptions', () => ({
 	adminCategoriesOptions: { queryKey: qk.categories }, packagingItemsOptions: { queryKey: qk.packagingItems },
+	settingsFeaturedAnimationOptions: { queryKey: qk.settingsFeaturedAnimation },
+	featuredAnimationOptions: { queryKey: qk.featuredAnimation },
 	productByIdOptions: (id: string) => ({ queryKey: qk.productById(id) }),
 	productReviewsOptions: (id: string) => ({ queryKey: qk.productReviews(id) }),
 }))
@@ -180,6 +182,30 @@ find(deletedForm, node => node.type === 'button' && node.props['aria-pressed'] =
 deletedForm = render(deletedHost, ProductForm, deletedProps)
 assert.equal(find(deletedForm, node => node.props.name === 'packagingCost').props.disabled, false, 'a deleted packaging selection can be removed without losing the draft')
 
+const featuredHost = instance()
+const featuredSubmissions: any[] = []
+const featuredProps = { ...props(), onSubmit: (data: unknown) => featuredSubmissions.push(data),
+	initialData: product({ sizesEnabled: false, isFeatured: true, featuredAnimation: null }) }
+queryData.set(JSON.stringify(qk.settingsFeaturedAnimation), 'sonar')
+render(featuredHost, ProductForm, featuredProps)
+let featuredForm = render(featuredHost, ProductForm, featuredProps)
+const animationRadio = (value: string) => find(featuredForm,
+	node => node.props.name === 'product-featured-animation' && node.props.value === value)
+assert.equal(animationRadio('inherit').props.checked, true)
+assert.equal(animationRadio('sonar').props.checked, false,
+	'inheritance and an explicit choice matching the global default remain distinct')
+animationRadio('sonar').props.onChange()
+featuredForm = render(featuredHost, ProductForm, featuredProps)
+find(featuredForm, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+assert.equal(featuredSubmissions.at(-1).featuredAnimation, 'sonar', 'the current global animation can be pinned explicitly')
+animationRadio('inherit').props.onChange()
+featuredForm = render(featuredHost, ProductForm, featuredProps)
+find(featuredForm, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+assert.equal(featuredSubmissions.at(-1).featuredAnimation, null, 'an explicit animation can be reset to global inheritance')
+const restrictedForm = render(instance(), ProductForm, { ...featuredProps, canToggleFeatured: false })
+assert(!nodes(restrictedForm).some(node => node.props.name === 'product-featured-animation'),
+	'admin2 cannot choose a featured animation')
+
 const client = new QueryClient()
 const derivedKeys = [qk.adminProducts({ page: 1, limit: 10, search: '', status: '', categoryId: '' }),
 	qk.adminProductDetails('a'), qk.adminProductDetails('b'), qk.productsByMain('food'), qk.productById('a'),
@@ -194,4 +220,4 @@ await invalidateCategoryQueries(client)
 for (const key of [...derivedKeys, ...categoryKeys]) assert.equal(client.getQueryState(key)?.isInvalidated, true, `category mutation refreshes ${key[0]}`)
 assert.equal(client.getQueryState(['unrelated'])?.isInvalidated, false)
 client.clear()
-console.log('Product regressions passed: category locks, reactive detail data, removed sizes, inactive packaging removal, draft preservation, duplicate saves and dependent cache invalidation.')
+console.log('Product regressions passed: category locks, reactive detail data, removed sizes, inactive packaging removal, featured animation inheritance/overrides, draft preservation, duplicate saves and dependent cache invalidation.')

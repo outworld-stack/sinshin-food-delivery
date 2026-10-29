@@ -204,12 +204,14 @@ export const myNotificationsOptions = (userId: string | undefined) =>
 // stage-100 — بج اعلان‌های خوانده‌نشده در هدر: اندپوینت سبکِ unread-count
 // (بدون لیست ۳۰تایی). هدر روی همه‌ی صفحه‌هاست ⇒ staleTime ۳۰s + رفرشِ
 // مرور هر ۶۰s (نبض سبک)؛ خواندن در صفحه‌ی صندوق همان لحظه invalidate می‌کند.
-export const notificationsUnreadOptions = queryOptions({
-	queryKey: qk.notificationsUnread,
-	queryFn: () => getUnreadNotifications(),
-	staleTime: 30_000,
-	refetchInterval: 60_000,
-})
+export const notificationsUnreadOptions = (userId: string | undefined) =>
+	queryOptions({
+		queryKey: [...qk.notificationsUnread, userId],
+		queryFn: () => getUnreadNotifications(),
+		enabled: Boolean(userId),
+		staleTime: 30_000,
+		refetchInterval: 60_000,
+	})
 
 // کار-۶: پروفایل سبک — برای لایه‌های همیشگی (هدر سایت/لایوت داشبورد/چک‌اوت).
 // همان DTO ولی بدون txs/devices/referrals؛ سفارش‌ها = ۱۰ آخر + فعال‌ها.

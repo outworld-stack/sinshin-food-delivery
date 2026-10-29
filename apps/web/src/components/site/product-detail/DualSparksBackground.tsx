@@ -82,6 +82,7 @@ export const DualSparks: FC<DualSparksProps> = ({
 	const containerWidthRef = useRef<number>(0)
 	const containerHeightRef = useRef<number>(0)
 	const animationIdRef = useRef<number>(0)
+	const redrawRef = useRef<() => void>(() => {})
 
 	const isDarkMode = useCallback(() => {
 		if (forceDarkMode !== undefined) return forceDarkMode
@@ -134,10 +135,21 @@ export const DualSparks: FC<DualSparksProps> = ({
 		let resizeTimeout: ReturnType<typeof setTimeout> | undefined
 
 		const resizeCanvas = () => {
-			const { width, height } = parent.getBoundingClientRect()
-			if (canvas.width !== width || canvas.height !== height) {
-				canvas.width = width
-				canvas.height = height
+			const rect = parent.getBoundingClientRect()
+			const width = Math.max(1, Math.round(rect.width))
+			const height = Math.max(1, Math.round(rect.height))
+			const dpr = Math.min(window.devicePixelRatio || 1, 2)
+			const pixelWidth = Math.round(width * dpr)
+			const pixelHeight = Math.round(height * dpr)
+			if (
+				canvas.width !== pixelWidth ||
+				canvas.height !== pixelHeight ||
+				containerWidthRef.current !== width ||
+				containerHeightRef.current !== height
+			) {
+				canvas.width = pixelWidth
+				canvas.height = pixelHeight
+				canvas.getContext('2d')?.setTransform(dpr, 0, 0, dpr, 0, 0)
 				containerWidthRef.current = width
 				containerHeightRef.current = height
 
@@ -145,6 +157,7 @@ export const DualSparks: FC<DualSparksProps> = ({
 				waveIdRef.current = 0
 				lastWaveTimeRef.current = 0
 				lastInwardWaveTimeRef.current = 700
+				redrawRef.current()
 			}
 		}
 
@@ -172,16 +185,28 @@ export const DualSparks: FC<DualSparksProps> = ({
 		if (!canvas) return
 		const ctx = canvas.getContext('2d', { alpha: true })
 		if (!ctx) return
+		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 
 		const animate = (timestamp: number) => {
+			animationIdRef.current = 0
+			if (document.hidden || reducedMotion.matches) return
+			const width = containerWidthRef.current
+			const height = containerHeightRef.current
 			if (clearBackground) {
 				ctx.fillStyle = getBackgroundColor()
-				ctx.fillRect(0, 0, canvas.width, canvas.height)
+				ctx.fillRect(0, 0, width, height)
 			} else {
-				ctx.clearRect(0, 0, canvas.width, canvas.height)
+				ctx.clearRect(0, 0, width, height)
 			}
 
 			const currentSparkColor = getSparkColor()
+			const dark = isDarkMode()
+			const shadowBlur = dark ? 15 : 8
+			const maxScreenRadius = Math.hypot(width, height) / 2 + 100
+			ctx.shadowColor = currentSparkColor
+			ctx.strokeStyle = currentSparkColor
+			ctx.lineWidth = dark ? 2.5 : 2
+			ctx.lineCap = 'round'
 
 			if (timestamp - lastWaveTimeRef.current >= waveInterval) {
 				const currentWaveId = waveIdRef.current++
@@ -232,13 +257,6 @@ export const DualSparks: FC<DualSparksProps> = ({
 				timestamp - lastInwardWaveTimeRef.current >= waveInterval
 			) {
 				const currentWaveId = waveIdRef.current++
-				const maxScreenRadius =
-					Math.sqrt(
-						containerWidthRef.current * containerWidthRef.current +
-							containerHeightRef.current * containerHeightRef.current,
-					) /
-						2 +
-					100
 
 				for (let ringIndex = 0; ringIndex < ringsPerWave; ringIndex++) {
 					const ringDelay = ringIndex * 150
@@ -297,13 +315,6 @@ export const DualSparks: FC<DualSparksProps> = ({
 					const expansionDistance = eased * maxRadius
 					currentRadius = spark.radius + expansionDistance
 				} else {
-					const maxScreenRadius =
-						Math.sqrt(
-							containerWidthRef.current * containerWidthRef.current +
-								containerHeightRef.current * containerHeightRef.current,
-						) /
-							2 +
-						100
 					const contractionDistance = eased * maxScreenRadius
 					currentRadius = spark.radius - contractionDistance
 
@@ -326,15 +337,19 @@ export const DualSparks: FC<DualSparksProps> = ({
 				const x2 = x1 + lineLength * Math.cos(lineAngle)
 				const y2 = y1 + lineLength * Math.sin(lineAngle)
 
-				const shadowBlur = isDarkMode() ? 15 : 8
-				const lineWidth = isDarkMode() ? 2.5 : 2
+				// Keep off-screen particles alive for inward waves, but skip costly
+				// shadow strokes until the segment or its glow reaches the canvas.
+				const padding = shadowBlur * 2 + sparkSize
+				if (
+					Math.max(x1, x2) < -padding ||
+					Math.min(x1, x2) > width + padding ||
+					Math.max(y1, y2) < -padding ||
+					Math.min(y1, y2) > height + padding
+				)
+					return true
 
 				ctx.shadowBlur = shadowBlur
-				ctx.shadowColor = currentSparkColor
-				ctx.strokeStyle = currentSparkColor
 				ctx.globalAlpha = opacity
-				ctx.lineWidth = lineWidth
-				ctx.lineCap = 'round'
 				ctx.beginPath()
 				ctx.moveTo(x1, y1)
 				ctx.lineTo(x2, y2)
@@ -349,13 +364,40 @@ export const DualSparks: FC<DualSparksProps> = ({
 			animationIdRef.current = requestAnimationFrame(animate)
 		}
 
-		animationIdRef.current = requestAnimationFrame(animate)
+		const updateAnimation = () => {
+			cancelAnimationFrame(animationIdRef.current)
+			animationIdRef.current = 0
+			if (document.hidden) return
+			if (reducedMotion.matches) {
+				sparksRef.current = []
+				ctx.clearRect(
+					0,
+					0,
+					containerWidthRef.current,
+					containerHeightRef.current,
+				)
+				ctx.fillStyle = getBackgroundColor()
+				ctx.fillRect(
+					0,
+					0,
+					containerWidthRef.current,
+					containerHeightRef.current,
+				)
+				return
+			}
+			animationIdRef.current = requestAnimationFrame(animate)
+		}
+		redrawRef.current = updateAnimation
+		document.addEventListener('visibilitychange', updateAnimation)
+		reducedMotion.addEventListener('change', updateAnimation)
+		updateAnimation()
 
 		const observer = new MutationObserver(() => {
 			sparksRef.current = []
 			waveIdRef.current = 0
 			lastWaveTimeRef.current = 0
 			lastInwardWaveTimeRef.current = 700
+			updateAnimation()
 		})
 
 		if (typeof document !== 'undefined') {
@@ -367,6 +409,10 @@ export const DualSparks: FC<DualSparksProps> = ({
 
 		return () => {
 			cancelAnimationFrame(animationIdRef.current)
+			animationIdRef.current = 0
+			redrawRef.current = () => {}
+			document.removeEventListener('visibilitychange', updateAnimation)
+			reducedMotion.removeEventListener('change', updateAnimation)
 			observer.disconnect()
 		}
 	}, [

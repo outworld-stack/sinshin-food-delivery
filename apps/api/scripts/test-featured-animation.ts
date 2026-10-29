@@ -16,10 +16,12 @@ import { Database } from '../src/infra/db/client'
 import { AppError } from '../src/domain/shared/errors'
 import { MenuService } from '../src/domain/menu/menu.service'
 import { PackagingService } from '../src/domain/menu/packaging.service'
+import { SettingsService } from '../src/domain/settings/settings.service'
 import { adminMenuRoutes } from '../src/http/routes/admin-menu.routes'
+import { adminSettingsRoutes } from '../src/http/routes/admin-settings.routes'
 import { menuRoutes } from '../src/http/routes/menu.routes'
 import type { RedisService } from '../src/infra/redis/redis'
-import { categories, mainCategories, users } from '../src/infra/db/schema'
+import { categories, mainCategories, SETTING_KEYS, users } from '../src/infra/db/schema'
 
 const source = new URL(process.env.DATABASE_URL?.startsWith('postgres')
   ? process.env.DATABASE_URL : 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin')
@@ -57,23 +59,39 @@ try {
     hub: { publish: () => undefined } as never,
   })
   const packaging = new PackagingService({ db })
+  const settings = new SettingsService({ db })
   const [adminUser] = await db.insert(users).values({ phone: '09120000001', name: 'Main Admin' }).returning()
   const [main] = await db.insert(mainCategories).values({ name: 'Main', slug: 'main', isActive: true, isDefault: true }).returning()
   const [category] = await db.insert(categories).values({ mainCategoryId: main!.id, name: 'Food', slug: 'food' }).returning()
   assert.ok(adminUser && main && category, 'seed rows')
+  const sessions = { authenticate: async (token: string) => ({ user: { id: adminUser!.id, role: token === 'main' ? 'admin' : 'admin2' }, ctx: {} }) }
+  const admin2 = { permissionsOf: async () => ({ productsRead: true, productsWrite: true }) }
+  const auditEntries: { action: string; metadata: unknown }[] = []
+  const audit = { log: async (entry: { action: string; metadata: unknown }) => { auditEntries.push(entry) } }
 
   const app = new Elysia()
+    .onError(({ error, set }) => {
+      if (error instanceof AppError) { set.status = error.status; return error.toJSON() }
+    })
     .use(adminMenuRoutes({
       menu, packaging,
-      sessions: { authenticate: async (token: string) => ({ user: { id: adminUser!.id, role: token === 'main' ? 'admin' : 'admin2' }, ctx: {} }) } as never,
-      admin2: { permissionsOf: async () => ({ productsRead: true, productsWrite: true }) } as never,
-      audit: { log: async () => undefined } as never,
+      sessions: sessions as never,
+      admin2: admin2 as never,
+      audit: audit as never,
+    }))
+    .use(adminSettingsRoutes({
+      settings,
+      sessions: sessions as never,
+      admin2: admin2 as never,
+      audit: audit as never,
+      zones: {} as never,
+      permits: {} as never,
     }))
     .use(menuRoutes({
       menu,
       cart: { details: async () => ({ items: [] }) } as never,
       redis,
-      settings: { get: async () => 'sonar' } as never,
+      settings,
     }))
     .compile()
 
@@ -89,6 +107,55 @@ try {
     }))
   const publicReq = (path: string) =>
     app.handle(new Request(`http://localhost/menu${path}`))
+  const settingsReq = (token: string, method: string, body?: unknown) =>
+    app.handle(new Request('http://localhost/admin/settings/featured-animation', {
+      method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }))
+
+  const initialAnimation = await publicReq('/featured-animation')
+  assert.equal(initialAnimation.status, 200)
+  assert.deepEqual(await initialAnimation.json(), { animation: 'shader' })
+  assert.deepEqual(await (await settingsReq('main', 'GET')).json(), { animation: 'shader' })
+  const initialEtag = initialAnimation.headers.get('etag')
+  assert.ok(initialEtag)
+  assert.match(initialAnimation.headers.get('cache-control') ?? '', /max-age=30/)
+  const unchanged = await app.handle(new Request('http://localhost/menu/featured-animation', {
+    headers: { 'if-none-match': initialEtag },
+  }))
+  assert.equal(unchanged.status, 304)
+  assert.equal(await unchanged.text(), '')
+  passed('missing global animation defaults to shader with ETag/304 caching')
+
+  assert.equal((await settingsReq('main', 'POST', { animation: 'sonar' })).status, 200)
+  assert.deepEqual(await (await settingsReq('main', 'GET')).json(), { animation: 'sonar' })
+  assert.deepEqual(await new SettingsService({ db }).get(SETTING_KEYS.featuredAnimation, ''), 'sonar')
+  const changed = await app.handle(new Request('http://localhost/menu/featured-animation', {
+    headers: { 'if-none-match': initialEtag },
+  }))
+  assert.equal(changed.status, 200)
+  assert.notEqual(changed.headers.get('etag'), initialEtag)
+  assert.deepEqual(await changed.json(), { animation: 'sonar' })
+  assert.deepEqual(auditEntries.at(-1), {
+    actorId: adminUser.id,
+    action: 'FEATURED_ANIMATION_SET',
+    entity: 'settings',
+    metadata: { animation: 'sonar' },
+  })
+  passed('global animation writes persist, refresh public ETag and create an audit entry')
+
+  const auditCount = auditEntries.length
+  assert.equal((await settingsReq('second', 'GET')).status, 403)
+  assert.equal((await settingsReq('second', 'POST', { animation: 'sparks' })).status, 403)
+  assert.equal((await settingsReq('main', 'POST', { animation: 'neon' })).status, 422)
+  assert.equal(auditEntries.length, auditCount)
+  assert.deepEqual(await (await publicReq('/featured-animation')).json(), { animation: 'sonar' })
+  passed('admin2 and invalid global animation writes are rejected without changing settings')
+
+  await settings.set(SETTING_KEYS.featuredAnimation, { invalid: true })
+  assert.deepEqual(await (await publicReq('/featured-animation')).json(), { animation: 'shader' })
+  assert.deepEqual(await (await settingsReq('main', 'GET')).json(), { animation: 'shader' })
+  passed('invalid stored global animation safely defaults to shader')
 
   const base = (name: string) => ({
     name, description: '', originalPrice: 100_000, discountPercentage: 0,
@@ -140,7 +207,7 @@ try {
   // ── ۶) گارد ادمین۲: پرچم + انیمیشن هر دو از بدنه حذف می‌شوند ──
   //    (تغییر نام بی‌ربطِ ادمین۲ نباید انیمیشنِ ذخیره‌شده را بازنویسی کند)
   await adminReq('PATCH', `/products/${sonarId}`, { ...base('Featured Sonar'), isFeatured: true, featuredAnimation: 'sonar' })
-  res = await adminReqAs('second', 'PATCH', `/products/${sonarId}`, { ...base('Renamed By Admin2'), isFeatured: true, featuredAnimation: 'sparks' })
+  res = await adminReqAs('second', 'PATCH', `/products/${sonarId}`, { ...base('Renamed By Admin2'), isFeatured: false, featuredAnimation: 'sparks' })
   assert.equal(res.status, 200)
   assert.equal((await res.json() as { success: boolean }).success, true)
   pub = await (await publicReq(`/products/${sonarId}`)).json() as PubProduct
@@ -178,7 +245,13 @@ try {
   process.exitCode = 1
 } finally {
   globalThis.fetch = savedFetch
-  try { database?.close() } catch { /* noop */ }
-  await admin.unsafe(`drop database if exists "${scratch}"`)
-  await admin.close()
+  try {
+    await database?.close()
+  } finally {
+    try {
+      await admin.unsafe(`drop database if exists "${scratch}"`)
+    } finally {
+      await admin.close()
+    }
+  }
 }

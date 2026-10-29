@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Header } from '#/components/Header'
 import { ScrollToTop } from '#/components/ScrollToTop'
 import { Footer } from '#/components/Footer'
+import { CartPulseOrb } from '#/components/site/products/CartPulseOrb'
 import { activeMainCategoriesOptions } from '#/utils/queryOptions'
 
 // تب فعال از URL — امن برای همه صفحات
@@ -70,6 +71,9 @@ export const MainLayout = memo(function MainLayout() {
 
       <Footer />
       <ScrollToTop />
+      {(pathname === '/products' || pathname.startsWith('/products/')) && (
+        <CartPulseOrb raised={/^\/products\/[^/]+/.test(pathname)} />
+      )}
     </div>
   )
 })

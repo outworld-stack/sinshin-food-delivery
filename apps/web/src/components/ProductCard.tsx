@@ -174,7 +174,9 @@ export const ProductCard = memo(function ProductCard({
 	// کارفرما). داخل تصویر فقط بج تخفیف می‌ماند.
 	const showDiscountBadge = showDiscount && activePct > 0
 	const cornerBadges = showDiscountBadge ? (
-		<div className="absolute top-3 left-3 flex flex-col items-start gap-1.5">
+		<div
+			className={`absolute left-3 flex flex-col items-start gap-1.5 ${aurora ? 'top-6' : 'top-3'}`}
+		>
 			<span className="bg-white/90 dark:bg-[#1a0a0e]/90 backdrop-blur-sm text-primary dark:text-dark-primary text-xs font-DanaDemiBold px-3 py-1 rounded-full shadow-md animate-badge-in">
 				{tpl(t['common.discountBadge'], { n: fmt.num(activePct) })}
 			</span>
@@ -256,26 +258,17 @@ export const ProductCard = memo(function ProductCard({
 	)
 
 	return (
-		// stage-100 — پوششِ نسبی دور کارت: بج «ویژه» باید «نصف بیرون،
-		// نصف درون» کارت دیده شود؛ کارتِ خودش overflow-hidden دارد (برای
-		// قیچِ تصویر و پس‌زمینه‌ی Aurora) پس بج نمی‌تواند داخلش باشد.
-		// بالابرِ هاور (translate) روی همین پوشش است تا کارت و بج با هم
-		// بالا بروند؛ .grid-anim > * هم همین پوشش را می‌گیرد (پلکانی).
-		//
-		// stage-101 — بج از «نیم‌خارجِ عمودی» به «میانه‌ی دقیق گوشه‌ی
-		// چپ-بالا» منتقل شد (-translate-x/y-1/2 روی top-0 left-0):
-		// حالا افقی هم نصف بیرون و نصف درون است — منتهاالیه سمت
-		// چپِ بالای کارت. گریدِ محصولات هم pl-8 گرفت تا بجِ کارتِ
-		// ستونِ آخر (چپ) هرگز از لبه‌ی دید بریده نشود.
-		<div className="group relative transition-all duration-300 hover:-translate-y-1">
+		// A fixed 6px overhang fits inside the grid gaps, regardless of label width.
+		// Keep the badge outside the clipped image, within this card's stacking context.
+		<div className="group relative isolate flex min-w-0 flex-col transition-all duration-300 hover:-translate-y-1">
 			{aurora && (
-				<span className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 z-10 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-DanaDemiBold text-white bg-linear-to-l from-[#E54CFF] to-[#00C2FF] shadow-md animate-badge-in pointer-events-none">
+				<span className="absolute -top-1.5 -left-1.5 z-10 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs whitespace-nowrap font-DanaDemiBold text-white bg-linear-to-l from-[#E54CFF] to-[#00C2FF] shadow-md animate-badge-in pointer-events-none">
 					<Star size={11} />
 					{t['common.featuredBadge']}
 				</span>
 			)}
 			<div
-				className={`flex flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300${aurora ? ' aurora-card' : ''}`}
+				className={`flex flex-1 flex-col bg-white dark:bg-[#2a1015] rounded-2xl overflow-hidden border border-gray-300 dark:border-[#3a151c] shadow-sm hover:shadow-xl transition-all duration-300${aurora ? ' aurora-card' : ''}`}
 			>
 				{/* سئو-۸: <img> واقعی به‌جای تصویر پس‌زمینه — alt + lazy + دیده‌شدن در Google Images
       round-12 — interactive=false (پیش‌نمایش فرم محصول): بدون Link — لینک با
@@ -286,7 +279,7 @@ export const ProductCard = memo(function ProductCard({
 						to="/products/$productId"
 						// stage-56 — سئو: slug اگر باشد وگرنه UUID (همان ترجیح canonical/sitemap)
 						params={{ productId: product.slug || product.id }}
-						className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]"
+						className="relative block w-full shrink-0 aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]"
 					>
 						{product.profileImage ? (
 							<img
@@ -304,7 +297,7 @@ export const ProductCard = memo(function ProductCard({
 						{unavailableOverlay}
 					</Link>
 				) : (
-					<div className="relative block w-full aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]">
+					<div className="relative block w-full shrink-0 aspect-4/3 bg-gray-100 dark:bg-[#1a0a0e]">
 						{product.profileImage ? (
 							<img
 								src={product.profileImage}

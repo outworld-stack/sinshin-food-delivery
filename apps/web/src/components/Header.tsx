@@ -68,10 +68,9 @@ export const Header = memo(function Header() {
         // stage-100 — بج اعلان‌های خوانده‌نشده (فقط کاربر وارد‌شده): اندپوینت
         // سبک unread-count + staleTime ۳۰s + نبض ۶۰s؛ خواندن در صفحه‌ی صندوق
         // همان لحظه این کلید را invalidate می‌کند
-        const { data: notifBadge } = useQuery({
-                ...notificationsUnreadOptions,
-                enabled: isAuthenticated,
-        })
+        const { data: notifBadge } = useQuery(
+                notificationsUnreadOptions(isAuthenticated ? user?.id : undefined),
+        )
         const unreadCount = notifBadge?.unread ?? 0
 
         if (!hydrated) return <HeaderSkeleton />
@@ -89,7 +88,7 @@ export const Header = memo(function Header() {
                         <div className="container mx-auto px-3 sm:px-6 lg:px-8">
                                 {/* stage-49 — گپ ردیف در md..lg فشرده‌تر تا برند حالت اصلی خودش را
                                     حفظ کند (بازخورد ۵: به خودِ برند دست نزدیم) */}
-                                <div className="flex h-16 sm:h-20 items-center justify-between gap-2 md:gap-3 lg:gap-4">
+                                <div className="flex h-16 sm:h-20 items-center justify-between gap-2 md:gap-3 lg:gap-4 max-[360px]:h-auto max-[360px]:flex-wrap max-[360px]:gap-y-4 max-[360px]:py-4">
                                         {/* برند — stage-49: هرگز جمع/کشیده نمی‌شود (shrink-0 + بدون
                                             شکستن خط)؛ محدودیت فضا به ناوبری و گپ‌ها منتقل شد */}
                                         <div className="flex items-center shrink-0 whitespace-nowrap">
@@ -114,12 +113,9 @@ export const Header = memo(function Header() {
                                                 ))}
                                         </nav>
 
-                                        {/* stage-49 — گپ آیکن‌ها در md..lg فشرده‌تر (بازخورد ۵)
-                                            stage-100 — گپ موبایل بازهم فشرده‌تر (gap-0.5) تا دکمه‌ی
-                                            نوتیفیکیشن + بدترین‌حالتِ نقش‌ها (ادمین/ادمین۲ + سفارش
-                                            فعال) بدون سرریز در ۳۲۰/۳۶۰px جا شود (دروازهٔ مرورگر
-                                            ۳۲۰/۳۶۰/۳۹۰/…/۱۲۸۰ راستی‌آزمایی شد) */}
-                                        <div className="flex items-center justify-end gap-0.5 sm:gap-2.5 lg:gap-4 shrink-0">
+                                        {/* On the narrowest phones, actions get their own row so
+                                            admin controls and an active order cannot overflow. */}
+                                        <div className="flex items-center justify-end gap-0.5 sm:gap-2.5 lg:gap-4 shrink-0 max-[360px]:basis-full max-[360px]:justify-between">
                                                 <ThemeToggle />
 
                                                 {/* رارد ۳۲ — سوییچر زبان: جفت «فا/ع» در دسکتاپ، تک‌دکمه در موبایل (تصمیم ۳)
@@ -204,7 +200,7 @@ export const Header = memo(function Header() {
                                                 <Link
                                                         to="/cart"
                                                         aria-label={t['header.cart']}
-                                                        className="relative flex items-center gap-1.5 sm:gap-2 px-2 py-1.5 sm:px-5 sm:py-2.5 text-sm rounded-lg bg-gray-100 dark:bg-[#2a1015] text-primary dark:text-dark-primary hover:bg-gray-200 dark:hover:bg-[#3a151c] transition font-DanaMedium shadow-sm border border-gray-200 dark:border-white/10"
+                                                        className="relative flex items-center gap-1.5 sm:gap-2 px-2 py-1.5 sm:px-2.5 lg:px-5 sm:py-2.5 text-sm rounded-lg bg-gray-100 dark:bg-[#2a1015] text-primary dark:text-dark-primary hover:bg-gray-200 dark:hover:bg-[#3a151c] transition font-DanaMedium shadow-sm border border-gray-200 dark:border-white/10"
                                                 >
                                                         <Cart size={22} className="h-4.5 w-4.5 sm:h-5.5 sm:w-5.5" />
                                                         {totalItems > 0 && (
@@ -222,7 +218,7 @@ export const Header = memo(function Header() {
                                                         aria-label={
                                                                 isAuthenticated ? t['header.profile'] : t['header.auth']
                                                         }
-                                                        className="flex items-center gap-2 p-1.5 sm:px-5 sm:py-2.5 text-sm rounded-xl bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition font-DanaMedium shadow-sm"
+                                                        className="flex items-center gap-2 p-1.5 sm:px-2.5 lg:px-5 sm:py-2.5 text-sm rounded-xl bg-primary dark:bg-dark-primary text-white hover:opacity-90 transition font-DanaMedium shadow-sm"
                                                 >
                                                         <User size={20} className={ico} />
                                                         <span className="hidden lg:inline">

@@ -55,7 +55,11 @@ export const FeaturedAnimationCard = memo(function FeaturedAnimationCard({
 }: FeaturedAnimationCardProps) {
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
-	const { data: animation } = useQuery({
+	const {
+		data: animation,
+		isError,
+		refetch,
+	} = useQuery({
 		...settingsFeaturedAnimationOptions,
 		enabled: visible,
 	})
@@ -65,13 +69,18 @@ export const FeaturedAnimationCard = memo(function FeaturedAnimationCard({
 			setFeaturedAnimation({ data: { animation: next } }),
 		onSuccess: async (_data, next) => {
 			await Promise.all([
-				queryClient.invalidateQueries({
+				queryClient.cancelQueries({
 					queryKey: qk.settingsFeaturedAnimation,
 				}),
-				// خواندنِ عمومیِ صفحه‌ی محصول هم همان لحظه تازه شود (ادمین بعد از
-				// ذخیره معمولاً خودش صفحه را باز می‌کند — نبض ETag منو هم هست)
-				queryClient.invalidateQueries({ queryKey: qk.featuredAnimation }),
+				queryClient.cancelQueries({ queryKey: qk.featuredAnimation }),
 			])
+			// Public HTTP caches may still contain the previous setting. Reflect
+			// the acknowledged write directly before revalidating the admin query.
+			queryClient.setQueryData(qk.settingsFeaturedAnimation, next)
+			queryClient.setQueryData(qk.featuredAnimation, next)
+			await queryClient.invalidateQueries({
+				queryKey: qk.settingsFeaturedAnimation,
+			})
 			const chosen = OPTIONS.find((o) => o.key === next)
 			showToast(
 				chosen
@@ -113,7 +122,7 @@ export const FeaturedAnimationCard = memo(function FeaturedAnimationCard({
 			>
 				{OPTIONS.map(({ key, label, hint, icon: Icon }) => {
 					const active = key === current
-					const pending = active && mutation.isPending
+					const pending = key === mutation.variables && mutation.isPending
 					const rowDisabled = loading || mutation.isPending
 					return (
 						<label
@@ -146,7 +155,7 @@ export const FeaturedAnimationCard = memo(function FeaturedAnimationCard({
 							<span className="min-w-0 flex-1">
 								<span className="block font-DanaDemiBold text-sm text-gray-800 dark:text-white">
 									{label}
-									{active && (
+									{(active || pending) && (
 										<span className="mr-2 text-[10px] font-DanaMedium text-primary dark:text-dark-primary">
 											{pending ? 'در حال ذخیره…' : 'فعال'}
 										</span>
@@ -167,6 +176,18 @@ export const FeaturedAnimationCard = memo(function FeaturedAnimationCard({
 					)
 				})}
 			</div>
+			{isError && animation === undefined && (
+				<p className="mt-3 text-xs text-red-500" role="alert">
+					دریافت تنظیم انیمیشن ناموفق بود.
+					<button
+						type="button"
+						onClick={() => void refetch()}
+						className="mr-2 underline cursor-pointer"
+					>
+						تلاش مجدد
+					</button>
+				</p>
+			)}
 			<p className="mt-3 text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
 				توجه: انیمیشن فقط روی صفحه‌ی محصولاتی که «ویژه» علامت خورده‌اند نمایش داده
 				می‌شود؛ بقیه‌ی صفحات تغییری نمی‌کنند. برای انیمیشنِ اختصاصیِ یک محصول خاص، در

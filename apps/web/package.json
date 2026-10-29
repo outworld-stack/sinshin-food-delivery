@@ -38,7 +38,7 @@
     "test:referral-client": "bun scripts/test-referral-client.ts",
     "test:wallet-client": "bun scripts/test-wallet-client.tsx",
     "test:order-money-cache": "bun scripts/test-order-money-cache.ts",
-    "test:products": "bun scripts/test-products-client.tsx && bun scripts/test-admin-products-client.tsx",
+    "test:products": "bun scripts/test-products-client.tsx && bun scripts/test-admin-products-client.tsx && bun scripts/test-cart-orb.tsx && bun scripts/test-featured-animation-client.tsx && bun scripts/test-featured-backgrounds.tsx",
     "test:articles": "bun scripts/test-articles-client.tsx && bun scripts/test-articles-api-client.ts && bun scripts/test-articles-admin.tsx && bun scripts/test-article-rendering.tsx && bun scripts/test-article-route.tsx"
   },
   "dependencies": {

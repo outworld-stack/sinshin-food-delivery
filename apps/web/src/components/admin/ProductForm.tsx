@@ -58,8 +58,8 @@ import {
 } from '#/utils/persianDate'
 import {
 	adminCategoriesOptions,
-	featuredAnimationOptions,
 	packagingItemsOptions,
+	settingsFeaturedAnimationOptions,
 } from '#/utils/queryOptions'
 
 /** stage-101 — انیمیشن اختصاصی محصول: مقدار معتبر | NULL (ارث از سراسری) */
@@ -71,11 +71,17 @@ function toFeaturedAnimation(
 
 /** stage-101 — گزینه‌های انیمیشن اختصاصی (همان سه‌گانه‌ی کارت تنظیمات) */
 const FEATURED_ANIMATION_OPTIONS: {
-	key: FeaturedAnimation
+	key: FeaturedAnimation | null
 	label: string
 	hint: string
 	icon: typeof Star
 }[] = [
+	{
+		key: null,
+		label: 'پیش‌فرض سراسری',
+		hint: 'از انتخاب تنظیمات سایت پیروی می‌کند و با تغییر آن به‌روز می‌شود',
+		icon: Star,
+	},
 	{
 		key: 'shader',
 		label: 'شیدر موج‌دار',
@@ -355,9 +361,9 @@ export function ProductForm({
 	const { data: packagingItems } = useQuery(packagingItemsOptions)
 	// stage-101 — انیمیشن سراسریِ محصول ویژه (کارت تنظیمات): فقط برای
 	// پیش‌انتخابِ رادیو وقتی محصول انیمیشن اختصاصی ندارد (null = ارث).
-	// کوئری عمومیِ سبکِ کش‌شده — فقط برای ادمین اصلی معنا دارد.
+	// Read the fresh admin setting so HTTP caching cannot show an older default.
 	const { data: globalFeaturedAnimation } = useQuery({
-		...featuredAnimationOptions,
+		...settingsFeaturedAnimationOptions,
 		enabled: canToggleFeatured,
 	})
 	/** stage-84 — انتخاب/حذف قلم بسته‌بندی (سقف ۱۲ — قرارداد سرور) */
@@ -1105,11 +1111,8 @@ export function ProductForm({
 						</div>
 					) : null}
 
-					{/* stage-101 — باکس انتخاب انیمیشنِ اختصاصیِ همین محصولِ ویژه:
-                                        با روشن‌شدنِ سوئیچ بالا باز می‌شود؛ انتخابِ ادمین فقط برای همین
-                                        محصول ذخیره می‌شود (چند محصول ویژه = چند انیمیشن مستقل).
-                                        تا انتخابِ صریح، رادیوِ همانِ پیش‌فرضِ سراسری (کارت تنظیمات)
-                                        فعال نشان داده می‌شود و ذخیره = «ارث از سراسری» می‌ماند. */}
+					{/* Keep inheritance distinct from an explicit animation, including
+                        an override that matches the current global default. */}
 					{canToggleFeatured && formData.isFeatured ? (
 						<div className="p-3 rounded-lg border border-primary/30 bg-primary/[0.03] dark:border-dark-primary/30 dark:bg-dark-primary/[0.03] animate-pop-in">
 							<div className="flex items-center gap-2 mb-1">
@@ -1132,16 +1135,15 @@ export function ProductForm({
 							>
 								{FEATURED_ANIMATION_OPTIONS.map(
 									({ key, label, hint, icon: Icon }) => {
-										// انتخاب صریحِ ادمین؛ تا قبل از آن = ارث از سراسری
-										const inherited = formData.featuredAnimation === null
-										const current =
-											formData.featuredAnimation ??
-											globalFeaturedAnimation ??
-											'shader'
-										const active = key === current
+										const inherited = key === null
+										const active = key === formData.featuredAnimation
+										const globalLabel = FEATURED_ANIMATION_OPTIONS.find(
+											(option) =>
+												option.key === (globalFeaturedAnimation ?? 'shader'),
+										)?.label
 										return (
 											<label
-												key={key}
+												key={key ?? 'inherit'}
 												className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-right transition border focus-within:ring-2 focus-within:ring-primary/30 dark:focus-within:ring-dark-primary/30 ${
 													active
 														? 'bg-primary/5 dark:bg-dark-primary/5 border-primary dark:border-dark-primary shadow-sm'
@@ -1152,6 +1154,7 @@ export function ProductForm({
 												<input
 													type="radio"
 													name="product-featured-animation"
+													value={key ?? 'inherit'}
 													checked={active}
 													onChange={() =>
 														setFormData((prev) => ({
@@ -1172,7 +1175,7 @@ export function ProductForm({
 												</span>
 												<span className="min-w-0 flex-1">
 													<span className="block text-xs font-DanaDemiBold text-gray-800 dark:text-white">
-														{label}
+														{inherited ? `${label} (${globalLabel})` : label}
 														{active && (
 															<span className="mr-2 text-[10px] font-DanaMedium text-primary dark:text-dark-primary">
 																{inherited ? 'پیش‌فرض سراسری' : 'انتخاب شما'}
