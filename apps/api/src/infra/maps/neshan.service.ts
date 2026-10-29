@@ -16,8 +16,8 @@
  *  • تبدیل نقطه به آدرس — GET /v5/reverse
  *
  * ضد-کرش:
- *  • هر متد در صورت هر خطایی «null» برمی‌گرداند — کالر به مسیر
- *    جایگزین (هیورساین / خط مستقیم) برمی‌گردد؛ سایت هرگز به نشان وابسته نیست.
+ *  • خطاهای سرویس null برمی‌گردانند؛ قیمت‌گذاری ارسال از هزینه پیش‌فرض
+ *    تنظیمات استفاده می‌کند و نمایش نقشه می‌تواند مسیر جایگزین داشته باشد.
  *  • کش حافظه‌ای TTL-دار (پیش‌فرض ۵ دقیقه) — صرفه‌جویی در سهمیه‌ی API.
  *  • سقف‌های ورودی (تعداد نقاط ماتریس) قبل از فراخوانی.
  */
@@ -123,7 +123,7 @@ export class NeshanService {
 
   /** Coalesce identical requests before spending provider quota. Invalid provider
    * payloads must fail as softly as transport errors, and failures remain retryable. */
-  private async cached<T>(key: string, load: () => Promise<T | null>): Promise<T | null> {
+  private async cached<T>(key: string, load: () => Promise<T | null>, cacheable: (value: T) => boolean = () => true): Promise<T | null> {
     const hit = this.cacheGet<T>(key)
     if (hit !== null) return hit
     const pending = this.inFlight.get(key)
@@ -131,7 +131,7 @@ export class NeshanService {
     const task = (async () => {
       try {
         const value = await load()
-        if (value !== null) this.cacheSet(key, value)
+        if (value !== null && cacheable(value)) this.cacheSet(key, value)
         return value
       } catch {
         return null
@@ -257,6 +257,7 @@ export class NeshanService {
       cleanDests.map((p) => `${this.roundCoord(p.lat)},${this.roundCoord(p.lng)}`).join(';')
     return this.cached(key, async () => {
     interface RawMatrix {
+      status?: string
       rows?: Array<{
         elements?: Array<{
           status?: string
@@ -271,7 +272,7 @@ export class NeshanService {
       `&origins=${encodeURIComponent(cleanOrigins.map((p) => `${p.lat},${p.lng}`).join('|'))}` +
       `&destinations=${encodeURIComponent(cleanDests.map((p) => `${p.lat},${p.lng}`).join('|'))}`,
     )
-    if (!Array.isArray(raw?.rows) || raw.rows.length !== origins.length ||
+    if ((raw?.status !== undefined && raw.status !== 'Ok') || !Array.isArray(raw?.rows) || raw.rows.length !== origins.length ||
       raw.rows.some((row) => !Array.isArray(row?.elements) || row.elements.length !== destinations.length)) return null
 
     const matrix: NeshanMatrixElement[][] = raw.rows.map((row) =>
@@ -284,7 +285,7 @@ export class NeshanService {
       })),
     )
     return matrix
-    })
+    }, (matrix) => matrix.every((row) => row.every((el) => el.status !== 'UnknownError')))
   }
 
   /** فاصله‌ی هوایی هیورساین — fallback همیشه در دسترس (بدون API) */

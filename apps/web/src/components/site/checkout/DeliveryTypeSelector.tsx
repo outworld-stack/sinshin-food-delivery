@@ -15,6 +15,7 @@ import { useI18n, tpl } from '#/i18n'
 interface DeliveryTypeSelectorProps {
 	deliveryType: DeliveryType
 	deliveryFee: number
+	deliveryFeeMessage?: string | null
 	packagingFee: number
 	onChange: (t: DeliveryType) => void
 	/** stage-48 — حالت‌های مسدود (اسم محصول محدودکننده) */
@@ -26,6 +27,7 @@ interface DeliveryTypeSelectorProps {
 export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 	deliveryType,
 	deliveryFee,
+	deliveryFeeMessage,
 	packagingFee,
 	onChange,
 	blockedCourier = null,
@@ -66,7 +68,7 @@ export const DeliveryTypeSelector = memo(function DeliveryTypeSelector({
 						<p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
 							{blockedCourier
 								? tpl(t['checkout.modeBlockedHint'], { n: blockedCourier })
-								: tpl(t['checkout.courierFee'], {
+								: deliveryFeeMessage ?? tpl(t['checkout.courierFee'], {
 										n: `${fmt.price(deliveryFee)} ${t['common.toman']}`,
 									})}
 						</p>

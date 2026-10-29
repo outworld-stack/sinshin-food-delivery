@@ -11,6 +11,9 @@ interface OrderSummaryProps {
 	discount: number
 	walletDeduction: number
 	deliveryFee: number
+	deliveryFeeMessage?: string | null
+	deliveryDistanceKm?: number | null
+	onRetryDelivery?: () => void
 	packagingFee: number
 	total: number
 	amountPaidOnline: number
@@ -28,6 +31,9 @@ export const OrderSummary = memo(function OrderSummary({
 	discount,
 	walletDeduction,
 	deliveryFee,
+	deliveryFeeMessage = null,
+	deliveryDistanceKm = null,
+	onRetryDelivery,
 	packagingFee,
 	total,
 	amountPaidOnline,
@@ -41,8 +47,9 @@ export const OrderSummary = memo(function OrderSummary({
 	const { t, fmt } = useI18n()
 	// مبلغ نهایی = کل سفارش منهای سهم کیف پول (پرداختِ واقعیِ الان)
 	const finalAmount = total - walletDeduction
+	const deliveryUnquoted = deliveryType === 'DELIVERY' && deliveryFeeMessage !== null
 	const buttonText =
-		finalAmount === 0 ? t['checkout.submitFree'] : t['checkout.submitPay']
+		finalAmount === 0 && !deliveryUnquoted ? t['checkout.submitFree'] : t['checkout.submitPay']
 
 	return (
 		<div className="lg:col-span-1">
@@ -78,9 +85,14 @@ export const OrderSummary = memo(function OrderSummary({
 							)}
 							{/* stage-10: سه حالت تحویل — ارسال فقط برای پیک؛ بسته‌بندی برای پیک و بیرون‌بر */}
 							{deliveryType === 'DELIVERY' && (
-								<div className="flex justify-between font-DanaRegular text-gray-600 dark:text-gray-300">
-									<span>{t['checkout.deliveryFee']}</span>
-									<span>{fmt.price(deliveryFee)} {t['common.toman']}</span>
+								<div aria-live="polite" className="space-y-2 font-DanaRegular text-gray-600 dark:text-gray-300">
+									<div className="flex justify-between gap-3">
+										<span>{t['checkout.deliveryFee']}</span>
+										<span>{deliveryUnquoted ? '—' : `${fmt.price(deliveryFee)} ${t['common.toman']}`}</span>
+									</div>
+									{deliveryFeeMessage && <p className="text-xs leading-relaxed">{deliveryFeeMessage}</p>}
+									{deliveryDistanceKm !== null && <p className="text-xs">{tpl(t['checkout.deliveryDistance'], { n: fmt.num(Number(deliveryDistanceKm.toFixed(3))) })}</p>}
+									{onRetryDelivery && <button type="button" onClick={onRetryDelivery} className="text-sm text-primary dark:text-dark-primary underline cursor-pointer">{t['checkout.deliveryRetry']}</button>}
 								</div>
 							)}
 							{deliveryType !== 'DINE_IN' && packagingFee > 0 && (
@@ -102,11 +114,11 @@ export const OrderSummary = memo(function OrderSummary({
 								{t['checkout.finalTitle']}
 							</span>
 							<span className="font-MorabbaBold text-2xl text-primary dark:text-dark-primary">
-								{fmt.price(finalAmount)}
+								{deliveryUnquoted ? '—' : fmt.price(finalAmount)}
 							</span>
 						</div>
 
-						{walletDeduction > 0 ? (
+						{!deliveryUnquoted && (walletDeduction > 0 ? (
 							<div className="mb-4 text-sm text-gray-500 dark:text-gray-400 font-DanaMedium text-center bg-gray-50 dark:bg-[#1a0a0e] p-3 rounded-xl">
 								{fmt.price(walletDeduction)} {t['common.toman']} {t['checkout.fromWallet']}{' '}
 								<span className="font-DanaDemiBold text-gray-800 dark:text-white">
@@ -121,12 +133,12 @@ export const OrderSummary = memo(function OrderSummary({
 									{fmt.price(amountPaidOnline)} {t['common.toman']}
 								</span>
 							</div>
-						)}
+						))}
 
 						<button
 							type="button"
 							onClick={onSubmit}
-							disabled={isSubmitting || isSubmitBlocked}
+							disabled={isSubmitting || isSubmitBlocked || deliveryUnquoted}
 							className="block w-full py-4 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-lg hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 						>
 							{isSubmitting ? t['checkout.processing'] : buttonText}

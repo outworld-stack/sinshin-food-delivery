@@ -84,7 +84,10 @@ try {
       enabledGateways: async () => ({ mellat: false, zarinpal: true, sep: false }),
       isBusy: async () => false,
     } as never,
-    zones: { feeFor: async () => 10_000 } as never,
+    zones: {
+      feeFor: async () => 10_000,
+      quoteFor: async () => ({ status: 'ready', fee: 10_000, radiusKm: 2, distanceKm: 1 }),
+    } as never,
     notifications: { notifyUser: async () => undefined } as never,
   })
 

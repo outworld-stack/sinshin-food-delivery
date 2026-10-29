@@ -2,10 +2,12 @@
 import { asc, eq, sql } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
-import { deliveryZones } from '#/infra/db/schema'
+import { deliveryZones, SETTING_KEYS } from '#/infra/db/schema'
 import type { SettingsService } from '#/domain/settings/settings.service'
-import type { DeliveryZone } from '@sinshin/shared'
+import type { DeliveryQuote, DeliveryZone } from '@sinshin/shared'
 import { isUniqueViolation } from '#/domain/shared/pg'
+import { Err } from '#/domain/shared/errors'
+import type { LatLng, NeshanMatrixElement, NeshanService } from '#/infra/maps/neshan.service'
 
 /** فاصله‌ی هیورساین — کیلومتر (عین فرانت) */
 export function haversineKm(
@@ -26,14 +28,12 @@ export function haversineKm(
 // کپی‌های موازی لایه‌ی سرور فرانت و کامپوننت مدیر هم با همان منبع بسته شدند.
 
 /**
- * ناحیه‌های ارسال — منطق واحد نمایش و پرداخت (عین فرانت):
- *  - آدرس تهی → نرخ ناحیه‌ی داخلی (کوچک‌ترین)
- *  - بیرون از همه → نرخ ناحیه‌ی بیرونی (بزرگ‌ترین)
- *  - مبدأ: مختصات رستوران از settings
+ * Shared preview/payment pricing: Neshan road distance from the restaurant,
+ * using the first matching distance tier (or the outermost tier beyond it).
  */
 export class DeliveryZoneService {
   constructor(
-    private readonly deps: { db: Db; settings: SettingsService },
+    private readonly deps: { db: Db; settings: SettingsService; neshan: Pick<NeshanService, 'distanceMatrix'> },
   ) {}
 
   // رارد M9 — کش ۳۰ ثانیه‌ای: feeFor در هر چک‌اوت/پیش‌نمایش صدا می‌شود و
@@ -121,21 +121,73 @@ export class DeliveryZoneService {
     return { success: true }
   }
 
-  /** هزینه‌ی ارسال برای آدرس — منطق واحد */
-  async feeFor(address: { lat: number; lng: number } | null, db?: DbOrTx): Promise<number> {
+  async fallbackFee(db?: DbOrTx): Promise<number | null> {
+    // Read this monetary setting fresh, including across API processes, using
+    // the checkout transaction's connection when one is provided.
+    const saved = await this.deps.settings.get<unknown>(SETTING_KEYS.deliveryFallbackFee, null, db ?? this.deps.db)
+    if (typeof saved === 'number' && !validateFee(saved)) return saved
+    // Existing installations start with an already configured delivery price.
+    // Once explicitly saved (including zero), this amount is independent of tiers.
     const zones = await this.list(db)
-    if (zones.length === 0) return 0
-    if (!address) return zones[0]!.fee
-
-    const origin = await this.deps.settings.restaurantLocation(db)
-    const distance = haversineKm(origin, address)
-    const zone = zones.find((z) => distance <= z.radiusKm) ?? zones[zones.length - 1]!
-    return zone.fee
+    return zones.at(-1)?.fee ?? null
   }
+
+  async setFallbackFee(fee: number): Promise<{ success: boolean; message?: string }> {
+    const error = validateFee(fee)
+    if (error) return { success: false, message: error }
+    await this.deps.settings.set(SETTING_KEYS.deliveryFallbackFee, fee)
+    return { success: true }
+  }
+
+  private async fallbackQuote(db?: DbOrTx): Promise<DeliveryQuote> {
+    const fee = await this.fallbackFee(db)
+    return fee !== null
+      ? { status: 'fallback', fee }
+      : { status: 'unavailable', message: 'ناحیه‌های ارسال هنوز تنظیم نشده‌اند.' }
+  }
+
+  async quoteFor(address: LatLng | null, db?: DbOrTx): Promise<DeliveryQuote> {
+    if (!address) return { status: 'address_required', message: 'برای محاسبه هزینه ارسال، آدرس تحویل را انتخاب کنید.' }
+    if (!validCoordinate(address)) return { status: 'no_route', message: 'موقعیت آدرس معتبر نیست؛ آن را روی نقشه اصلاح کنید.' }
+    const zones = await this.list(db)
+    if (zones.length === 0) return { status: 'unavailable', message: 'ناحیه‌های ارسال هنوز تنظیم نشده‌اند.' }
+    const origin = await this.deps.settings.restaurantLocation(db)
+    const unavailable: DeliveryQuote = { status: 'unavailable', message: 'محاسبه هزینه ارسال موقتاً ممکن نیست؛ دوباره تلاش کنید.' }
+    if (!validCoordinate(origin)) return unavailable
+    // Successful routes use distance tiers; provider outages use the saved fee.
+    let route: NeshanMatrixElement | undefined
+    try {
+      const matrix = await this.deps.neshan.distanceMatrix([origin], [address], { type: 'car', traffic: false })
+      route = matrix?.[0]?.[0]
+    } catch {
+      return this.fallbackQuote(db)
+    }
+    if (route?.status === 'NoRoute') return { status: 'no_route', message: 'مسیری برای ارسال به این آدرس پیدا نشد؛ موقعیت آدرس را بررسی کنید.' }
+    if (route?.status !== 'Ok' || route.distanceMeters === null || !Number.isFinite(route.distanceMeters) || route.distanceMeters < 0) return this.fallbackQuote(db)
+    const distanceKm = route.distanceMeters / 1000
+    const zone = zones.find((z) => distanceKm <= z.radiusKm) ?? zones[zones.length - 1]!
+    return { status: 'ready', distanceKm, radiusKm: zone.radiusKm, fee: zone.fee }
+  }
+
+  /** Final checkout must have a valid server quote before charging. */
+  async feeFor(address: LatLng | null, db?: DbOrTx): Promise<number> {
+    const quote = await this.quoteFor(address, db)
+    if (quote.status === 'ready' || quote.status === 'fallback') return quote.fee
+    if (quote.status === 'unavailable') throw Err.serviceUnavailable(quote.message)
+    throw Err.validation(quote.message)
+  }
+}
+
+function validCoordinate(point: LatLng): boolean {
+  return Number.isFinite(point.lat) && Number.isFinite(point.lng) && Math.abs(point.lat) <= 90 && Math.abs(point.lng) <= 180
 }
 
 function validateZone(radiusKm: number, fee: number): string | null {
   if (!Number.isFinite(radiusKm) || radiusKm < 0.5 || radiusKm > 500) return 'شعاع باید بین ۰.۵ و ۵۰۰ کیلومتر باشد'
+  return validateFee(fee)
+}
+
+function validateFee(fee: number): string | null {
   if (!Number.isSafeInteger(fee) || fee < 0 || fee > 2_147_483_647) return 'هزینه معتبر نیست'
   return null
 }

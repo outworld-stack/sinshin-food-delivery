@@ -112,7 +112,10 @@ try {
       isBusy: async () => busy,
       enabledGateways: async () => ({ mellat: false, zarinpal: enabled, sep: false }),
     } as never,
-    zones: { feeFor: async () => 10_000 } as never,
+    zones: {
+      feeFor: async () => 10_000,
+      quoteFor: async () => ({ status: 'ready', fee: 10_000, radiusKm: 2, distanceKm: 1 }),
+    } as never,
     notifications: { notifyUser: async () => undefined } as never,
   })
   const checkout: CheckoutInput = { items: [{ productId: pid, quantity: 2 }], deliveryType: 'PICKUP', useWallet: false, gatewayId: 'ZARINPAL' }

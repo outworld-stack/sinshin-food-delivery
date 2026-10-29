@@ -128,7 +128,9 @@ async function main(): Promise<void> {
   const db = database.db
 
   const settings = new SettingsService({ db, config })
-  const zones = new DeliveryZoneService({ db, settings })
+  const zones = new DeliveryZoneService({ db, settings, neshan: {
+    distanceMatrix: async () => [[{ status: 'Ok', distanceMeters: 1000, durationSeconds: 60 }]],
+  } })
   const coupons = new CouponService({ db })
   const notifications = new NotificationService({
     db,

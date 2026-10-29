@@ -150,7 +150,7 @@ const SettingsContent = memo(function SettingsContent() {
 			{/* بخش ۱ — تنظیمات عملیاتی: تک‌ستونه‌ی تمام‌عرض، زیر هم (stage-101) */}
 			<div className="space-y-6">
 				{/* ⬅ ناحیه‌های ارسال — مشترک بین ادمین اصلی و ادمین۲ */}
-				<DeliveryZonesManager />
+				<DeliveryZonesManager canManage={isMainAdmin} />
 
 				{/* stage-84 — باکس واحدِ «وضعیت رستوران»: ① باز/بسته دائم (ادمین اصلی)
               ② اعلام شلوغی (ادمین اصلی + canAnnounceBusy) ③ بسته موقت (موجود) */}

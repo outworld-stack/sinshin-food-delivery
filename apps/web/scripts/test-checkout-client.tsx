@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { CheckoutInput } from '@sinshin/shared'
+import type { CheckoutInput, DeliveryQuote } from '@sinshin/shared'
 
 const navigations: Array<{ to: string; params?: { orderId: string } }> = []
 const activeOrders: string[] = []
@@ -15,6 +15,11 @@ let mockPayment: () => Promise<{ paymentStatus: string; orderDisplayId: string }
 let onlineAmount = 100
 let pendingMutation: Promise<void> | null = null
 let navigationResult: Promise<void> = Promise.resolve()
+let deliveryQuote: DeliveryQuote | null = null
+let previewFetching = false
+let previewFailed = false
+let refetches = 0
+const previewAddresses: Array<string | null> = []
 
 mock.module('@tanstack/react-router', () => ({ useNavigate: () => (next: any) => { navigations.push(next); return navigationResult } }))
 mock.module('@tanstack/react-query', () => ({
@@ -22,13 +27,15 @@ mock.module('@tanstack/react-query', () => ({
   useQuery: (options: any) => {
     const code = options.previewArgs[4] as string | null
     previewCodes.push(code)
+    previewAddresses.push(options.previewArgs[2])
     return {
       data: {
         items: [{ name: 'Test food', available: true }],
-        breakdown: { foodTotal: 100, discount: 0, totalAmount: 100, amountPaidOnline: onlineAmount },
+        breakdown: { foodTotal: 100, discount: 0, totalAmount: 100, amountPaidOnline: onlineAmount, deliveryFee: deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback' ? deliveryQuote.fee : 0 },
         coupon: { valid: Boolean(code), discount: 5 },
+        deliveryQuote,
       },
-      isLoading: false, isFetching: false, isError: false, refetch: async () => {},
+      isLoading: false, isFetching: previewFetching, isError: previewFailed, refetch: async () => { refetches++ },
     }
   },
   useMutation: (options: any) => ({
@@ -43,8 +50,8 @@ mock.module('@tanstack/react-query', () => ({
 }))
 mock.module('#/hooks/shared/useMenuLive', () => ({ useMenuLive: () => {} }))
 mock.module('#/i18n', () => ({
-  useI18n: () => ({ t: new Proxy({}, { get: (_target, key) => String(key) }), fmt: { num: String }, apiError: (message: string) => message }),
-  tpl: (text: string) => text,
+  useI18n: () => ({ t: new Proxy({}, { get: (_target, key) => key === 'checkout.deliveryDistance' ? 'distance {n} km' : String(key) }), fmt: { num: String, price: String }, apiError: (message: string) => message }),
+  tpl: (text: string, values: Record<string, unknown> = {}) => text.replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? '')),
 }))
 mock.module('#/server/checkout', () => ({
   processCheckout: async (input: CheckoutInput, key: string) => {
@@ -70,14 +77,15 @@ type Page = ReturnType<typeof useCheckoutPage>
 
 // Render-phase updates exercise React's real reducer and preserve its refs;
 // no hook source extraction, reducer copies, browser APIs or live API calls.
-function renderCheckout(coupon?: string): Page {
+function renderCheckout(coupon?: string, delivery?: { addressId?: string }): Page {
   let page!: Page
   let step = 0
   function Probe() {
     page = useCheckoutPage({ items: [{ productId: 'product-1', sizeId: 'size-1', quantity: 1 }], isAuthenticated: true })
     if (step === 0) {
       step++
-      page.handleDeliveryTypeChange('PICKUP')
+      page.handleDeliveryTypeChange(delivery ? 'DELIVERY' : 'PICKUP')
+      if (delivery?.addressId) page.handleSelectAddress(delivery.addressId)
       page.handleGatewayChange('MOCK')
     } else if (step === 1 && coupon !== undefined) {
       step++
@@ -236,4 +244,78 @@ Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value:
 rememberPendingCheckout('new-order')
 assert(consumePendingCheckout('new-order'), 'memory must win over stale storage after a write failure')
 assert(!consumePendingCheckout('new-order'))
+
+deliveryQuote = { status: 'address_required', message: 'Select a delivery address' }
+const missingAddress = renderCheckout(undefined, {})
+assert(missingAddress.isSubmitBlocked)
+assert.equal(missingAddress.deliveryDistanceKm, null)
+assert.equal(missingAddress.canRetryDelivery, false)
+deliveryQuote = { status: 'ready', distanceKm: 5.001, radiusKm: 6, fee: 60_000 }
+const quoted = renderCheckout(undefined, { addressId: 'home' })
+assert.equal(quoted.isDeliveryQuoteReady, true)
+assert.equal(quoted.deliveryDistanceKm, 5.001)
+assert.equal(quoted.calc.deliveryFee, 60_000)
+assert.equal(quoted.deliveryFeeMessage, null)
+assert.equal(previewAddresses.at(-1), 'home')
+previewFetching = true
+const changingAddress = renderCheckout(undefined, { addressId: 'work' })
+assert.equal(previewAddresses.at(-1), 'work')
+assert(changingAddress.isSubmitBlocked, 'address changes wait for the new server quote')
+assert.equal(changingAddress.deliveryDistanceKm, null, 'stale distance is hidden while recalculating')
+assert.equal(changingAddress.deliveryFeeMessage, 'checkout.deliveryCalculating')
+previewFetching = false
+previewFailed = true
+const failedRefresh = renderCheckout(undefined, { addressId: 'work' })
+assert(failedRefresh.isSubmitBlocked)
+assert.equal(failedRefresh.deliveryDistanceKm, null)
+assert(failedRefresh.canRetryDelivery)
+previewFailed = false
+for (const status of ['unavailable', 'no_route'] as const) {
+  deliveryQuote = { status, message: `Shipping ${status}` }
+  const failed = renderCheckout(undefined, { addressId: 'work' })
+  assert(failed.isSubmitBlocked)
+  assert.equal(failed.deliveryFeeMessage, `Shipping ${status}`)
+  const before = checkoutRequests.length
+  failed.handleFinalSubmit()
+  assert.equal(checkoutRequests.length, before, 'an unquoted delivery cannot submit even through the handler')
+  await failed.refetchPreview()
+}
+assert.equal(refetches, 2)
+assert.equal(renderCheckout().isDeliveryQuoteReady, true, 'pickup remains available during a shipping outage')
+
+deliveryQuote = { status: 'fallback', fee: 35_000 }
+const fallbackPage = renderCheckout(undefined, { addressId: 'home' })
+assert.equal(fallbackPage.isSubmitBlocked, false, 'a server fallback quote allows payment')
+assert.equal(fallbackPage.isDeliveryQuoteReady, true)
+assert.equal(fallbackPage.calc.deliveryFee, 35_000)
+assert.equal(fallbackPage.deliveryDistanceKm, null, 'fallback has no invented distance')
+assert.equal(fallbackPage.deliveryFeeMessage, null)
+assert.equal(fallbackPage.canRetryDelivery, false)
+await submit(fallbackPage)
+assert.equal(checkoutRequests.at(-1)!.input.addressId, 'home')
+assert.equal('deliveryFee' in checkoutRequests.at(-1)!.input, false, 'client cannot supply the charge')
+
+const { OrderSummary } = await import('../src/components/site/checkout/OrderSummary')
+const summaryProps = {
+  subtotal: 100_000, discount: 0, walletDeduction: 0, deliveryFee: 60_000, packagingFee: 0,
+  total: 160_000, amountPaidOnline: 160_000, deliveryType: 'DELIVERY' as const,
+  isLoading: false, isSubmitBlocked: false, isSubmitting: false, onSubmit: () => {},
+  restaurantStatus: { isOpen: true, nextOpenTime: '', closeReason: null, isBusy: false },
+}
+const readySummary = renderToStaticMarkup(createElement(OrderSummary, { ...summaryProps, deliveryDistanceKm: 5.001 }))
+assert(readySummary.includes('60000'))
+assert(readySummary.includes('distance 5.001 km'))
+assert(readySummary.includes('160000'))
+const fallbackSummary = renderToStaticMarkup(createElement(OrderSummary, { ...summaryProps, deliveryFee: fallbackPage.calc.deliveryFee, total: 135_000, amountPaidOnline: 135_000, deliveryFeeMessage: fallbackPage.deliveryFeeMessage, deliveryDistanceKm: fallbackPage.deliveryDistanceKm, isSubmitBlocked: fallbackPage.isSubmitBlocked }))
+assert(fallbackSummary.includes('35000'))
+assert(fallbackSummary.includes('135000'))
+assert(!fallbackSummary.includes('disabled=""'))
+assert(!fallbackSummary.includes('distance '))
+const unavailableSummary = renderToStaticMarkup(createElement(OrderSummary, { ...summaryProps, deliveryFeeMessage: 'Shipping unavailable', onRetryDelivery: () => {} }))
+assert(unavailableSummary.includes('Shipping unavailable'))
+assert(unavailableSummary.includes('checkout.deliveryRetry'))
+assert(unavailableSummary.includes('disabled=""'))
+assert(!unavailableSummary.includes('60000'), 'previous shipping price is hidden')
+assert(!unavailableSummary.includes('160000'), 'incomplete total is not presented as a payable amount')
+console.log('PASS shipping selection/recalculation, failed-quote submit guard, retry, pickup and visible road-distance pricing')
 console.log('Checkout client regressions passed: denied/quota-limited storage, wallet/redirect/replay routing, retry idempotency and Persian/Arabic coupon digits.')

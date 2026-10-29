@@ -59,7 +59,9 @@ try {
   })
   const services = (database: Db) => {
     const settingService = new SettingsService({ db: database, config })
-    const zones = new DeliveryZoneService({ db: database, settings: settingService })
+    const zones = new DeliveryZoneService({ db: database, settings: settingService, neshan: {
+      distanceMatrix: async () => [[{ status: 'Ok', distanceMeters: 1000, durationSeconds: 60 }]],
+    } })
     const orderService = new OrderService({
       db: database, config, settings: settingService, zones, coupons: new CouponService({ db: database }),
       notifications: { notifyUser: async () => undefined } as never,

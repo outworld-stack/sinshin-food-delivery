@@ -683,9 +683,8 @@ export class OrderService {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
 
-                // phase-3: آدرس در پیش‌نمایش «اختیاری» — UI قبل از انتخاب آدرس هم عدد
-                // نشان می‌دهد (نرخ ناحیه‌ی بیرونی، مثل getCheckoutDetails فعلی).
-                // اعتبارسنجی واقعی همان‌جا می‌ماند که بود: ثبتِ نهایی (چک‌اوت).
+                // Address selection is optional during preview; delivery stays
+                // unquoted until the customer selects an owned address.
                 let addressRow: typeof addresses.$inferSelect | undefined;
                 if (input.deliveryType === "DELIVERY" && input.addressId) {
                         addressRow = (
@@ -846,12 +845,13 @@ export class OrderService {
                         ? Math.min(Math.max(0, balance), payableFood)
                         : 0;
 
-                const deliveryFee =
+                const deliveryQuote =
                         input.deliveryType === "DELIVERY"
-                                ? await this.deps.zones.feeFor(
+                                ? await this.deps.zones.quoteFor(
                                                 addressRow ? { lat: addressRow.lat, lng: addressRow.lng } : null,
                                         )
-                                : 0;
+                                : null;
+                const deliveryFee = deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback' ? deliveryQuote.fee : 0;
                 // stage-10: بسته‌بندیِ هر محصول — فقط سرو در محل صفر
                 const packagingFee = input.deliveryType === "DINE_IN" ? 0 : packagingTotal;
 
@@ -891,6 +891,7 @@ export class OrderService {
                         coupon,
                         gateways,
                         restaurantBusy: busy,
+                        deliveryQuote,
                 };
         }
 

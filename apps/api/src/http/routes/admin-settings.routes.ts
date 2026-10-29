@@ -39,6 +39,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       '/delivery-zones',
       async () => ({
         zones: await deps.zones.list(),
+        fallbackFee: await deps.zones.fallbackFee(),
         // round-13 — مبدأ واقعی محاسبه‌ی فاصله (env > تنظیمات > پیش‌فرض) برای نمایش در پنل
         origin: await deps.settings.restaurantLocation(),
       }),
@@ -126,6 +127,25 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
   // (دو نمونه‌ی جدا — .use وسط زنجیره به روت‌های بعدی نشت می‌کند)
   const ownerOnly = new Elysia({ prefix: '/admin/settings', tags: ['Admin / Settings'] })
     .use(requireAdmin(deps.sessions))
+
+    .post(
+      '/delivery-zones/fallback-fee',
+      async ({ body, user }) => {
+        const result = await deps.zones.setFallbackFee(body.fee)
+        if (!result.success) return result
+        await deps.audit.log({
+          actorId: user.id,
+          action: 'ZONE_FALLBACK_FEE_UPDATE',
+          entity: 'delivery-zone',
+          metadata: { fee: body.fee },
+        })
+        return result
+      },
+      {
+        body: t.Object({ fee: t.Integer({ minimum: 0, maximum: 2_147_483_647 }) }),
+        detail: { summary: 'Set delivery fee used during Neshan outages — main admin only' },
+      },
+    )
 
     .post(
       '/delivery-zones',

@@ -7,25 +7,27 @@
 //             می‌شوند و همه‌چیز داخل کارت می‌ماند.
 import { memo, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { addDeliveryZone, removeDeliveryZone, updateDeliveryZone } from '#/server/deliveryZones'
+import { addDeliveryZone, removeDeliveryZone, updateDeliveryZone, setDeliveryFallbackFee } from '#/server/deliveryZones'
 import { deliveryZonesOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Plus, Trash2, Pin, Pen, Check, X } from 'reicon-react'
 import { formatPrice, faNum } from '#/utils/format'
-import type { DeliveryZone } from '@sinshin/shared'
+import type { DeliveryZone, DeliveryZonesData } from '@sinshin/shared'
 
 // رارد ۴۶ — اینترفیس محلی DeliveryZone حذف شد؛ از قرارداد مشترک
 // (@sinshin/shared) می‌آید — همان دو فیلد قبلی، منبع واحد با بک‌اند.
 
-// ناحیه‌های ارسال — مشترک ادمین اصلی و ادمین۲ (هر دو می‌توانند مدیریت کنند)
-export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
+// Both admin roles can view zones; only the main admin can change prices.
+export const DeliveryZonesManager = memo(function DeliveryZonesManager({ canManage = false }: { canManage?: boolean }) {
   const queryClient = useQueryClient()
   const showToast = useToastStore((s) => s.showToast)
 
   const [radiusInput, setRadiusInput] = useState('')
   const [feeInput, setFeeInput] = useState('')
+  // Null follows server data; a draft survives background query refreshes.
+  const [fallbackInput, setFallbackInput] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   // round-13 — ردیف در حال ویرایش: شعاع فعلی (کلید) + مقادیر فرم
   const [editing, setEditing] = useState<{ radiusKm: number; radius: string; fee: string } | null>(null)
@@ -78,6 +80,18 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
     },
   })
 
+  const fallbackMut = useMutation({
+    mutationFn: (fee: number) => setDeliveryFallbackFee({ fee }),
+    onError: reportError,
+    onSuccess: (res, fee) => {
+      if (!res.success) { showToast(res.message ?? 'خطا', 'error'); return }
+      queryClient.setQueryData<DeliveryZonesData>(qk.deliveryZones, (previous) => previous ? { ...previous, fallbackFee: fee } : previous)
+      setFallbackInput(null)
+      invalidate()
+      showToast('هزینه پیش‌فرض ارسال ذخیره شد')
+    },
+  })
+
   const handleAdd = useCallback(() => {
     const radiusKm = Number(radiusInput)
     const fee = Number(feeInput)
@@ -104,6 +118,8 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
 
   const zones: DeliveryZone[] = data?.zones ?? []
   const origin = data?.origin
+  const isSaving = addMut.isPending || updateMut.isPending || removeMut.isPending || fallbackMut.isPending
+  const fallbackValue = fallbackInput ?? (data?.fallbackFee == null ? '' : String(data.fallbackFee))
 
   return (
     <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
@@ -112,8 +128,9 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
         ناحیه‌های ارسال
       </h2>
       <p className="text-xs text-gray-500 dark:text-gray-400 font-DanaMedium mb-4 leading-relaxed">
-        هزینه پیک بر اساس فاصله آدرس مشتری از رستوران محاسبه می‌شود — مشتری در ناحیه‌ی بزرگ‌تر، هزینه‌ی همان ناحیه را می‌پردازد.
-        آدرسی بیرون از همه‌ی ناحیه‌ها → نرخ ناحیه‌ی بیرونی. قبل از انتخاب آدرس → نرخ ناحیه‌ی داخلی.
+        هزینه پیک بر اساس مسافت مسیر از رستوران تا آدرس مشتری در سرویس ماتریس فاصله نشان محاسبه می‌شود.
+        نرخ اولین ناحیه‌ای که مسافت در آن جا می‌گیرد اعمال می‌شود؛ بیرون از همه ناحیه‌ها، نرخ آخرین ناحیه محاسبه می‌شود.
+        هزینه پس از انتخاب آدرس در صفحه پرداخت نمایش داده می‌شود. حداقل یک ناحیه باید باقی بماند.
       </p>
 
       {/* round-13 — مبدأ محاسبه‌ی فاصله (مختصات رستوران) */}
@@ -125,9 +142,6 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
             <span className="font-DanaDemiBold" dir="ltr">
               {origin.lat.toFixed(6)}, {origin.lng.toFixed(6)}
             </span>{' '}
-            — با متغیرهای محیطی <code dir="ltr">RESTAURANT_LAT</code> /{' '}
-            <code dir="ltr">RESTAURANT_LNG</code> در <code dir="ltr">apps/api/.env</code> قابل
-            تنظیم است (بعد از تغییر، API را ری‌استارت کنید).
           </p>
         </div>
       )}
@@ -141,13 +155,55 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
         </div>
       ) : (
         <>
+          <div className="mb-6 p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5">
+            <h3 className="font-DanaDemiBold text-sm text-gray-800 dark:text-white">هزینه پیش‌فرض ارسال</h3>
+            <p className="mt-2 mb-3 text-xs text-gray-500 dark:text-gray-400 font-DanaMedium leading-relaxed">
+              در صورت قطعی یا خطای سرویس نشان، این مبلغ برای ارسال اعمال می‌شود و پرداخت ادامه پیدا می‌کند.
+              تا پیش از ذخیره مبلغ دلخواه، نرخ آخرین ناحیه استفاده می‌شود.
+            </p>
+            {canManage ? (
+              <form onSubmit={(event) => {
+                event.preventDefault()
+                if (isSaving || isError || !data) return
+                const fee = Number(fallbackValue)
+                if (!fallbackValue.trim() || !Number.isSafeInteger(fee) || fee < 0 || fee > 2_147_483_647) {
+                  showToast('هزینه معتبر نیست', 'error')
+                  return
+                }
+                fallbackMut.mutate(fee)
+              }}>
+                <label htmlFor="delivery-fallback-fee" className="block mb-2 text-xs font-DanaMedium text-gray-600 dark:text-gray-300">هزینه پیش‌فرض (تومان)</label>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    id="delivery-fallback-fee"
+                    type="number"
+                    value={fallbackValue}
+                    onChange={(event) => setFallbackInput(event.target.value)}
+                    min="0"
+                    max="2147483647"
+                    step="1"
+                    required
+                    disabled={isSaving || isError || !data}
+                    className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none disabled:opacity-50"
+                  />
+                  <button type="submit" disabled={isSaving || isError || !data || !fallbackValue.trim()} className="px-6 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    {fallbackMut.isPending ? 'در حال ذخیره...' : 'ذخیره هزینه پیش‌فرض'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <p className="text-sm font-DanaDemiBold text-gray-700 dark:text-gray-200">
+                {data?.fallbackFee == null ? 'تعیین نشده' : `${formatPrice(data.fallbackFee)} تومان`}
+              </p>
+            )}
+          </div>
           {/* لیست ناحیه‌ها — مرتب روی شعاع */}
           <div className="space-y-3">
             {zones.map((z, i) => {
               const isEditing = editing?.radiusKm === z.radiusKm
               return (
                 <div key={z.radiusKm} className="flex items-center justify-between p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5">
-                  {isEditing ? (
+                  {canManage && isEditing ? (
                     /* round-13 — حالت ویرایش: شعاع + هزینه + تایید/انصراف */
                     <div className="w-full space-y-3">
                       <div className="flex flex-col sm:flex-row gap-3">
@@ -155,9 +211,11 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
                           type="number"
                           value={editing!.radius}
                           onChange={(e) => setEditing(prev => prev ? { ...prev, radius: e.target.value } : prev)}
-                          placeholder="شعاع (کیلومتر)"
+                          placeholder="حداکثر مسافت (کیلومتر)"
+                          aria-label="حداکثر مسافت مسیر (کیلومتر)"
                           min="0.5"
-                          step="0.5"
+                          max="500"
+                          step="any"
                           className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-primary text-sm outline-none"
                         />
                         <input
@@ -165,7 +223,10 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
                           value={editing!.fee}
                           onChange={(e) => setEditing(prev => prev ? { ...prev, fee: e.target.value } : prev)}
                           placeholder="هزینه (تومان)"
+                          aria-label="هزینه ارسال (تومان)"
                           min="0"
+                          max="2147483647"
+                          step="1"
                           className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-primary text-sm outline-none"
                         />
                       </div>
@@ -173,7 +234,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
                         <button
                           type="button"
                           onClick={handleSaveEdit}
-                          disabled={updateMut.isPending}
+                          disabled={isSaving}
                           className="flex-1 py-2 rounded-xl bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
                         >
                           <Check size={15} />
@@ -182,6 +243,7 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
                         <button
                           type="button"
                           onClick={handleCancelEdit}
+                          disabled={isSaving}
                           className="flex-1 py-2 rounded-xl bg-gray-100 dark:bg-[#2a1015] text-gray-600 dark:text-gray-300 text-sm font-DanaMedium hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer flex items-center justify-center gap-1.5"
                         >
                           <X size={15} />
@@ -211,24 +273,26 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
                           </span>
                         )}
                         {/* round-13 — ویرایش، کنار حذف */}
-                        <button
+                        {canManage && <button
                           type="button"
                           onClick={() => handleStartEdit(z)}
+                          disabled={isSaving}
                           className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
                           aria-label="ویرایش ناحیه"
-                          title="ویرایش شعاع و هزینه"
+                          title="ویرایش مسافت و هزینه"
                         >
                           <Pen size={16} />
-                        </button>
-                        <button
+                        </button>}
+                        {canManage && <button
                           type="button"
                           onClick={() => setConfirmDelete(z.radiusKm)}
+                          disabled={isSaving || zones.length <= 1}
                           className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer"
                           aria-label="حذف ناحیه"
-                          title="حذف ناحیه"
+                          title={zones.length <= 1 ? 'حداقل یک ناحیه باید باقی بماند' : 'حذف ناحیه'}
                         >
                           <Trash2 size={16} />
-                        </button>
+                        </button>}
                       </div>
                     </>
                   )}
@@ -241,39 +305,45 @@ export const DeliveryZonesManager = memo(function DeliveryZonesManager() {
           </div>
 
           {/* فرم افزودن — round-30: min-w-0 تا اینپوت‌ها زیر عرض ذاتی جمع شوند و دکمه داخل کادر بماند */}
-          <div className="mt-6 pt-4 border-t border-gray-100 dark:border-white/5 flex flex-col sm:flex-row gap-3">
+          {canManage && <div className="mt-6 pt-4 border-t border-gray-100 dark:border-white/5 flex flex-col sm:flex-row gap-3">
             <input
               type="number"
               value={radiusInput}
               onChange={(e) => setRadiusInput(e.target.value)}
-              placeholder="شعاع (کیلومتر) — مثلا 5"
+              placeholder="حداکثر مسافت (کیلومتر) — مثلا 5"
+              aria-label="حداکثر مسافت مسیر جدید (کیلومتر)"
               className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
               min="0.5"
-              step="0.5"
+              max="500"
+              step="any"
             />
             <input
               type="number"
               value={feeInput}
               onChange={(e) => setFeeInput(e.target.value)}
               placeholder="هزینه (تومان) — مثلا 35000"
+              aria-label="هزینه ارسال ناحیه جدید (تومان)"
               className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
               min="0"
+              max="2147483647"
+              step="1"
             />
             <button
               type="button"
               onClick={handleAdd}
-              disabled={addMut.isPending}
+              disabled={isSaving || isError}
               className="px-6 py-2.5 rounded-xl bg-primary dark:bg-dark-primary text-white text-sm font-DanaDemiBold hover:opacity-90 transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
             >
               <Plus size={16} />
               افزودن ناحیه
             </button>
-          </div>
+          </div>}
         </>
       )}
 
       <ConfirmModal
-        isOpen={confirmDelete !== null}
+        isOpen={canManage && confirmDelete !== null}
+        isPending={removeMut.isPending}
         title="حذف ناحیه"
         message={`آیا از حذف ناحیه تا ${faNum(confirmDelete ?? 0)} کیلومتر مطمئن هستید؟`}
         onConfirm={() => { if (confirmDelete !== null) removeMut.mutate(confirmDelete) }}

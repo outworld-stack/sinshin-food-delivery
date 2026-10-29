@@ -119,12 +119,12 @@ const settings = new SettingsService({ db, config }) // round-13 — config بر
 // round-28 — سبد: دسته‌ای از loadPricingBases مشترک؛ دیگر به menu نیاز ندارد
 const cart = new CartService({ db })
 const addresses = new AddressService({ db })
-const zones = new DeliveryZoneService({ db, settings })
 const coupons = new CouponService({ db })
 const termsService = new TermsService({ db })
 // فاز-۲ — نشان (کلید service فقط سمت سرور) + لاگ داکر (سوکت compose) +
 // نوتیفیکیشن (صندوق + پوش) — قبل از مصرف‌کننده‌ها (orders/reports/retention)
 const neshan = new NeshanService(config)
+const zones = new DeliveryZoneService({ db, settings, neshan })
 const dockerLogs = new DockerLogsService(config)
 const notifications = new NotificationService({ db, config, hub: sseHub })
 // stage-48 — منو: پخش نوتیفیکیشن تخفیف + SSE عمومی menu:live

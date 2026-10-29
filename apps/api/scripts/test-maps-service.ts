@@ -128,6 +128,21 @@ try {
   assert.equal(requests.at(-1)?.url.searchParams.get('type'), 'motorcycle')
   console.log('PASS matrix dimensions, zero distances and invalid/no-route elements preserve positions')
 
+  const retryableMatrix = service()
+  reply({ status: 'UnknownError', ...matrixPayload() })
+  assert.equal(await retryableMatrix.distanceMatrix([origin], [destination]), null, 'failed overall status cannot price a delivery')
+  reply({ status: 'Ok', rows: [{ elements: [{ status: 'UnknownError' }] }] })
+  assert.equal((await retryableMatrix.distanceMatrix([origin], [destination]))?.[0]?.[0]?.status, 'UnknownError')
+  reply({ status: 'Ok', ...matrixPayload() })
+  const recovered = await retryableMatrix.distanceMatrix([origin], [destination])
+  assert.equal(recovered?.[0]?.[0]?.distanceMeters, 100, 'transient element failures are not cached')
+  const matrixRequest = requests.at(-1)!
+  assert.equal(matrixRequest.url.pathname, '/v1/distance-matrix/no-traffic')
+  assert.equal(matrixRequest.url.searchParams.get('origins'), `${origin.lat},${origin.lng}`)
+  assert.equal(matrixRequest.url.searchParams.get('destinations'), `${destination.lat},${destination.lng}`)
+  assert.equal(new Headers(matrixRequest.init?.headers).get('Api-Key'), 'test-service-key')
+  console.log('PASS documented no-traffic matrix request format and immediate retry after transient route failures')
+
   for (const operation of [
     (maps: NeshanService) => maps.reverseGeocode(0, 0),
     (maps: NeshanService) => maps.routeNoTraffic(origin, destination),

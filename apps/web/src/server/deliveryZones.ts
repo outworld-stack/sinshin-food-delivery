@@ -10,6 +10,16 @@ export async function getDeliveryZones(): Promise<DeliveryZonesData> {
   return authJson<DeliveryZonesData>('/admin/settings/delivery-zones', 'GET')
 }
 
+export async function setDeliveryFallbackFee(input: {
+  fee: number
+}): Promise<{ success: boolean; message?: string }> {
+  return authJson<{ success: boolean; message?: string }>(
+    '/admin/settings/delivery-zones/fallback-fee',
+    'POST',
+    input,
+  )
+}
+
 export async function addDeliveryZone(input: {
   radiusKm: number
   fee: number

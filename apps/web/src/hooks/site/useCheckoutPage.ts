@@ -252,6 +252,22 @@ export function useCheckoutPage(deps: {
 	}, [previewData])
 
 	const couponApplied = previewData?.coupon?.valid === true
+	const deliveryQuote = previewData?.deliveryQuote
+	const isDeliveryQuoteReady = state.deliveryType !== 'DELIVERY' || (
+		!!state.selectedAddressId && !isPreviewFetching && !isPreviewError && (deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback')
+	)
+	const deliveryFeeMessage = state.deliveryType !== 'DELIVERY' || !state.selectedAddressId
+		? t['checkout.deliveryAddressRequired']
+		: isPreviewFetching
+			? t['checkout.deliveryCalculating']
+			: isPreviewError || !deliveryQuote
+				? t['checkout.priceError']
+				: deliveryQuote.status === 'ready' || deliveryQuote.status === 'fallback'
+					? null
+					: apiError(deliveryQuote.message, t['checkout.priceError'])
+	const deliveryDistanceKm = isDeliveryQuoteReady && state.deliveryType === 'DELIVERY' && deliveryQuote?.status === 'ready'
+		? deliveryQuote.distanceKm : null
+	const canRetryDelivery = state.deliveryType === 'DELIVERY' && !!state.selectedAddressId && !isPreviewFetching && !isDeliveryQuoteReady
 	const isGatewayDisabled = calc.amountPaidOnline === 0
 	// stage-84 — درگاه‌های فعال از preview (سوئیچ‌های ادمین اصلی).
 	// ترمیم اسکنِ استیج-۸۴: «آرایه‌ی خالی» (همه‌ی درگاه‌ها خاموش) دیگر با
@@ -285,6 +301,7 @@ export function useCheckoutPage(deps: {
 	const isDeliveryBlocked = deliveryBlockedFor.length > 0
 	const isSubmitBlocked =
 		!previewData ||
+		!isDeliveryQuoteReady ||
 		isPreviewFetching ||
 		(state.couponStatus === 'HAVE' && !couponApplied) ||
 		isPreviewError ||
@@ -480,6 +497,10 @@ export function useCheckoutPage(deps: {
 			showToast(t['checkout.pickAddress'], 'error')
 			return
 		}
+		if (!isDeliveryQuoteReady) {
+			showToast(deliveryFeeMessage ?? t['checkout.priceError'], 'error')
+			return
+		}
 		// stage-84 — شلوغی: سرو در محل بدونِ یادداشت (اسم و میز) ثبت نمی‌شود.
 		// گاردِ سروری هم داخل tx چک‌اوت هست (خطای ۴۲۲ فارسی) — این توستِ اول.
 		if (busyDineIn && !state.customerNote.trim()) {
@@ -527,6 +548,8 @@ export function useCheckoutPage(deps: {
 		blocked,
 		deliveryBlockedFor,
 		busyDineIn,
+		isDeliveryQuoteReady,
+		deliveryFeeMessage,
 	])
 
 	return {
@@ -538,6 +561,11 @@ export function useCheckoutPage(deps: {
 		couponApplied,
 		isGatewayDisabled,
 		isSubmitBlocked,
+		isDeliveryQuoteReady,
+		deliveryFeeMessage,
+		deliveryDistanceKm,
+		canRetryDelivery,
+		refetchPreview,
 		/** stage-48 — وضعیت‌های سروری سبد (هشدار نارنجی + قفل گزینه‌ی تحویل) */
 		blocked,
 		hasUnavailableItems,

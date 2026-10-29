@@ -132,6 +132,7 @@ function CheckoutPage() {
 					<DeliveryTypeSelector
 						deliveryType={page.state.deliveryType}
 						deliveryFee={page.calc.deliveryFee}
+						deliveryFeeMessage={page.deliveryFeeMessage}
 						packagingFee={page.calc.packagingFee}
 						onChange={page.handleDeliveryTypeChange}
 						blockedCourier={page.blocked.courierBlockedNames[0] ?? null}
@@ -148,7 +149,7 @@ function CheckoutPage() {
 						onApply={page.handleApplyCoupon}
 					/>
 
-					<PaymentSection
+					{page.isDeliveryQuoteReady && <PaymentSection
 						useWallet={page.state.useWallet}
 						walletBalance={user?.walletBalance ?? 0}
 						walletDeduction={page.calc.walletDeduction}
@@ -159,7 +160,7 @@ function CheckoutPage() {
 						amountPaidOnline={page.calc.amountPaidOnline}
 						deliveryType={page.state.deliveryType}
 						availableGateways={page.availableGateways}
-					/>
+					/>}
 
 					{page.state.deliveryType === 'DELIVERY' && (
 						<AddressSelector
@@ -183,6 +184,9 @@ function CheckoutPage() {
 					discount={page.calc.discount}
 					walletDeduction={page.calc.walletDeduction}
 					deliveryFee={page.calc.deliveryFee}
+					deliveryFeeMessage={page.deliveryFeeMessage}
+					deliveryDistanceKm={page.deliveryDistanceKm}
+					onRetryDelivery={page.canRetryDelivery ? () => { void page.refetchPreview() } : undefined}
 					packagingFee={page.calc.packagingFee}
 					total={page.calc.total}
 					amountPaidOnline={page.calc.amountPaidOnline}

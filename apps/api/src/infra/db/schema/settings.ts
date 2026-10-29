@@ -55,6 +55,8 @@ export const SETTING_KEYS = {
   invoicePrinters: 'invoice_printers', // { sales, kitchen }
   /** مختصات مبدأ ارسال */
   restaurantLocation: 'restaurant_location', // { lat, lng }
+  /** Shipping fee in toman when the distance service is unavailable. */
+  deliveryFallbackFee: 'delivery_fallback_fee', // nonnegative integer
   // round-11: کلید packagingFee حذف شد — stage-10 هزینهٔ بسته‌بندی
   // به‌ازای هر محصول (ستون products.packaging_cost) شد و این کلید مرده بود.
 

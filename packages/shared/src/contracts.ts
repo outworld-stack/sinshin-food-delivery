@@ -451,8 +451,15 @@ export interface CheckoutPreviewItem {
   dineInAllowed: boolean
 }
 
+export type DeliveryQuote =
+  | { status: 'ready'; distanceKm: number; radiusKm: number; fee: number }
+  | { status: 'fallback'; fee: number }
+  | { status: 'address_required' | 'unavailable' | 'no_route'; message: string }
+
 export interface CheckoutPreviewData {
   breakdown: OrderBreakdown
+  /** Server-priced road distance; null for pickup/dine-in. Optional for older servers. */
+  deliveryQuote?: DeliveryQuote | null
   items: CheckoutPreviewItem[]
   coupon: CheckoutPreviewCoupon | null
   /**
@@ -799,6 +806,8 @@ export interface DeliveryZone {
 
 export interface DeliveryZonesData {
   zones: DeliveryZone[]
+  /** Saved outage fee, or the outermost zone's fee until customized. */
+  fallbackFee: number | null
   /** round-13 — مبدأ واقعی محاسبه‌ی فاصله (env > تنظیمات > پیش‌فرض) */
   origin?: { lat: number; lng: number }
 }

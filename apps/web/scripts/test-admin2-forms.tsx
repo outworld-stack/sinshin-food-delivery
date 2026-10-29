@@ -36,7 +36,7 @@ mock.module('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: noop }),
   useMutation: (options: { mutationFn: (value: unknown) => unknown }) => ({ isPending, mutate: options.mutationFn }),
 }))
-const optionNames = ['aboutContentOptions', 'adminGalleryImagesOptions', 'deliveryZonesOptions', 'settingsIranOnlyOptions', 'settingsOutsideScopeOptions', 'settingsRegistrationPermitsOptions', 'settingsRestaurantOptions', 'settingsRestaurantStatusOptions', 'settingsTrackingOptions']
+const optionNames = ['aboutContentOptions', 'adminGalleryImagesOptions', 'deliveryZonesOptions', 'settingsFeaturedAnimationOptions', 'settingsIranOnlyOptions', 'settingsOutsideScopeOptions', 'settingsRegistrationPermitsOptions', 'settingsRestaurantOptions', 'settingsRestaurantStatusOptions', 'settingsTrackingOptions']
 mock.module('#/utils/queryOptions', () => ({
   ...Object.fromEntries(optionNames.map(name => [name, { queryKey: [name] }])),
   adminProductDetailsOptions: () => ({ queryKey: ['product'] }),
@@ -50,7 +50,7 @@ for (const [path, names] of [
   ['#/components/shared/PermissionGate', ['PermissionGate']],
   ['#/components/shared/RouteFallbacks', ['RouteError', 'RouteNotFound']],
   ['#/components/shared/Toggle', ['Toggle']],
-  ...['AboutContentForm', 'DeliveryZonesManager', 'GalleryManager', 'GeoAccessCard', 'PaymentGatewaysCard', 'RegistrationPermitCard', 'RestaurantStatusCard', 'TermsEditor'].map(name => [`#/components/admin/settings/${name}`, [name]] as const),
+  ...['AboutContentForm', 'DeliveryZonesManager', 'FeaturedAnimationCard', 'GalleryManager', 'GeoAccessCard', 'PaymentGatewaysCard', 'RegistrationPermitCard', 'RestaurantStatusCard', 'TermsEditor'].map(name => [`#/components/admin/settings/${name}`, [name]] as const),
 ] as const) mock.module(path, () => Object.fromEntries(names.map(name => [name, function placeholder() { return null }])))
 
 const { Route: productRoute } = await import('../src/routes/admin/products/$productId/edit')
@@ -59,6 +59,7 @@ const { Route: settingsRoute } = await import('../src/routes/admin/settings/inde
 const { PermissionGate } = await import('../src/components/shared/PermissionGate')
 const { RouteNotFound } = await import('../src/components/shared/RouteFallbacks')
 const { RestaurantStatusCard } = await import('../src/components/admin/settings/RestaurantStatusCard')
+const { DeliveryZonesManager } = await import('../src/components/admin/settings/DeliveryZonesManager')
 const { Toggle } = await import('../src/components/shared/Toggle')
 const { AdminProductFormSkeleton } = await import('../src/components/LoadingSkeletons')
 type Element = { type: any; props: Record<string, any> }
@@ -109,6 +110,7 @@ function settingsTree() {
 results.settingsRestaurantStatusOptions = { data: { isOpen: false, temporarilyClosed: false } }
 tree = settingsTree()
 assert.equal(find(tree, node => node.type === RestaurantStatusCard).props.hourlyOpen, false, 'Level 2 sees the actual hourly closure without the main-admin query')
+assert.equal(find(tree, node => node.type === DeliveryZonesManager).props.canManage, false)
 assert.equal(enabled.get('settingsRestaurantOptions'), false)
 assert.equal(enabled.get('settingsTrackingOptions'), false)
 isMainAdmin = true
@@ -116,6 +118,7 @@ results.settingsTrackingOptions = { data: false }
 results.settingsRestaurantOptions = { data: { isOpen: false } }
 results.settingsRestaurantStatusOptions = { data: { isOpen: true, temporarilyClosed: true } }
 tree = settingsTree()
+assert.equal(find(tree, node => node.type === DeliveryZonesManager).props.canManage, true, 'main admin can add, edit and delete zones')
 await find(tree, node => node.type === Toggle).props.onToggle()
 assert.deepEqual(requests.at(-1), { kind: 'tracking', data: { enabled: true } }, 'disabled tracking can be enabled')
 await find(tree, node => node.type === RestaurantStatusCard).props.onToggleHourly()
