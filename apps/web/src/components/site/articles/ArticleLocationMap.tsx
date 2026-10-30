@@ -125,10 +125,16 @@ export const ArticleLocationMap = memo(function ArticleLocationMap({
 			}
 		>
 			{/* Keep a sized container mounted when a failed map is retried with a
-			    new destination, even if the cached SDK resolves before React renders. */}
+			    new destination. Inline positioning also wins over MapLibre's unlayered
+			    position: relative rule, which overrides Tailwind's absolute utility. */}
 			<div
 				ref={containerRef}
-				className="absolute inset-0"
+				style={{
+					position: 'absolute',
+					inset: 0,
+					width: '100%',
+					height: '100%',
+				}}
 				role="img"
 				aria-label={mapLabel}
 				aria-hidden={useFallback}

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { mock } from 'bun:test'
 import { decodePolyline, normalizeMapPoint, mapBounds } from '../src/utils/mapGeometry'
 
 assert.deepEqual(decodePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@'), [[38.5, -120.2], [40.7, -120.95], [43.252, -126.453]])
@@ -9,29 +10,36 @@ assert.deepEqual(normalizeMapPoint({ lat: 37, lng: 409 }), { lat: 37, lng: 49 })
 assert.equal(normalizeMapPoint({ lat: 95, lng: 49 }), null)
 assert.deepEqual(mapBounds([[37, 49], [36, 48], [38, 50]]), [[48, 36], [50, 38]])
 
-type FakeElement = { tag: string; src?: string; href?: string; onload?: (() => void) | null; onerror?: (() => void) | null; remove(): void }
-const elements: FakeElement[] = []
-const fakeWindow: { maplibregl?: { default: unknown } } = {}
-Object.defineProperty(globalThis, 'window', { configurable: true, value: fakeWindow })
-Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-	createElement(tag: string) { const el: FakeElement = { tag, remove() { elements.splice(elements.indexOf(el), 1) } }; return el },
-	querySelector() { return elements.find((el) => el.tag === 'link') },
-	head: { appendChild(el: FakeElement) { elements.push(el) } },
-} })
+// Exercise the loader boundary without evaluating WebGL or claiming to test CSS.
+// A separate browser check covers the actual package, canvas and marker layout.
+let clientLoads = 0
+mock.module('../src/lib/neshan-sdk-client', () => {
+	clientLoads++
+	throw new Error('Simulated SDK chunk failure')
+})
 const { loadNeshanSdk } = await import('../src/lib/neshan-sdk')
+await assert.rejects(loadNeshanSdk(), /requires a browser/)
+assert.equal(clientLoads, 0, 'server rendering never evaluates the browser-only SDK module')
+
+Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
 const first = loadNeshanSdk()
 const second = loadNeshanSdk()
 assert.equal(first, second, 'all map component types share one in-flight SDK promise')
-assert.equal(elements.filter((el) => el.tag === 'script').length, 1)
-const rejection = assert.rejects(first)
-elements.find((el) => el.tag === 'script')!.onerror!()
-await rejection
+await assert.rejects(first, /Simulated SDK chunk failure/)
+assert.equal(clientLoads, 1, 'concurrent maps evaluate the SDK module once')
+
+const sdk = { Map: class {}, Marker: class {} }
+mock.module('../src/lib/neshan-sdk-client', () => {
+	clientLoads++
+	return { default: sdk }
+})
 const retry = loadNeshanSdk()
-assert.notEqual(retry, first, 'CDN failure permits a fresh request')
-assert.equal(elements.filter((el) => el.tag === 'script').length, 1, 'failed scripts are removed')
-assert.equal(elements.filter((el) => el.tag === 'link').length, 1)
-fakeWindow.maplibregl = { default: { Map: class {}, Marker: class {} } }
-elements.find((el) => el.tag === 'script')!.onload!()
-assert.equal(await retry, fakeWindow.maplibregl.default)
-assert.equal(loadNeshanSdk(), retry)
-console.log('Neshan SDK and geometry regressions passed: deduplication, retry, cleanup, wrapped coordinates, bounded polyline decoding and route bounds.')
+assert.notEqual(retry, first, 'a failed SDK chunk does not poison the cached promise')
+assert.equal(await retry, sdk, 'the loader exposes the package default export')
+assert.equal(loadNeshanSdk(), retry, 'subsequent maps reuse the successfully loaded SDK')
+assert.equal(clientLoads, 2)
+
+Object.defineProperty(globalThis, 'window', { configurable: true, value: undefined })
+await assert.rejects(loadNeshanSdk(), /requires a browser/)
+assert.equal(clientLoads, 2, 'the browser guard still applies after a successful load')
+console.log('Neshan SDK and geometry regressions passed: SSR guard, shared package loading, retry, cached success, wrapped coordinates, bounded polyline decoding and route bounds.')

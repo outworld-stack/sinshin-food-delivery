@@ -5,10 +5,6 @@ export const NESHAN_STYLE =
 export const NESHAN_KEY =
 	(import.meta.env.VITE_NESHAN_MAP_KEY as string | undefined) ||
 	(import.meta.env.VITE_NESHAN_API_KEY as string | undefined)
-const SDK_JS =
-	'https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.umd.js'
-const SDK_CSS =
-	'https://static.neshan.org/sdk/maplibre/5.24.3/neshan-maplibre-sdk.css'
 
 export interface NeshanMap {
 	remove(): void
@@ -37,54 +33,15 @@ export interface NeshanSdk {
 
 let sdkPromise: Promise<NeshanSdk> | null = null
 
-/** Share the CDN request across every map, including simultaneous article/editor mounts. */
+/** Load the bundled SDK and its CSS only in the browser, once for all maps. */
 export function loadNeshanSdk(): Promise<NeshanSdk> {
+	if (typeof window === 'undefined') {
+		return Promise.reject(new Error('The map SDK requires a browser'))
+	}
 	if (sdkPromise) return sdkPromise
-	const pending = new Promise<NeshanSdk>((resolve, reject) => {
-		if (typeof window === 'undefined') {
-			reject(new Error('The map SDK requires a browser'))
-			return
-		}
-		if (!document.querySelector(`link[href="${SDK_CSS}"]`)) {
-			const link = document.createElement('link')
-			link.rel = 'stylesheet'
-			link.href = SDK_CSS
-			document.head.appendChild(link)
-		}
-		const getSdk = () =>
-			(window as unknown as { maplibregl?: { default?: NeshanSdk } }).maplibregl
-				?.default
-		const existing = getSdk()
-		if (existing) {
-			resolve(existing)
-			return
-		}
-		const script = document.createElement('script')
-		script.src = SDK_JS
-		script.async = true
-		const cleanup = () => {
-			clearTimeout(timer)
-			script.onload = null
-			script.onerror = null
-		}
-		const fail = () => {
-			cleanup()
-			script.remove()
-			reject(new Error('Unable to load the Neshan map SDK'))
-		}
-		const timer = setTimeout(fail, 15_000)
-		script.onload = () => {
-			const sdk = getSdk()
-			if (!sdk) {
-				fail()
-				return
-			}
-			cleanup()
-			resolve(sdk)
-		}
-		script.onerror = fail
-		document.head.appendChild(script)
-	})
+	const pending = import('./neshan-sdk-client').then(
+		({ default: sdk }) => sdk as unknown as NeshanSdk,
+	)
 	sdkPromise = pending
 	void pending.catch(() => {
 		if (sdkPromise === pending) sdkPromise = null

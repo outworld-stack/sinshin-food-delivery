@@ -37,9 +37,16 @@ the directions button after React removes the dialog. Escape, Cancel and backdro
 click close it. Text is available in Persian and Arabic.
 
 Embedded maps load near the viewport and mark the admin-selected article location
-or the saved restaurant location on About Us. Neshan is used when its web key and
-SDK are available. Without a key, or if the Neshan CDN, WebGL initialization or map
-loading fails, an OpenStreetMap iframe displays the same destination. This fallback
+or the saved restaurant location on About Us. The frontend installs
+`@neshan-maps-platform/maplibre-sdk` and lazily imports it together with
+`@neshan-maps-platform/maplibre-sdk/style.css`, following the
+[official setup](https://platform.neshan.org/docs/sdk/web/maplibre/neshan-maplibre-gl-js/).
+The SDK and CSS are built into the site's assets; no remote SDK script or window
+global is needed. The inner map container has explicit inline positioning and
+dimensions so the SDK's CSS cannot override Tailwind positioning and collapse it.
+
+Neshan is used when its web key and SDK are available. Without a key, or if WebGL
+initialization or map loading fails, an OpenStreetMap iframe displays the same destination. This fallback
 needs no API key or WebGL, preserves the saved coordinates, and has a translated
 title. Viewing a saved location does not request the visitor's GPS position.
 
@@ -101,6 +108,12 @@ deadlines, retries, stale callbacks, cancellation, destination changes and clean
 The article, About and map tests cover embedded fallback maps without a key,
 preserved marker coordinates, lazy loading, stalled loads, recovery after destination
 changes, translated labels and resource cleanup.
+
+Browser checks with the installed SDK reproduced the former CSS failure: the map
+container collapsed to zero height after MapLibre added its class. Explicit inline
+dimensions preserve the canvas and fixed marker at desktop and mobile sizes.
+Live tile requests must come from an origin allowed by the Neshan web key; HTTP
+484 (`API Key scope did not match`) indicates an origin/IP scope restriction.
 
 Actual native launch and Neshan's start-navigation button require device testing:
 
