@@ -203,13 +203,15 @@ function LandingPage({ showBanner }: { showBanner: boolean }) {
                         z بالاتر + جریان مستقل). قرینگی حفظ: دارک چپ، زبان راست؛ هیرو در
                         فضای باقی‌مانده همان وسط‌چینِ قبلی است. */}
 			<div className="min-h-screen w-full flex flex-col relative overflow-hidden bg-white dark:bg-[#1a0a0e] transition-colors duration-500 px-6 py-6">
-				{/* stage-102 (الف) — هاله‌های لندینگ: از «rounded-full + filter:blur»
-				به radial-gradient واقعیِ دو-لایه مهاجرت کردند (کلاس‌های landing-glow-*
-				در styles.css) — blur در WebView های Instagram/Telegram حبابِ رنگیِ
-				توپر می‌سازد؛ گرادیان همه‌جا یکسان رندر می‌شود. موقعیت/ابعاد/رسپانسیو
-				عیناً همان است. */}
-				<div className="landing-glow-tr absolute top-0 -right-20 w-72.5 h-62.5 sm:w-150 sm:h-150 sm:-right-40 pointer-events-none"></div>
-				<div className="landing-glow-bl absolute bottom-0 -left-20 w-62.5 h-62.5 sm:w-150 sm:h-150 sm:-left-40 pointer-events-none"></div>
+				{/* Layered gradients preserve the soft glow in embedded browsers. */}
+				<div
+					aria-hidden="true"
+					className="landing-glow-tr absolute top-0 -right-20 w-72.5 h-62.5 sm:w-150 sm:h-150 sm:-right-40 pointer-events-none"
+				/>
+				<div
+					aria-hidden="true"
+					className="landing-glow-bl absolute bottom-0 -left-20 w-62.5 h-62.5 sm:w-150 sm:h-150 sm:-left-40 pointer-events-none"
+				/>
 
 				{/* نوار بالای صفحه — جای توگل‌ها (جریان، نه fixed) */}
 				<div className="relative z-20 w-full max-w-6xl mx-auto flex items-center justify-between">

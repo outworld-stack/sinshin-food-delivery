@@ -614,92 +614,95 @@ html[dir='rtl'] .ab-js [data-anim='slide'].ab-inview { animation-name: ab-slide-
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   stage-102 (الف) — هاله‌های رنگی لندینگ‌پیج — بازسازیِ بدونِ filter
-   مشکلِ کارفرما: در مرورگرهای داخلیِ Instagram و Telegram روی موبایل،
-   «filter: blur(100px)» به‌درستی رندر نمی‌شود و هاله به شکلِ «حبابِ
-   رنگی با مرزِ مشخص» درمی‌آید (WebView های قدیمی GPU-blur را ندارد
-   یا فال‌بکِ آن دایره‌ی توپر می‌کشد).
-   راه‌حل: هاله = مجموعه‌ی «دو لایه‌ی radial-gradient واقعی» که هرکدام
-   با ایستگاه‌های رنگیِ نرم به transparent می‌رسند — بدونِ filter، بدونِ
-   backdrop-filter و بدونِ هیچ وابستگیِ GPU. مجموعِ دو لایه، منحنیِ
-   محوشدگیِ گاوسی‌مانندِ blur قبلی را بازسازی می‌کند.
-   رنگ/شدت/موقعیت/ابعاد/رفتارِ رسپانسیو عیناً حفظ شده:
-     • بالا-راست: Light = #ed0741 @ 20% | Dark = #2fd4d1 @ 10%
-     • پایین-چپ:  Light = #2fd4d1 @ 35% | Dark = #4a1a24 @ 30%
-   closest-side یعنی بیضیِ گرادیان خودش را با ابعادِ هر بریک‌پوینت
-   وفق می‌دهد (موبایل ۲۹۰×۲۵۰ / دسکتاپ ۶۰۰×۶۰۰) — همان هندسه‌ی
-   rounded-full قبلی. بدون UA-detection؛ CSS سازگار با همه‌ی مرورگرها.
-   ═══════════════════════════════════════════════════════════════ */
-
-/* بالا-راست — Light: قرمز/صورتیِ primary با شدتِ ۲۰٪ */
+/* Keep the original glow colors and opacity, without filter compositing. */
 .landing-glow-tr {
-  background-image:
-    radial-gradient(
-      closest-side,
-      rgba(237, 7, 65, 0.155) 0%,
-      rgba(237, 7, 65, 0.155) 30%,
-      rgba(237, 7, 65, 0.07) 48%,
-      rgba(237, 7, 65, 0) 66%
-    ),
-    radial-gradient(
-      closest-side,
-      rgba(237, 7, 65, 0.06) 0%,
-      rgba(237, 7, 65, 0.025) 40%,
-      rgba(237, 7, 65, 0) 100%
-    );
+  --landing-glow-rgb: 237, 7, 65;
+  opacity: 0.2;
 }
 
-/* بالا-راست — Dark: فیروزه‌ایِ dark-primary با شدتِ ۱۰٪ */
 .dark .landing-glow-tr {
-  background-image:
-    radial-gradient(
-      closest-side,
-      rgba(47, 212, 209, 0.08) 0%,
-      rgba(47, 212, 209, 0.08) 30%,
-      rgba(47, 212, 209, 0.036) 48%,
-      rgba(47, 212, 209, 0) 66%
-    ),
-    radial-gradient(
-      closest-side,
-      rgba(47, 212, 209, 0.03) 0%,
-      rgba(47, 212, 209, 0.012) 40%,
-      rgba(47, 212, 209, 0) 100%
-    );
+  --landing-glow-rgb: 47, 212, 209;
+  opacity: 0.1;
 }
 
-/* پایین-چپ — Light: فیروزه‌ای با شدتِ ۳۵٪ */
 .landing-glow-bl {
+  --landing-glow-rgb: 47, 212, 209;
+  opacity: 0.35;
+}
+
+.dark .landing-glow-bl {
+  --landing-glow-rgb: 74, 26, 36;
+  opacity: 0.3;
+}
+
+/* Paint beyond the unchanged anchors to retain the old 100px blur's spread.
+   Closest-side follows the responsive ellipse; both layers fade to zero at their
+   outer edges. Same-hue transparent stops avoid dark fringes in WebViews.
+   Smaller mobile glows have a softer center, like the original blurred shapes. */
+.landing-glow-tr::before,
+.landing-glow-bl::before {
+  content: "";
+  position: absolute;
+  inset: -200px;
   background-image:
     radial-gradient(
-      closest-side,
-      rgba(47, 212, 209, 0.25) 0%,
-      rgba(47, 212, 209, 0.25) 32%,
-      rgba(47, 212, 209, 0.115) 50%,
-      rgba(47, 212, 209, 0) 68%
+      ellipse closest-side,
+      rgba(var(--landing-glow-rgb), 0.4) 0%,
+      rgba(var(--landing-glow-rgb), 0.385) 10%,
+      rgba(var(--landing-glow-rgb), 0.32) 20%,
+      rgba(var(--landing-glow-rgb), 0.26) 30%,
+      rgba(var(--landing-glow-rgb), 0.18) 40%,
+      rgba(var(--landing-glow-rgb), 0.11) 50%,
+      rgba(var(--landing-glow-rgb), 0.05) 60%,
+      rgba(var(--landing-glow-rgb), 0.02) 70%,
+      rgba(var(--landing-glow-rgb), 0) 85%
     ),
     radial-gradient(
-      closest-side,
-      rgba(47, 212, 209, 0.095) 0%,
-      rgba(47, 212, 209, 0.04) 42%,
-      rgba(47, 212, 209, 0) 100%
+      ellipse closest-side,
+      rgba(var(--landing-glow-rgb), 0.25) 0%,
+      rgba(var(--landing-glow-rgb), 0.235) 10%,
+      rgba(var(--landing-glow-rgb), 0.22) 20%,
+      rgba(var(--landing-glow-rgb), 0.19) 30%,
+      rgba(var(--landing-glow-rgb), 0.16) 40%,
+      rgba(var(--landing-glow-rgb), 0.13) 50%,
+      rgba(var(--landing-glow-rgb), 0.09) 60%,
+      rgba(var(--landing-glow-rgb), 0.055) 70%,
+      rgba(var(--landing-glow-rgb), 0.027) 80%,
+      rgba(var(--landing-glow-rgb), 0.01) 90%,
+      rgba(var(--landing-glow-rgb), 0) 100%
     );
 }
 
-/* پایین-چپ — Dark: زرشکیِ #4a1a24 با شدتِ ۳۰٪ */
-.dark .landing-glow-bl {
-  background-image:
-    radial-gradient(
-      closest-side,
-      rgba(74, 26, 36, 0.215) 0%,
-      rgba(74, 26, 36, 0.215) 32%,
-      rgba(74, 26, 36, 0.1) 50%,
-      rgba(74, 26, 36, 0) 68%
-    ),
-    radial-gradient(
-      closest-side,
-      rgba(74, 26, 36, 0.08) 0%,
-      rgba(74, 26, 36, 0.034) 42%,
-      rgba(74, 26, 36, 0) 100%
-    );
+/* Match the landing page's sm breakpoint and its larger 600px glows. */
+@media (min-width: 40rem) {
+  .landing-glow-tr::before,
+  .landing-glow-bl::before {
+    background-image:
+      radial-gradient(
+        ellipse closest-side,
+        rgba(var(--landing-glow-rgb), 0.98) 0%,
+        rgba(var(--landing-glow-rgb), 0.96) 10%,
+        rgba(var(--landing-glow-rgb), 0.93) 20%,
+        rgba(var(--landing-glow-rgb), 0.82) 30%,
+        rgba(var(--landing-glow-rgb), 0.65) 40%,
+        rgba(var(--landing-glow-rgb), 0.4) 50%,
+        rgba(var(--landing-glow-rgb), 0.19) 60%,
+        rgba(var(--landing-glow-rgb), 0.1) 70%,
+        rgba(var(--landing-glow-rgb), 0.035) 80%,
+        rgba(var(--landing-glow-rgb), 0.005) 90%,
+        rgba(var(--landing-glow-rgb), 0) 100%
+      ),
+      radial-gradient(
+        ellipse closest-side,
+        rgba(var(--landing-glow-rgb), 0.5) 0%,
+        rgba(var(--landing-glow-rgb), 0.45) 20%,
+        rgba(var(--landing-glow-rgb), 0.4) 40%,
+        rgba(var(--landing-glow-rgb), 0.35) 50%,
+        rgba(var(--landing-glow-rgb), 0.3) 60%,
+        rgba(var(--landing-glow-rgb), 0.18) 70%,
+        rgba(var(--landing-glow-rgb), 0.1) 80%,
+        rgba(var(--landing-glow-rgb), 0.035) 90%,
+        rgba(var(--landing-glow-rgb), 0) 100%
+      );
+  }
 }

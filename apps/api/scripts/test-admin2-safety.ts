@@ -210,13 +210,17 @@ try {
     'confirmOrder stamps the confirmation moment (stage-102)')
   const unconfirmedRow = (await db.select().from(orders).where(eq(orders.id, pickup.id)))[0]!
   assert.equal(unconfirmedRow.confirmedAt, null, 'orders that were never confirmed keep a null timestamp')
-  const detailed = await live.orderDetail(ordinary.id, 'admin2', noted.displayId)
+  const confirmingAdminId = confirmed.confirmedBy!
+  const detailed = await live.orderDetail(confirmingAdminId, 'admin2', noted.displayId)
   assert.equal(detailed.userPhone, '09150001006', 'order detail shows the full buyer phone (stage-102)')
   assert.equal(detailed.userName, '09150001006', 'name fallback on the detail view is the full phone too')
   assert.ok(Math.abs(new Date(detailed.confirmedAt as Date).getTime() - confirmedAtMs) < 1_000,
     'the detail view carries the stamped confirmation time')
-  const listedRow = (await live.liveOrders(ordinary.id, 'admin2')).orders.find((row) => row.id === noted.displayId)!
+  const listedRow = (await live.liveOrders(confirmingAdminId, 'admin2')).orders.find((row) => row.id === noted.displayId)!
   assert.equal(listedRow.userPhone, '0915***006', 'live queue rows keep the stage-55 mask')
+  assert.equal((await live.confirmOrder(confirmingAdminId, 'admin2', noted.displayId, {})).success, false)
+  const retried = (await db.select().from(orders).where(eq(orders.id, noted.id)))[0]!
+  assert.equal(retried.confirmedAt?.getTime(), confirmedAtMs, 'a confirmation retry preserves the original timestamp')
   assert.equal((await live.confirmOrder(ordinary.id, 'admin2', claimedPaid.displayId, {})).success, false)
   passed('notes refresh immediately; simultaneous confirmations assign one owner, one counter increment and one audit event')
 

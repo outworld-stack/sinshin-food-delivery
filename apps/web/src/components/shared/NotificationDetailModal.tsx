@@ -45,20 +45,40 @@ export const NotificationDetailModal = memo(function NotificationDetailModal({
 	meta,
 	closeLabel,
 }: NotificationDetailModalProps) {
+	const dialogRef = useRef<HTMLDivElement | null>(null)
+	const closeRef = useRef<HTMLButtonElement | null>(null)
 	// الگوی ConfirmModal — Escape می‌بندد (فقط وقتی باز است)
 	useEffect(() => {
 		if (!open) return
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') onClose()
+			if (e.key !== 'Tab') return
+			const dialog = dialogRef.current
+			const buttons = dialog?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+			const first = buttons?.[0]
+			const last = buttons?.[buttons.length - 1]
+			if (!first || !last) return
+			const outside = !dialog?.contains(document.activeElement)
+			if (e.shiftKey && (document.activeElement === first || outside)) {
+				e.preventDefault()
+				last.focus()
+			} else if (!e.shiftKey && (document.activeElement === last || outside)) {
+				e.preventDefault()
+				first.focus()
+			}
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
 	}, [open, onClose])
 
 	// فوکوس روی دکمه‌ی بستن — ناوبریِ صفحه‌کلید داخل مدال شروع شود
-	const closeRef = useRef<HTMLButtonElement | null>(null)
 	useEffect(() => {
-		if (open) closeRef.current?.focus()
+		if (!open) return
+		const trigger = document.activeElement as HTMLElement | null
+		closeRef.current?.focus()
+		return () => {
+			if (trigger?.isConnected) trigger.focus()
+		}
 	}, [open])
 
 	if (!open) return null
@@ -76,7 +96,10 @@ export const NotificationDetailModal = memo(function NotificationDetailModal({
 				onClick={onClose}
 				aria-hidden="true"
 			/>
-			<div className="relative bg-white dark:bg-[#2a1015] rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[85vh] animate-pop-in">
+			<div
+				ref={dialogRef}
+				className="relative bg-white dark:bg-[#2a1015] rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-y-auto overscroll-contain animate-pop-in"
+			>
 				{/* سربرگ — آیکون + چیپ نوع + دکمه بستن */}
 				<div className="flex items-start gap-3 p-5 sm:p-6 border-b border-gray-100 dark:border-white/5 shrink-0">
 					<span
@@ -89,7 +112,7 @@ export const NotificationDetailModal = memo(function NotificationDetailModal({
 						<span className="inline-block text-[10px] font-DanaDemiBold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-[#1a0a0e] text-gray-500 dark:text-gray-400">
 							{typeLabel}
 						</span>
-						<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mt-2 leading-snug break-words">
+						<h3 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mt-2 leading-snug wrap-break-word">
 							{title}
 						</h3>
 					</div>
@@ -116,8 +139,8 @@ export const NotificationDetailModal = memo(function NotificationDetailModal({
 				</div>
 
 				{/* متن کامل اعلان — اسکرول داخلی، بدون لِیک اسکرول به پشت */}
-				<div className="p-5 sm:p-6 overflow-y-auto overscroll-contain">
-					<p className="text-sm text-gray-600 dark:text-gray-300 font-DanaRegular leading-relaxed whitespace-pre-line break-words">
+				<div className="p-5 sm:p-6">
+					<p className="text-sm text-gray-600 dark:text-gray-300 font-DanaRegular leading-relaxed whitespace-pre-line wrap-break-word">
 						{body}
 					</p>
 
@@ -131,7 +154,7 @@ export const NotificationDetailModal = memo(function NotificationDetailModal({
 									<span>{row.label}:</span>
 									<span
 										dir={row.dir ?? 'rtl'}
-										className="text-gray-500 dark:text-gray-400"
+										className="min-w-0 max-w-full wrap-break-word text-gray-500 dark:text-gray-400"
 									>
 										{row.value}
 									</span>

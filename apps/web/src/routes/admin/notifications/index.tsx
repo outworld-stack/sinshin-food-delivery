@@ -746,7 +746,7 @@ function AdminNotificationsPage() {
 											: {
 													role: 'button' as const,
 													tabIndex: 0,
-													'aria-label': 'مشاهده محتوای کامل اعلان',
+													'aria-label': `مشاهده محتوای کامل اعلان: ${n.title}`,
 													onClick: () => setDetail(n),
 													onKeyDown: (e: { key: string; preventDefault: () => void }) => {
 															if (e.key === 'Enter' || e.key === ' ') {

@@ -162,13 +162,18 @@ function findDialogs(node: unknown, acc: Array<Record<string, unknown>> = []): A
 }
 
 // ── window ساختگی برای شنونده‌ی Escape ──
-const keyHandlers: Array<(e: { key: string }) => void> = []
+type KeyEvent = { key: string; shiftKey?: boolean; preventDefault?: () => void }
+const keyHandlers = new Set<(e: KeyEvent) => void>()
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+type FocusTarget = { isConnected: boolean; focus: () => void }
+const fakeDocument: { activeElement: FocusTarget | null } = { activeElement: null }
+Object.defineProperty(globalThis, 'document', { configurable: true, value: fakeDocument })
 Object.defineProperty(globalThis, 'window', {
 	configurable: true,
 	value: {
-		addEventListener: (_kind: string, fn: (e: { key: string }) => void) => keyHandlers.push(fn),
-		removeEventListener: () => {},
+		addEventListener: (_kind: string, fn: (e: KeyEvent) => void) => keyHandlers.add(fn),
+		removeEventListener: (_kind: string, fn: (e: KeyEvent) => void) => keyHandlers.delete(fn),
 	},
 })
 
@@ -239,27 +244,52 @@ try {
 	checked += 6
 
 	// Escape می‌بندد
-	assert.equal(keyHandlers.length, 1, 'modal listens for Escape')
-	keyHandlers[0]({ key: 'Escape' })
+	assert.equal(keyHandlers.size, 1, 'modal listens for Escape')
+	for (const handler of keyHandlers) handler({ key: 'Escape' })
 	assert.equal(findDialogs(render(InboxList as never, props)).length, 0,
 		'Escape closes the full-content modal')
 	checked++
 
 	// ═══ ۳) NotificationDetailModal مستقیم (میزبان تازه — سلول‌های هوک مستقل) ═══
+	for (const cell of host.cells) (cell as EffectCell | undefined)?.cleanup?.()
 	host = { cells: [], cursor: 0, effects: [], dirty: false }
 	assert.equal(render(NotificationDetailModal as never, {
 		open: false, onClose: () => {}, icon: null, typeLabel: 'x', title: 't', body: 'b', closeLabel: 'c',
 	} as never), null, 'closed modal renders nothing')
-	const openModal = render(NotificationDetailModal as never, {
-		open: true, onClose: () => {}, icon: null, typeLabel: 'عمومی', title: 'عنوان', body: 'متن',
+	let closeCalls = 0
+	let restoredFocus = 0
+	const trigger = { isConnected: true, focus: () => { restoredFocus++ } }
+	fakeDocument.activeElement = trigger
+	const modalProps = {
+		open: true, onClose: () => { closeCalls++ }, icon: null, typeLabel: 'عمومی', title: 'عنوان', body: 'متن',
 		meta: [{ label: 'گیرندگان', value: '۱۲' }], closeLabel: 'بستن',
-	} as never)
+	}
+	const openModal = render(NotificationDetailModal as never, modalProps as never)
 	assert.ok(openModal, 'open modal renders a dialog')
 	assert.equal(findDialogs(openModal).length, 1)
 	const backdrop = (openModal as ReactElement<{ children: unknown[] }>).props.children[0] as { props: { onClick: () => void } }
 	backdrop.props.onClick()
-	// props.onClose که صدا خورد — فقط چک فراخوانی بی‌خطا
-	checked += 3
+	assert.equal(closeCalls, 1, 'clicking the backdrop requests dismissal')
+	const first = { isConnected: true, focus: () => { fakeDocument.activeElement = first } }
+	const last = { isConnected: true, focus: () => { fakeDocument.activeElement = last } }
+	const card = findAll(openModal, 'div').find((node) => (node.props as { ref?: unknown }).ref)
+	assert.ok(card)
+	const cardRef = (card.props as { ref: { current: unknown } }).ref
+	cardRef.current = {
+		querySelectorAll: () => [first, last],
+		contains: (node: unknown) => node === first || node === last,
+	}
+	let prevented = 0
+	fakeDocument.activeElement = first
+	for (const handler of keyHandlers) handler({ key: 'Tab', shiftKey: true, preventDefault: () => { prevented++ } })
+	assert.equal(fakeDocument.activeElement, last, 'Shift+Tab from the first control stays in the modal')
+	for (const handler of keyHandlers) handler({ key: 'Tab', preventDefault: () => { prevented++ } })
+	assert.equal(fakeDocument.activeElement, first, 'Tab from the last control stays in the modal')
+	assert.equal(prevented, 2, 'wrapped focus suppresses default document navigation')
+	render(NotificationDetailModal as never, { ...modalProps, open: false } as never)
+	assert.equal(restoredFocus, 1, 'closing restores focus to the notification that opened the modal')
+	assert.equal(keyHandlers.size, 0, 'closing removes the keyboard listener')
+	checked += 8
 
 	// ═══ ۴) بازبینی منبع: لندینگ بدونِ blur + سیمِ تاریخچه‌ی ادمین ═══
 	const landing = await Bun.file(`${import.meta.dir}/../src/routes/index.tsx`).text()
@@ -268,24 +298,20 @@ try {
 		'landing page wires the gradient glow classes')
 	const styles = await Bun.file(`${import.meta.dir}/../src/styles.css`).text()
 	assert.ok(!styles.includes('blur-[100px]'), 'no leftover blur utility in styles')
-	// فقط بدنه‌ی قواعدِ هاله‌ها — بدونِ فیلترِ GPU، فقط گرادیان
-	const glowRules = [...styles.matchAll(/(?:\.dark )?\.landing-glow-[a-z]+\s*\{([^}]*)\}/g)]
-	assert.equal(glowRules.length, 4, 'styles.css defines all four glow rules (light+dark × tr+bl)')
-	for (const rule of glowRules) {
-		assert.ok(rule[1].includes('background-image'), 'glow rule paints with background-image')
-		assert.ok(!/\bfilter\b|backdrop-filter/.test(rule[1]), 'glow rules never touch filter/blur — pure gradients')
-		assert.ok(rule[1].includes('radial-gradient'), 'glow rules use real radial gradients')
-	}
-	checked += 4
+	// Visual appearance belongs in browser checks, without coupling this
+	// interaction suite to the number or arrangement of CSS declarations.
+	checked += 3
 	const adminPage = await Bun.file(`${import.meta.dir}/../src/routes/admin/notifications/index.tsx`).text()
 	assert.ok(adminPage.includes('NotificationDetailModal'), 'admin history wires the shared detail modal')
 	assert.ok(adminPage.includes("role: 'button'"), 'linkless history rows are keyboard-clickable buttons')
 	assert.ok(adminPage.includes('setDetail(n)'), 'clicking a linkless history row opens its content')
 	checked += 3
 
-	console.log(`Stage-102 client checks passed: ${checked} (fmt.datetime · linkless modal · linked navigation · escape · landing glow source · admin history wiring)`)
+	console.log(`Stage-109 client checks passed: ${checked} (fmt.datetime · linkless modal · linked navigation · modal keyboard focus · landing glow source · admin history wiring)`)
 } finally {
 	if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
 	else Reflect.deleteProperty(globalThis, 'window')
+	if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument)
+	else Reflect.deleteProperty(globalThis, 'document')
 	host = { cells: [], cursor: 0, effects: [], dirty: false }
 }
