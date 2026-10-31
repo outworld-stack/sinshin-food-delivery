@@ -436,6 +436,9 @@ export const ar: Dict = {
 
         // ── تفاصيل الطلب (الجولة ٣٣) ──
         'dash.orderDetail.backToOrders': 'العودة إلى الطلبات',
+        // stage-102 (ب/پ) — يوم وساعة تسجيل/تأكيد الطلب في رأس تفاصيل الطلب
+        'dash.orderDetail.placedAt': 'تسجيل الطلب',
+        'dash.orderDetail.confirmedAt': 'تأكيد الطلب',
         // stage-58 — صندوق متابعة الدفع (PENDING_PAYMENT)
         'dash.orderDetail.pendingTitle': 'هذا الطلب في انتظار الدفع',
         'dash.orderDetail.pendingHint': 'لإتمام الطلب، أكمل الدفع من هنا.',
@@ -638,6 +641,9 @@ export const ar: Dict = {
         'notify.inbox.retry': 'إعادة المحاولة',
         // stage-75 (P3-28) — سقفِ سروری لیست؛ {n} = 30
         'notify.inbox.capped': 'يتم عرض آخر {n} إشعارًا فقط',
+        // stage-102 (ه) — نافذة «المحتوى الكامل للإشعار» في صندوق الوارد
+        'notify.inbox.sentAt': 'وقت الإرسال',
+        'notify.inbox.close': 'إغلاق',
         'notify.type.coupon': 'قسيمة خصم',
         'notify.type.discount': 'خصم منتج',
         'notify.type.broadcast': 'إشعار عام',

@@ -141,6 +141,13 @@
       "when": 1793287053977,
       "tag": "0019_warm_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793477970011,
+      "tag": "0020_sudden_omega_red",
+      "breakpoints": true
     }
   ]
 }

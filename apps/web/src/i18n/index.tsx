@@ -119,6 +119,9 @@ export interface Fmt {
         year: (n: number) => string
         date: (d: Date | string) => string
         time: (d: Date | string) => string
+        /** stage-102 (ب/پ) — روز + ساعت در یک خط: «۱۵ مهر ۱۴۰۴، ساعت ۱۴:۳۰» —
+         * برای «ثبت/تایید سفارش» در صفحات سفارش مشتری و ادمین */
+        datetime: (d: Date | string) => string
         duration: (ms: number) => string
         relative: (d: Date | string) => string
 }
@@ -169,12 +172,26 @@ const arRelative = (d: Date | string): string => {
         return `قبل ${arNum(Math.round(seconds / 86400))} يوم`
 }
 
+// stage-102 (ب/پ) — ترکیبِ روز + ساعت به زبانِ رابط (مبنای «ثبت/تایید سفارش»)
+const faDatetime = (d: Date | string): string => {
+        const date = formatDate(d)
+        const time = formatTime(d)
+        return date === '—' || time === '—' ? '—' : `${date}، ساعت ${time}`
+}
+
+const arDatetime = (d: Date | string): string => {
+        const date = arDate(d)
+        const time = arTime(d)
+        return date === '—' || time === '—' ? '—' : `${date}، الساعة ${time}`
+}
+
 const faFmt: Fmt = {
         price: formatPrice,
         num: faNum,
         year: faYear,
         date: formatDate,
         time: formatTime,
+        datetime: faDatetime,
         duration: formatDuration,
         relative: formatRelative,
 }
@@ -185,6 +202,7 @@ const arFmt: Fmt = {
         year: arYear,
         date: arDate,
         time: arTime,
+        datetime: arDatetime,
         duration: arDuration,
         relative: arRelative,
 }

@@ -486,6 +486,9 @@ export interface UserOrderItem {
 export interface UserOrder {
   id: string // displayId — ord-xxxxxxxx
   date: Date
+  /** stage-102 (ب/پ) — لحظه‌ی تایید سفارش توسط ادمین؛ UI هر دو زمان را
+   * کنارِ هم نشان می‌دهد (ثبت + تایید). null = هنوز تایید نشده. */
+  confirmedAt: Date | null
   totalAmount: number
   itemCount: number
   address: string | null
@@ -1263,6 +1266,8 @@ export interface LiveOrderDto {
   customerNote: string | null
   noteSeen: boolean
   confirmedBy: UserId | null
+  /** stage-102 (پ) — لحظه‌ی تایید سفارش توسط ادمین (null = تاییدنشده/ردیف قدیمی) */
+  confirmedAt: Date | null
   confirmedByName: string | null
   courierId: string | null
   courierName: string | null

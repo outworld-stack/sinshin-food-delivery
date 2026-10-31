@@ -32,8 +32,11 @@ import { useCallback, useEffect, useState } from 'react'
 import {
 	BellRing,
 	CalendarSearch,
+	Clock,
 	Eraser,
 	Filter,
+	Gift,
+	InfoCircle,
 	Send,
 } from 'reicon-react'
 import {
@@ -43,11 +46,13 @@ import {
 } from '#/components/admin/filters'
 import { Pagination } from '#/components/Pagination'
 import { BottomSheet } from '#/components/shared/BottomSheet'
+import { NotificationDetailModal } from '#/components/shared/NotificationDetailModal'
 import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
 import { usePermissions } from '#/hooks/admin/usePermissions'
 import { useI18nSafe } from '#/i18n'
 import { authJson } from '#/lib/api-fetch'
 import { enablePush, getPushState, type PushState } from '#/lib/push-subscription'
+import { faNum, formatDate, formatTime } from '#/utils/format'
 import { jalaliFromISO, jalaliToGregorian } from '#/utils/persianDate'
 
 /**
@@ -84,6 +89,15 @@ const SENDER_OPTIONS = [
 	{ value: 'admin2', label: 'ادمین سطح ۲' },
 	{ value: 'system', label: 'سیستم (خودکار)' },
 ] as const
+
+/** stage-102 (ه) — آیکون‌ نوع‌ اعلان برای مدال‌ «محتوای کامل» تاریخچه —
+ * همان نگاشت‌ آیکونی‌ صندوق‌ مشتری (Gift/Clock/BellRing/InfoCircle) */
+function iconForHistory(type: string) {
+	if (type === 'coupon' || type === 'coupon_nudge') return <Gift size={22} />
+	if (type === 'product_discount') return <Clock size={22} />
+	if (type === 'broadcast') return <BellRing size={22} />
+	return <InfoCircle size={22} />
+}
 
 /** بج نوع + بج فرستنده — مشترک ردیف‌ها */
 function TypeBadge({ type }: { type: string }) {
@@ -166,10 +180,10 @@ function AdminNotificationsPage() {
 	const [title, setTitle] = useState('')
 	const [body, setBody] = useState('')
 	const [url, setUrl] = useState('')
-	const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>(
-		'idle',
-	)
+	const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
 	const [targeted, setTargeted] = useState(0)
+	// stage-102 (ه) — ردیف‌ بدون‌ لینک‌ تاریخچه: مدال‌ محتوای کامل
+	const [detail, setDetail] = useState<NotificationLogDto | null>(null)
 
 	// ── stage-64 — آزمایش خط پوش این دستگاه ──
 	const [localPush, setLocalPush] = useState<PushState | null>(null)
@@ -727,7 +741,21 @@ function AdminNotificationsPage() {
 								{items.map((n) => (
 									<div
 										key={n.id}
-										className="p-3.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c] flex flex-col gap-2"
+										{...(n.url
+											? {}
+											: {
+													role: 'button' as const,
+													tabIndex: 0,
+													'aria-label': 'مشاهده محتوای کامل اعلان',
+													onClick: () => setDetail(n),
+													onKeyDown: (e: { key: string; preventDefault: () => void }) => {
+															if (e.key === 'Enter' || e.key === ' ') {
+																e.preventDefault()
+																setDetail(n)
+															}
+														},
+												})}
+										className={`p-3.5 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c] flex flex-col gap-2${n.url ? '' : ' cursor-pointer transition-colors hover:border-gray-300 dark:hover:border-[#4a1a24]'}`}
 									>
 										<div className="flex items-center gap-2 flex-wrap">
 											<TypeBadge type={n.type} />
@@ -785,6 +813,26 @@ function AdminNotificationsPage() {
 			>
 				<FilterBox isMobileModal />
 			</BottomSheet>
+
+			{/* stage-102 (ه) — مدال‌ «محتوای کامل» برای ردیف‌ بدون‌
+				لینک‌ تاریخچه: متن‌ کامل (لیست دو-خطی قیچ می‌کند) +
+				زمان‌ ارسال‌ دقیق + گیرندگان — رسپانسیو با Escape/پس‌زمینه */}
+			{detail && (
+				<NotificationDetailModal
+					open
+					onClose={() => setDetail(null)}
+					icon={iconForHistory(detail.type)}
+					typeLabel={TYPE_OPTIONS.find((o) => o.value === detail.type)?.label ?? detail.type}
+					title={detail.title}
+					body={detail.body}
+					meta={[
+						{ label: 'زمان ارسال', value: `${formatDate(detail.createdAt)}، ساعت ${formatTime(detail.createdAt)}` },
+						{ label: 'گیرندگان', value: faNum(detail.audience) },
+						...(detail.senderName ? [{ label: 'فرستنده', value: detail.senderName }] : []),
+					]}
+					closeLabel="بستن"
+				/>
+			)}
 		</div>
 	)
 }

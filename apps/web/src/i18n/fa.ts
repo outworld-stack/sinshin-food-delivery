@@ -442,6 +442,9 @@ export const fa = {
 
         // ── جزئیات سفارش (رارد ۳۳) ──
         'dash.orderDetail.backToOrders': 'بازگشت به سفارشات',
+        // stage-102 (ب/پ) — روز و ساعتِ ثبت/تایید سفارش در هدر جزئیات سفارش
+        'dash.orderDetail.placedAt': 'ثبت سفارش',
+        'dash.orderDetail.confirmedAt': 'تایید سفارش',
         // stage-58 — باکس ادامه‌ی پرداخت (PENDING_PAYMENT)
         'dash.orderDetail.pendingTitle': 'این سفارش در انتظار پرداخت است',
         'dash.orderDetail.pendingHint':
@@ -647,6 +650,9 @@ export const fa = {
         'notify.inbox.retry': 'تلاش مجدد',
         // stage-75 (P3-28) — سقفِ سروری لیست؛ {n} = ۳۰
         'notify.inbox.capped': 'آخرین {n} اعلان نمایش داده می‌شود',
+        // stage-102 (ه) — مدال «محتوای کامل اعلان» در صندوق
+        'notify.inbox.sentAt': 'زمان ارسال',
+        'notify.inbox.close': 'بستن',
         'notify.type.coupon': 'کوپن تخفیف',
         'notify.type.discount': 'تخفیف محصول',
         'notify.type.broadcast': 'اطلاعیه عمومی',

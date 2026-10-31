@@ -250,6 +250,8 @@ async function buildLegacyAt0004(url: string): Promise<void> {
       drop column if exists "blocks",
       drop column if exists "blocks_ar",
       drop column if exists "location";
+    -- stage-102 — اشیاءِ ۰۰۲۰: ستونِ لحظه‌ی تایید سفارش
+    alter table "orders" drop column if exists "confirmed_at";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",
@@ -346,6 +348,9 @@ await withScratch('a', async (url) => {
     where id = 1 and hero_title = 'Existing restaurant story' and hero_text = 'Original copy'
       and blocks is null and blocks_ar is null and location is null`)
   ok('A2: About migration preserves existing content and leaves new fields unset', preservedAbout === 1)
+  const confirmedCol = await scalar(url, `select count(*)::int as n from information_schema.columns
+    where table_name = 'orders' and column_name = 'confirmed_at' and data_type = 'timestamp with time zone'`)
+  ok('A2: stage-102 confirmation timestamp column is added to the existing orders table', confirmedCol === 1)
   const memoryType = await scalar(url, `select data_type from information_schema.columns
     where table_schema = 'public' and table_name = 'devices' and column_name = 'device_memory'`)
   ok('A2: device memory upgrades from integer to double precision', memoryType === 'double precision')

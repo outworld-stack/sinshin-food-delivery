@@ -1541,6 +1541,9 @@ export class OrderService {
                 return {
                         id: row.displayId,
                         date: row.createdAt,
+                        // stage-102 (ب/پ) — لحظه‌ی تایید ادمین برای نمایش
+                        // «ساعت تایید» در صفحه‌ی سفارش مشتری (null = تاییدنشده)
+                        confirmedAt: row.confirmedAt ?? null,
                         totalAmount: row.breakdown.totalAmount,
                         itemCount: items.reduce((s, i) => s + i.quantity, 0),
                         address: row.addressSnapshot,

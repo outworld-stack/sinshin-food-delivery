@@ -8,9 +8,10 @@ import type { NotificationInboxItemDto } from '@sinshin/shared'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 // src/components/dashboard/notifications/InboxList.tsx
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { AlertTriangle, Bell, Check, ChevronLeft, Clock, Gift, InfoCircle } from 'reicon-react'
 import { type Fmt, tpl, useI18n } from '#/i18n'
+import { NotificationDetailModal } from '#/components/shared/NotificationDetailModal'
 
 // stage-68 (F8) — TTL از prop سروری می‌آید (ttlDays در NotificationInboxData
 // پاسخ GET /notifications). ۷ فقط fallback پیش از پاسخ است؛ هاردکدِ موازی
@@ -63,6 +64,8 @@ interface InboxRowProps {
         item: NotificationInboxItemDto
         ttlDays: number
         onMarkRead: (id: string) => void
+        /** stage-102 (ه) — باز کردن مدالِ محتوای کامل برای اعلانِ بدونِ لینک */
+        onOpen: (item: NotificationInboxItemDto) => void
         daysLeftLabel: string
         lessThanDayLabel: string
 }
@@ -72,6 +75,7 @@ const InboxRow = memo(function InboxRow({
         item,
         ttlDays,
         onMarkRead,
+        onOpen,
         daysLeftLabel,
         lessThanDayLabel,
 }: InboxRowProps) {
@@ -155,7 +159,10 @@ const InboxRow = memo(function InboxRow({
         return (
                 <button
                         type="button"
-                        onClick={() => onMarkRead(item.id)}
+                        onClick={() => {
+                                onMarkRead(item.id)
+                                onOpen(item)
+                        }}
                         className={className}
                 >
                         {inner}
@@ -195,6 +202,9 @@ export function InboxList({
         onMarkAllRead,
 }: InboxListProps) {
         const { t, fmt } = useI18n()
+        // stage-102 (ه) — اعلانِ انتخاب‌شده‌ی بدونِ لینک: مدالِ محتوای کامل
+        const [detail, setDetail] = useState<NotificationInboxItemDto | null>(null)
+        const openDetail = (item: NotificationInboxItemDto) => setDetail(item)
 
         return (
                 <section
@@ -277,6 +287,7 @@ export function InboxList({
                                                         item={item}
                                                         ttlDays={ttlDays}
                                                         onMarkRead={onMarkRead}
+                                                        onOpen={openDetail}
                                                         daysLeftLabel={t['notify.inbox.daysLeft']}
                                                         lessThanDayLabel={t['notify.inbox.lessThanDay']}
                                                 />
@@ -290,6 +301,24 @@ export function InboxList({
                                                 </p>
                                         )}
                                 </div>
+                        )}
+
+                        {/* stage-102 (ه) — مدالِ «محتوای کامل» اعلانِ بدونِ لینک:
+                            متنِ کامل (لیست دو-خطی قیچ می‌کند)، زمانِ ارسالِ دقیق
+                            و چیپِ نوع — رسپانسیو، Escape/پس‌زمینه می‌بندند */}
+                        {detail && (
+                                <NotificationDetailModal
+                                        open
+                                        onClose={() => setDetail(null)}
+                                        icon={iconOf(detail.type, t).icon}
+                                        typeLabel={iconOf(detail.type, t).label}
+                                        title={detail.title}
+                                        body={detail.body}
+                                        meta={[
+                                                { label: t['notify.inbox.sentAt'], value: fmt.datetime(detail.createdAt) },
+                                        ]}
+                                        closeLabel={t['notify.inbox.close']}
+                                />
                         )}
                 </section>
         )

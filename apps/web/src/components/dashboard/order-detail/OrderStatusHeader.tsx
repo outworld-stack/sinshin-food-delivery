@@ -17,7 +17,16 @@ export const OrderStatusHeader = memo(function OrderStatusHeader({ order }: Orde
           <h1 className="font-MorabbaBold text-2xl text-gray-800 dark:text-white">{tpl(t['dash.orderNumber'], { n: order.id })}</h1>
           <StatusBadge status={order.status} />
         </div>
-        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">{fmt.date(order.date)}</p>
+        {/* stage-102 (ب/پ) — روز و ساعتِ ثبت، و بعد از تاییدِ ادمین روز و
+            ساعتِ تایید، کنارِ هم (خواسته‌ی ب/پ: قابل‌رویت در پروفایل مشتری) */}
+        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+          {t['dash.orderDetail.placedAt']}: {fmt.datetime(order.date)}
+        </p>
+        {order.confirmedAt && (
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">
+            {t['dash.orderDetail.confirmedAt']}: {fmt.datetime(order.confirmedAt)}
+          </p>
+        )}
 
         {order.paymentStatus === 'REFUNDED' && (
           <p className="text-sm text-green-600 dark:text-green-400 mt-3 font-DanaMedium">

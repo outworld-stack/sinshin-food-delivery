@@ -202,6 +202,21 @@ try {
   assert.equal(events.filter((event) => event.event === 'order-confirmed').length, 1)
   const confirmedTotals = (await db.select().from(admin2Profiles)).reduce((sum, profile) => sum + profile.ordersConfirmed, 0)
   assert.equal(confirmedTotals, 1)
+  // stage-102 (ب/پ/ج) — تایید، لحظه‌ی تایید را مهر می‌زند؛ صفحه‌ی جزئیات
+  // شماره‌ی کامل مشتری را می‌دهد (نمای عملیاتی — هم‌ردیفِ فاکتورِ stage-91)
+  // ولی ردیف‌های لیستِ زنده همان ماسکِ stage-55 را نگه می‌دارند.
+  const confirmedAtMs = new Date(confirmed.confirmedAt as Date).getTime()
+  assert.ok(Number.isFinite(confirmedAtMs) && Math.abs(Date.now() - confirmedAtMs) < 60_000,
+    'confirmOrder stamps the confirmation moment (stage-102)')
+  const unconfirmedRow = (await db.select().from(orders).where(eq(orders.id, pickup.id)))[0]!
+  assert.equal(unconfirmedRow.confirmedAt, null, 'orders that were never confirmed keep a null timestamp')
+  const detailed = await live.orderDetail(ordinary.id, 'admin2', noted.displayId)
+  assert.equal(detailed.userPhone, '09150001006', 'order detail shows the full buyer phone (stage-102)')
+  assert.equal(detailed.userName, '09150001006', 'name fallback on the detail view is the full phone too')
+  assert.ok(Math.abs(new Date(detailed.confirmedAt as Date).getTime() - confirmedAtMs) < 1_000,
+    'the detail view carries the stamped confirmation time')
+  const listedRow = (await live.liveOrders(ordinary.id, 'admin2')).orders.find((row) => row.id === noted.displayId)!
+  assert.equal(listedRow.userPhone, '0915***006', 'live queue rows keep the stage-55 mask')
   assert.equal((await live.confirmOrder(ordinary.id, 'admin2', claimedPaid.displayId, {})).success, false)
   passed('notes refresh immediately; simultaneous confirmations assign one owner, one counter increment and one audit event')
 

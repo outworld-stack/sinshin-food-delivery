@@ -613,3 +613,93 @@ html[dir='rtl'] .ab-js [data-anim='slide'].ab-inview { animation-name: ab-slide-
     scale: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   stage-102 (الف) — هاله‌های رنگی لندینگ‌پیج — بازسازیِ بدونِ filter
+   مشکلِ کارفرما: در مرورگرهای داخلیِ Instagram و Telegram روی موبایل،
+   «filter: blur(100px)» به‌درستی رندر نمی‌شود و هاله به شکلِ «حبابِ
+   رنگی با مرزِ مشخص» درمی‌آید (WebView های قدیمی GPU-blur را ندارد
+   یا فال‌بکِ آن دایره‌ی توپر می‌کشد).
+   راه‌حل: هاله = مجموعه‌ی «دو لایه‌ی radial-gradient واقعی» که هرکدام
+   با ایستگاه‌های رنگیِ نرم به transparent می‌رسند — بدونِ filter، بدونِ
+   backdrop-filter و بدونِ هیچ وابستگیِ GPU. مجموعِ دو لایه، منحنیِ
+   محوشدگیِ گاوسی‌مانندِ blur قبلی را بازسازی می‌کند.
+   رنگ/شدت/موقعیت/ابعاد/رفتارِ رسپانسیو عیناً حفظ شده:
+     • بالا-راست: Light = #ed0741 @ 20% | Dark = #2fd4d1 @ 10%
+     • پایین-چپ:  Light = #2fd4d1 @ 35% | Dark = #4a1a24 @ 30%
+   closest-side یعنی بیضیِ گرادیان خودش را با ابعادِ هر بریک‌پوینت
+   وفق می‌دهد (موبایل ۲۹۰×۲۵۰ / دسکتاپ ۶۰۰×۶۰۰) — همان هندسه‌ی
+   rounded-full قبلی. بدون UA-detection؛ CSS سازگار با همه‌ی مرورگرها.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* بالا-راست — Light: قرمز/صورتیِ primary با شدتِ ۲۰٪ */
+.landing-glow-tr {
+  background-image:
+    radial-gradient(
+      closest-side,
+      rgba(237, 7, 65, 0.155) 0%,
+      rgba(237, 7, 65, 0.155) 30%,
+      rgba(237, 7, 65, 0.07) 48%,
+      rgba(237, 7, 65, 0) 66%
+    ),
+    radial-gradient(
+      closest-side,
+      rgba(237, 7, 65, 0.06) 0%,
+      rgba(237, 7, 65, 0.025) 40%,
+      rgba(237, 7, 65, 0) 100%
+    );
+}
+
+/* بالا-راست — Dark: فیروزه‌ایِ dark-primary با شدتِ ۱۰٪ */
+.dark .landing-glow-tr {
+  background-image:
+    radial-gradient(
+      closest-side,
+      rgba(47, 212, 209, 0.08) 0%,
+      rgba(47, 212, 209, 0.08) 30%,
+      rgba(47, 212, 209, 0.036) 48%,
+      rgba(47, 212, 209, 0) 66%
+    ),
+    radial-gradient(
+      closest-side,
+      rgba(47, 212, 209, 0.03) 0%,
+      rgba(47, 212, 209, 0.012) 40%,
+      rgba(47, 212, 209, 0) 100%
+    );
+}
+
+/* پایین-چپ — Light: فیروزه‌ای با شدتِ ۳۵٪ */
+.landing-glow-bl {
+  background-image:
+    radial-gradient(
+      closest-side,
+      rgba(47, 212, 209, 0.25) 0%,
+      rgba(47, 212, 209, 0.25) 32%,
+      rgba(47, 212, 209, 0.115) 50%,
+      rgba(47, 212, 209, 0) 68%
+    ),
+    radial-gradient(
+      closest-side,
+      rgba(47, 212, 209, 0.095) 0%,
+      rgba(47, 212, 209, 0.04) 42%,
+      rgba(47, 212, 209, 0) 100%
+    );
+}
+
+/* پایین-چپ — Dark: زرشکیِ #4a1a24 با شدتِ ۳۰٪ */
+.dark .landing-glow-bl {
+  background-image:
+    radial-gradient(
+      closest-side,
+      rgba(74, 26, 36, 0.215) 0%,
+      rgba(74, 26, 36, 0.215) 32%,
+      rgba(74, 26, 36, 0.1) 50%,
+      rgba(74, 26, 36, 0) 68%
+    ),
+    radial-gradient(
+      closest-side,
+      rgba(74, 26, 36, 0.08) 0%,
+      rgba(74, 26, 36, 0.034) 42%,
+      rgba(74, 26, 36, 0) 100%
+    );
+}

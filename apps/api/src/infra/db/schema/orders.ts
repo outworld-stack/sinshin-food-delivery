@@ -83,6 +83,10 @@ export const orders = pgTable(
 
 		/** تاییدکننده — ادمین۲ (مالکیت سفارش) */
 		confirmedBy: uuid("confirmed_by").references(() => users.id),
+		/** stage-102 (پ) — لحظه‌ی تایید سفارش توسط ادمین — همان تراکنش‌
+		 *  confirmOrder نوشته می‌شود؛ ردیف‌های قدیمی (قبل از این استیج)
+		 *  null می‌مانند و UI آن‌ها را صادقانه مخفی می‌کند. */
+		confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
 		courierId: uuid("courier_id")
 			.$type<CourierId>()
 			.references(() => couriers.id, { onDelete: "set null" }),

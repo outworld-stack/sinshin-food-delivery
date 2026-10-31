@@ -26,7 +26,7 @@ import { usePermissions } from '#/hooks/admin/usePermissions'
 import { useHydrated } from '#/hooks/useHydrated'
 import { ensureAuthHydrated, useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
-import { faNum, formatDate, formatPrice } from '#/utils/format'
+import { faNum, formatDate, formatPrice, formatTime } from '#/utils/format'
 import { courierScanUrl } from '#/utils/invoicePrint'
 import { adminOrderDetailsOptions } from '#/utils/queryOptions'
 
@@ -92,8 +92,14 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 						<StatusBadge status={order.status} perspective="admin" />
 					</div>
 					<p className="text-gray-500 dark:text-gray-400 mt-2 font-DanaMedium">
-						{formatDate(order.date)}
+						{/* stage-102 (ب/پ) — روز و ساعتِ ثبت + ساعتِ تایید ادمین در پنل */}
+						ثبت سفارش: {formatDate(order.date)}، ساعت {formatTime(order.date)}
 					</p>
+					{order.confirmedAt && (
+						<p className="text-gray-500 dark:text-gray-400 mt-1 font-DanaMedium">
+							تایید سفارش: {formatDate(order.confirmedAt)}، ساعت {formatTime(order.confirmedAt)}
+						</p>
+					)}
 				</div>
 				<div className="flex items-center gap-4">
 					<div className="text-left">

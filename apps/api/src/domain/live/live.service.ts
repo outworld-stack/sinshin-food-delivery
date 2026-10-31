@@ -32,6 +32,8 @@ export interface LiveOrderView {
 	userName: string;
 	amount: number;
 	date: Date;
+	/** stage-102 (پ) — لحظه‌ی تایید سفارش توسط ادمین (null = تاییدنشده/قدیمی) */
+	confirmedAt: Date | null;
 	status: string;
 	/** رنگ پنل: DELIVERY=آبی | PICKUP=بنفش | DINE_IN=سبز — فرانت بر اساس deliveryType */
 	deliveryType: string;
@@ -271,6 +273,9 @@ export class LiveService {
 			.set({
 				status: "CONFIRMED",
 				confirmedBy: adminUserId,
+				// stage-102 (پ) — لحظه‌ی تایید، همان تراکنش: مبنای نمایش
+				// «ساعت تایید» در صفحه‌ی سفارش‌ی مشتری و پنل ادمین.
+				confirmedAt: new Date(),
 				// round-26 — پیک فقط برای «ارسال پیک»: متغیرِ اعتبارسنجی‌شده‌ی
 				// بالا نوشته می‌شود (غیر DELIVERY همیشه null است)، نه input خام.
 				// قبلاً courierId خام ذخیره می‌شد → پیک روی سرو در محل /
@@ -417,7 +422,11 @@ export class LiveService {
 			.from(orderItems)
 			.where(eq(orderItems.orderId, row.id));
 
-		const base = (await this.toViews([{ o: row, buyer }]))[0]!;
+		const base = (await this.toViews([{ o: row, buyer }], {
+			// stage-102 (ج) — صفحه‌ی مخصوص سفارش = نمای عملیاتی (هم‌ردیف‌ فاکتور‌
+			// stage-91): شماره‌ی کامل مشتری + نام‌ کامل‌ ثبت‌شده. لیست‌ زنده ماسک می‌ماند.
+			maskPhones: false,
+		}))[0]!;
 		return {
 			...base,
 			address: row.addressSnapshot,
@@ -477,6 +486,11 @@ export class LiveService {
 	 */
 	private async toViews(
 		rows: Array<{ o: OrderRow; buyer: typeof users.$inferSelect }>,
+		// stage-102 (ج) — ماسک‌ شماره‌ی مشتری حالا نقش‌آگاه است: نمای‌ زنده
+		// (لیست داغ پنل) ماسک می‌ماند (طرح‌ stage-55)، ولی «صفحه‌ی مخصوص‌
+		// سفارش» مثل فاکتور‌ چاپی‌ stage-91 سند‌ عملیاتی است — ادمین باید
+		// بتواند به مشتری زنگ بزند ⇒ شماره‌ی کامل + نام‌ کامل‌ ثبت‌شده.
+		opts: { maskPhones?: boolean } = {},
 	): Promise<LiveOrderView[]> {
 		const courierIds = [
 			...new Set(
@@ -536,13 +550,18 @@ export class LiveService {
 			const confirmedByName =
 				(p ? `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() : "") ||
 				(o.confirmedBy ? (confirmerNameMap.get(o.confirmedBy) ?? "") : "");
+			const shownPhone = opts.maskPhones === false ? buyer.phone : maskPhone(buyer.phone);
 			return {
 				id: o.displayId,
-				// stage-55 — ماسک شماره‌ی مشتری در نمای ادمین۲
-				userPhone: maskPhone(buyer.phone),
-				userName: `${buyer.name ?? ""}`.trim() || maskPhone(buyer.phone),
+				// stage-102 (ج) — نمای جزئیات (عملیاتی) شماره‌ی کامل می‌دهد؛ لیست زنده
+				// همان ماسک stage-55 را نگه می‌دارد. fallback نام هم همان مسیر را می‌رود.
+				userPhone: shownPhone,
+				userName: `${buyer.name ?? ""}`.trim() || shownPhone,
 				amount: o.totalAmount,
 				date: o.createdAt,
+				// stage-102 (پ) — لحظه‌ی تایید سفارش (null = هنوز تایید نشده یا
+				// ردیف‌ قدیمی قبل از این استیج؛ UI صادقانه مخفی می‌کند)
+				confirmedAt: o.confirmedAt,
 				status: o.status,
 				deliveryType: o.deliveryType,
 				customerNote: o.customerNote,
