@@ -257,6 +257,8 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     drop table if exists "product_view_log";
     -- hundred-twelve — اشیاءِ ۰۰۲۲: جدول شباهت (توصیه‌گر فاز ۲)
     drop table if exists "product_similarity";
+    -- hundred-fifteen — اشیاءِ ۰۰۲۳: جدول رتبه‌بندی هوشمند «منتخب» (فاز ۳)
+    drop table if exists "product_ranking";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",

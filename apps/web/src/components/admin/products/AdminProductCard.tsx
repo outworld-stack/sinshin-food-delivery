@@ -54,6 +54,10 @@ interface AdminProductCardProps {
 		 *  حالا داده‌ی واقعی پشتش است — بک‌فیل شبانه از سفارش‌ها) */
 		views?: number
 		sales?: number
+		/** hundred-fifteen (فاز ۳) — امتیاز/رتبه‌ی هوشمند «منتخب»
+		 *  (null = جاب شبانه هنوز نرانده — بجِ کم‌رنگ می‌ماند) */
+		smartScore?: number | null
+		smartRank?: number | null
 	}
 	categoryName: string | undefined
 	canWrite: boolean
@@ -116,6 +120,20 @@ export const AdminProductCard = memo(function AdminProductCard({
 	const unavailable = product.isAvailable === false
 	// stage-86 — خریدِ دسته‌ی این محصول توسط مدیریت غیرفعال است (بج اطلاعی)
 	const categoryLocked = product.purchasable === false
+
+	// hundred-fifteen (فاز ۳) — بجِ رتبه‌ی هوشمند «منتخب»: رتبه‌ی سراسری +
+	// امتیازِ تامپسون (درصدی). ردیفِ ندارد (جاب نرانده) = بجِ کم‌رنگِ «هنوز».
+	const smartBadge =
+		product.smartRank != null ? (
+			<span className="text-[10px] font-DanaDemiBold px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-500/10 dark:text-violet-300">
+				رتبه هوشمند #{faNum(product.smartRank)} · امتیاز{' '}
+				{faNum(Math.round((product.smartScore ?? 0) * 100))}٪
+			</span>
+		) : (
+			<span className="text-[10px] text-gray-300 dark:text-gray-600">
+				هنوز رتبه‌ی هوشمند ندارد
+			</span>
+		)
 
 	// stage-63 — حذف کامل محصول + نامعتبرسازی کش‌های وابسته
 	// (لیست ادمین/منوی عمومی/جزئیات/سبد/چک‌اوت — عین availabilityMut)
@@ -208,6 +226,8 @@ export const AdminProductCard = memo(function AdminProductCard({
 					<p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 font-DanaMedium">
 						{faNum(product.views ?? 0)} بازدید · {faNum(product.sales ?? 0)} فروش
 					</p>
+					{/* hundred-fifteen — رتبه/امتیاز هوشمند (موبایل) */}
+					<div className="mt-1">{smartBadge}</div>
 					<div className="flex items-center gap-1.5 mt-1">
 						<span className="text-sm font-DanaDemiBold text-primary dark:text-dark-primary">
 							{formatPrice(product.finalPrice)} ت
@@ -257,10 +277,12 @@ export const AdminProductCard = memo(function AdminProductCard({
 					{formatPrice(product.finalPrice)} ت
 				</div>
 				{/* hundred-eleven — آمار واقعی: بازدید و فروشِ واقعی
-				    (بک‌فیل شبانه از order_items + بیکن زنده) */}
-				<div className="flex flex-col gap-0.5 text-xs font-DanaMedium text-gray-500 dark:text-gray-400">
+				    (بک‌فیل شبانه از order_items + بیکن زنده) +
+				    hundred-fifteen — رتبه/امتیاز هوشمند «منتخب» */}
+				<div className="flex flex-col gap-1 items-start text-xs font-DanaMedium text-gray-500 dark:text-gray-400">
 					<span>{faNum(product.views ?? 0)} بازدید</span>
 					<span>{faNum(product.sales ?? 0)} فروش</span>
+					{smartBadge}
 				</div>
 				<div className="flex flex-col gap-1 items-start">
 					<span

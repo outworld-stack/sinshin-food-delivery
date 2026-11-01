@@ -154,6 +154,8 @@ export const ar: Dict = {
         'products.emptyTitle': 'لم يُعثر على منتج في هذا التصنيف',
         'products.emptyDesc': 'لا توجد حالياً منتجات متاحة لهذا التصنيف.',
         'products.loadMore': 'عرض المزيد من المنتجات',
+        // hundred-fifteen (المرحلة ٣) — الترتيب الذكي «مختارات» (الافتراضي)
+        'products.sort.smart': 'مختارات',
         'products.sort.newest': 'الأحدث',
         'products.sort.mostViewed': 'الأكثر مشاهدة',
         'products.sort.bestSelling': 'الأكثر مبيعاً',

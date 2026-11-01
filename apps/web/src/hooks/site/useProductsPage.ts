@@ -12,7 +12,11 @@ import {
 } from '#/utils/queryOptions'
 
 // --- تایپ‌ها ---
+// hundred-fifteen (فاز ۳) — «منتخب» اولین و پیش‌فرض: مرتب‌سازیِ هوشمند روی
+// smartScore سرور (نمونه‌ی تامپسون؛ بازمحاسبه‌ی شبانه). null ⇒ تخریبِ امن:
+// تهِ کلاسِ موجودی، ترتیبِ باقی = همان سرور (جدیدترین).
 export const SORT_KEYS = [
+	'smart',
 	'newest',
 	'most-viewed',
 	'best-selling',
@@ -23,7 +27,8 @@ export const SORT_KEYS = [
 export type SortKey = (typeof SORT_KEYS)[number]
 // اسکیمای مشترک با validateSearch روت — سورت شهروند URL شده
 export const sortSchema = z.enum(SORT_KEYS)
-const DEFAULT_SORT: SortKey = 'newest'
+// hundred-fifteen — صادرشده برای تست کلاینت (مرجعِ پیش‌فرضِ URLهای بی-سورت)
+export const DEFAULT_SORT: SortKey = 'smart'
 
 // Main فعلی — منطق مشترک بین loader (سرور) و هوک (کلاینت).
 // فقط همین تابع باید در دو جا یکسان اجرا شه — برای همین صادرشده
@@ -87,9 +92,25 @@ function productsReducer(
 }
 
 // --- سورت خالص ---
-function sortProducts(products: Product[], sortBy: SortKey): Product[] {
+// hundred-fifteen — صادرشده برای تست کلاینت (همان الگوی resolveActiveMain)
+export function sortProducts(products: Product[], sortBy: SortKey): Product[] {
 	const sorted = [...products]
 	switch (sortBy) {
+		// hundred-fifteen (فاز ۳) — «منتخب»: اولویت ۱ کلاسِ موجودی (قابل‌خریدِ
+		// موجود بالاتر از همه — موجودی تصمیمِ لحظه‌ی نمایش است، نه شبانه)،
+		// اولویت ۲ امتیاز هوشمند نزولی (null = -۱ ⇒ تهِ کلاس)، تای‌بریک =
+		// sort پایدار (ترتیب سرور = جدیدترین حفظ می‌شود؛ ES2019+ تضمینِ پایداری)
+		case 'smart':
+			return sorted.sort((a, b) => {
+				const classA =
+					a.isAvailable === false || a.purchasable === false ? 1 : 0
+				const classB =
+					b.isAvailable === false || b.purchasable === false ? 1 : 0
+				if (classA !== classB) return classA - classB
+				const scoreA = typeof a.smartScore === 'number' ? a.smartScore : -1
+				const scoreB = typeof b.smartScore === 'number' ? b.smartScore : -1
+				return scoreB - scoreA
+			})
 		case 'expensive':
 			return sorted.sort((a, b) => b.finalPrice - a.finalPrice)
 		case 'cheap':
@@ -130,6 +151,17 @@ function mulberry32(seed: number): () => number {
 		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
 		return ((t ^ (t >>> 14)) >>> 0) / 4294967296
 	}
+}
+
+/**
+ * hundred-fifteen (فاز ۳) — گیتِ موجودیِ سنجاشِ ویژه: فلگ‌دارِ ناموجود یا
+ * قفل‌خرید (دسته/والد) دیگر جایگاهِ تصادفیِ صدر نمی‌گیرد — تصمیمِ فاز ۳.
+ * صادرشده برای تست؛ PRNG/ادغامِ خودِ سنجاش عیناً دست‌نخورده.
+ */
+export function eligibleForFeaturedPinning(p: Product): boolean {
+	return (
+		p.isFeatured === true && p.isAvailable !== false && p.purchasable !== false
+	)
 }
 
 /** Fischer-Yates با PRNG داده‌شده (کپی آرایه — ورودی دست‌نخورده) */
@@ -180,6 +212,7 @@ function mergePinnedIntoSlots<T>(
 // رارد ۳۲ — برچسب‌ها به labelKey تبدیل شدند؛ کامپوننت‌ها t[option.labelKey]
 // رندر می‌کنند تا با تعویض زبان همان لحظه عربی شوند (کلید ثابت است).
 export type ProductsSortLabelKey =
+	| 'products.sort.smart'
 	| 'products.sort.newest'
 	| 'products.sort.mostViewed'
 	| 'products.sort.bestSelling'
@@ -189,6 +222,7 @@ export type ProductsSortLabelKey =
 
 export const SORT_OPTIONS: { key: SortKey; labelKey: ProductsSortLabelKey }[] =
 	[
+		{ key: 'smart', labelKey: 'products.sort.smart' },
 		{ key: 'newest', labelKey: 'products.sort.newest' },
 		{ key: 'most-viewed', labelKey: 'products.sort.mostViewed' },
 		{ key: 'best-selling', labelKey: 'products.sort.bestSelling' },
@@ -258,10 +292,12 @@ export function useProductsPage() {
 		// سنجاش ویژه: فلگ‌دارها از «لیست کاملِ Main» (فارغ از فیلتر دسته و
 		// سورت) تا ۴ نفر در جایگاه‌های تصادفی ۰..۳ می‌نشینند؛ بقیه‌ی فلگ‌دارها
 		// (بیش از ۴) مثل آیتم‌های عادی در جریان فیلتر/سورت می‌مانند.
+		// hundred-fifteen — گیتِ موجودی: سنجاشِ ناموجود/قفل‌خرید دیگر جایگاهِ
+		// تصادفیِ صدر نمی‌گیرد (PRNG/ادغام عیناً دست‌نخورده).
 		const rng = mulberry32(
 			hashSeed(`${activeMainSlug ?? 'all'}|${activeCategory}|${sortBy}`),
 		)
-		const flagged = products.filter((p) => p.isFeatured === true)
+		const flagged = products.filter(eligibleForFeaturedPinning)
 		const pinned = shuffleWithRng(flagged, rng).slice(0, 4)
 		const pinnedIds = new Set(pinned.map((p) => p.id))
 		const normal = sortProducts(

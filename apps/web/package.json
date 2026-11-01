@@ -27,6 +27,7 @@
     "test:auth-session": "bun scripts/test-auth-session.ts",
     "test:auth-store": "bun scripts/test-auth-store.ts",
     "test:product-stats": "bun scripts/test-product-stats-client.ts",
+    "test:smart-sort": "bun scripts/test-smart-sort.ts",
     "test:similar-products": "bun scripts/test-similar-products.ts && bun scripts/test-similar-products-cache.tsx",
     "test:registration-client": "bun scripts/test-registration-client.ts",
     "test:sse-client": "bun scripts/test-sse-client.ts",

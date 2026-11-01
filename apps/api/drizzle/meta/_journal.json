@@ -162,6 +162,13 @@
       "when": 1793529359740,
       "tag": "0022_perfect_ben_grimm",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793548721055,
+      "tag": "0023_chubby_tenebrous",
+      "breakpoints": true
     }
   ]
 }

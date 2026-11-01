@@ -62,6 +62,7 @@ import {
   packagingItems,
   productCategories,
   productPackagingItems,
+  productRanking,
   productSimilarity,
   productSizes,
   products,
@@ -409,6 +410,19 @@ export async function loadPricingBases(
 }
 
 /**
+ * hundred-fifteen (فاز ۳) — امتیاز/رتبه‌ی هوشمندِ خوانده‌شده از
+ * product_ranking (خروجی جاب شبانه‌ی ۰۳:۴۷). Map فقط برای محصول‌هایی
+ * که ردیف دارند پر می‌شود — بقیه در DTO با null می‌روند (نصب تازه
+ * قبل از اولین جاب ⇒ همه null ⇒ فرانت به سورت امن برمی‌گردد).
+ */
+export interface SmartScore {
+  /** نمونه‌ی تامپسون از بتای پسینی — ۰..۱ */
+  score: number
+  /** رتبه‌ی سراسری ۱-مبنا (score نزولی، تای‌بریک id صعودی) */
+  rank: number
+}
+
+/**
  * منو — عمومی با کش ردیس (نسخه‌دار) + مدیریت ادمین مستقیم DB.
  *
  * کش نسخه‌دار: کلید = menu:v{ver}:... ؛ نامعتبرسازی = INCR menu:ver.
@@ -549,6 +563,10 @@ export class MenuService {
         .where(and(catCond, eq(products.status, 'ACTIVE')))
         .orderBy(desc(products.createdAt))
 
+      // hundred-fifteen (فاز ۳) — امتیاز هوشمند «منتخب» در همان closureِ
+      // کش (تا باطل‌شدنِ نسخه تازه شود؛ جاب شبانه bustCache می‌زند)
+      const smartScores = await this.loadSmartScores(rows.map((r) => r.id))
+
       // stage-60 — دسته‌های اضافه‌ی هر محصول (categoryIds در DTO) +
       // نام/حالتِ دسته‌ی اولیه‌ی محصولاتی که از والد دیگری آمده‌اند.
       // حالت‌های سفارش همیشه از دسته‌ی اولیه — سازگار با سبد/چک‌اوت.
@@ -593,7 +611,12 @@ export class MenuService {
         catRows.map((c) => c.id),
       )
       return {
-        products: await this.withSizes(rows, catMap, lang, { catModes, categoryIdsMap, catPurchase }),
+        products: await this.withSizes(rows, catMap, lang, {
+          catModes,
+          categoryIdsMap,
+          catPurchase,
+          smartScores,
+        }),
         categories: cats.map((c) => categoryView(c, lang)),
       }
     })
@@ -632,6 +655,8 @@ export class MenuService {
           categoryIdsMap,
           // stage-86 — امکان خرید زنجیره‌ی اولیه (دکمه‌ی سبد صفحه‌ی محصول)
           catPurchase: await loadCategoryPurchaseStates(this.deps.db, [row.categoryId]),
+          // hundred-fifteen (فاز ۳) — امتیاز هوشمند روی کشِ جزئیات هم می‌نشیند
+          smartScores: await this.loadSmartScores([row.id]),
         },
       )
       return list[0] ?? null
@@ -1190,6 +1215,8 @@ export class MenuService {
         categoryIdsMap,
         // stage-86 — خریدِ زنجیره‌ی دسته برای بج قفل روی کارت لیست ادمین
         catPurchase: await loadCategoryPurchaseStates(this.deps.db, catIds),
+        // hundred-fifteen (فاز ۳) — رتبه/امتیاز هوشمند برای بج «منتخب» پنل
+        smartScores: await this.loadSmartScores(rows.map((r) => r.id)),
       }),
       total,
     }
@@ -1811,6 +1838,30 @@ export class MenuService {
     )
   }
 
+  /**
+   * hundred-fifteen (فاز ۳) — امتیاز/رتبه‌ی هوشمندِ یک‌عده محصول از
+   * product_ranking. جدول کوچک است (یک ردیف به‌ازای محصولِ ACTIVE) و
+   * فقط با PK/inArray خوانده می‌شود؛ ردیفِ ندارد = در Map نمی‌آید (DTO
+   * ⇒ null). خواندن داخل closure کشِ نسخه‌دار ⇒ باطل‌شدنِ نسخه (جاب
+   * شبانه/ادمین) خودش تازه‌سازی می‌کند.
+   */
+  private async loadSmartScores(
+    ids: ProductId[],
+  ): Promise<Map<ProductId, SmartScore>> {
+    const map = new Map<ProductId, SmartScore>()
+    if (ids.length === 0) return map
+    const rows = await this.deps.db
+      .select({
+        productId: productRanking.productId,
+        score: productRanking.score,
+        rank: productRanking.rank,
+      })
+      .from(productRanking)
+      .where(inArray(productRanking.productId, ids))
+    for (const r of rows) map.set(r.productId, { score: r.score, rank: r.rank })
+    return map
+  }
+
   private async withSizes(
     rows: Array<typeof products.$inferSelect>,
     catMap: Map<CategoryId, string>,
@@ -1820,10 +1871,12 @@ export class MenuService {
       includeAr?: boolean
       /** stage-48 — حالت‌های دسته برای محاسبه‌ی حالت مؤثر (نیامد = همه روشن) */
       catModes?: Map<CategoryId, OrderModes>
-      /** stage-60 — دسته‌های هر محصول (دسته‌ی اولیه اول)؛ نیامد = فقط اولیه */
+      // stage-60 — دسته‌های هر محصول (دسته‌ی اولیه اول)؛ نیامد = فقط اولیه
       categoryIdsMap?: Map<ProductId, CategoryId[]>
       /** stage-86 — وضعیت خرید زنجیره‌ی اولیه (دسته AND والد)؛ نیامد = همه روشن */
       catPurchase?: Map<CategoryId, CategoryPurchaseState>
+      /** hundred-fifteen (فاز ۳) — امتیاز/رتبه‌ی هوشمند از product_ranking؛ نیامد = null در DTO */
+      smartScores?: Map<ProductId, SmartScore>
     },
   ): Promise<ProductDto[]> {
     const sizedIds = rows.filter((r) => r.sizesEnabled).map((r) => r.id)
@@ -1888,6 +1941,10 @@ export class MenuService {
       prepTime: r.prepTime,
       views: r.views,
       sales: r.sales,
+      // ── hundred-fifteen (فاز ۳) — امتیاز/رتبه‌ی هوشمند «منتخب»؛ null =
+      // جابِ شبانه هنوز نرانده یا این مسیر امتیاز نمی‌دهد (مشابه‌ها) ──
+      smartScore: opts?.smartScores?.get(r.id)?.score ?? null,
+      smartRank: opts?.smartScores?.get(r.id)?.rank ?? null,
       status: r.status,
       // ── stage-48 — موجودی + حالت‌های مؤثر سفارش (دسته AND محصول) ──
       isAvailable: r.isAvailable,

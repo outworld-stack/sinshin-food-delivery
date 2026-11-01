@@ -156,6 +156,8 @@ export const fa = {
         'products.emptyTitle': 'محصولی در این دسته یافت نشد',
         'products.emptyDesc': 'در حال حاضر محصولی برای این دسته‌بندی موجود نیست.',
         'products.loadMore': 'مشاهده محصولات بیشتر',
+        // hundred-fifteen (فاز ۳) — مرتب‌سازی هوشمند «منتخب» (پیش‌فرض)
+        'products.sort.smart': 'منتخب',
         'products.sort.newest': 'جدیدترین',
         'products.sort.mostViewed': 'پربازدیدترین',
         'products.sort.bestSelling': 'پرفروش‌ترین',

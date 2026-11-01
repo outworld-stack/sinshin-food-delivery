@@ -71,6 +71,9 @@ import { ProductStatsSyncJob } from '#/workers/jobs/product-stats-sync.job'
 // hundred-twelve (فاز ۲) — توصیه‌گر مشابه‌ها + جاب شبانه
 import { ProductSimilarityService } from '#/domain/product-similarity/similarity.service'
 import { ProductSimilarityJob } from '#/workers/jobs/product-similarity.job'
+// hundred-fifteen (فاز ۳) — رتبه‌بندی هوشمند «منتخب» + جاب شبانه
+import { ProductRankingService } from '#/domain/product-ranking/ranking.service'
+import { ProductRankingJob } from '#/workers/jobs/product-ranking.job'
 // فاز-۲ — نشان / لاگ داکر / نوتیفیکیشن
 import { NeshanService } from '#/infra/maps/neshan.service'
 import { DockerLogsService } from '#/infra/logs/docker-logs.service'
@@ -142,6 +145,9 @@ const productStats = new ProductStatsService({ db, redis })
 // hundred-twelve (فاز ۲) — شباهت رفتاری محصول‌ها (بازمحاسبه‌ی شبانه؛
 // خواندن از MenuService.similarProducts روی کش نسخه‌دار منو)
 const productSimilarity = new ProductSimilarityService({ db })
+// hundred-fifteen (فاز ۳) — رتبه‌بندی هوشمند «منتخب» (بازمحاسبه‌ی شبانه؛
+// خواندن از MenuService روی کش نسخه‌دار منو — smartScore در DTO محصول)
+const productRanking = new ProductRankingService({ db })
 // stage-84 — اقلام بسته‌بندی (قیمت سراسری؛ CRUD ادمین)
 const packaging = new PackagingService({ db })
 const orders = new OrderService({ db, config, zones, settings, coupons, notifications, stats: productStats })
@@ -194,6 +200,11 @@ if (!g.__sinshin_cron_registered) {
   // ۰۳:۳۷ و قبل از رتینشنِ ۰۴:۳۰) + باطل‌کردن کشِ «مشابه‌ها»
   scheduler.register(
     new ProductSimilarityJob({ similarity: productSimilarity, menu }),
+  )
+  // hundred-fifteen (فاز ۳) — بازمحاسبه‌ی رتبه‌ی «منتخب» (۰۳:۴۷؛ بعد از
+  // شباهت ۰۳:۴۱ و قبل از رتینشنِ ۰۴:۳۰) + باطل‌کردن کشِ منو برای smartScore
+  scheduler.register(
+    new ProductRankingJob({ ranking: productRanking, menu }),
   )
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
   // round-19 — دیده‌بان سلامت: پیامک قطعی/برگشت db/redis/uploads (بدون قفل — موثق در کار)
