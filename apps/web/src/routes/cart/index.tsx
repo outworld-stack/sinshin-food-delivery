@@ -7,7 +7,7 @@
 
 // src/routes/cart/index.tsx
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
 import { ArrowsRotate, ChevronRight } from 'reicon-react'
@@ -28,12 +28,14 @@ import { useI18n } from '#/i18n'
 import { noindexHead } from '#/lib/seo'
 import { cartItemKey } from '#/stores/cartStore'
 import { cartDetailsOptions } from '#/utils/queryOptions'
+import { qk } from '#/utils/queryKeys'
 
 function CartPage() {
         const back = useBack('/products')
         const hasHydrated = useHydrated()
         const page = useCartPage()
         const { t } = useI18n()
+        const queryClient = useQueryClient()
 
         // آیتم‌های استور (فقط id و quantity)
         const items = page.items
@@ -62,7 +64,8 @@ function CartPage() {
         const onMenuEvent = useCallback(() => {
                 // کلید شامل آیتم‌هاست؛ با رفرشِ همان کلید، هشدارها فوری می‌آیند
                 void refetch()
-        }, [refetch])
+                void queryClient.invalidateQueries({ queryKey: qk.similarProductsAll })
+        }, [refetch, queryClient])
         useMenuLive(onMenuEvent)
 
         // round-12 — ردیف‌هایی که سرور حذف کرده (ناموجود/حذف‌شده) ولی هنوز در

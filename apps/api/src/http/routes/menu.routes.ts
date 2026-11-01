@@ -24,7 +24,7 @@ import type { RedisService } from '#/infra/redis/redis'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { sha256 } from '#/domain/shared/crypto'
 import { parseCookies, serializeCookie } from '#/domain/shared/cookies'
-import { SLUG_OR_ID_PATTERN, UUID_PATTERN } from '#/domain/shared/ids'
+import { SLUG_OR_ID_PATTERN, UUID_PATTERN, UUID_RE } from '#/domain/shared/ids'
 import { SETTING_KEYS } from '#/infra/db/schema'
 import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
 import { cartItemSchema } from '#/http/schemas'
@@ -56,6 +56,7 @@ async function countBeacon(
   request: Request,
   set: { headers: Record<string, string | number> },
 ): Promise<{ counted: boolean }> {
+  set.headers['cache-control'] = 'no-store'
   const ua = request.headers.get('user-agent') ?? ''
   if (!ua || BOT_UA_RE.test(ua)) return { counted: false }
   // hundred-twelve — گارد کراس‌سایت: بیکنِ مرورگری که از دامنه‌ی دیگری
@@ -64,19 +65,19 @@ async function countBeacon(
   // غیرمرورگر) مسدود نمی‌شود — سپر همان سقف نرخ IP است.
   if (request.headers.get('sec-fetch-site') === 'cross-site') return { counted: false }
   const existing = parseCookies(request)[VIEWER_COOKIE]
-  const vid = existing && existing.length <= 64 ? existing : crypto.randomUUID()
+  const vid = existing?.length === 36 && UUID_RE.test(existing) ? existing : crypto.randomUUID()
   const counted =
     kind === 'view'
       ? await stats.recordView(productId, vid)
       : await stats.recordCartAdd(productId, vid)
-  if (!existing) {
+  // Persist replacement identities too, so malformed cookies cannot inflate counts.
+  if (vid !== existing) {
     set.headers['set-cookie'] = serializeCookie(VIEWER_COOKIE, vid, {
       maxAge: 365 * 24 * 60 * 60,
       httpOnly: true,
       sameSite: 'Lax',
     })
   }
-  set.headers['cache-control'] = 'no-store'
   return { counted }
 }
 
@@ -184,6 +185,7 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
       (ctx) =>
         withMenuCache(ctx, () =>
           deps.menu.similarProducts(ctx.params.id, langFromHeaders(ctx.headers)),
+          'public, no-cache',
         ),
       {
         params: t.Object({ id: t.String({ pattern: SLUG_OR_ID_PATTERN }) }),

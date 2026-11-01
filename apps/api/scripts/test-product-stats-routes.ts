@@ -25,12 +25,13 @@ const app = new Elysia().use(menuRoutes({
   } as never,
 })).compile()
 
-const beacon = (kind: string, cookie?: string, ua: string | null = 'Mozilla/5.0', id: string = productId) =>
+const beacon = (kind: string, cookie?: string, ua: string | null = 'Mozilla/5.0', id: string = productId, fetchSite?: string) =>
   app.handle(new Request(`http://localhost/menu/products/${id}/${kind}`, {
     method: 'POST',
     headers: {
       ...(cookie === undefined ? {} : { cookie }),
       ...(ua === null ? {} : { 'user-agent': ua }),
+      ...(fetchSite === undefined ? {} : { 'sec-fetch-site': fetchSite }),
     },
   }))
 
@@ -62,6 +63,18 @@ assert.deepEqual(await (await beacon('cart-event', sharedIdentity)).json(), { co
 assert.equal(visitors.at(-1), visitors.at(-2), 'view and cart events share one visitor identity')
 
 for (const kind of ['view', 'cart-event']) {
+  const beforeCrossSite = visitors.length
+  const crossSite = await beacon(kind, sharedIdentity, 'Mozilla/5.0', productId, 'cross-site')
+  assert.deepEqual(await crossSite.json(), { counted: false })
+  assert.equal(crossSite.headers.get('cache-control'), 'no-store')
+  assert.equal(crossSite.headers.get('set-cookie'), null)
+  assert.equal(visitors.length, beforeCrossSite, 'cross-site beacons never reach the stats service')
+  for (const fetchSite of ['same-origin', 'same-site']) {
+    const accepted = await beacon(kind, undefined, 'Mozilla/5.0', productId, fetchSite)
+    assert.deepEqual(await accepted.json(), { counted: true })
+    assert.equal(accepted.headers.get('cache-control'), 'no-store')
+    assert.ok(accepted.headers.get('set-cookie'))
+  }
   for (const ua of [null, 'Googlebot/2.1', 'Mozilla/5.0 HeadlessChrome']) {
     const before = visitors.length
     const response = await beacon(kind, undefined, ua)
@@ -75,4 +88,4 @@ for (const kind of ['view', 'cart-event']) {
   assert.equal(visitors.length, before, 'invalid product IDs cannot reach the stats service')
 }
 
-console.log('PASS product stats routes: cookie repair, identity reuse, view/cart identity, bot filtering, UUID validation')
+console.log('PASS product stats routes: cookie repair, identity reuse, view/cart identity, fetch-site and bot filtering, UUID validation')

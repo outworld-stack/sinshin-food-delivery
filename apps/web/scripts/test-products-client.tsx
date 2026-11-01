@@ -47,11 +47,12 @@ mock.module('#/components/shared/ImageField', () => ({ ImageField: () => null })
 mock.module('#/components/shared/PersianDatePicker', () => ({ PersianDatePicker: () => null }))
 mock.module('#/components/admin/ArField', () => ({ ArField: () => null }))
 mock.module('#/hooks/useBack', () => ({ useBack: () => () => {} }))
+mock.module('#/hooks/shared/useMenuLive', () => ({ useMenuLive() {} }))
 mock.module('#/lib/seo', () => ({ alternateLinks() {}, headLang() {}, langUrl() {}, localizedFor() {}, productJsonLd() {}, withBrand() {} }))
 const { qk } = await import('../src/utils/queryKeys')
 const queryData = new Map<string, unknown>()
 const queryCalls: unknown[][] = []
-mock.module('@tanstack/react-query', () => ({ useQuery: (options: { queryKey: readonly unknown[] }) => {
+mock.module('@tanstack/react-query', () => ({ useQueryClient: () => null, useQuery: (options: { queryKey: readonly unknown[] }) => {
 	queryCalls.push([...options.queryKey])
 	return { data: queryData.get(JSON.stringify(options.queryKey)), isLoading: false }
 } }))
@@ -60,6 +61,7 @@ mock.module('#/utils/queryOptions', () => ({
 	settingsFeaturedAnimationOptions: { queryKey: qk.settingsFeaturedAnimation },
 	featuredAnimationOptions: { queryKey: qk.featuredAnimation },
 	productByIdOptions: (id: string) => ({ queryKey: qk.productById(id) }),
+	similarProductsOptions: (id: string) => ({ queryKey: qk.similarProducts(id) }),
 	productReviewsOptions: (id: string) => ({ queryKey: qk.productReviews(id) }),
 }))
 let loadedProduct: Product

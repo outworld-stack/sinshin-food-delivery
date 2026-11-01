@@ -36,6 +36,7 @@ function NewProductPage() {
                         queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
                         queryClient.invalidateQueries({ queryKey: qk.categories })
                         queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+                        queryClient.invalidateQueries({ queryKey: qk.similarProductsAll })
                         showToast('محصول جدید با موفقیت افزوده شد')
                         navigate({ to: '/admin/products' })
                 },

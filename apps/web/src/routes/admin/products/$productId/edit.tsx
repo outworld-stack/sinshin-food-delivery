@@ -47,6 +47,7 @@ function EditProductPage() {
                         // stage-48 — منوی عمومی/سبد/چک‌اوت حالت‌ها و موجودی تازه را ببینند
                         queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
                         queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+                        queryClient.invalidateQueries({ queryKey: qk.similarProductsAll })
                         queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
                         queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
                         showToast('محصول با موفقیت ویرایش شد')

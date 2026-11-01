@@ -8,6 +8,7 @@ export function invalidateProductQueries(queryClient: QueryClient) {
 		qk.adminProductDetailsAll,
 		qk.productsByMainPrefix,
 		qk.productByIdAll,
+		qk.similarProductsAll,
 		qk.cartDetailsAll,
 		qk.checkoutPreviewPrefix,
 	].map((queryKey) => queryClient.invalidateQueries({ queryKey })))

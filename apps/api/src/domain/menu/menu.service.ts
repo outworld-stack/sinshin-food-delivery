@@ -659,7 +659,7 @@ export class MenuService {
    * سایه دعوت کند. لنگرِ موجود ⇒ ترتیب امتیاز؛ کارتِ ناموجود خودش با
    * لایه‌ی خاکستری ProductCard می‌ایستد (همان زبان بصری سایت).
    *
-   * کش: همان کشِ نسخه‌دار منو (sim:{lang}:{id}) — باطل‌شدنِ خودکار با
+   * کش: همان کشِ نسخه‌دار منو (sim:{lang}:{id}:{limit}) — باطل‌شدنِ خودکار با
    * هر write ادمین (INCR menu:ver) + باطل‌شدنِ جاب شبانه. null (= لنگرِ
    * ناموجود/حذف‌شده) کش نمی‌شود — مثل productById.
    */
@@ -669,6 +669,9 @@ export class MenuService {
     limit: number = MenuService.SIMILAR_LIMIT,
   ): Promise<SimilarProductsDto | null> {
     const pid = UUID_RE.test(id) ? asProductId(id) : null
+    const count = Number.isFinite(limit)
+      ? Math.min(MenuService.SIMILAR_LIMIT, Math.max(0, Math.floor(limit)))
+      : MenuService.SIMILAR_LIMIT
 
     const load = async (): Promise<SimilarProductsDto | null> => {
       const anchor = await this.deps.db.query.products.findFirst({
@@ -676,32 +679,29 @@ export class MenuService {
       })
       if (!anchor || anchor.status !== 'ACTIVE') return null
 
-      // بیش‌گرفت (۳×) تا فیلترِ سختگیرانه هم اسلات‌ها را پر کند
-      const simRows = await this.deps.db
-        .select({ similarId: productSimilarity.similarId })
-        .from(productSimilarity)
-        .where(eq(productSimilarity.productId, anchor.id))
-        .orderBy(desc(productSimilarity.score))
-        .limit(limit * 3)
-      if (simRows.length === 0) return { products: [], strict: !anchor.isAvailable }
-
-      // ردیف‌های زنده‌ی محصولات (حذف‌شده/INACTIVE با join بیرون می‌افتند)
-      const ids = simRows.map((r) => r.similarId)
-      const rows = await this.deps.db.query.products.findMany({
-        where: and(inArray(products.id, ids), eq(products.status, 'ACTIVE')),
-      })
-      const byId = new Map(rows.map((r) => [r.id, r] as const))
-      const ordered: typeof rows = []
-      for (const sid of ids) {
-        const r = byId.get(sid)
-        if (r) ordered.push(r)
-      }
-
       const strict = anchor.isAvailable !== true
-      const picked = (strict ? ordered.filter((r) => r.isAvailable) : ordered).slice(
-        0,
-        limit,
-      )
+      if (count === 0) return { products: [], strict }
+
+      // Filter before limiting: stale rows and purchase-locked alternatives must
+      // not displace live recommendations. Keep equal-score results deterministic.
+      const simRows = await this.deps.db
+        .select({ product: products })
+        .from(productSimilarity)
+        .innerJoin(products, eq(products.id, productSimilarity.similarId))
+        .innerJoin(categories, eq(categories.id, products.categoryId))
+        .innerJoin(mainCategories, eq(mainCategories.id, categories.mainCategoryId))
+        .where(and(
+          eq(productSimilarity.productId, anchor.id),
+          eq(products.status, 'ACTIVE'),
+          strict ? and(
+            eq(products.isAvailable, true),
+            eq(categories.purchaseEnabled, true),
+            eq(mainCategories.purchaseEnabled, true),
+          ) : undefined,
+        ))
+        .orderBy(desc(productSimilarity.score), asc(productSimilarity.similarId))
+        .limit(count)
+      const picked = simRows.map((r) => r.product)
       if (picked.length === 0) return { products: [], strict }
 
       // DTO — همان ماشینِ productById (نام دسته، حالت‌های مؤثر، خرید زنجیره)
@@ -731,7 +731,7 @@ export class MenuService {
       return { products: list, strict }
     }
 
-    return this.cache.cachedNullable(`sim:${lang}:${id}`, load)
+    return this.cache.cachedNullable(`sim:${lang}:${id}:${count}`, load)
   }
 
   async allCategories(lang: Lang = 'fa') {

@@ -59,6 +59,7 @@ export const qk = {
         // کشِ سرور ۳۰ثانیه‌ای + ETag دارد، کلاینت هم staleTime کوتاه
         similarProducts: (productId: string) =>
                 ['similar-products', productId] as const,
+        similarProductsAll: ['similar-products'] as const,
 
         // --- مقالات ---
         articleCategories: ['article-categories'] as const,
@@ -354,6 +355,7 @@ export const langSensitiveKeys = [
         qk.activeMainCategories, // تب‌های منو (دسته‌های اصلی)
         qk.productsByMainPrefix, // لیست منو: محصولات + دسته‌های هر تب
         qk.productByIdAll, // صفحه‌ی جزئیات محصول (نام/توضیح/محتویات/سایزها)
+        qk.similarProductsAll, // نام و جزئیات پیشنهادهای صفحه‌ی محصول و سبد
         qk.categories, // stage-59 — /menu/categories هم lang-aware است (فرم‌های ادمین)
         qk.articleCategories, // دسته‌های مقاله
         qk.articlesAll, // لیست مقاله‌ها

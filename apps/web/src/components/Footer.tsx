@@ -65,7 +65,7 @@ export const Footer = memo(function Footer() {
                                                         className="font-DanaDemiBold text-lg text-gray-800 dark:text-white mb-5 relative pb-2
                            after:absolute after:right-0 after:bottom-0 after:w-10 after:h-0.5 after:bg-primary dark:after:bg-dark-primary"
                                                 >
-                                                        {t['footer.about']}
+                                                        {t['footer.others']}
                                                 </h3>
                                                 <ul className="space-y-3">
                                                         {ABOUT_LINKS.map((item) => (

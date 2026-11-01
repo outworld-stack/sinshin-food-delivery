@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm'
 import { SQL } from 'bun'
 import { Elysia } from 'elysia'
 
-import { ProductSimilarityService, W_COVIEW, W_COPURCHASE } from '../src/domain/product-similarity/similarity.service'
+import { ProductSimilarityService, TOP_N_PER_PRODUCT, W_COVIEW, W_COPURCHASE } from '../src/domain/product-similarity/similarity.service'
 import { MenuService } from '../src/domain/menu/menu.service'
 import { Database } from '../src/infra/db/client'
 import {
@@ -279,7 +279,8 @@ try {
                 viewRow(salad.id, 'v1'),
         ])
         await similarity.recompute()
-        const afterDup = pair(pizza.id, salad.id)!
+        const afterDup = (await db.select().from(productSimilarity))
+                .find((r) => r.productId === pizza.id && r.similarId === salad.id)!
         check(afterDup.coViews === 3, 'duplicate log rows do not inflate co-view (distinct visitor pairs)')
 
         // ── لایه‌ی HTTP — همان مسیر پروداکشن (ETag + کش نسخه‌دار) ──
@@ -300,8 +301,8 @@ try {
         const res1 = await get(`/menu/products/${pizza.id}/similar`)
         check(res1.status === 200, 'similar endpoint answers 200')
         check(
-                (res1.headers.get('cache-control') ?? '').includes('max-age=30'),
-                'similar response is client-cached like other menu GETs',
+                res1.headers.get('cache-control') === 'public, no-cache',
+                'similar response requires HTTP revalidation after client invalidation',
         )
         const body1 = (await res1.json()) as {
                 products: Array<{ id: string; name: string; isAvailable: boolean }>
@@ -322,6 +323,8 @@ try {
                 'if-none-match': etag,
         })
         check(res304.status === 304, 'If-None-Match revalidation returns 304')
+        check(res304.headers.get('cache-control') === 'public, no-cache',
+                '304 similarity responses preserve mandatory HTTP revalidation')
 
         const bySlug = await get('/menu/products/pizza-test/similar')
         const slugBody = (await bySlug.json()) as { products: unknown[] }
@@ -329,6 +332,15 @@ try {
 
         const missing = await get(`/menu/products/${crypto.randomUUID()}/similar`)
         check(missing.status === 200, 'missing anchor responds 200 (null body, not 500)')
+
+        check((await menu.similarProducts(pizza.id, 'fa', 1))?.products.length === 1,
+                'a cached default response respects a later one-product limit')
+        check((await menu.similarProducts(pizza.id, 'fa', 2))?.products.length === 2,
+                'different recommendation limits have independent cached responses')
+        check((await menu.similarProducts(pizza.id, 'fa', 0))?.products.length === 0,
+                'zero recommendation limit returns an empty list')
+        check((await menu.similarProducts(pizza.id, 'fa', Number.NaN))?.products.length === 2,
+                'non-finite recommendation limit uses the safe default')
 
         // ── حالت سختگیرانه (تصمیم قفل‌شده): لنگرِ ناموجود ⇒ فقط موجود ──
         await db
@@ -340,7 +352,11 @@ try {
                 .set({ isAvailable: false })
                 .where(eq(products.id, pizza.id))
         await menu.bustCache()
-        const strictRes = await get(`/menu/products/${pizza.id}/similar`)
+        const strictRes = await get(`/menu/products/${pizza.id}/similar`, { 'if-none-match': etag })
+        check(strictRes.status === 200 && strictRes.headers.get('etag') !== etag,
+                'availability changes plus cache bust return fresh data and a changed ETag')
+        check(strictRes.headers.get('cache-control') === 'public, no-cache',
+                'updated similarity responses keep HTTP revalidation enabled')
         const strictBody = (await strictRes.json()) as {
                 products: Array<{ id: string; isAvailable: boolean }>
                 strict: boolean
@@ -355,6 +371,18 @@ try {
                 'strict mode never leaks unavailable similars',
         )
 
+        await db.update(categories).set({ purchaseEnabled: false }).where(eq(categories.id, cat.id))
+        await menu.bustCache()
+        check((await menu.similarProducts(pizza.id))?.products.length === 0,
+                'strict alternatives exclude categories with purchasing disabled')
+        await db.update(categories).set({ purchaseEnabled: true }).where(eq(categories.id, cat.id))
+        await db.update(mainCategories).set({ purchaseEnabled: false }).where(eq(mainCategories.id, main.id))
+        await menu.bustCache()
+        check((await menu.similarProducts(pizza.id))?.products.length === 0,
+                'strict alternatives exclude main categories with purchasing disabled')
+        await db.update(mainCategories).set({ purchaseEnabled: true }).where(eq(mainCategories.id, main.id))
+        await menu.bustCache()
+
         // ── بازمحاسه بعد از حذف محصول — ردیف یتیم نمی‌ماند ──
         await db.delete(products).where(eq(products.id, drink.id))
         await similarity.recompute()
@@ -363,6 +391,80 @@ try {
                 afterDelete.every((r) => r.productId !== drink.id && r.similarId !== drink.id),
                 'deleted product leaves no orphan similarity rows',
         )
+
+        // A middle UUID has neighbors on both sides of the canonical a<b pairs.
+        // The cap must cover its complete outgoing list, with a stable UUID tie-break.
+        const rankedAnchorId = '80000000-0000-4000-8000-000000000000' as typeof pizza.id
+        const rankedNeighborIds = ['40000000', 'c0000000'].flatMap((prefix) =>
+                Array.from({ length: 25 }, (_, i) =>
+                        `${prefix}-0000-4000-8000-${String(i + 1).padStart(12, '0')}` as typeof pizza.id,
+                ),
+        )
+        await db.insert(products).values([rankedAnchorId, ...rankedNeighborIds].map((id) => ({
+                id, categoryId: cat.id, name: `rank ${id}`, originalPrice: 1000,
+        })))
+        await db.insert(productViewLog).values(rankedNeighborIds.flatMap((id, i) =>
+                [0, 1].flatMap((n) => [viewRow(rankedAnchorId, `rank-${i}-${n}`), viewRow(id, `rank-${i}-${n}`)]),
+        ))
+        const rankedIds = async () => (await db.select().from(productSimilarity)
+                .where(eq(productSimilarity.productId, rankedAnchorId)))
+                .sort((a, b) => b.score - a.score || a.similarId.localeCompare(b.similarId))
+                .map((r) => r.similarId)
+        await similarity.recompute()
+        const beforeRankDelete = await rankedIds()
+        check(beforeRankDelete.length === TOP_N_PER_PRODUCT, 'top-N caps the combined neighbors on both UUID sides')
+        check(beforeRankDelete.every((id, i) => id === rankedNeighborIds[i]),
+                'top-N uses one deterministic score/UUID ranking for each product')
+        const tiedResponse = await menu.similarProducts(rankedAnchorId)
+        check(tiedResponse?.products.length === 8 && tiedResponse.products.every((p, i) => p.id === rankedNeighborIds[i]),
+                'similar API preserves the deterministic UUID order for tied scores')
+
+        await db.update(products).set({ isAvailable: false }).where(sql`${products.id} in (${sql.join(
+                [rankedAnchorId, ...rankedNeighborIds.slice(0, 4)].map((id) => sql`${id}::uuid`), sql`, `,
+        )})`)
+        await menu.bustCache()
+        const filteredResponse = await menu.similarProducts(rankedAnchorId, 'fa', 1)
+        check(filteredResponse?.strict === true && filteredResponse.products[0]?.id === rankedNeighborIds[4],
+                'strict availability filtering precedes the limit and can skip several unavailable neighbors')
+
+        // Historical view logs remain after deletion, but cannot occupy recommendation slots.
+        await db.delete(products).where(sql`${products.id} in (${sql.join(
+                rankedNeighborIds.slice(0, TOP_N_PER_PRODUCT).map((id) => sql`${id}::uuid`), sql`, `,
+        )})`)
+        await similarity.recompute()
+        const afterRankDelete = await rankedIds()
+        check(afterRankDelete.length === TOP_N_PER_PRODUCT && afterRankDelete.every((id, i) => id === rankedNeighborIds[i + TOP_N_PER_PRODUCT]),
+                'deleted products are excluded before selecting top-N neighbors')
+
+        // Multiplying two int4 popularity counts overflows at just 46,341 each.
+        const popular = await db.insert(products).values([0, 1].map((n) => ({
+                categoryId: cat.id, name: `popular ${n}`, originalPrice: 1000,
+        }))).returning()
+        await db.execute(sql`
+                insert into product_view_log (product_id, visitor_id, day)
+                select p.id, 'popular-' || n, ${recentDay}::date
+                from generate_series(1, 46341) n
+                cross join (values (${popular[0]!.id}::uuid), (${popular[1]!.id}::uuid)) p(id)
+        `)
+        await db.execute(sql`
+                insert into orders (display_id, user_id, status, delivery_type, payment_status, total_amount, breakdown)
+                select 'sim-big-' || n, ${user.id}::uuid, 'PAID', 'PICKUP', 'SUCCESS', 2000, '{}'::jsonb
+                from generate_series(1, 46341) n
+        `)
+        await db.execute(sql`
+                insert into order_items (order_id, product_id, name, unit_price, quantity)
+                select o.id, p.id, 'popular', 1000, 1
+                from orders o
+                cross join (values (${popular[0]!.id}::uuid), (${popular[1]!.id}::uuid)) p(id)
+                where o.display_id like 'sim-big-%'
+        `)
+        await similarity.recompute()
+        const popularPair = (await db.select().from(productSimilarity)
+                .where(eq(productSimilarity.productId, popular[0]!.id)))[0]!
+        check(popularPair.coViews === 46341 && popularPair.coPurchases === 46341,
+                'large popularity counts recompute without integer multiplication overflow')
+        check(Math.abs(popularPair.score - 1) < 0.001,
+                'large-popularity score preserves cosine normalization for both signals')
 
         await db.execute(sql`select 1`)
         console.log(`\n══ Product similarity: ${checks} پاس ══`)

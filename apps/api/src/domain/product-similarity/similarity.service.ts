@@ -38,7 +38,7 @@ const MIN_COVIEWS = 2
 const MAX_PRODUCTS_PER_VISITOR = 30
 /** سقف سبدِ معنادار: سفارشِ پارتی/کترینگ جفت‌های بی‌معنا می‌سازد */
 const MAX_ITEMS_PER_ORDER = 12
-/** حداکثر ردیف به‌ازای هر «جهت» (a→b و b→a هر دو نگه داشته می‌شوند) */
+/** حداکثر همسایه به‌ازای هر محصول، پس از رتبه‌بندیِ هر دو جهت */
 export const TOP_N_PER_PRODUCT = 20
 
 export class ProductSimilarityService {
@@ -116,34 +116,37 @@ export class ProductSimilarityService {
                                         select
                                                 p.a, p.b, p.cv, p.cp,
                                                 (${W_COVIEW} * p.cv
-                                                        / greatest(sqrt(coalesce(va.n, 0) * coalesce(vb.n, 0)), 1.0))
+                                                        / greatest(sqrt(coalesce(va.n, 0)::double precision * coalesce(vb.n, 0)), 1.0))
                                                 + (${W_COPURCHASE} * p.cp
-                                                        / greatest(sqrt(coalesce(oa.n, 0) * coalesce(ob.n, 0)), 1.0)) as score
+                                                        / greatest(sqrt(coalesce(oa.n, 0)::double precision * coalesce(ob.n, 0)), 1.0)) as score
                                         from pairs p
                                         left join vhub va on va.product_id = p.a
                                         left join vhub vb on vb.product_id = p.b
                                         left join ohub oa on oa.product_id = p.a
                                         left join ohub ob on ob.product_id = p.b
                                 ),
-                                -- ── رتبه‌بندی هر دو جهت + برشِ TOP_N ──
+                                -- Filter deleted products before they can occupy rank slots.
+                                live_pairs as (
+                                        select s.*
+                                        from scored s
+                                        join products pa on pa.id = s.a
+                                        join products pb on pb.id = s.b
+                                        where s.score > 0
+                                ),
+                                -- Expand first: neighbors on either UUID side share one top-N budget.
+                                directed as (
+                                        select a, b, cv, cp, score from live_pairs
+                                        union all
+                                        select b, a, cv, cp, score from live_pairs
+                                ),
                                 ranked as (
                                         select a, b, cv, cp, score,
-                                                row_number() over (partition by a order by score desc, b) as ra,
-                                                row_number() over (partition by b order by score desc, a) as rb
-                                        from scored
-                                        where score > 0
+                                                row_number() over (partition by a order by score desc, b) as rank
+                                        from directed
                                 )
-                                select r.a, r.b, r.score::real, r.cv, r.cp, now()
-                                from ranked r
-                                join products pa on pa.id = r.a
-                                join products pb on pb.id = r.b
-                                where r.ra <= ${TOP_N_PER_PRODUCT}
-                                union all
-                                select r.b, r.a, r.score::real, r.cv, r.cp, now()
-                                from ranked r
-                                join products pa on pa.id = r.b
-                                join products pb on pb.id = r.a
-                                where r.rb <= ${TOP_N_PER_PRODUCT}
+                                select a, b, score::real, cv, cp, now()
+                                from ranked
+                                where rank <= ${TOP_N_PER_PRODUCT}
                         `)
 
                         // شمارش با select صریح — شکلِ خروجیِ execute بین

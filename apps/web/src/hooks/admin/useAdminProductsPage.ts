@@ -132,6 +132,7 @@ export function useAdminProductsPage() {
       // phase-3: وضعیت عمومی محصول عوض شد — منو و جزئیات عمومی هم تازه شوند
       queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
       queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+      queryClient.invalidateQueries({ queryKey: qk.similarProductsAll })
       // stage-54 — برابریِ کامل با میوتیشنِ موجود/ناموجود: کالای «غیرفعال»شده
       // برای سبد/چک‌اوت دقیقاً مثل «ناموجود» رفتار می‌کند (سرور از stage-48
       // هر دو را available=false می‌دهد) — پس کش‌های همان دو صفحه هم همان‌جا

@@ -109,6 +109,7 @@ export const ar: Dict = {
         'header.auth': 'دخول / تسجيل',
 
         // ── التذييل (الجولة ٣٢) ──
+        'footer.others': 'أقسام أخرى',
         'footer.about': 'من نحن',
         'pwa.install': 'تثبيت سين‌شين',
         'footer.gallery': 'المعرض',

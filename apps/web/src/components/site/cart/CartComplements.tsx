@@ -48,7 +48,7 @@ export const CartComplements = memo(function CartComplements() {
 		// حذفِ خودِ اقلام سبد از کاندیدها + فقطِ موجودها (در ادغام)
 		const excludeIds = new Set(items.map((i) => i.productId))
 		return mergeSimilarCandidates(
-			results.map((r) => r.data ?? null),
+			results.map((r) => r.isError ? null : (r.data ?? null)),
 			{ excludeIds, limit: CART_BLOCK_LIMIT },
 		)
 	}, [results, items])

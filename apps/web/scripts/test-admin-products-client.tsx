@@ -108,6 +108,7 @@ function seedPage(page = 3) {
   search = { page, limit: 20, search: 'Pizza', status: 'all', categoryId: 'category-a' }
   const key = qk.adminProducts(search)
   client.setQueryData(key, { products: [product], total: 41 })
+  client.setQueryData(qk.similarProducts('another-anchor'), { products: [product], strict: false })
   events.length = 0
   return key
 }
@@ -128,6 +129,8 @@ const context = await toggle.onMutate(product.id)
 assert.equal(client.getQueryData<any>(key).products[0].status, 'INACTIVE')
 await toggle.onSuccess()
 await toggle.onSettled(undefined, null)
+assert.equal(client.getQueryState(qk.similarProducts('another-anchor'))?.isInvalidated, true,
+  'Status changes invalidate recommendations containing the edited product')
 assert.deepEqual(search, { page: 1, limit: 20, search: 'Pizza', status: 'all', categoryId: 'category-a' },
   'Successful status changes follow the updated product to page one while preserving filters')
 assert(events.indexOf('invalidate:admin-products') < events.indexOf('navigate'),
@@ -158,10 +161,18 @@ await availability.onSuccess({ success: false }, false)
 assert.equal(search.page, 3, 'Rejected availability changes do not navigate')
 assert(!events.includes('navigate'))
 await availability.onSuccess({ success: true }, false)
+assert.equal(client.getQueryState(qk.similarProducts('another-anchor'))?.isInvalidated, true,
+  'Availability changes invalidate recommendations for other anchors')
 assert.equal(search.page, 1, 'Successful availability changes follow the updated product to page one')
 assert(events.indexOf('invalidate:admin-products') < events.indexOf('navigate'))
 assert.equal(search.limit, 20)
 assert.equal(search.categoryId, 'category-a')
+
+seedPage()
+render(() => AdminProductCard(card.props))
+await mutations[1]!.onSuccess({ success: true })
+assert.equal(client.getQueryState(qk.similarProducts('another-anchor'))?.isInvalidated, true,
+  'Deleting a product invalidates recommendations containing it')
 
 client.clear()
 console.log('PASS admin product page sizes, status rollback, first-page navigation and availability wiring')

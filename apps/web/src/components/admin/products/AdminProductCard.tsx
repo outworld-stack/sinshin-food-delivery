@@ -99,6 +99,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 			const productsRefresh = queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
 			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
 			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+			queryClient.invalidateQueries({ queryKey: qk.similarProductsAll })
 			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
 			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
 			// stage-54 — available (آرگومان دوم onSuccess) = همان مقداری که خودِ
@@ -128,6 +129,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 			queryClient.invalidateQueries({ queryKey: qk.adminProductsAll })
 			queryClient.invalidateQueries({ queryKey: qk.productsByMainPrefix })
 			queryClient.invalidateQueries({ queryKey: qk.productByIdAll })
+			queryClient.invalidateQueries({ queryKey: qk.similarProductsAll })
 			queryClient.invalidateQueries({ queryKey: qk.cartDetailsAll })
 			queryClient.invalidateQueries({ queryKey: qk.checkoutPreviewPrefix })
 			showToast(res.message ?? 'محصول حذف شد')

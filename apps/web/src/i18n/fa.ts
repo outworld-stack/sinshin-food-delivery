@@ -109,6 +109,7 @@ export const fa = {
         'header.auth': 'ورود / ثبت‌نام',
 
         // ── فوتر (رارد ۳۲) ──
+        'footer.others': 'سایر بخش ها',
         'footer.about': 'درباره ما',
         'pwa.install': 'نصب سین‌شین',
         'footer.gallery': 'گالری',

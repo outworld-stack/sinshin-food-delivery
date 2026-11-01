@@ -34,7 +34,7 @@ export function mergeSimilarCandidates(
                         if (opts.excludeIds.has(p.id)) continue
                         // بلوک سبد فقط «موجود» می‌دهد — افزودنِ ناموجود به
                         // سبد ممکن نیست و کارتِ خاکستری اینجا فقط نویز است
-                        if (p.isAvailable === false) continue
+                        if (p.isAvailable === false || p.purchasable === false) continue
                         const entry = best.get(p.id)
                         if (entry) {
                                 entry.rrf += 1 / (rank + 1)

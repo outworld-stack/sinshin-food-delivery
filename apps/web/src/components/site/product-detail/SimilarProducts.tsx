@@ -15,11 +15,13 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/site/product-detail/SimilarProducts.tsx
-import { useQuery } from '@tanstack/react-query'
-import { memo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { memo, useCallback } from 'react'
 import { ProductCard } from '#/components/ProductCard'
+import { useMenuLive } from '#/hooks/shared/useMenuLive'
 import { useI18n } from '#/i18n'
 import type { Product } from '#/server/products'
+import { qk } from '#/utils/queryKeys'
 import { similarProductsOptions } from '#/utils/queryOptions'
 
 interface SimilarProductsProps {
@@ -31,10 +33,15 @@ export const SimilarProducts = memo(function SimilarProducts({
 	product,
 }: SimilarProductsProps) {
 	const { t } = useI18n()
-	const { data } = useQuery(similarProductsOptions(product.id))
+	const queryClient = useQueryClient()
+	const { data, isError } = useQuery(similarProductsOptions(product.id))
+	const onMenuEvent = useCallback(() => {
+		void queryClient.invalidateQueries({ queryKey: qk.similarProductsAll })
+	}, [queryClient])
+	useMenuLive(onMenuEvent)
 
 	const products = data?.products ?? []
-	if (products.length === 0) return null
+	if (isError || products.length === 0) return null
 
 	return (
 		<section
