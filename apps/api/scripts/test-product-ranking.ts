@@ -6,6 +6,7 @@ import { Elysia } from 'elysia'
 
 import {
         CART_ADD_WEIGHT,
+        EMA_HALF_LIFE_DAYS,
         PRIOR_STRENGTH,
         ProductRankingService,
 } from '../src/domain/product-ranking/ranking.service'
@@ -14,12 +15,16 @@ import { Database } from '../src/infra/db/client'
 import {
         categories,
         mainCategories,
+        orderItems,
+        orders,
+        payments,
         productDailyStats,
         productRanking,
         products,
+        users,
 } from '../src/infra/db/schema'
 import { menuRoutes } from '../src/http/routes/menu.routes'
-import type { CategoryId } from '../src/domain/shared/brand'
+import type { CategoryId, ProductId } from '../src/domain/shared/brand'
 import type { RedisService } from '../src/infra/redis/redis'
 
 const source = new URL(
@@ -139,6 +144,32 @@ try {
         // روزِ مرجعِ ثابت — همه‌ی محاسبات/قطعیت روی همین روز
         const day = '2025-06-15'
         const dayMinus10 = '2025-06-05'
+        const buyer = (await db.insert(users).values({ phone: '09120000001', name: 'Ranking buyer' }).returning())[0]!
+        let orderNumber = 0
+        const sale = async (
+                productId: ProductId,
+                quantity: number,
+                saleDay = day,
+                extra: Partial<typeof orders.$inferInsert> = {},
+        ) => {
+                const order = (await db.insert(orders).values({
+                        displayId: `rank-${++orderNumber}`,
+                        userId: buyer.id,
+                        status: 'PAID', deliveryType: 'PICKUP', paymentStatus: 'SUCCESS', paymentMethod: 'WALLET',
+                        createdAt: new Date(`${saleDay}T12:00:00+03:30`),
+                        totalAmount: 100_000,
+                        breakdown: {
+                                foodTotal: 100_000, discount: 0, walletDeduction: 100_000,
+                                deliveryFee: 0, packagingFee: 0, totalAmount: 100_000, amountPaidOnline: 0,
+                        },
+                        ...extra,
+                }).returning())[0]!
+                await db.insert(orderItems).values({
+                        orderId: order.id, productId,
+                        name: 'Ranking product', unitPrice: 100_000, quantity,
+                })
+                return order
+        }
         const mk = (categoryId: CategoryId, name: string, extra: Record<string, unknown> = {}) =>
                 db
                         .insert(products)
@@ -172,6 +203,10 @@ try {
                 stat(p3.id, day, 100, 0, 1),
                 stat(p4.id, day, 100, 30, 0),
         ])
+        await sale(p1.id, 100)
+        await sale(p6.id, 25)
+        await sale(p7.id, 500)
+        await sale(p3.id, 1)
 
         // ── تخریبِ امن: قبل از اولین جاب، همه‌ی smartScoreها null ──
         const beforeRanking = await menu.productsByMain('rest-main')
@@ -236,7 +271,7 @@ try {
         )
         check(
                 Math.abs(rowOf(p6.id)!.alpha - (a0c + 25)) < T,
-                'r is clipped to views (min(25+0, 50) ⇒ 25 successes stay)',
+                'sales below views retain their full weight (25 sales, 50 views)',
         )
         check(rowsA.every((r) => r.score >= 0 && r.score <= 1), 'every Thompson sample stays within 0..1')
         check(rowsA.every((r) => dayOf(r.computedDay) === day), 'computed_day records the reference day')
@@ -284,6 +319,7 @@ try {
         // ── سرریز: یک میلیارد بازدید/فروش — بدون کرش، بدون NaN ──
         const p8 = await mk(cat2.id, 'وایرال')
         await db.insert(productDailyStats).values([stat(p8.id, day, 1_000_000_000, 0, 1_000_000_000)])
+        await sale(p8.id, 1_000_000_000)
         const resultB = await ranking.recompute({ day })
         const rowsC = await db.select().from(productRanking)
         const overflowRow = rowsC.find((r) => r.productId === p8.id)
@@ -366,6 +402,87 @@ try {
                 afterDelete.every((r) => r.productId !== p1.id) && afterDelete.length === 6,
                 'deleted product leaves no orphan ranking row',
         )
+
+        // Exercise real order state, not just manually seeded daily sale counters.
+        await db.update(products).set({ status: 'INACTIVE' })
+        const cold = await mk(cat1.id, 'Signal prior reference')
+        const historical = await mk(cat1.id, 'Historical and refunded sales')
+        await db.insert(productDailyStats).values(stat(historical.id, day, 100, 0, 777))
+        const walletOrder = await sale(historical.id, 3)
+        const legacyOrder = await sale(historical.id, 2, day, { paymentMethod: 'GATEWAY' })
+        await sale(historical.id, 100, day, { status: 'PENDING_PAYMENT', paymentStatus: 'SUCCESS' })
+        await sale(historical.id, 100, day, { status: 'PENDING_PAYMENT', paymentStatus: 'PENDING' })
+        await sale(historical.id, 100, day, { paymentStatus: 'FAILED' })
+        await sale(historical.id, 100, day, { status: 'CANCELED', paymentStatus: 'SUCCESS' })
+        await db.insert(orderItems).values({
+                orderId: walletOrder.id, productId: null, name: 'Legacy snapshot', unitPrice: 100_000, quantity: 999,
+        })
+        const signal = async (productId: string) => {
+                await ranking.recompute({ day })
+                const rows = await db.select().from(productRanking)
+                const row = rows.find((r) => r.productId === productId)!
+                const prior = rows.find((r) => r.productId === cold.id)!
+                return { r: row.alpha - prior.alpha, v: row.alpha + row.beta - PRIOR_STRENGTH }
+        }
+        check(Math.abs((await signal(historical.id)).r - 5) < T,
+                'wallet and legacy paid orders backfill sales without a buffer; stale daily counters and unpaid orders are ignored')
+        await db.update(orders).set({ status: 'CANCELED', paymentStatus: 'REFUNDED' }).where(eq(orders.id, walletOrder.id))
+        check(Math.abs((await signal(historical.id)).r - 2) < T,
+                'refunded units disappear on recompute even though the additive daily counter remains')
+        await db.update(orders).set({ status: 'CANCELED' }).where(eq(orders.id, legacyOrder.id))
+        check(Math.abs((await signal(historical.id)).r) < T,
+                'canceled orders are excluded even if their payment status is still SUCCESS')
+
+        const dated = await mk(cat1.id, 'Gateway settlement day')
+        await db.insert(productDailyStats).values(stat(dated.id, day, 100))
+        const gatewayOrder = await sale(dated.id, 8, '2025-04-01', { paymentMethod: 'GATEWAY' })
+        const payment = (orderId: typeof gatewayOrder.id, verifiedAt: string, status = 'SUCCESS') =>
+                db.insert(payments).values({
+                        orderId, userId: buyer.id, gateway: 'MOCK', mode: 'mock', amount: 100_000,
+                        status, verifiedAt: new Date(verifiedAt),
+                })
+        // 20:30 UTC is already the next calendar day in Tehran.
+        await payment(gatewayOrder.id, '2025-06-04T20:30:00.000Z')
+        await payment(gatewayOrder.id, '2025-06-05T20:30:00.000Z')
+        await payment(gatewayOrder.id, '2025-04-01T10:00:00.000Z', 'FAILED')
+        const futureOrder = await sale(dated.id, 100, day, { paymentMethod: 'GATEWAY' })
+        await payment(futureOrder.id, '2025-06-15T20:30:00.000Z')
+        check(Math.abs((await signal(dated.id)).r - 4) < T,
+                'gateway sales use the first successful Tehran settlement day, count duplicate attempts once, and exclude future settlements')
+
+        const clipped = await mk(cat1.id, 'Clipped conversions')
+        await db.insert(productDailyStats).values(stat(clipped.id, day, 2, 10))
+        await sale(clipped.id, 3)
+        const clippedSignal = await signal(clipped.id)
+        check(Math.abs(clippedSignal.r - 2) < T && Math.abs(clippedSignal.v - 2) < T,
+                'sales plus weighted cart additions above views are actually clipped to views')
+        const noViews = await mk(cat1.id, 'Sales without views')
+        await sale(noViews.id, 10)
+        const noViewSignal = await signal(noViews.id)
+        check(Math.abs(noViewSignal.r) < T && Math.abs(noViewSignal.v) < T,
+                'backfilled sales with zero views retain only the finite prior')
+
+        const boundary = await mk(cat1.id, 'Window boundaries')
+        const firstDay = '2025-05-02' // Reference day minus 44: included.
+        const expiredDay = '2025-05-01' // Reference day minus 45: excluded.
+        await db.insert(productDailyStats).values([
+                stat(boundary.id, firstDay, 160, 20),
+                stat(boundary.id, expiredDay, 100_000, 100_000),
+                stat(boundary.id, '2025-06-16', 100_000, 100_000),
+        ])
+        await sale(boundary.id, 16, firstDay)
+        await sale(boundary.id, 100_000, expiredDay)
+        await sale(boundary.id, 100_000, '2025-06-16')
+        const edgeSignal = await signal(boundary.id)
+        const oldestWeight = Math.pow(0.5, 44 / EMA_HALF_LIFE_DAYS)
+        check(Math.abs(edgeSignal.v - 160 * oldestWeight) < T &&
+                Math.abs(edgeSignal.r - (16 + CART_ADD_WEIGHT * 20) * oldestWeight) < T,
+                'views, carts, and sales share the inclusive 45-day window and exclude old and future days')
+
+        await db.update(products).set({ status: 'INACTIVE' })
+        const empty = await ranking.recompute({ day })
+        check(empty.products === 0 && (await db.select().from(productRanking)).length === 0,
+                'an empty active catalog atomically clears obsolete ranks')
 
         await db.execute(sql`select 1`)
         console.log(`\n══ Product ranking: ${checks} پاس ══`)

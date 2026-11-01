@@ -2,8 +2,8 @@
 // hundred-fifteen (فاز ۳ — «منتخب») — sinshin-food-delivery
 // مسیر مقصد: apps/api/src/domain/product-ranking/ranking.service.ts
 //
-// رتبه‌بندی هوشمند «منتخب» — هر شب (۰۳:۴۷) از آمار روزانه‌ی فاز ۱
-// (product_daily_stats) برای هر محصولِ ACTIVE یک امتیاز ۰..۱ ساخته
+// رتبه‌بندی هوشمند «منتخب» — هر شب (۰۳:۴۷) از آمار بازدید/سبدِ فاز ۱
+// و اقلام سفارش‌های پرداخت‌شده برای هر محصولِ ACTIVE یک امتیاز ۰..۱ ساخته
 // می‌شود. سه لایه:
 //
 //   ۱) EMA نیم‌عمرِ ۱۰ روز روی پنجره‌ی ۴۵روزه: دیروز ۲ برابرِ ۱۱ روز
@@ -210,19 +210,46 @@ export class ProductRankingService {
 
   /**
    * سیگنال‌های وزن‌دارِ همه‌ی محصولات ACTIVE — یک کوئری:
-   * EMA روی product_daily_stats (پنجره نسبت به «روزِ مرجع»، نه ساعتِ
+   * EMA روی بازدید/سبدِ product_daily_stats و فروشِ order_items (پنجره نسبت به «روزِ مرجع»، نه ساعتِ
    * سرور) + برشِ r = min(S + ۰.۳·C, V) داخل SQL با double precision
    * (درسِ سرریزِ فاز ۲ — جمع‌های بزرگ هرگز داخل int4 نمی‌روند).
    */
   private async loadSignals(day: string): Promise<ProductSignal[]> {
     const weight = sql`power(0.5, (${day}::date - s.day)::double precision / ${EMA_HALF_LIFE_DAYS})`
+    // Daily order counters are buffered and additive: refunds and lost buffers are
+    // not repaired there. Rebuild S from current paid orders instead. Successful
+    // gateway verification supplies the settlement day; wallet checkout settles in
+    // its creation transaction, and legacy orders fall back to creation time too.
+    // Collapse payment attempts before joining items so each sold unit counts once.
     const result = await this.deps.db.execute(sql`
+      with paid_orders as (
+        select o.id,
+          (coalesce(p.settled_at, o.created_at) at time zone 'Asia/Tehran')::date as day
+        from orders o
+        left join (
+          select order_id, min(verified_at) as settled_at
+          from payments
+          where status = 'SUCCESS'
+          group by order_id
+        ) p on p.order_id = o.id
+        where o.payment_status = 'SUCCESS'
+          and o.status not in ('PENDING_PAYMENT', 'CANCELED')
+      ), sales as (
+        select it.product_id,
+          sum(it.quantity::double precision *
+            power(0.5, (${day}::date - o.day)::double precision / ${EMA_HALF_LIFE_DAYS})) as units
+        from paid_orders o
+        join order_items it on it.order_id = o.id
+        where o.day >= ${day}::date - ${EMA_WINDOW_DAYS - 1}
+          and o.day <= ${day}::date
+        group by it.product_id
+      )
       select
         p.id as product_id,
         c.main_category_id as main_id,
         greatest(coalesce(w.v, 0), 0)::double precision as v,
         least(
-          coalesce(w.s, 0) + ${CART_ADD_WEIGHT} * coalesce(w.c, 0),
+          coalesce(sales.units, 0) + ${CART_ADD_WEIGHT} * coalesce(w.c, 0),
           greatest(coalesce(w.v, 0), 0)
         )::double precision as r
       from products p
@@ -231,13 +258,13 @@ export class ProductRankingService {
         select
           s.product_id,
           sum(s.views::double precision * ${weight}) as v,
-          sum(s.cart_adds::double precision * ${weight}) as c,
-          sum(s.orders::double precision * ${weight}) as s
+          sum(s.cart_adds::double precision * ${weight}) as c
         from product_daily_stats s
         where s.day >= ${day}::date - ${EMA_WINDOW_DAYS - 1}
           and s.day <= ${day}::date
         group by s.product_id
       ) w on w.product_id = p.id
+      left join sales on sales.product_id = p.id
       where p.status = 'ACTIVE'
       order by p.id
     `)

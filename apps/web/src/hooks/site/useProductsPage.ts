@@ -102,10 +102,8 @@ export function sortProducts(products: Product[], sortBy: SortKey): Product[] {
 		// sort پایدار (ترتیب سرور = جدیدترین حفظ می‌شود؛ ES2019+ تضمینِ پایداری)
 		case 'smart':
 			return sorted.sort((a, b) => {
-				const classA =
-					a.isAvailable === false || a.purchasable === false ? 1 : 0
-				const classB =
-					b.isAvailable === false || b.purchasable === false ? 1 : 0
+				const classA = availabilityClass(a)
+				const classB = availabilityClass(b)
 				if (classA !== classB) return classA - classB
 				const scoreA = typeof a.smartScore === 'number' ? a.smartScore : -1
 				const scoreB = typeof b.smartScore === 'number' ? b.smartScore : -1
@@ -124,6 +122,10 @@ export function sortProducts(products: Product[], sortBy: SortKey): Product[] {
 		default:
 			return sorted
 	}
+}
+
+function availabilityClass(product: Product): number {
+	return product.isAvailable === false || product.purchasable === false ? 1 : 0
 }
 
 // ═══ stage-60 — سنجاش ویژه (فلگ‌دارها جزو ۴ آیتم اول) با تصادفِ قطعی ═══
@@ -159,9 +161,7 @@ function mulberry32(seed: number): () => number {
  * صادرشده برای تست؛ PRNG/ادغامِ خودِ سنجاش عیناً دست‌نخورده.
  */
 export function eligibleForFeaturedPinning(p: Product): boolean {
-	return (
-		p.isFeatured === true && p.isAvailable !== false && p.purchasable !== false
-	)
+	return p.isFeatured === true && availabilityClass(p) === 0
 }
 
 /** Fischer-Yates با PRNG داده‌شده (کپی آرایه — ورودی دست‌نخورده) */
@@ -304,7 +304,13 @@ export function useProductsPage() {
 			res.filter((p) => !pinnedIds.has(p.id)),
 			sortBy,
 		)
-		return mergePinnedIntoSlots(normal, pinned, rng)
+		const merged = mergePinnedIntoSlots(normal, pinned, rng)
+		// Short/filtered lists can put a featured slot after an unavailable normal
+		// item. Keep smart availability priority after inserting featured products,
+		// preserving relative order within each availability class.
+		return sortBy === 'smart'
+			? merged.sort((a, b) => availabilityClass(a) - availabilityClass(b))
+			: merged
 	}, [products, tabCategories, activeCategory, sortBy, activeMainSlug])
 
 	const visibleProducts = useMemo(
