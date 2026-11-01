@@ -2,30 +2,29 @@
 import assert from 'node:assert/strict'
 import { eq, sql } from 'drizzle-orm'
 import { SQL } from 'bun'
-import { setSystemTime } from 'bun:test'
 import { Elysia } from 'elysia'
 
 import { ProductStatsService, tehranDay } from '../src/domain/product-stats/product-stats.service'
 import { Database } from '../src/infra/db/client'
 import {
-	categories,
-	mainCategories,
-	orderItems,
-	orders,
-	productDailyStats,
-	productViewLog,
-	products,
-	users,
+        categories,
+        mainCategories,
+        orderItems,
+        orders,
+        productDailyStats,
+        productViewLog,
+        products,
+        users,
 } from '../src/infra/db/schema'
 import { menuRoutes } from '../src/http/routes/menu.routes'
 import type { RedisService } from '../src/infra/redis/redis'
 
 const source = new URL(
-	process.env.DATABASE_URL ?? 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin',
+        process.env.DATABASE_URL ?? 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin',
 )
 assert.ok(
-	['127.0.0.1', 'localhost', '[::1]'].includes(source.hostname),
-	'Product-stats tests require a local PostgreSQL server',
+        ['127.0.0.1', 'localhost', '[::1]'].includes(source.hostname),
+        'Product-stats tests require a local PostgreSQL server',
 )
 const scratch = `sinshin_stats_test_${process.pid}_${crypto.randomUUID().replaceAll('-', '')}`
 const adminUrl = new URL(source)
@@ -37,52 +36,52 @@ let database: Database | undefined
 let service: ProductStatsService | undefined
 let checks = 0
 const check = (condition: unknown, message: string) => {
-	assert.ok(condition, message)
-	checks++
-	console.log(`  ✓ ${message}`)
+        assert.ok(condition, message)
+        checks++
+        console.log(`  ✓ ${message}`)
 }
 
 /** ردیسِ درون‌حافظه‌ای — همان قراردادی که سرویس/سقفِ نرخ می‌خواهند (TTL واقعی) */
 function fakeRedis(): RedisService {
-	const store = new Map<string, { value: string; expiresAt: number }>()
-	const alive = (key: string) => {
-		const entry = store.get(key)
-		if (!entry) return null
-		if (entry.expiresAt < Date.now()) {
-			store.delete(key)
-			return null
-		}
-		return entry
-	}
-	return {
-		get: async (key: string) => alive(key)?.value ?? null,
-		set: async (key: string, value: string, opts?: { ex?: number }) => {
-			store.set(key, {
-				value,
-				expiresAt: opts?.ex ? Date.now() + opts.ex * 1000 : Number.MAX_SAFE_INTEGER,
-			})
-			return 'OK'
-		},
-		setNx: async (key: string, value: string, opts: { ex: number }) => {
-			if (alive(key)) return false
-			store.set(key, { value, expiresAt: Date.now() + opts.ex * 1000 })
-			return true
-		},
-		incr: async (key: string) => {
-			const entry = alive(key)
-			const next = Number(entry?.value ?? 0) + 1
-			store.set(key, {
-				value: String(next),
-				expiresAt: entry?.expiresAt ?? Number.MAX_SAFE_INTEGER,
-			})
-			return next
-		},
-		expire: async (key: string, seconds: number) => {
-			const entry = alive(key)
-			if (entry) entry.expiresAt = Date.now() + seconds * 1000
-			return 1
-		},
-	} as unknown as RedisService
+        const store = new Map<string, { value: string; expiresAt: number }>()
+        const alive = (key: string) => {
+                const entry = store.get(key)
+                if (!entry) return null
+                if (entry.expiresAt < Date.now()) {
+                        store.delete(key)
+                        return null
+                }
+                return entry
+        }
+        return {
+                get: async (key: string) => alive(key)?.value ?? null,
+                set: async (key: string, value: string, opts?: { ex?: number }) => {
+                        store.set(key, {
+                                value,
+                                expiresAt: opts?.ex ? Date.now() + opts.ex * 1000 : Number.MAX_SAFE_INTEGER,
+                        })
+                        return 'OK'
+                },
+                setNx: async (key: string, value: string, opts: { ex: number }) => {
+                        if (alive(key)) return false
+                        store.set(key, { value, expiresAt: Date.now() + opts.ex * 1000 })
+                        return true
+                },
+                incr: async (key: string) => {
+                        const entry = alive(key)
+                        const next = Number(entry?.value ?? 0) + 1
+                        store.set(key, {
+                                value: String(next),
+                                expiresAt: entry?.expiresAt ?? Number.MAX_SAFE_INTEGER,
+                        })
+                        return next
+                },
+                expire: async (key: string, seconds: number) => {
+                        const entry = alive(key)
+                        if (entry) entry.expiresAt = Date.now() + seconds * 1000
+                        return 1
+                },
+        } as unknown as RedisService
 }
 
 /** درایور Bun SQL ستون date را به Date پارس می‌کند (mode در drizzle بر آن
@@ -90,367 +89,248 @@ function fakeRedis(): RedisService {
 const dayStr = (d: string | Date) => new Date(d).toISOString().slice(0, 10)
 
 try {
-	await boot.unsafe(`create database "${scratch}"`)
-	const migration = Bun.spawn(['bun', 'src/infra/db/migrate.ts'], {
-		cwd: `${import.meta.dir}/..`,
-		env: { ...process.env, DATABASE_URL: testUrl.toString() },
-		stdout: 'pipe',
-		stderr: 'pipe',
-	})
-	const [stdout, stderr, exit] = await Promise.all([
-		new Response(migration.stdout).text(),
-		new Response(migration.stderr).text(),
-		migration.exited,
-	])
-	assert.equal(exit, 0, `Scratch migrations failed:\n${stdout}\n${stderr}`)
+        await boot.unsafe(`create database "${scratch}"`)
+        const migration = Bun.spawn(['bun', 'src/infra/db/migrate.ts'], {
+                cwd: `${import.meta.dir}/..`,
+                env: { ...process.env, DATABASE_URL: testUrl.toString() },
+                stdout: 'pipe',
+                stderr: 'pipe',
+        })
+        const [stdout, stderr, exit] = await Promise.all([
+                new Response(migration.stdout).text(),
+                new Response(migration.stderr).text(),
+                migration.exited,
+        ])
+        assert.equal(exit, 0, `Scratch migrations failed:\n${stdout}\n${stderr}`)
 
-	database = new Database(testUrl.toString(), { max: 8 })
-	const db = database.db
-	const redis = fakeRedis()
-	service = new ProductStatsService({ db, redis })
+        database = new Database(testUrl.toString(), { max: 8 })
+        const db = database.db
+        const redis = fakeRedis()
+        service = new ProductStatsService({ db, redis })
 
-	// ── سید: کاربر + والد + دسته + دو محصول ──
-	const user = (await db
-		.insert(users)
-		.values({ phone: '09150000000' })
-		.returning())[0]!
-	const main = (await db
-		.insert(mainCategories)
-		.values({ name: 'تست', slug: 'test-main', isActive: true })
-		.returning())[0]!
-	const cat = (await db
-		.insert(categories)
-		.values({ mainCategoryId: main.id, name: 'دسته تست', slug: 'test-cat' })
-		.returning())[0]!
-	const pizza = (await db
-		.insert(products)
-		.values({ categoryId: cat.id, name: 'پیتزا', originalPrice: 100_000 })
-		.returning())[0]!
-	const salad = (await db
-		.insert(products)
-		.values({ categoryId: cat.id, name: 'سالاد', originalPrice: 50_000 })
-		.returning())[0]!
+        // ── سید: کاربر + والد + دسته + دو محصول ──
+        const user = (await db
+                .insert(users)
+                .values({ phone: '09150000000' })
+                .returning())[0]!
+        const main = (await db
+                .insert(mainCategories)
+                .values({ name: 'تست', slug: 'test-main', isActive: true })
+                .returning())[0]!
+        const cat = (await db
+                .insert(categories)
+                .values({ mainCategoryId: main.id, name: 'دسته تست', slug: 'test-cat' })
+                .returning())[0]!
+        const pizza = (await db
+                .insert(products)
+                .values({ categoryId: cat.id, name: 'پیتزا', originalPrice: 100_000 })
+                .returning())[0]!
+        const salad = (await db
+                .insert(products)
+                .values({ categoryId: cat.id, name: 'سالاد', originalPrice: 50_000 })
+                .returning())[0]!
 
-	// ── بیکن‌ها از لایه‌ی HTTP (همان مسیر پروداکشن: کوکی + بات + سقف نرخ) ──
-	const app = new Elysia()
-		.use(
-			menuRoutes({
-				menu: {} as never,
-				cart: {} as never,
-				settings: {} as never,
-				redis,
-				stats: service,
-			}),
-		)
-		.compile()
-	const post = (path: string, headers: Record<string, string>) =>
-		app.handle(new Request(`http://localhost${path}`, { method: 'POST', headers }))
+        // ── بیکن‌ها از لایه‌ی HTTP (همان مسیر پروداکشن: کوکی + بات + سقف نرخ) ──
+        const app = new Elysia()
+                .use(
+                        menuRoutes({
+                                menu: {} as never,
+                                cart: {} as never,
+                                settings: {} as never,
+                                redis,
+                                stats: service,
+                        }),
+                )
+                .compile()
+        const post = (path: string, headers: Record<string, string>) =>
+                app.handle(new Request(`http://localhost${path}`, { method: 'POST', headers }))
 
-	const bot = await post(`/menu/products/${pizza.id}/view`, {
-		'user-agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
-	})
-	const botBody = (await bot.json()) as { counted: boolean }
-	check(botBody.counted === false, 'bot UA is not counted')
-	check(!bot.headers.get('set-cookie'), 'bot UA gets no cookie')
+        const bot = await post(`/menu/products/${pizza.id}/view`, {
+                'user-agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
+        })
+        const botBody = (await bot.json()) as { counted: boolean }
+        check(botBody.counted === false, 'bot UA is not counted')
+        check(!bot.headers.get('set-cookie'), 'bot UA gets no cookie')
 
-	const first = await post(`/menu/products/${pizza.id}/view`, {
-		'user-agent': 'Mozilla/5.0 (Linux; Android 14)',
-	})
-	const cookieHeader = first.headers.get('set-cookie') ?? ''
-	const firstBody = (await first.json()) as { counted: boolean }
-	check(firstBody.counted === true, 'first view counts')
-	check(
-		cookieHeader.includes('sinshin_vid=') && cookieHeader.includes('HttpOnly'),
-		'fresh visitor gets HttpOnly sinshin_vid cookie',
-	)
-	const vid = /sinshin_vid=([^;]+)/.exec(cookieHeader)?.[1] ?? ''
+        // hundred-twelve — گارد کراس‌سایت: بیکنِ مرورگری که از دامنه‌ی دیگری
+        // آمده شمرده نمی‌شود (کوکی Lax همراهش نمی‌آید ⇒ هر بار vid تازه = تورم)
+        const crossSite = await post(`/menu/products/${pizza.id}/view`, {
+                'user-agent': 'Mozilla/5.0 (Linux; Android 14)',
+                'sec-fetch-site': 'cross-site',
+        })
+        const crossSiteBody = (await crossSite.json()) as { counted: boolean }
+        check(crossSiteBody.counted === false, 'cross-site browser beacon is not counted')
+        check(!crossSite.headers.get('set-cookie'), 'cross-site beacon gets no cookie')
+        // same-origin (سایت خودمان) شمرده می‌شود — گاردِ هدفمند، نه بسته‌ی کامل
+        const sameOrigin = await post(`/menu/products/${salad.id}/view`, {
+                'user-agent': 'Mozilla/5.0 (Linux; Android 14)',
+                'sec-fetch-site': 'same-origin',
+        })
+        const sameOriginBody = (await sameOrigin.json()) as { counted: boolean }
+        check(sameOriginBody.counted === true, 'same-origin browser beacon is counted')
 
-	const repeat = await post(`/menu/products/${pizza.id}/view`, {
-		'user-agent': 'Mozilla/5.0',
-		cookie: `sinshin_vid=${vid}`,
-	})
-	const repeatBody = (await repeat.json()) as { counted: boolean }
-	check(repeatBody.counted === false, 'same visitor refresh is deduped (24h)')
+        const first = await post(`/menu/products/${pizza.id}/view`, {
+                'user-agent': 'Mozilla/5.0 (Linux; Android 14)',
+        })
+        const cookieHeader = first.headers.get('set-cookie') ?? ''
+        const firstBody = (await first.json()) as { counted: boolean }
+        check(firstBody.counted === true, 'first view counts')
+        check(
+                cookieHeader.includes('sinshin_vid=') && cookieHeader.includes('HttpOnly'),
+                'fresh visitor gets HttpOnly sinshin_vid cookie',
+        )
+        const vid = /sinshin_vid=([^;]+)/.exec(cookieHeader)?.[1] ?? ''
 
-	const secondVid = crypto.randomUUID()
-	const second = await post(`/menu/products/${pizza.id}/view`, {
-		'user-agent': 'Mozilla/5.0',
-		cookie: `sinshin_vid=${secondVid}`,
-	})
-	const secondBody = (await second.json()) as { counted: boolean }
-	check(secondBody.counted === true, 'a different visitor counts')
-	check(
-		(second.headers.get('set-cookie') ?? '').length === 0,
-		'existing cookie is not re-issued',
-	)
+        const repeat = await post(`/menu/products/${pizza.id}/view`, {
+                'user-agent': 'Mozilla/5.0',
+                cookie: `sinshin_vid=${vid}`,
+        })
+        const repeatBody = (await repeat.json()) as { counted: boolean }
+        check(repeatBody.counted === false, 'same visitor refresh is deduped (24h)')
 
-	const cartFirst = await post(`/menu/products/${pizza.id}/cart-event`, {
-		'user-agent': 'Mozilla/5.0',
-		cookie: `sinshin_vid=${vid}`,
-	})
-	const cartFirstBody = (await cartFirst.json()) as { counted: boolean }
-	check(cartFirstBody.counted === true, 'first cart event counts')
-	const cartRepeat = await post(`/menu/products/${pizza.id}/cart-event`, {
-		'user-agent': 'Mozilla/5.0',
-		cookie: `sinshin_vid=${vid}`,
-	})
-	const cartRepeatBody = (await cartRepeat.json()) as { counted: boolean }
-	check(cartRepeatBody.counted === false, 'same-visitor cart event is deduped')
+        const secondVid = crypto.randomUUID()
+        const second = await post(`/menu/products/${pizza.id}/view`, {
+                'user-agent': 'Mozilla/5.0',
+                cookie: `sinshin_vid=${secondVid}`,
+        })
+        const secondBody = (await second.json()) as { counted: boolean }
+        check(secondBody.counted === true, 'a different visitor counts')
+        check(
+                (second.headers.get('set-cookie') ?? '').length === 0,
+                'existing cookie is not re-issued',
+        )
 
-	const invalid = await post(`/menu/products/not-a-uuid/view`, { 'user-agent': 'Mozilla/5.0' })
-	check(invalid.status === 422, 'non-UUID id is rejected by the route schema')
+        const cartFirst = await post(`/menu/products/${pizza.id}/cart-event`, {
+                'user-agent': 'Mozilla/5.0',
+                cookie: `sinshin_vid=${vid}`,
+        })
+        const cartFirstBody = (await cartFirst.json()) as { counted: boolean }
+        check(cartFirstBody.counted === true, 'first cart event counts')
+        const cartRepeat = await post(`/menu/products/${pizza.id}/cart-event`, {
+                'user-agent': 'Mozilla/5.0',
+                cookie: `sinshin_vid=${vid}`,
+        })
+        const cartRepeatBody = (await cartRepeat.json()) as { counted: boolean }
+        check(cartRepeatBody.counted === false, 'same-visitor cart event is deduped')
 
-	// ── فلش (close) → همه‌چیز یکجا می‌نشیند ──
-	await service.close()
-	const pizzaRow = (await db.select().from(products).where(eq(products.id, pizza.id)))[0]!
-	check(pizzaRow.views === 2, 'products.views got both unique visitors (2)')
-	const logRows = await db.select().from(productViewLog)
-	check(logRows.length === 2, 'view log carries one row per accepted view')
-	check(
-		logRows.every((r) => dayStr(r.day) === tehranDay()),
-		'log day is Tehran-today',
-	)
-	check(
-		logRows.every((r) => !r.visitorId.includes(vid)),
-		'visitor id is hashed (no raw cookie in log)',
-	)
-	const todayStats = (
-		await db.select().from(productDailyStats).where(eq(productDailyStats.productId, pizza.id))
-	)[0]!
-	check(todayStats.views === 2 && todayStats.cartAdds === 1, 'daily cell: 2 views + 1 cart add')
+        const invalid = await post(`/menu/products/not-a-uuid/view`, { 'user-agent': 'Mozilla/5.0' })
+        check(invalid.status === 422, 'non-UUID id is rejected by the route schema')
 
-	// ── صدور فروش — سفارشِ تسویه‌شده اعمال می‌شود، ناتسویه رد می‌شود ──
-	const breakdown = {
-		foodTotal: 250_000,
-		discount: 0,
-		walletDeduction: 0,
-		deliveryFee: 0,
-		packagingFee: 0,
-		totalAmount: 250_000,
-		amountPaidOnline: 250_000,
-	}
-	const paid = (await db
-		.insert(orders)
-		.values({
-			displayId: 'ord-test01',
-			userId: user.id,
-			status: 'PAID',
-			deliveryType: 'PICKUP',
-			paymentStatus: 'SUCCESS',
-			totalAmount: 250_000,
-			breakdown,
-		})
-		.returning())[0]!
-	await db.insert(orderItems).values([
-		{ orderId: paid.id, productId: pizza.id, name: 'پیتزا', unitPrice: 100_000, quantity: 2 },
-		{ orderId: paid.id, productId: salad.id, name: 'سالاد', unitPrice: 50_000, quantity: 1 },
-	])
-	service.recordOrderSettlement(paid.id)
+        // ── فلش (close) → همه‌چیز یکجا می‌نشیند ──
+        await service.close()
+        const pizzaRow = (await db.select().from(products).where(eq(products.id, pizza.id)))[0]!
+        check(pizzaRow.views === 2, 'products.views got both unique visitors (2)')
+        const logRows = await db.select().from(productViewLog)
+        check(logRows.length === 3, 'view log carries one row per accepted view (2 pizza + 1 salad)')
+        check(
+                logRows.every((r) => dayStr(r.day) === tehranDay()),
+                'log day is Tehran-today',
+        )
+        check(
+                logRows.every((r) => !r.visitorId.includes(vid)),
+                'visitor id is hashed (no raw cookie in log)',
+        )
+        const todayStats = (
+                await db.select().from(productDailyStats).where(eq(productDailyStats.productId, pizza.id))
+        )[0]!
+        check(todayStats.views === 2 && todayStats.cartAdds === 1, 'daily cell: 2 views + 1 cart add')
 
-	const pending = (await db
-		.insert(orders)
-		.values({
-			displayId: 'ord-test02',
-			userId: user.id,
-			status: 'PENDING_PAYMENT',
-			deliveryType: 'PICKUP',
-			totalAmount: 100_000,
-			breakdown,
-		})
-		.returning())[0]!
-	await db.insert(orderItems).values([
-		{ orderId: pending.id, productId: pizza.id, name: 'پیتزا', unitPrice: 100_000, quantity: 5 },
-	])
-	service.recordOrderSettlement(pending.id)
+        // ── صدور فروش — سفارشِ تسویه‌شده اعمال می‌شود، ناتسویه رد می‌شود ──
+        const breakdown = {
+                foodTotal: 250_000,
+                discount: 0,
+                walletDeduction: 0,
+                deliveryFee: 0,
+                packagingFee: 0,
+                totalAmount: 250_000,
+                amountPaidOnline: 250_000,
+        }
+        const paid = (await db
+                .insert(orders)
+                .values({
+                        displayId: 'ord-test01',
+                        userId: user.id,
+                        status: 'PAID',
+                        deliveryType: 'PICKUP',
+                        paymentStatus: 'SUCCESS',
+                        totalAmount: 250_000,
+                        breakdown,
+                })
+                .returning())[0]!
+        await db.insert(orderItems).values([
+                { orderId: paid.id, productId: pizza.id, name: 'پیتزا', unitPrice: 100_000, quantity: 2 },
+                { orderId: paid.id, productId: salad.id, name: 'سالاد', unitPrice: 50_000, quantity: 1 },
+        ])
+        service.recordOrderSettlement(paid.id)
 
-	await service.flush()
-	const afterPizza = (await db.select().from(products).where(eq(products.id, pizza.id)))[0]!
-	const afterSalad = (await db.select().from(products).where(eq(products.id, salad.id)))[0]!
-	check(afterPizza.sales === 2, 'settled order adds sales (pizza x2)')
-	check(afterSalad.sales === 1, 'settled order adds sales (salad x1)')
-	check(
-		afterPizza.views === 2,
-		'flush kept earlier views (buffer re-queue after close is lossless)',
-	)
-	const cells = await db.select().from(productDailyStats)
-	const pizzaCell = cells.find((c) => c.productId === pizza.id)!
-	check(pizzaCell.orders === 2, 'daily cell carries sold units (pizza x2)')
-	const saladCell = cells.find((c) => c.productId === salad.id)!
-	check(saladCell.orders === 1, 'daily cell carries sold units (salad x1)')
+        const pending = (await db
+                .insert(orders)
+                .values({
+                        displayId: 'ord-test02',
+                        userId: user.id,
+                        status: 'PENDING_PAYMENT',
+                        deliveryType: 'PICKUP',
+                        totalAmount: 100_000,
+                        breakdown,
+                })
+                .returning())[0]!
+        await db.insert(orderItems).values([
+                { orderId: pending.id, productId: pizza.id, name: 'پیتزا', unitPrice: 100_000, quantity: 5 },
+        ])
+        service.recordOrderSettlement(pending.id)
 
-	// ── sync شبانه — خودترمیمی refund + پاکسازی یتیم ──
-	await db
-		.update(orders)
-		.set({ status: 'CANCELED', paymentStatus: 'REFUNDED' })
-		.where(eq(orders.id, paid.id))
-	await service.syncSales()
-	const healedPizza = (await db.select().from(products).where(eq(products.id, pizza.id)))[0]!
-	const healedSalad = (await db.select().from(products).where(eq(products.id, salad.id)))[0]!
-	check(healedPizza.sales === 0 && healedSalad.sales === 0, 'refunded order is removed by the nightly sync')
+        await service.flush()
+        const afterPizza = (await db.select().from(products).where(eq(products.id, pizza.id)))[0]!
+        const afterSalad = (await db.select().from(products).where(eq(products.id, salad.id)))[0]!
+        check(afterPizza.sales === 2, 'settled order adds sales (pizza x2)')
+        check(afterSalad.sales === 1, 'settled order adds sales (salad x1)')
+        check(
+                afterPizza.views === 2,
+                'flush kept earlier views (buffer re-queue after close is lossless)',
+        )
+        const cells = await db.select().from(productDailyStats)
+        const pizzaCell = cells.find((c) => c.productId === pizza.id)!
+        check(pizzaCell.orders === 2, 'daily cell carries sold units (pizza x2)')
+        const saladCell = cells.find((c) => c.productId === salad.id)!
+        check(saladCell.orders === 1, 'daily cell carries sold units (salad x1)')
 
-	// ردیف یتیم: محصولِ حذف‌شده (FK عمداً نیست — snapshot semantics اقلام سفارش)
-	await db.execute(
-		sql`insert into product_view_log (product_id, visitor_id, day) values (${crypto.randomUUID()}, 'orphan-hash', ${tehranDay()})`,
-	)
-	const orphansBefore = await db.select().from(productViewLog)
-	check(orphansBefore.length === 3, 'orphan log row exists before sync (2 real + 1 orphan)')
-	await service.syncSales()
-	const orphansAfter = await db.select().from(productViewLog)
-	check(orphansAfter.length === 2, 'nightly sync prunes orphan stats rows (deleted product)')
+        // ── sync شبانه — خودترمیمی refund + پاکسازی یتیم ──
+        await db
+                .update(orders)
+                .set({ status: 'CANCELED', paymentStatus: 'REFUNDED' })
+                .where(eq(orders.id, paid.id))
+        await service.syncSales()
+        const healedPizza = (await db.select().from(products).where(eq(products.id, pizza.id)))[0]!
+        const healedSalad = (await db.select().from(products).where(eq(products.id, salad.id)))[0]!
+        check(healedPizza.sales === 0 && healedSalad.sales === 0, 'refunded order is removed by the nightly sync')
 
-	// tehranDay — قرارداد روزِ تقویمی
-	check(/^\d{4}-\d{2}-\d{2}$/.test(tehranDay()), 'tehranDay is YYYY-MM-DD')
+        // ردیف یتیم: محصولِ حذف‌شده (FK عمداً نیست — snapshot semantics اقلام سفارش)
+        await db.execute(
+                sql`insert into product_view_log (product_id, visitor_id, day) values (${crypto.randomUUID()}, 'orphan-hash', ${tehranDay()})`,
+        )
+        const orphansBefore = await db.select().from(productViewLog)
+        check(orphansBefore.length === 4, 'orphan log row exists before sync (3 real + 1 orphan)')
+        await service.syncSales()
+        const orphansAfter = await db.select().from(productViewLog)
+        check(orphansAfter.length === 3, 'nightly sync prunes orphan stats rows (deleted product)')
 
-	// A failed final write must roll back logs/counters and retry each event once.
-	const retryProduct = (await db.insert(products).values({
-		categoryId: cat.id, name: 'Retry product', originalPrice: 100_000,
-	}).returning())[0]!
-	const makeOrder = async (displayId: string, quantity: number, anonymousQuantity = 0) => {
-		const order = (await db.insert(orders).values({
-			displayId, userId: user.id, status: 'PAID', deliveryType: 'PICKUP',
-			paymentStatus: 'SUCCESS', totalAmount: 100_000, breakdown,
-		}).returning())[0]!
-		await db.insert(orderItems).values([
-			{ orderId: order.id, productId: retryProduct.id, name: 'Retry product', unitPrice: 100_000, quantity },
-			...(anonymousQuantity ? [{ orderId: order.id, productId: null, name: 'Legacy snapshot', unitPrice: 100_000, quantity: anonymousQuantity }] : []),
-		])
-		return order
-	}
-	const retryOrder = await makeOrder('ord-retry', 3)
-	await service.recordView(retryProduct.id, crypto.randomUUID())
-	await service.recordCartAdd(retryProduct.id, crypto.randomUUID())
-	service.recordOrderSettlement(retryOrder.id)
-	await db.execute(sql`create function fail_stats_sales() returns trigger language plpgsql as '
-		begin raise exception ''injected stats write failure''; end;
-	'`)
-	await db.execute(sql`create trigger fail_stats_sales before update of sales on products
-		for each row execute function fail_stats_sales()`)
-	try {
-		await service.flush()
-		const failedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
-		check(failedProduct.views === 0 && failedProduct.sales === 0, 'failed flush rolls back lifetime counters')
-		check((await db.select().from(productViewLog).where(eq(productViewLog.productId, retryProduct.id))).length === 0,
-			'failed flush rolls back view log')
-		check((await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))).length === 0,
-			'failed flush rolls back daily counters')
-	} finally {
-		await db.execute(sql`drop trigger fail_stats_sales on products`)
-		await db.execute(sql`drop function fail_stats_sales()`)
-	}
-	await service.flush()
-	const retriedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
-	const retriedCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
-	check(retriedProduct.views === 1 && retriedProduct.sales === 3, 'retry counts views and settled units exactly once')
-	check(retriedCell.views === 1 && retriedCell.cartAdds === 1 && retriedCell.orders === 3,
-		'retry does not add both requeued order IDs and their derived quantities')
-	check((await db.select().from(productViewLog).where(eq(productViewLog.productId, retryProduct.id))).length === 1,
-		'retry persists only one view log row')
+        // tehranDay — قرارداد روزِ تقویمی
+        check(/^\d{4}-\d{2}-\d{2}$/.test(tehranDay()), 'tehranDay is YYYY-MM-DD')
 
-	// Nullable product IDs are valid historical order snapshots, not UUIDs.
-	const snapshotOrder = await makeOrder('ord-snapshot', 2, 9)
-	service.recordOrderSettlement(snapshotOrder.id)
-	await service.flush()
-	const snapshotProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
-	const snapshotCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
-	check(snapshotProduct.sales === 5 && snapshotCell.orders === 5,
-		'null product snapshots cannot poison valid product stats in the same batch')
-
-	// Nightly reconciliation can see a paid order before its buffered event flushes.
-	const bufferedOrder = await makeOrder('ord-buffered', 4)
-	service.recordOrderSettlement(bufferedOrder.id)
-	await service.syncSales()
-	await service.flush()
-	const syncedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
-	const syncedCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
-	check(syncedProduct.sales === 9, 'nightly sync followed by pending settlement flush does not count a sale twice')
-	check(syncedCell.orders === 9, 'nightly sync preserves additive daily settlement events')
-
-	const refundedOrder = await makeOrder('ord-refunded', 7)
-	await db.update(orders).set({ paymentStatus: 'REFUNDED' }).where(eq(orders.id, refundedOrder.id))
-	service.recordOrderSettlement(refundedOrder.id)
-	await service.flush()
-	const refundedCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
-	check(refundedCell.orders === 9, 'an order without SUCCESS payment cannot contribute sold units')
-
-	// Crossing Tehran midnight while buffered cannot move a sale to the next day.
-	const midnightOrder = await makeOrder('ord-midnight', 1)
-	try {
-		setSystemTime(new Date('2026-01-01T20:29:59.000Z'))
-		service.recordOrderSettlement(midnightOrder.id)
-		setSystemTime(new Date('2026-01-01T20:30:01.000Z'))
-		await service.flush()
-	} finally {
-		setSystemTime()
-	}
-	const midnightCells = await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))
-	check(midnightCells.find((cell) => dayStr(cell.day) === '2026-01-01')?.orders === 1,
-		'buffered settlement retains its Tehran event day across midnight')
-	check(!midnightCells.some((cell) => dayStr(cell.day) === '2026-01-02'),
-		'flush day does not create a spurious daily sale')
-
-	// Shutdown must await beacons already accepted but still awaiting Redis.
-	let finishDedup!: (first: boolean) => void
-	const dedupPending = new Promise<boolean>((resolve) => { finishDedup = resolve })
-	const drainingService = new ProductStatsService({
-		db,
-		redis: { setNx: () => dedupPending } as unknown as RedisService,
-	})
-	try {
-		setSystemTime(new Date('2026-01-01T20:29:59.000Z'))
-		const recordPending = drainingService.recordView(retryProduct.id, crypto.randomUUID())
-		const closePending = drainingService.close()
-		await Promise.resolve()
-		setSystemTime(new Date('2026-01-01T20:30:01.000Z'))
-		finishDedup(true)
-		await Promise.all([recordPending, closePending])
-		const drainedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
-		const drainedLogs = await db.select().from(productViewLog).where(eq(productViewLog.productId, retryProduct.id))
-		const drainedCells = await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))
-		check(drainedProduct.views === 2, 'close drains a beacon still awaiting Redis when shutdown starts')
-		check(drainedLogs.some((row) => dayStr(row.day) === '2026-01-01') &&
-			drainedCells.find((cell) => dayStr(cell.day) === '2026-01-01')?.views === 1,
-			'view log and daily count retain the same event day across Redis latency')
-	} finally {
-		setSystemTime()
-		finishDedup(true)
-		await drainingService.close()
-	}
-
-	const replica = new ProductStatsService({ db, redis })
-	try {
-		const firstConcurrent = await makeOrder('ord-concurrent-a', 2)
-		const secondConcurrent = await makeOrder('ord-concurrent-b', 3)
-		service.recordOrderSettlement(firstConcurrent.id)
-		replica.recordOrderSettlement(secondConcurrent.id)
-		await Promise.all([
-			service.recordView(retryProduct.id, crypto.randomUUID()),
-			replica.recordView(retryProduct.id, crypto.randomUUID()),
-		])
-		await Promise.all([service.flush(), replica.flush(), service.syncSales()])
-		const concurrentProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
-		const concurrentCells = await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))
-		check(concurrentProduct.sales === 15 && concurrentProduct.views === 4,
-			'concurrent replicas and nightly reconciliation preserve exact lifetime totals')
-		check(concurrentCells.reduce((total, cell) => total + cell.orders, 0) === 15,
-			'concurrent replica flushes preserve all daily settlement events')
-	} finally {
-		await replica.close()
-	}
-
-	console.log(`\n══ Product stats: ${checks} پاس ══`)
+        console.log(`\n══ Product stats: ${checks} پاس ══`)
 } finally {
-	if (service) {
-		try {
-			await service.close()
-		} catch {
-			/* shutdown تست */
-		}
-	}
-	if (database) await database.close().catch(() => undefined)
-	try {
-		await boot.unsafe(`drop database if exists "${scratch}" with (force)`)
-	} catch {
-		/* تمیزکاری بهترین‌تلاش */
-	}
-	await boot.close({ timeout: 5 })
+        if (service) {
+                try {
+                        await service.close()
+                } catch {
+                        /* shutdown تست */
+                }
+        }
+        if (database) await database.close().catch(() => undefined)
+        try {
+                await boot.unsafe(`drop database if exists "${scratch}" with (force)`)
+        } catch {
+                /* تمیزکاری بهترین‌تلاش */
+        }
+        await boot.close({ timeout: 5 })
 }

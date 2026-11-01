@@ -263,6 +263,21 @@ export interface MainData {
   categories: Category[]
 }
 
+// ═══════════ hundred-twelve (فاز ۲) — محصولات مشابه ═══════════
+
+/**
+ * پاسخ GET /menu/products/:id/similar — توصیه‌ی رفتاری (فاز ۲).
+ * products: مشابه‌های محصول به‌ترتیب امتیاز (هم‌بازدید + هم‌خرید؛
+ * شبانه از product_similarity). strict = «حالت سختگیرانه» (تصمیمِ
+ * سرور): لنگر ناموجود است ⇒ فقط مشابه‌های «موجود» برگشته‌اند —
+ * فرانت با همین پرچم عنوان بلوک را به «جایگزین‌های موجود» می‌برد.
+ * null (نه خالی) = خودِ محصول وجود ندارد/غیرفعال است.
+ */
+export interface SimilarProductsDto {
+  products: Product[]
+  strict: boolean
+}
+
 // ═══════════ stage-84 — اقلام بسته‌بندی (قیمت سراسری) ═══════════
 
 /**

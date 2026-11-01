@@ -68,6 +68,9 @@ import { TranslationService } from '#/domain/translation/translation.service'
 // hundred-eleven (فاز ۱) — آمار واقعی محصول + جابِ همگرایی شبانه
 import { ProductStatsService } from '#/domain/product-stats/product-stats.service'
 import { ProductStatsSyncJob } from '#/workers/jobs/product-stats-sync.job'
+// hundred-twelve (فاز ۲) — توصیه‌گر مشابه‌ها + جاب شبانه
+import { ProductSimilarityService } from '#/domain/product-similarity/similarity.service'
+import { ProductSimilarityJob } from '#/workers/jobs/product-similarity.job'
 // فاز-۲ — نشان / لاگ داکر / نوتیفیکیشن
 import { NeshanService } from '#/infra/maps/neshan.service'
 import { DockerLogsService } from '#/infra/logs/docker-logs.service'
@@ -136,6 +139,9 @@ const menu = new MenuService({ db, redis, notifications, hub: sseHub })
 // hundred-eleven (فاز ۱) — آمار واقعی: بیکن‌های منو + قلاب تسویه؛
 // قبل از orders (قلاب) و buildApp (مسیرها) ساخته می‌شود
 const productStats = new ProductStatsService({ db, redis })
+// hundred-twelve (فاز ۲) — شباهت رفتاری محصول‌ها (بازمحاسبه‌ی شبانه؛
+// خواندن از MenuService.similarProducts روی کش نسخه‌دار منو)
+const productSimilarity = new ProductSimilarityService({ db })
 // stage-84 — اقلام بسته‌بندی (قیمت سراسری؛ CRUD ادمین)
 const packaging = new PackagingService({ db })
 const orders = new OrderService({ db, config, zones, settings, coupons, notifications, stats: productStats })
@@ -184,6 +190,11 @@ if (!g.__sinshin_cron_registered) {
   // hundred-eleven (فاز ۱) — همگرایی شبانه‌ی فروش از منبع حقیقت (03:37؛
   // جدا از 02:00 کوپن و 04:30 رتینشن) + بک‌فیل سه‌هفته‌ی سفارش‌های واقعی
   scheduler.register(new ProductStatsSyncJob({ stats: productStats }))
+  // hundred-twelve (فاز ۲) — بازمحاسبه‌ی شباهت (۰۳:۴۱؛ بعد از همگراییِ
+  // ۰۳:۳۷ و قبل از رتینشنِ ۰۴:۳۰) + باطل‌کردن کشِ «مشابه‌ها»
+  scheduler.register(
+    new ProductSimilarityJob({ similarity: productSimilarity, menu }),
+  )
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
   // round-19 — دیده‌بان سلامت: پیامک قطعی/برگشت db/redis/uploads (بدون قفل — موثق در کار)
   scheduler.registerInterval(

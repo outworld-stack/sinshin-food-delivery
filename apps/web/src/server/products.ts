@@ -16,23 +16,24 @@
 // phase-3: مرگ products-admin-mock — ویرایش‌ها دیگر با ری‌استارت نمی‌پرند
 
 import type {
-	CartDetails,
-	CartItemInput,
-	Category,
-	MainCategory,
-	MainData,
-	PackagingItemDto,
-	Product,
-	ProductId,
-	ProductSize,
-	PurchaseStateDto,
+        CartDetails,
+        CartItemInput,
+        Category,
+        MainCategory,
+        MainData,
+        PackagingItemDto,
+        Product,
+        ProductId,
+        ProductSize,
+        PurchaseStateDto,
+        SimilarProductsDto,
 } from '@sinshin/shared'
 import { authJson, getJson, postJson } from '#/lib/api-fetch'
 import type { ProductFormData } from '#/types/forms'
 // stage-100 — قرارداد انیمیشن صفحه‌ی محصول ویژه
 import {
-	type FeaturedAnimation,
-	normalizeFeaturedAnimation,
+        type FeaturedAnimation,
+        normalizeFeaturedAnimation,
 } from '#/types/site/featured-animation'
 
 // ─── re-export تایپ‌ها برای صفحات (قرارداد قبلی حفظ) ───
@@ -44,52 +45,63 @@ export type { MainCategory, Category, Product, ProductSize }
 // ─── عمومی: منو ───
 
 export async function getActiveMainCategories(): Promise<MainCategory[]> {
-	return getJson<MainCategory[]>('/menu/mains')
+        return getJson<MainCategory[]>('/menu/mains')
 }
 
 export async function getProductsByMain(input: {
-	data: { mainSlug: string }
+        data: { mainSlug: string }
 }): Promise<Product[]> {
-	const d = await getJson<MainData>(
-		`/menu/mains/${input.data.mainSlug}/products`,
-	)
-	return d.products
+        const d = await getJson<MainData>(
+                `/menu/mains/${input.data.mainSlug}/products`,
+        )
+        return d.products
 }
 
 export async function getCategoriesByMain(input: {
-	data: { mainSlug: string }
+        data: { mainSlug: string }
 }): Promise<Category[]> {
-	return getJson<Category[]>(`/menu/mains/${input.data.mainSlug}/categories`)
+        return getJson<Category[]>(`/menu/mains/${input.data.mainSlug}/categories`)
 }
 
 export async function getCategories(): Promise<Category[]> {
-	return getJson<Category[]>('/menu/categories')
+        return getJson<Category[]>('/menu/categories')
 }
 
 // stage-56 — پارامتر UUID یا slug انگلیسی است (هر دو توسط سرور پذیرفته
 // می‌شوند؛ لینک‌های سئو slug می‌فرستند، مسیرهای قدیمی/سبد UUID).
 export async function getProductById(input: {
-	data: { id: ProductId | string }
+        data: { id: ProductId | string }
 }): Promise<Product | null> {
-	return getJson<Product | null>(`/menu/products/${input.data.id}`)
+        return getJson<Product | null>(`/menu/products/${input.data.id}`)
+}
+
+// ── hundred-twelve (فاز ۲) — مشابه‌های رفتاری محصول (توصیه‌گر) ──
+// همان الگوی getProductById: پارامتر UUID یا slug؛ null = لنگر ناموجود.
+// strict (تصمیم سرور) = لنگر ناموجود ⇒ فقط مشابه‌های موجود برگشته‌اند.
+export async function getSimilarProducts(input: {
+        data: { id: ProductId | string }
+}): Promise<SimilarProductsDto | null> {
+        return getJson<SimilarProductsDto | null>(
+                `/menu/products/${input.data.id}/similar`,
+        )
 }
 
 // ── stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی محصول ویژه (عمومی) ──
 // ادمین اصلی از پنل انتخاب می‌کند؛ اینجا فقط خواندنِ عمومیِ کش‌شده
 // (ETag منو). مقدار ناشناخته/غایب ⇒ 'shader' (پیش‌فرض = رفتارِ امروز).
 export async function getFeaturedAnimation(): Promise<FeaturedAnimation> {
-	const d = await getJson<{ animation?: string }>('/menu/featured-animation')
-	return normalizeFeaturedAnimation(d?.animation)
+        const d = await getJson<{ animation?: string }>('/menu/featured-animation')
+        return normalizeFeaturedAnimation(d?.animation)
 }
 
 // ─── سبد — قیمت‌گذاری سروری ───
 
 export async function getCartDetails(input: {
-	data: { items: CartItemInput[] }
+        data: { items: CartItemInput[] }
 }): Promise<CartDetails> {
-	return postJson<CartDetails>('/menu/cart/details', {
-		items: input.data.items,
-	})
+        return postJson<CartDetails>('/menu/cart/details', {
+                items: input.data.items,
+        })
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -99,135 +111,135 @@ export async function getCartDetails(input: {
 // ══════════════════════════════════════════════════════════════
 
 export interface AdminMutationResult {
-	success: boolean
-	message?: string
+        success: boolean
+        message?: string
 }
 
 // ── Main ها ──
 
 export async function getAdminMainCategories(): Promise<MainCategory[]> {
-	return authJson<MainCategory[]>('/admin/menu/mains', 'GET')
+        return authJson<MainCategory[]>('/admin/menu/mains', 'GET')
 }
 
 export async function createMainCategory(input: {
-	data: { name: string; slug: string; nameAr?: string | null }
+        data: { name: string; slug: string; nameAr?: string | null }
 }): Promise<AdminMutationResult> {
-	return authJson<AdminMutationResult>('/admin/menu/mains', 'POST', {
-		name: input.data.name,
-		slug: input.data.slug,
-		// round-34 — نام عربی ('' → null = بازگشت به فارسی)
-		nameAr: input.data.nameAr?.trim() || null,
-	})
+        return authJson<AdminMutationResult>('/admin/menu/mains', 'POST', {
+                name: input.data.name,
+                slug: input.data.slug,
+                // round-34 — نام عربی ('' → null = بازگشت به فارسی)
+                nameAr: input.data.nameAr?.trim() || null,
+        })
 }
 
 export async function toggleMainCategory(input: {
-	data: { id: string }
+        data: { id: string }
 }): Promise<{ success: boolean }> {
-	await authJson<unknown>(`/admin/menu/mains/${input.data.id}/toggle`, 'POST')
-	return { success: true }
+        await authJson<unknown>(`/admin/menu/mains/${input.data.id}/toggle`, 'POST')
+        return { success: true }
 }
 
 export async function setDefaultMainCategory(input: {
-	data: { id: string }
+        data: { id: string }
 }): Promise<AdminMutationResult> {
-	return authJson<AdminMutationResult>(
-		`/admin/menu/mains/${input.data.id}/default`,
-		'POST',
-	)
+        return authJson<AdminMutationResult>(
+                `/admin/menu/mains/${input.data.id}/default`,
+                'POST',
+        )
 }
 
 export async function reorderMainCategory(input: {
-	data: { id: string; direction: 'up' | 'down' }
+        data: { id: string; direction: 'up' | 'down' }
 }): Promise<{ success: boolean }> {
-	await authJson<unknown>(
-		`/admin/menu/mains/${input.data.id}/reorder`,
-		'POST',
-		{
-			direction: input.data.direction,
-		},
-	)
-	return { success: true }
+        await authJson<unknown>(
+                `/admin/menu/mains/${input.data.id}/reorder`,
+                'POST',
+                {
+                        direction: input.data.direction,
+                },
+        )
+        return { success: true }
 }
 
 export async function deleteMainCategory(input: {
-	data: { id: string }
+        data: { id: string }
 }): Promise<AdminMutationResult> {
-	return authJson<AdminMutationResult>(
-		`/admin/menu/mains/${input.data.id}`,
-		'DELETE',
-	)
+        return authJson<AdminMutationResult>(
+                `/admin/menu/mains/${input.data.id}`,
+                'DELETE',
+        )
 }
 
 // ── دسته‌ها ──
 
 export async function createCategory(input: {
-	data: {
-		name: string
-		/** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
-		mainCategoryIds: string[]
-		/** stage-48 — حالت‌های سفارش پایه (پیش‌فرض روشن) */
-		courierEnabled?: boolean
-		takeawayEnabled?: boolean
-		dineInEnabled?: boolean
-		/** round-34 — نام عربی */
-		nameAr?: string | null
-	}
+        data: {
+                name: string
+                /** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
+                mainCategoryIds: string[]
+                /** stage-48 — حالت‌های سفارش پایه (پیش‌فرض روشن) */
+                courierEnabled?: boolean
+                takeawayEnabled?: boolean
+                dineInEnabled?: boolean
+                /** round-34 — نام عربی */
+                nameAr?: string | null
+        }
 }): Promise<AdminMutationResult> {
-	return authJson<AdminMutationResult>('/admin/menu/categories', 'POST', {
-		name: input.data.name,
-		// stage-60 — آرایه‌ی والدها (اولین = والد اصلی)؛ سرور categoryId قدیمی را هم می‌پذیرد
-		mainCategoryIds: input.data.mainCategoryIds,
-		// stage-48 — حالت‌های سفارش (سایزبندی دیگر از دسته نمی‌آید)
-		courierEnabled: input.data.courierEnabled ?? true,
-		takeawayEnabled: input.data.takeawayEnabled ?? true,
-		dineInEnabled: input.data.dineInEnabled ?? true,
-		nameAr: input.data.nameAr?.trim() || null,
-	})
+        return authJson<AdminMutationResult>('/admin/menu/categories', 'POST', {
+                name: input.data.name,
+                // stage-60 — آرایه‌ی والدها (اولین = والد اصلی)؛ سرور categoryId قدیمی را هم می‌پذیرد
+                mainCategoryIds: input.data.mainCategoryIds,
+                // stage-48 — حالت‌های سفارش (سایزبندی دیگر از دسته نمی‌آید)
+                courierEnabled: input.data.courierEnabled ?? true,
+                takeawayEnabled: input.data.takeawayEnabled ?? true,
+                dineInEnabled: input.data.dineInEnabled ?? true,
+                nameAr: input.data.nameAr?.trim() || null,
+        })
 }
 
 export async function updateCategory(input: {
-	data: {
-		id: string
-		name: string
-		/** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
-		mainCategoryIds: string[]
-		/** stage-48 — حالت‌های سفارش پایه */
-		courierEnabled?: boolean
-		takeawayEnabled?: boolean
-		dineInEnabled?: boolean
-		/** round-34 — نام عربی */
-		nameAr?: string | null
-	}
+        data: {
+                id: string
+                name: string
+                /** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
+                mainCategoryIds: string[]
+                /** stage-48 — حالت‌های سفارش پایه */
+                courierEnabled?: boolean
+                takeawayEnabled?: boolean
+                dineInEnabled?: boolean
+                /** round-34 — نام عربی */
+                nameAr?: string | null
+        }
 }): Promise<AdminMutationResult> {
-	await authJson<unknown>(`/admin/menu/categories/${input.data.id}`, 'PATCH', {
-		name: input.data.name,
-		// stage-60 — سینک کامل والدها (اولین = والد اصلی)
-		mainCategoryIds: input.data.mainCategoryIds,
-		courierEnabled: input.data.courierEnabled ?? true,
-		takeawayEnabled: input.data.takeawayEnabled ?? true,
-		dineInEnabled: input.data.dineInEnabled ?? true,
-		nameAr: input.data.nameAr?.trim() || null,
-	})
-	return { success: true }
+        await authJson<unknown>(`/admin/menu/categories/${input.data.id}`, 'PATCH', {
+                name: input.data.name,
+                // stage-60 — سینک کامل والدها (اولین = والد اصلی)
+                mainCategoryIds: input.data.mainCategoryIds,
+                courierEnabled: input.data.courierEnabled ?? true,
+                takeawayEnabled: input.data.takeawayEnabled ?? true,
+                dineInEnabled: input.data.dineInEnabled ?? true,
+                nameAr: input.data.nameAr?.trim() || null,
+        })
+        return { success: true }
 }
 
 export async function deleteCategory(input: {
-	data: { id: string }
+        data: { id: string }
 }): Promise<AdminMutationResult> {
-	return authJson<AdminMutationResult>(
-		`/admin/menu/categories/${input.data.id}`,
-		'DELETE',
-	)
+        return authJson<AdminMutationResult>(
+                `/admin/menu/categories/${input.data.id}`,
+                'DELETE',
+        )
 }
 
 // ── محصولات ──
 
 /** round-34 — متن چندخطی → آرایه (خطوط خالی حذف؛ مثل ادیتور قوانین) */
 function parseLines(text: string): string[] {
-	return text
-		.split('\n')
-		.map((l) => l.trim())
-		.filter(Boolean)
+        return text
+                .split('\n')
+                .map((l) => l.trim())
+                .filter(Boolean)
 }
 
 /**
@@ -235,88 +247,88 @@ function parseLines(text: string): string[] {
  * (بدون محدودیت). درصد صفر هم پنجره را بی‌اثر می‌کند — تمیز ارسال می‌شود.
  */
 function discountWindow(
-	pct: number,
-	startsAt: string | null | undefined,
-	endsAt: string | null | undefined,
+        pct: number,
+        startsAt: string | null | undefined,
+        endsAt: string | null | undefined,
 ): { discountStartsAt: string | null; discountEndsAt: string | null } {
-	if (!(pct > 0)) return { discountStartsAt: null, discountEndsAt: null }
-	const norm = (v: string | null | undefined): string | null => {
-		if (!v) return null
-		const t = new Date(v).getTime()
-		return Number.isFinite(t) ? new Date(t).toISOString() : null
-	}
-	return { discountStartsAt: norm(startsAt), discountEndsAt: norm(endsAt) }
+        if (!(pct > 0)) return { discountStartsAt: null, discountEndsAt: null }
+        const norm = (v: string | null | undefined): string | null => {
+                if (!v) return null
+                const t = new Date(v).getTime()
+                return Number.isFinite(t) ? new Date(t).toISOString() : null
+        }
+        return { discountStartsAt: norm(startsAt), discountEndsAt: norm(endsAt) }
 }
 
 /** round-34 — بدنه‌ی عربیِ مشترکِ create/update ('' → null = حذف ترجمه = بازگشت به فارسی)
  *  stage-47 — سایزها با تخفیف مستقل (درصد + پنجره) ارسال می‌شوند.
  *  stage-48 — موجودی + حالت‌های سفارش هم می‌روند. */
 function productModePayload(data: ProductFormData) {
-	return {
-		isAvailable: data.isAvailable ?? true,
-		courierAllowed: data.courierAllowed ?? true,
-		takeawayAllowed: data.takeawayAllowed ?? true,
-		dineInAllowed: data.dineInAllowed ?? true,
-	}
+        return {
+                isAvailable: data.isAvailable ?? true,
+                courierAllowed: data.courierAllowed ?? true,
+                takeawayAllowed: data.takeawayAllowed ?? true,
+                dineInAllowed: data.dineInAllowed ?? true,
+        }
 }
 
 function productArPayload(data: ProductFormData) {
-	return {
-		nameAr: data.nameAr.trim() || null,
-		descriptionAr: data.descriptionAr.trim() || null,
-		ingredientsAr: parseLines(data.ingredientsArText),
-		// stage-56 — تصویر مستقل هر variant (خالی = null = تصویر مشترک)
-		sizes: data.sizes.map((s) => ({
-			name: s.name,
-			nameAr: s.nameAr.trim() || null,
-			price: s.price,
-			...discountWindow(
-				s.discountPercentage,
-				s.discountStartsAt,
-				s.discountEndsAt,
-			),
-			discountPercentage: s.discountPercentage,
-			image: s.image?.trim() || null,
-		})),
-	}
+        return {
+                nameAr: data.nameAr.trim() || null,
+                descriptionAr: data.descriptionAr.trim() || null,
+                ingredientsAr: parseLines(data.ingredientsArText),
+                // stage-56 — تصویر مستقل هر variant (خالی = null = تصویر مشترک)
+                sizes: data.sizes.map((s) => ({
+                        name: s.name,
+                        nameAr: s.nameAr.trim() || null,
+                        price: s.price,
+                        ...discountWindow(
+                                s.discountPercentage,
+                                s.discountStartsAt,
+                                s.discountEndsAt,
+                        ),
+                        discountPercentage: s.discountPercentage,
+                        image: s.image?.trim() || null,
+                })),
+        }
 }
 
 /** stage-56 — slug انگلیسی سئوپسند در پیلود (خالی = null = URL با UUID) */
 function productSlugPayload(data: ProductFormData) {
-	return { slug: data.slug?.trim() || null }
+        return { slug: data.slug?.trim() || null }
 }
 
 export async function getAdminProducts(input: {
-	data: {
-		page: number
-		limit: number
-		search?: string
-		status?: string
-		categoryId?: string
-	}
+        data: {
+                page: number
+                limit: number
+                search?: string
+                status?: string
+                categoryId?: string
+        }
 }): Promise<{ products: Product[]; total: number }> {
-	const params = new URLSearchParams()
-	params.set('page', String(input.data.page))
-	params.set('limit', String(input.data.limit))
-	if (input.data.search) params.set('search', input.data.search)
-	if (input.data.status && input.data.status !== 'all')
-		params.set('status', input.data.status)
-	if (input.data.categoryId && input.data.categoryId !== 'all')
-		params.set('categoryId', input.data.categoryId)
-	return authJson<{ products: Product[]; total: number }>(
-		`/admin/menu/products?${params}`,
-		'GET',
-	)
+        const params = new URLSearchParams()
+        params.set('page', String(input.data.page))
+        params.set('limit', String(input.data.limit))
+        if (input.data.search) params.set('search', input.data.search)
+        if (input.data.status && input.data.status !== 'all')
+                params.set('status', input.data.status)
+        if (input.data.categoryId && input.data.categoryId !== 'all')
+                params.set('categoryId', input.data.categoryId)
+        return authJson<{ products: Product[]; total: number }>(
+                `/admin/menu/products?${params}`,
+                'GET',
+        )
 }
 
 export async function toggleProductStatus(input: {
-	data: { id: string }
+        data: { id: string }
 }): Promise<{ success: boolean }> {
-	await authJson<unknown>(
-		`/admin/menu/products/${input.data.id}/toggle`,
-		'POST',
-	)
-	return { success: true }
+        await authJson<unknown>(
+                `/admin/menu/products/${input.data.id}/toggle`,
+                'POST',
+        )
+        return { success: true }
 }
 
 /**
@@ -325,104 +337,104 @@ export async function toggleProductStatus(input: {
  * DB حذف می‌شوند؛ آیتم‌های سفارش snapshot دارند و می‌مانند.
  */
 export async function deleteProduct(input: {
-	data: { id: string }
+        data: { id: string }
 }): Promise<AdminMutationResult> {
-	return authJson<AdminMutationResult>(
-		`/admin/menu/products/${input.data.id}`,
-		'DELETE',
-	)
+        return authJson<AdminMutationResult>(
+                `/admin/menu/products/${input.data.id}`,
+                'DELETE',
+        )
 }
 
 export async function getAdminProductDetails(input: {
-	data: { id: string }
+        data: { id: string }
 }): Promise<Product | null> {
-	return authJson<Product | null>(
-		`/admin/menu/products/${input.data.id}`,
-		'GET',
-	)
+        return authJson<Product | null>(
+                `/admin/menu/products/${input.data.id}`,
+                'GET',
+        )
 }
 
 export async function createAdminProduct(input: {
-	data: ProductFormData
+        data: ProductFormData
 }): Promise<{ success: boolean; id?: string; message?: string }> {
-	const ar = productArPayload(input.data)
-	return authJson<{ success: boolean; id?: string; message?: string }>(
-		'/admin/menu/products',
-		'POST',
-		{
-			name: input.data.name,
-			description: input.data.description,
-			originalPrice: input.data.originalPrice,
-			discountPercentage: input.data.discountPercentage,
-			// stage-47 — پنجره‌ی زمانی تخفیف محصول
-			...discountWindow(
-				input.data.discountPercentage,
-				input.data.discountStartsAt,
-				input.data.discountEndsAt,
-			),
-			prepTime: input.data.prepTime,
-			packagingCost: input.data.packagingCost ?? 0,
-			// stage-84 — اقلام بسته‌بندیِ انتخابی (junction سمت سرور سینک می‌شود)
-			packagingItemIds: input.data.packagingItemIds ?? [],
-			// stage-60 — آرایه‌ی دسته‌ها (اولین = اصلی) + پرچم ویژه
-			categoryIds: input.data.categoryIds,
-			isFeatured: input.data.isFeatured ?? false,
-			// stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
-			// (null = ارث از تنظیم سراسری — گارد ادمین اصلی سمت روت)
-			featuredAnimation: input.data.featuredAnimation ?? null,
-			profileImage: input.data.profileImage || null, // '' → null
-			galleryImages: input.data.galleryImages ?? [],
-			sizesEnabled: input.data.sizesEnabled ?? false,
-			ingredients: input.data.ingredients ?? [],
-			// stage-48 — موجودی + حالت‌های سفارش
-			...productModePayload(input.data),
-			// stage-56 — slug سئوپسند
-			...productSlugPayload(input.data),
-			...ar,
-		},
-	)
+        const ar = productArPayload(input.data)
+        return authJson<{ success: boolean; id?: string; message?: string }>(
+                '/admin/menu/products',
+                'POST',
+                {
+                        name: input.data.name,
+                        description: input.data.description,
+                        originalPrice: input.data.originalPrice,
+                        discountPercentage: input.data.discountPercentage,
+                        // stage-47 — پنجره‌ی زمانی تخفیف محصول
+                        ...discountWindow(
+                                input.data.discountPercentage,
+                                input.data.discountStartsAt,
+                                input.data.discountEndsAt,
+                        ),
+                        prepTime: input.data.prepTime,
+                        packagingCost: input.data.packagingCost ?? 0,
+                        // stage-84 — اقلام بسته‌بندیِ انتخابی (junction سمت سرور سینک می‌شود)
+                        packagingItemIds: input.data.packagingItemIds ?? [],
+                        // stage-60 — آرایه‌ی دسته‌ها (اولین = اصلی) + پرچم ویژه
+                        categoryIds: input.data.categoryIds,
+                        isFeatured: input.data.isFeatured ?? false,
+                        // stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
+                        // (null = ارث از تنظیم سراسری — گارد ادمین اصلی سمت روت)
+                        featuredAnimation: input.data.featuredAnimation ?? null,
+                        profileImage: input.data.profileImage || null, // '' → null
+                        galleryImages: input.data.galleryImages ?? [],
+                        sizesEnabled: input.data.sizesEnabled ?? false,
+                        ingredients: input.data.ingredients ?? [],
+                        // stage-48 — موجودی + حالت‌های سفارش
+                        ...productModePayload(input.data),
+                        // stage-56 — slug سئوپسند
+                        ...productSlugPayload(input.data),
+                        ...ar,
+                },
+        )
 }
 
 // stage-56 — پاسخِ پیام‌دار: clashِ slug پیام دوستانه‌ی سرور را برمی‌گرداند
 export async function updateAdminProduct(input: {
-	data: ProductFormData & { id?: string }
+        data: ProductFormData & { id?: string }
 }): Promise<{ success: boolean; message?: string }> {
-	const ar = productArPayload(input.data)
-	return authJson<{ success: boolean; message?: string }>(
-		`/admin/menu/products/${input.data.id}`,
-		'PATCH',
-		{
-			name: input.data.name,
-			description: input.data.description,
-			originalPrice: input.data.originalPrice,
-			discountPercentage: input.data.discountPercentage,
-			// stage-47 — پنجره‌ی زمانی تخفیف محصول
-			...discountWindow(
-				input.data.discountPercentage,
-				input.data.discountStartsAt,
-				input.data.discountEndsAt,
-			),
-			prepTime: input.data.prepTime,
-			packagingCost: input.data.packagingCost ?? 0,
-			// stage-84 — اقلام بسته‌بندی: سینک کامل (undefined نمی‌فرستیم)
-			packagingItemIds: input.data.packagingItemIds ?? [],
-			// stage-60 — سینک کامل دسته‌ها (اولین = اصلی؛ دسته دیگر immutable نیست)
-			categoryIds: input.data.categoryIds,
-			isFeatured: input.data.isFeatured ?? false,
-			// stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
-			// (null = پاک‌سازی/ارث از سراسری — گارد ادمین اصلی سمت روت)
-			featuredAnimation: input.data.featuredAnimation ?? null,
-			profileImage: input.data.profileImage || null,
-			galleryImages: input.data.galleryImages ?? [],
-			sizesEnabled: input.data.sizesEnabled ?? false,
-			ingredients: input.data.ingredients ?? [],
-			// stage-48 — موجودی + حالت‌های سفارش
-			...productModePayload(input.data),
-			// stage-56 — slug سئوپسند
-			...productSlugPayload(input.data),
-			...ar,
-		},
-	)
+        const ar = productArPayload(input.data)
+        return authJson<{ success: boolean; message?: string }>(
+                `/admin/menu/products/${input.data.id}`,
+                'PATCH',
+                {
+                        name: input.data.name,
+                        description: input.data.description,
+                        originalPrice: input.data.originalPrice,
+                        discountPercentage: input.data.discountPercentage,
+                        // stage-47 — پنجره‌ی زمانی تخفیف محصول
+                        ...discountWindow(
+                                input.data.discountPercentage,
+                                input.data.discountStartsAt,
+                                input.data.discountEndsAt,
+                        ),
+                        prepTime: input.data.prepTime,
+                        packagingCost: input.data.packagingCost ?? 0,
+                        // stage-84 — اقلام بسته‌بندی: سینک کامل (undefined نمی‌فرستیم)
+                        packagingItemIds: input.data.packagingItemIds ?? [],
+                        // stage-60 — سینک کامل دسته‌ها (اولین = اصلی؛ دسته دیگر immutable نیست)
+                        categoryIds: input.data.categoryIds,
+                        isFeatured: input.data.isFeatured ?? false,
+                        // stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
+                        // (null = پاک‌سازی/ارث از سراسری — گارد ادمین اصلی سمت روت)
+                        featuredAnimation: input.data.featuredAnimation ?? null,
+                        profileImage: input.data.profileImage || null,
+                        galleryImages: input.data.galleryImages ?? [],
+                        sizesEnabled: input.data.sizesEnabled ?? false,
+                        ingredients: input.data.ingredients ?? [],
+                        // stage-48 — موجودی + حالت‌های سفارش
+                        ...productModePayload(input.data),
+                        // stage-56 — slug سئوپسند
+                        ...productSlugPayload(input.data),
+                        ...ar,
+                },
+        )
 }
 
 // ═══ stage-84 — اقلام بسته‌بندی (قیمت سراسری) ═══
@@ -431,49 +443,49 @@ export type PackagingItem = PackagingItemDto
 
 /** لیست کامل برای پنل ادمین (شامل غیرفعال‌ها) — گارد productsRead */
 export async function getPackagingItems(): Promise<PackagingItemDto[]> {
-	return authJson<PackagingItemDto[]>('/admin/menu/packaging-items', 'GET')
+        return authJson<PackagingItemDto[]>('/admin/menu/packaging-items', 'GET')
 }
 
 export async function addPackagingItem(input: {
-	data: {
-		title: string
-		price: number
-		titleAr?: string | null
-		sortOrder?: number
-	}
+        data: {
+                title: string
+                price: number
+                titleAr?: string | null
+                sortOrder?: number
+        }
 }): Promise<PackagingItemDto> {
-	return authJson<PackagingItemDto>('/admin/menu/packaging-items', 'POST', {
-		title: input.data.title,
-		price: input.data.price,
-		titleAr: input.data.titleAr || null,
-		sortOrder: input.data.sortOrder,
-	})
+        return authJson<PackagingItemDto>('/admin/menu/packaging-items', 'POST', {
+                title: input.data.title,
+                price: input.data.price,
+                titleAr: input.data.titleAr || null,
+                sortOrder: input.data.sortOrder,
+        })
 }
 
 export async function updatePackagingItem(input: {
-	id: string
-	data: {
-		title?: string
-		price?: number
-		titleAr?: string | null
-		isActive?: boolean
-		sortOrder?: number
-	}
+        id: string
+        data: {
+                title?: string
+                price?: number
+                titleAr?: string | null
+                isActive?: boolean
+                sortOrder?: number
+        }
 }): Promise<PackagingItemDto> {
-	return authJson<PackagingItemDto>(
-		`/admin/menu/packaging-items/${input.id}`,
-		'PATCH',
-		input.data,
-	)
+        return authJson<PackagingItemDto>(
+                `/admin/menu/packaging-items/${input.id}`,
+                'PATCH',
+                input.data,
+        )
 }
 
 export async function removePackagingItem(input: {
-	id: string
+        id: string
 }): Promise<{ success: boolean }> {
-	return authJson<{ success: boolean }>(
-		`/admin/menu/packaging-items/${input.id}`,
-		'DELETE',
-	)
+        return authJson<{ success: boolean }>(
+                `/admin/menu/packaging-items/${input.id}`,
+                'DELETE',
+        )
 }
 
 // ═══ stage-86 — غیرفعال‌سازی خریدِ دسته‌ها (والد + زیردسته) ═══
@@ -483,29 +495,29 @@ export async function removePackagingItem(input: {
 
 /** لیست وضعیت خرید همه‌ی والدها + زیردسته‌ها (پنل محصولات) */
 export async function getAdminPurchaseState(): Promise<PurchaseStateDto> {
-	return authJson<PurchaseStateDto>('/admin/menu/purchase-state', 'GET')
+        return authJson<PurchaseStateDto>('/admin/menu/purchase-state', 'GET')
 }
 
 /** خریدِ همه‌ی محصولاتِ این والد را فعال/غیرفعال می‌کند */
 export async function setMainPurchaseState(input: {
-	data: { id: string; purchaseEnabled: boolean }
+        data: { id: string; purchaseEnabled: boolean }
 }): Promise<{ success: boolean; message?: string }> {
-	return authJson<{ success: boolean; message?: string }>(
-		`/admin/menu/mains/${input.data.id}/purchase`,
-		'POST',
-		{ purchaseEnabled: input.data.purchaseEnabled },
-	)
+        return authJson<{ success: boolean; message?: string }>(
+                `/admin/menu/mains/${input.data.id}/purchase`,
+                'POST',
+                { purchaseEnabled: input.data.purchaseEnabled },
+        )
 }
 
 /** خریدِ محصولاتِ این زیردسته را فعال/غیرفعال می‌کند */
 export async function setCategoryPurchaseState(input: {
-	data: { id: string; purchaseEnabled: boolean }
+        data: { id: string; purchaseEnabled: boolean }
 }): Promise<{ success: boolean; message?: string }> {
-	return authJson<{ success: boolean; message?: string }>(
-		`/admin/menu/categories/${input.data.id}/purchase`,
-		'POST',
-		{ purchaseEnabled: input.data.purchaseEnabled },
-	)
+        return authJson<{ success: boolean; message?: string }>(
+                `/admin/menu/categories/${input.data.id}/purchase`,
+                'POST',
+                { purchaseEnabled: input.data.purchaseEnabled },
+        )
 }
 
 /**
@@ -513,11 +525,11 @@ export async function setCategoryPurchaseState(input: {
  * گارد سرور: ادمین اصلی یا ادمین۲ با productsAvailability.
  */
 export async function setProductAvailability(input: {
-	data: { id: string; available: boolean }
+        data: { id: string; available: boolean }
 }): Promise<{ success: boolean; message?: string }> {
-	return authJson<{ success: boolean; message?: string }>(
-		`/admin/menu/products/${input.data.id}/availability`,
-		'POST',
-		{ available: input.data.available },
-	)
+        return authJson<{ success: boolean; message?: string }>(
+                `/admin/menu/products/${input.data.id}/availability`,
+                'POST',
+                { available: input.data.available },
+        )
 }

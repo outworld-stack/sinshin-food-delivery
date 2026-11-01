@@ -155,6 +155,13 @@
       "when": 1793495826392,
       "tag": "0021_fluffy_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793529359740,
+      "tag": "0022_perfect_ben_grimm",
+      "breakpoints": true
     }
   ]
 }

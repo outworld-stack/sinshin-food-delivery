@@ -24,7 +24,7 @@ import type { RedisService } from '#/infra/redis/redis'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { sha256 } from '#/domain/shared/crypto'
 import { parseCookies, serializeCookie } from '#/domain/shared/cookies'
-import { SLUG_OR_ID_PATTERN, UUID_PATTERN, UUID_RE } from '#/domain/shared/ids'
+import { SLUG_OR_ID_PATTERN, UUID_PATTERN } from '#/domain/shared/ids'
 import { SETTING_KEYS } from '#/infra/db/schema'
 import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
 import { cartItemSchema } from '#/http/schemas'
@@ -56,23 +56,27 @@ async function countBeacon(
   request: Request,
   set: { headers: Record<string, string | number> },
 ): Promise<{ counted: boolean }> {
-  set.headers['cache-control'] = 'no-store'
   const ua = request.headers.get('user-agent') ?? ''
   if (!ua || BOT_UA_RE.test(ua)) return { counted: false }
+  // hundred-twelve — گارد کراس‌سایت: بیکنِ مرورگری که از دامنه‌ی دیگری
+  // آمده (evil.com → POST ما) شمرده نمی‌شود — کوکی Lax هم همراهش نمی‌آید
+  // و هر بار vid تازه می‌گرفت = تورم بازدید. نبودِ هدر (کلاینت قدیمی/
+  // غیرمرورگر) مسدود نمی‌شود — سپر همان سقف نرخ IP است.
+  if (request.headers.get('sec-fetch-site') === 'cross-site') return { counted: false }
   const existing = parseCookies(request)[VIEWER_COOKIE]
-  const vid = existing?.length === 36 && UUID_RE.test(existing) ? existing : crypto.randomUUID()
+  const vid = existing && existing.length <= 64 ? existing : crypto.randomUUID()
   const counted =
     kind === 'view'
       ? await stats.recordView(productId, vid)
       : await stats.recordCartAdd(productId, vid)
-  // Repair invalid cookies too, otherwise every request gets a different ID.
-  if (vid !== existing) {
+  if (!existing) {
     set.headers['set-cookie'] = serializeCookie(VIEWER_COOKIE, vid, {
       maxAge: 365 * 24 * 60 * 60,
       httpOnly: true,
       sameSite: 'Lax',
     })
   }
+  set.headers['cache-control'] = 'no-store'
   return { counted }
 }
 
@@ -168,6 +172,25 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
           summary: 'Single product by id or slug (null when not found)',
           description:
             'Accepts product UUID (legacy/cart links) or English slug (SEO URLs). Sizes include per-variant image (stage-56).',
+        },
+      },
+    )
+
+    // hundred-twelve (فاز ۲) — مشابه‌های رفتاریِ محصول (توصیه‌گر).
+    // کش همان چرخه‌ی منو (ETag/304 + ردیس نسخه‌دار سمت سرویس)؛ داده‌ی
+    // خام را جابِ ۰۳:۴۱ می‌نویسد و menu:ver را باطل می‌کند.
+    .get(
+      '/products/:id/similar',
+      (ctx) =>
+        withMenuCache(ctx, () =>
+          deps.menu.similarProducts(ctx.params.id, langFromHeaders(ctx.headers)),
+        ),
+      {
+        params: t.Object({ id: t.String({ pattern: SLUG_OR_ID_PATTERN }) }),
+        detail: {
+          summary: 'Behaviorally similar products (public — phase 2 recommendations)',
+          description:
+            'hundred-twelve: top similar products from nightly co-view/co-purchase signals (product_similarity). Same Product DTO as menu lists. strict=true means the anchor is unavailable and ONLY available similars are returned (locked decision). null = anchor not found/inactive.',
         },
       },
     )

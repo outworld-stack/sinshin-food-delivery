@@ -255,6 +255,8 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     -- stage-111 — اشیاءِ ۰۰۲۱: دو جدولِ آمارِ روزانه‌ی محصول (ایندکس‌ها با جدول می‌روند)
     drop table if exists "product_daily_stats";
     drop table if exists "product_view_log";
+    -- hundred-twelve — اشیاءِ ۰۰۲۲: جدول شباهت (توصیه‌گر فاز ۲)
+    drop table if exists "product_similarity";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",

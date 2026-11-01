@@ -62,6 +62,7 @@ import {
   packagingItems,
   productCategories,
   productPackagingItems,
+  productSimilarity,
   productSizes,
   products,
 } from '#/infra/db/schema'
@@ -80,7 +81,7 @@ import { UUID_RE } from '#/domain/shared/ids'
 // stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
 import { faNum } from '#/domain/report/format'
 // stage-86 — DTO وضعیت خرید دسته‌ها (پاسخ GET /admin/menu/purchase-state)
-import type { Product, PurchaseStateDto } from '@sinshin/shared'
+import type { Product, PurchaseStateDto, SimilarProductsDto } from '@sinshin/shared'
 
 const CACHE_TTL_SECONDS = 30
 const VERSION_KEY = 'menu:ver'
@@ -640,6 +641,97 @@ export class MenuService {
     // هم‌زمان توسط SSR + چند کامپوننت درخواست شود.
     // null کش نمی‌شود (مثل قبل) — محصولِ حذف‌شده بعد از نامعتبرسازی دوباره پرسیده می‌شود
     return this.cache.cachedNullable(`prod:${lang}:${id}`, load)
+  }
+
+  /** hundred-twelve — حداکثر تعداد کارتِ بلوک «مشابه‌ها» (خواندن از
+   *  product_similarity؛ از TOP_N سمت جاب کمتر تا خواندن سبز بماند) */
+  private static readonly SIMILAR_LIMIT = 8
+
+  /**
+   * hundred-twelve (فاز ۲) — مشابه‌های رفتاریِ یک محصول.
+   *
+   * مسیر خواندن: product_similarity (امتیاز‌مرتب؛ نوشتن فقط با جابِ
+   * ۰۳:۴۱) → join محصولاتِ ACTIVE → DTO کامل با withSizes (همان قراردادِ
+   * لیست منو ⇒ همان کارت‌های فرانت، همان حالت ناموجودی).
+   *
+   * «حالت سختگیرانه» (تصمیم قفل‌شده‌ی فاز ۱): لنگرِ ناموجود ⇒ فقط
+   * مشابه‌های موجود برمی‌گردند — صفحه‌ی تمام‌خاکستری نباید به سبدِ لای
+   * سایه دعوت کند. لنگرِ موجود ⇒ ترتیب امتیاز؛ کارتِ ناموجود خودش با
+   * لایه‌ی خاکستری ProductCard می‌ایستد (همان زبان بصری سایت).
+   *
+   * کش: همان کشِ نسخه‌دار منو (sim:{lang}:{id}) — باطل‌شدنِ خودکار با
+   * هر write ادمین (INCR menu:ver) + باطل‌شدنِ جاب شبانه. null (= لنگرِ
+   * ناموجود/حذف‌شده) کش نمی‌شود — مثل productById.
+   */
+  async similarProducts(
+    id: string,
+    lang: Lang = 'fa',
+    limit: number = MenuService.SIMILAR_LIMIT,
+  ): Promise<SimilarProductsDto | null> {
+    const pid = UUID_RE.test(id) ? asProductId(id) : null
+
+    const load = async (): Promise<SimilarProductsDto | null> => {
+      const anchor = await this.deps.db.query.products.findFirst({
+        where: pid ? eq(products.id, pid) : eq(products.slug, id),
+      })
+      if (!anchor || anchor.status !== 'ACTIVE') return null
+
+      // بیش‌گرفت (۳×) تا فیلترِ سختگیرانه هم اسلات‌ها را پر کند
+      const simRows = await this.deps.db
+        .select({ similarId: productSimilarity.similarId })
+        .from(productSimilarity)
+        .where(eq(productSimilarity.productId, anchor.id))
+        .orderBy(desc(productSimilarity.score))
+        .limit(limit * 3)
+      if (simRows.length === 0) return { products: [], strict: !anchor.isAvailable }
+
+      // ردیف‌های زنده‌ی محصولات (حذف‌شده/INACTIVE با join بیرون می‌افتند)
+      const ids = simRows.map((r) => r.similarId)
+      const rows = await this.deps.db.query.products.findMany({
+        where: and(inArray(products.id, ids), eq(products.status, 'ACTIVE')),
+      })
+      const byId = new Map(rows.map((r) => [r.id, r] as const))
+      const ordered: typeof rows = []
+      for (const sid of ids) {
+        const r = byId.get(sid)
+        if (r) ordered.push(r)
+      }
+
+      const strict = anchor.isAvailable !== true
+      const picked = (strict ? ordered.filter((r) => r.isAvailable) : ordered).slice(
+        0,
+        limit,
+      )
+      if (picked.length === 0) return { products: [], strict }
+
+      // DTO — همان ماشینِ productById (نام دسته، حالت‌های مؤثر، خرید زنجیره)
+      const catIds = [...new Set(picked.map((r) => r.categoryId))]
+      const catRows = await this.deps.db
+        .select()
+        .from(categories)
+        .where(inArray(categories.id, catIds))
+      const links = await this.deps.db
+        .select()
+        .from(productCategories)
+        .where(inArray(productCategories.productId, picked.map((r) => r.id)))
+      const extraByProduct = new Map<ProductId, CategoryId[]>()
+      for (const l of links) {
+        const list = extraByProduct.get(l.productId) ?? []
+        list.push(l.categoryId)
+        extraByProduct.set(l.productId, list)
+      }
+      const categoryIdsMap = new Map<ProductId, CategoryId[]>(
+        picked.map((r) => [r.id, [r.categoryId, ...(extraByProduct.get(r.id) ?? [])]]),
+      )
+      const list = await this.withSizes(picked, new Map(catRows.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)])), lang, {
+        catModes: new Map(catRows.map((c) => [c.id, categoryModesOf(c)] as const)),
+        categoryIdsMap,
+        catPurchase: await loadCategoryPurchaseStates(this.deps.db, catIds),
+      })
+      return { products: list, strict }
+    }
+
+    return this.cache.cachedNullable(`sim:${lang}:${id}`, load)
   }
 
   async allCategories(lang: Lang = 'fa') {
