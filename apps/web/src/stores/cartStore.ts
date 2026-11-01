@@ -2,6 +2,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+import { trackCartAdd } from '#/lib/product-stats-beacon'
+
 // آیتم سبد فقط آیدی محصول + سایز و تعداد داره (امنیت قیمت تضمین می‌شه)
 // هویت هر ردیف = (محصول، سایز) — سایزِ خالی = محصول بدون سایزبندی
 export interface CartItem {
@@ -82,7 +84,7 @@ export const useCartStore = create<CartState>()(
 			// افزودن — ادغام فقط وقتی محصول و سایز هر دو یکسان باشن
 			// stage-100 — addTick در «هر» addItem (حتی ادغامِ ردیفِ موجود)
 			// جلو می‌رود تا UI رویدادِ کلیک را از تغییرِ مقدار تفکیک کند
-			addItem: (productId, quantity = 1, sizeId = null) =>
+			addItem: (productId, quantity = 1, sizeId = null) => {
 				set((state) => {
 					const key = cartItemKey(productId, sizeId)
 					const existing = state.items.find(
@@ -99,7 +101,11 @@ export const useCartStore = create<CartState>()(
 								{ productId, sizeId, quantity: clampQty(quantity) },
 							]
 					return { items, addTick: state.addTick + 1 }
-				}),
+				})
+				// hundred-eleven — رویدادِ «افزودن به سبد» از تنها چوک‌پوینتِ
+				// تغییرِ آیتم می‌رود (fail-silent؛ SSR بی‌عمل). دداپ ۲۴h سمت سرور.
+				trackCartAdd(productId)
+			},
 
 			// آپدیت تعداد بر اساس کلید ردیف
 			updateQuantity: (key, quantity) =>

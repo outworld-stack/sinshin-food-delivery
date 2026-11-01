@@ -92,6 +92,8 @@ try {
       cart: { details: async () => ({ items: [] }) } as never,
       redis,
       settings,
+      // hundred-eleven — بیکن‌های آمار در این تست کاربردی ندارند
+      stats: {} as never,
     }))
     .compile()
 

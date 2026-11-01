@@ -35,7 +35,7 @@ import { ConfirmModal } from '#/components/ConfirmModal'
 import { Can } from '#/components/shared/PermissionGate'
 import { deleteProduct, setProductAvailability } from '#/server/products'
 import { useToastStore } from '#/stores/toastStore'
-import { formatPrice } from '#/utils/format'
+import { faNum, formatPrice } from '#/utils/format'
 import { qk } from '#/utils/queryKeys'
 
 interface AdminProductCardProps {
@@ -50,6 +50,10 @@ interface AdminProductCardProps {
 		isAvailable?: boolean
 		/** stage-86 — امکان خرید زنجیره‌ی دسته (نیامد = روشن) */
 		purchasable?: boolean
+		/** hundred-eleven — آمار واقعی (بازدید/فروش؛ DTO از قدیم می‌داد،
+		 *  حالا داده‌ی واقعی پشتش است — بک‌فیل شبانه از سفارش‌ها) */
+		views?: number
+		sales?: number
 	}
 	categoryName: string | undefined
 	canWrite: boolean
@@ -198,6 +202,10 @@ export const AdminProductCard = memo(function AdminProductCard({
 					<p className="text-xs text-gray-400 mt-1">
 						{categoryName} | {product.prepTime} دقیقه
 					</p>
+					{/* hundred-eleven — آمار واقعی (موبایل) */}
+					<p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 font-DanaMedium">
+						{faNum(product.views ?? 0)} بازدید · {faNum(product.sales ?? 0)} فروش
+					</p>
 					<div className="flex items-center gap-1.5 mt-1">
 						<span className="text-sm font-DanaDemiBold text-primary dark:text-dark-primary">
 							{formatPrice(product.finalPrice)} ت
@@ -232,8 +240,8 @@ export const AdminProductCard = memo(function AdminProductCard({
 				</div>
 			</div>
 
-			{/* دسکتاپ */}
-			<div className="hidden lg:grid lg:grid-cols-5 gap-4 items-center text-right">
+			{/* دسکتاپ — hundred-eleven: ستون «آمار» بعد از قیمت */}
+			<div className="hidden lg:grid lg:grid-cols-6 gap-4 items-center text-right">
 				<div className="flex flex-col">
 					<p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">
 						{product.name}
@@ -245,6 +253,12 @@ export const AdminProductCard = memo(function AdminProductCard({
 				</div>
 				<div className="font-DanaDemiBold text-gray-900 dark:text-white text-sm">
 					{formatPrice(product.finalPrice)} ت
+				</div>
+				{/* hundred-eleven — آمار واقعی: بازدید و فروشِ واقعی
+				    (بک‌فیل شبانه از order_items + بیکن زنده) */}
+				<div className="flex flex-col gap-0.5 text-xs font-DanaMedium text-gray-500 dark:text-gray-400">
+					<span>{faNum(product.views ?? 0)} بازدید</span>
+					<span>{faNum(product.sales ?? 0)} فروش</span>
 				</div>
 				<div className="flex flex-col gap-1 items-start">
 					<span

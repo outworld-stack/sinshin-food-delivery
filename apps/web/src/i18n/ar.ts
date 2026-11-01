@@ -163,6 +163,8 @@ export const ar: Dict = {
         // ── صفحة تفاصيل المنتج (الجولة ٣٢) ──
         'pdetail.category': 'التصنيف',
         'pdetail.prepTime': 'جاهز خلال {n} دقيقة',
+        /** hundred-eleven — مشاهدات المنتج الحقيقية (شارة صفحة التفاصيل) */
+        'pdetail.views': '{n} مشاهدة',
         'pdetail.sizeSelect': 'اختيار الحجم:',
         'pdetail.addToCart': 'إضافة إلى سلة الشراء',
         'pdetail.addedToast': 'تمت إضافة {n} إلى السلة!',

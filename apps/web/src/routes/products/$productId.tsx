@@ -14,6 +14,7 @@
 
 // src/routes/products/$productId.tsx
 
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, notFound } from '@tanstack/react-router'
 import { ChevronRight } from 'reicon-react'
@@ -33,6 +34,8 @@ import { useProductPage } from '#/hooks/site/useProductPage'
 import { useBack } from '#/hooks/useBack'
 import { useI18n } from '#/i18n'
 import { SEO } from '#/i18n/seo'
+// hundred-eleven — بیکن بازدید (فقط مرورگر؛ دداپ/شمارش سمت سرور)
+import { trackProductView } from '#/lib/product-stats-beacon'
 import {
 	alternateLinks,
 	headLang,
@@ -124,6 +127,13 @@ function ProductDetailContent({ product }: { product: Product }) {
 	const back = useBack('/products')
 	const page = useProductPage(product)
 	const { t } = useI18n()
+
+	// hundred-eleven (فاز ۱) — بازدید صفحه‌ی محصول: یک‌بار به‌ازای مانتِ
+	// هر محصول (نه هر رندر)؛ فقط در مرورگر. رفرش‌ها سمت سرور دداپ
+	// می‌شوند (کوکی vid + ردیس ۲۴h) — این‌جا فقط رویداد می‌رود.
+	useEffect(() => {
+		trackProductView(product.id)
+	}, [product.id])
 
 	const galleryImages = product.galleryImages?.length
 		? product.galleryImages

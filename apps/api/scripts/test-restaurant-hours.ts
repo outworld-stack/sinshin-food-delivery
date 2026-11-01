@@ -54,7 +54,7 @@ const app = new Elysia()
     zones: {} as never,
     permits: {} as never,
   }))
-  .use(menuRoutes({ settings, menu: {} as never, cart: {} as never, redis: {} as never }))
+  .use(menuRoutes({ settings, menu: {} as never, cart: {} as never, redis: {} as never, stats: {} as never }))
   .compile()
 
 const adminRequest = (role: string | null, method = 'GET', body?: unknown) =>

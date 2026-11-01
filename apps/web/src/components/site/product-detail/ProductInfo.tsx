@@ -3,7 +3,7 @@
 // stage-84 — استایلِ جدید: آیکون‌ها می‌مانند؛ تیک/ضرب + پس‌زمینه + بوردرِ وضعیت
 // حذف شد — «کلمه‌ی حالت + آیکون» سبز است اگر مجاز، قرمز اگر نه.
 import { memo } from 'react'
-import { Bag, Bicycle, Chair, Clock } from 'reicon-react'
+import { Bag, Bicycle, Chair, Clock, Eye } from 'reicon-react'
 import { tpl, useI18n } from '#/i18n'
 import type { Product } from '#/server/products'
 
@@ -50,6 +50,15 @@ export const ProductInfo = memo(function ProductInfo({
 					<Clock size={14} />
 					{tpl(t['pdetail.prepTime'], { n: fmt.num(product.prepTime) })}
 				</span>
+				{/* hundred-eleven (فاز ۱) — بازدید واقعی (نه seed): فقط
+				    وقتی دیده شده باشد نمایش داده می‌شود تا ردیفِ
+				    «۰ بازدید» برای محصول تازه ناخوشایند باشد */}
+				{(product.views ?? 0) > 0 && (
+					<span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 font-DanaMedium">
+						<Eye size={14} aria-hidden="true" />
+						{tpl(t['pdetail.views'], { n: fmt.num(product.views) })}
+					</span>
+				)}
 			</div>
 
 			<h1 className="font-MorabbaBold text-3xl md:text-4xl text-gray-900 dark:text-white mb-6">

@@ -252,6 +252,9 @@ async function buildLegacyAt0004(url: string): Promise<void> {
       drop column if exists "location";
     -- stage-102 — اشیاءِ ۰۰۲۰: ستونِ لحظه‌ی تایید سفارش
     alter table "orders" drop column if exists "confirmed_at";
+    -- stage-111 — اشیاءِ ۰۰۲۱: دو جدولِ آمارِ روزانه‌ی محصول (ایندکس‌ها با جدول می‌روند)
+    drop table if exists "product_daily_stats";
+    drop table if exists "product_view_log";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",

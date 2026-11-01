@@ -18,11 +18,13 @@ import { Elysia, t } from 'elysia'
 
 import type { MenuService } from '#/domain/menu/menu.service'
 import type { CartService } from '#/domain/cart/cart.service'
+import type { ProductStatsService } from '#/domain/product-stats/product-stats.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { RedisService } from '#/infra/redis/redis'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { sha256 } from '#/domain/shared/crypto'
-import { SLUG_OR_ID_PATTERN } from '#/domain/shared/ids'
+import { parseCookies, serializeCookie } from '#/domain/shared/cookies'
+import { SLUG_OR_ID_PATTERN, UUID_PATTERN } from '#/domain/shared/ids'
 import { SETTING_KEYS } from '#/infra/db/schema'
 import { ipRateLimit } from '#/http/hooks/ip-rate-limit'
 import { cartItemSchema } from '#/http/schemas'
@@ -35,6 +37,42 @@ export interface MenuRoutesDeps {
   redis: RedisService
   /** stage-100 — خواندنِ عمومی انیمیشن صفحه‌ی محصول ویژه (featured_animation) */
   settings: SettingsService
+  /** hundred-eleven — بیکن‌های آمار واقعی (بازدید/افزودن‌به‌سبد) */
+  stats: ProductStatsService
+}
+
+/** hundred-eleven — کوکی بازدیدکننده‌ی ناشناس (خودِ سرور صادر می‌کند؛
+ * HttpOnly و فقط یک UUID تصادفی — هیچ داده‌ی شخصی نه در آن نه مشتق از آن) */
+const VIEWER_COOKIE = 'sinshin_vid'
+/** بات‌های بدیهی — بازدیدشان شمرده نمی‌شود (سئو-کراولرها نباید رتبه‌ها
+ * را جعل کنند). لیست عامیانه؛ نبودِ UA هم شمرده نمی‌شود. */
+const BOT_UA_RE = /bot|crawl|spider|slurp|headless|lighthouse|puppeteer|playwright|phantom/i
+
+/** صدور کوکی سالانه + شمردن با vid — الگوی مشترکِ دو بیکن */
+async function countBeacon(
+  stats: ProductStatsService,
+  kind: 'view' | 'cart',
+  productId: string,
+  request: Request,
+  set: { headers: Record<string, string | number> },
+): Promise<{ counted: boolean }> {
+  const ua = request.headers.get('user-agent') ?? ''
+  if (!ua || BOT_UA_RE.test(ua)) return { counted: false }
+  const existing = parseCookies(request)[VIEWER_COOKIE]
+  const vid = existing && existing.length <= 64 ? existing : crypto.randomUUID()
+  const counted =
+    kind === 'view'
+      ? await stats.recordView(productId, vid)
+      : await stats.recordCartAdd(productId, vid)
+  if (!existing) {
+    set.headers['set-cookie'] = serializeCookie(VIEWER_COOKIE, vid, {
+      maxAge: 365 * 24 * 60 * 60,
+      httpOnly: true,
+      sameSite: 'Lax',
+    })
+  }
+  set.headers['cache-control'] = 'no-store'
+  return { counted }
 }
 
 /** stage-55 — ETag/304 + Cache-Control برای GETهای عمومی منو.
@@ -157,6 +195,49 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
           summary: 'Featured-product page background animation (public)',
           description:
             "stage-100: one of 'shader' (default — current WebGL background) | 'sonar' | 'sparks'. Chosen by the main admin (POST /admin/settings/featured-animation). stage-101: this is the global fallback — each featured product may carry its own featuredAnimation (set in the product form) which takes precedence. Unknown/missing value falls back to 'shader'.",
+        },
+      },
+    )
+
+    // ── hundred-eleven (فاز ۱) — بیکن‌های آمار واقعی ──
+    // صفحه‌ی محصول در مرورگر (نه SSR) بعد از مانت می‌فرستد؛ سقف نرخ IP
+    // سپرِ بدنه‌ی بی‌معناست. پاسخ tiny و no-store؛ دداپ در سرویس (ردیس ۲۴h).
+    .post(
+      '/products/:id/view',
+      ({ params, request, set }) =>
+        countBeacon(deps.stats, 'view', params.id, request, set),
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        beforeHandle: ipRateLimit({
+          redis: deps.redis,
+          scope: 'product-view',
+          limit: 30,
+          windowSeconds: 60,
+        }),
+        detail: {
+          summary: 'Record a product page view (public beacon)',
+          description:
+            "hundred-eleven: anonymous visitor dedup (sinshin_vid cookie + Redis 24h) — refreshes don't count; obvious bots skipped. Fires from the browser on product-page mount.",
+        },
+      },
+    )
+
+    .post(
+      '/products/:id/cart-event',
+      ({ params, request, set }) =>
+        countBeacon(deps.stats, 'cart', params.id, request, set),
+      {
+        params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        beforeHandle: ipRateLimit({
+          redis: deps.redis,
+          scope: 'product-cart-event',
+          limit: 60,
+          windowSeconds: 60,
+        }),
+        detail: {
+          summary: 'Record an add-to-cart event (public beacon)',
+          description:
+            'hundred-eleven: fires once per add-to-cart action (cartStore choke point); same 24h (visitor, product) dedup as views. Completes the view→cart→order funnel.',
         },
       },
     )

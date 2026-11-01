@@ -29,6 +29,7 @@ import type { AuthService } from '#/domain/auth/auth.service'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { DeviceService } from '#/domain/device/device.service'
 import type { MenuService } from '#/domain/menu/menu.service'
+import type { ProductStatsService } from '#/domain/product-stats/product-stats.service'
 import type { PackagingService } from '#/domain/menu/packaging.service'
 import type { CartService } from '#/domain/cart/cart.service'
 import type { AddressService } from '#/domain/address/address.service'
@@ -112,6 +113,8 @@ export interface AppDeps {
   /** stage-79 — مجوز ثبت‌نام ویژه */
   permits: RegistrationPermitService
   menu: MenuService
+  /** hundred-eleven — آمار واقعی محصولات (بیکن‌های منو + قلاب تسویه) */
+  stats: ProductStatsService
   /** stage-84 — اقلام بسته‌بندی (قیمت سراسری) */
   packaging: PackagingService
   cart: CartService
@@ -250,7 +253,7 @@ export const buildApp = (deps: AppDeps) => {
     )
     .use(articlesRoutes({ sessions: deps.sessions, articles: deps.articles, admin2: deps.admin2 }))
     // stage-100 — settings: خواندنِ عمومیِ انیمیشن صفحه‌ی محصول ویژه
-    .use(menuRoutes({ menu: deps.menu, cart: deps.cart, redis: deps.redis, settings: deps.settings }))
+    .use(menuRoutes({ menu: deps.menu, cart: deps.cart, redis: deps.redis, settings: deps.settings, stats: deps.stats }))
     .use(addressRoutes({ sessions: deps.sessions, addresses: deps.addresses }))
     .use(
       adminMenuRoutes({

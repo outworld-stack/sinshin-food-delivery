@@ -73,6 +73,7 @@ import {
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
 import { lockWalletAccounts, signedWalletAmount } from "#/domain/shared/wallet-sql";
+import type { ProductStatsService } from "#/domain/product-stats/product-stats.service";
 import {
         finalPriceOf,
         loadCategoryModes,
@@ -138,6 +139,11 @@ export class OrderService {
                         coupons: CouponService;
                         /** فاز-۲ — پوش نوتیفیکیشن اعطای کوپن */
                         notifications: NotificationService;
+                        /** hundred-eleven — آمار فروش واقعی. اختیاری است تا
+                         *  آمار هرگز مسیر پول را نگرفته نگه دارد: فقط شناسه‌ی
+                         *  سفارش به بافر سپرده می‌شود (بدون هیچ IO در این tx)؛
+                         *  تست‌های قدیمی بدون آن همان قبل کار می‌کنند. */
+                        stats?: ProductStatsService;
                 },
         ) {}
 
@@ -943,6 +949,12 @@ export class OrderService {
                         )
                         .returning();
                 if (!updated) return { displayId: orderRow.displayId };
+
+                // hundred-eleven (فاز ۱) — فروش واقعی: فقط «شناسه» به بافرِ آمار
+                // سپرده می‌شود (بدون هیچ IO داخل این tx). فلش، وضعیت زنده را
+                // دوباره چک می‌کند؛ گارد بالا هم تکرارِ تسویه را به اینجا
+                // نمی‌رساند ⇒ به‌ازای هر پرداخت موفق دقیقاً یک‌بار.
+                this.deps.stats?.recordOrderSettlement(orderRow.id);
 
                 // سود معرف — درصدش از کانفیگ (REFERRAL_PERCENT؛ پیش‌فرض ۱۰٪) فقط از
                 // پرداخت آنلاینِ غذاها (بدون ارسال و بسته‌بندی)

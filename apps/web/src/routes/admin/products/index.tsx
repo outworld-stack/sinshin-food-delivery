@@ -125,11 +125,12 @@ function AdminProductsPage() {
                                                 <AdminProductsPageSkeleton />
                                         ) : page.products.length > 0 ? (
                                                 <>
-                                                        {/* هدر دسکتاپ */}
-                                                        <div className="hidden lg:grid lg:grid-cols-5 gap-4 px-4 mb-2 text-xs text-gray-400 dark:text-gray-500 font-DanaMedium border-b border-gray-100 dark:border-white/5 pb-2 text-right">
+                                                        {/* هدر دسکتاپ — hundred-eleven: ستون «آمار» بعد از قیمت */}
+                                                        <div className="hidden lg:grid lg:grid-cols-6 gap-4 px-4 mb-2 text-xs text-gray-400 dark:text-gray-500 font-DanaMedium border-b border-gray-100 dark:border-white/5 pb-2 text-right">
                                                                 <div>محصول</div>
                                                                 <div>دسته‌بندی</div>
                                                                 <div>قیمت</div>
+                                                                <div>آمار</div>
                                                                 <div>وضعیت</div>
                                                                 <div className="text-left">مدیریت</div>
                                                         </div>

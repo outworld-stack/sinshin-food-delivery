@@ -65,6 +65,9 @@ import { GeoService } from '#/domain/geo/geo.service'
 import { MetricsService } from '#/infra/monitor/metrics'
 import { JobRunRegistry } from '#/infra/monitor/job-registry'
 import { TranslationService } from '#/domain/translation/translation.service'
+// hundred-eleven (فاز ۱) — آمار واقعی محصول + جابِ همگرایی شبانه
+import { ProductStatsService } from '#/domain/product-stats/product-stats.service'
+import { ProductStatsSyncJob } from '#/workers/jobs/product-stats-sync.job'
 // فاز-۲ — نشان / لاگ داکر / نوتیفیکیشن
 import { NeshanService } from '#/infra/maps/neshan.service'
 import { DockerLogsService } from '#/infra/logs/docker-logs.service'
@@ -130,9 +133,12 @@ const notifications = new NotificationService({ db, config, hub: sseHub })
 // stage-48 — منو: پخش نوتیفیکیشن تخفیف + SSE عمومی menu:live
 // (بعد از notifications ساخته می‌شود تا هر دو سرویس را بگیرد)
 const menu = new MenuService({ db, redis, notifications, hub: sseHub })
+// hundred-eleven (فاز ۱) — آمار واقعی: بیکن‌های منو + قلاب تسویه؛
+// قبل از orders (قلاب) و buildApp (مسیرها) ساخته می‌شود
+const productStats = new ProductStatsService({ db, redis })
 // stage-84 — اقلام بسته‌بندی (قیمت سراسری؛ CRUD ادمین)
 const packaging = new PackagingService({ db })
-const orders = new OrderService({ db, config, zones, settings, coupons, notifications })
+const orders = new OrderService({ db, config, zones, settings, coupons, notifications, stats: productStats })
 const profile = new ProfileService({ db, config, orders, devices })
 // round-20 — تکرارناپذیری چک‌اوت مقیم DB (مستقل از ردیس — مسیر پول)
 const checkoutIdempotency = new CheckoutIdempotency({ db })
@@ -175,6 +181,9 @@ if (!g.__sinshin_cron_registered) {
   scheduler.register(new ReconcileJob({ config, db, reconcile }))
   // round-16 — پاک‌سازی دوره‌ای جدول‌های لاگی/سشن (۱۸۰/۹۰ روز، حذف سقف‌دار)
   scheduler.register(new RetentionJob({ db, notifications }))
+  // hundred-eleven (فاز ۱) — همگرایی شبانه‌ی فروش از منبع حقیقت (03:37؛
+  // جدا از 02:00 کوپن و 04:30 رتینشن) + بک‌فیل سه‌هفته‌ی سفارش‌های واقعی
+  scheduler.register(new ProductStatsSyncJob({ stats: productStats }))
   scheduler.registerInterval(new PaymentTimeoutJob({ payments }))
   // round-19 — دیده‌بان سلامت: پیامک قطعی/برگشت db/redis/uploads (بدون قفل — موثق در کار)
   scheduler.registerInterval(
@@ -217,6 +226,12 @@ if (!g.__sinshin_signals) {
     } catch (error) {
       console.error('[articles] failed to flush views during shutdown:', error)
     }
+    // hundred-eleven — بافر آمار محصولات قبل از بستنِ ردیس/دیتابیس فلش می‌شود
+    try {
+      await productStats.close()
+    } catch (error) {
+      console.error('[product-stats] failed to flush during shutdown:', error)
+    }
     try {
       redis.close()
     } catch {
@@ -247,6 +262,7 @@ const app = buildApp({
   devices,
   permits,
   menu,
+  stats: productStats,
   packaging,
   cart,
   addresses,

@@ -147,6 +147,19 @@ export class RetentionJob implements DailyJob {
           )
         `,
       },
+      {
+        // hundred-eleven (فاز ۱) — لاگ بازدید محصول: ۶۰ روز برای Co-view
+        // (فاز ۲) و روندها کافی است؛ ایندکس day این برش را می‌خواباند.
+        label: 'product_view_log',
+        stmt: sql`
+          delete from product_view_log
+          where id in (
+            select id from product_view_log
+            where day < current_date - 60
+            limit ${BATCH}
+          )
+        `,
+      },
     ]
 
     for (const t of targets) {

@@ -8,7 +8,9 @@ const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
 	getItem: () => null, setItem() {}, removeItem() {},
 } })
-Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: globalThis.localStorage } })
+Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+	location: { origin: 'http://localhost:5173' }, localStorage: globalThis.localStorage,
+} })
 type EffectCell = { deps: readonly unknown[]; cleanup?: () => void }
 type Host = { cells: unknown[]; cursor: number; effects: Array<() => void>; dirty: boolean }
 let host: Host = { cells: [], cursor: 0, effects: [], dirty: false }

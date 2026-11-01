@@ -165,6 +165,8 @@ export const fa = {
         // ── صفحه‌ی جزئیات محصول (رارد ۳۲) ──
         'pdetail.category': 'دسته‌بندی',
         'pdetail.prepTime': 'آماده‌سازی در {n} دقیقه',
+        /** hundred-eleven — بازدید واقعی محصول (چیپ صفحه‌ی جزئیات) */
+        'pdetail.views': '{n} بازدید',
         'pdetail.sizeSelect': 'انتخاب سایز:',
         'pdetail.addToCart': 'افزودن به سبد خرید',
         'pdetail.addedToast': '{n} به سبد اضافه شد!',
