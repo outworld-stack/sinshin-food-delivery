@@ -222,11 +222,17 @@ try {
   passed('persisted findings refresh evidence/severity and reopen recurring resolved findings without duplicating rows')
 
   let settlementCalls = 0, grantCalls = 0
+  const statsEvents: string[] = []
+  const statsSnapshots: Array<Promise<typeof orders.$inferSelect | undefined>> = []
   const settlementSpy = {
     settlePayment: async (tx: DbOrTx, order: typeof orders.$inferSelect) => {
       settlementCalls++
       await tx.update(orders).set({ status: 'PAID', paymentStatus: 'SUCCESS' }).where(eq(orders.id, order.id))
       return { displayId: order.displayId }
+    },
+    recordSettlementAfterCommit: (orderId: string) => {
+      statsEvents.push(orderId)
+      statsSnapshots.push(db.select().from(orders).where(eq(orders.id, orderId as typeof orders.$inferSelect.id)).then(rows => rows[0]))
     },
     grantCouponsAfterCommit: async () => { grantCalls++ },
   } as never
@@ -261,6 +267,7 @@ try {
     await Promise.all([blocker, running])
     assert.equal(settlementCalls, 0)
     assert.equal(grantCalls, 0)
+    assert.equal(statsEvents.length, 0)
     assert.equal((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status, 'PENDING_PAYMENT')
   }
   passed('R1 rechecks amount, ownership and unique successful payment after its buyer lock is acquired')
@@ -270,10 +277,13 @@ try {
   const trustedReport = await auto.run()
   assert.equal(settlementCalls, 1)
   assert.equal(grantCalls, 1)
+  assert.deepEqual(statsEvents, [trustedOrder.id])
+  assert.equal((await statsSnapshots[0])?.status, 'PAID')
   assert.equal((await db.select().from(orders).where(eq(orders.id, trustedOrder.id)))[0]!.status, 'PAID')
   assert.equal(trustedReport.checks.find((entry: CheckResult) => entry.checkId === 'R1')!.wouldFix, 1)
   await auto.run()
   assert.equal(settlementCalls, 1)
+  assert.deepEqual(statsEvents, [trustedOrder.id])
   passed('R1 settles one trusted pending order once and grants only after successful settlement')
 
   const recordedPayment = async (gateway: string, mode: string, gatewayRef: string | null, pendingOrder = true) => {

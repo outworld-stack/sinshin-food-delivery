@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { eq, sql } from 'drizzle-orm'
 import { SQL } from 'bun'
+import { setSystemTime } from 'bun:test'
 import { Elysia } from 'elysia'
 
 import { ProductStatsService, tehranDay } from '../src/domain/product-stats/product-stats.service'
@@ -299,6 +300,142 @@ try {
 
 	// tehranDay — قرارداد روزِ تقویمی
 	check(/^\d{4}-\d{2}-\d{2}$/.test(tehranDay()), 'tehranDay is YYYY-MM-DD')
+
+	// A failed final write must roll back logs/counters and retry each event once.
+	const retryProduct = (await db.insert(products).values({
+		categoryId: cat.id, name: 'Retry product', originalPrice: 100_000,
+	}).returning())[0]!
+	const makeOrder = async (displayId: string, quantity: number, anonymousQuantity = 0) => {
+		const order = (await db.insert(orders).values({
+			displayId, userId: user.id, status: 'PAID', deliveryType: 'PICKUP',
+			paymentStatus: 'SUCCESS', totalAmount: 100_000, breakdown,
+		}).returning())[0]!
+		await db.insert(orderItems).values([
+			{ orderId: order.id, productId: retryProduct.id, name: 'Retry product', unitPrice: 100_000, quantity },
+			...(anonymousQuantity ? [{ orderId: order.id, productId: null, name: 'Legacy snapshot', unitPrice: 100_000, quantity: anonymousQuantity }] : []),
+		])
+		return order
+	}
+	const retryOrder = await makeOrder('ord-retry', 3)
+	await service.recordView(retryProduct.id, crypto.randomUUID())
+	await service.recordCartAdd(retryProduct.id, crypto.randomUUID())
+	service.recordOrderSettlement(retryOrder.id)
+	await db.execute(sql`create function fail_stats_sales() returns trigger language plpgsql as '
+		begin raise exception ''injected stats write failure''; end;
+	'`)
+	await db.execute(sql`create trigger fail_stats_sales before update of sales on products
+		for each row execute function fail_stats_sales()`)
+	try {
+		await service.flush()
+		const failedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
+		check(failedProduct.views === 0 && failedProduct.sales === 0, 'failed flush rolls back lifetime counters')
+		check((await db.select().from(productViewLog).where(eq(productViewLog.productId, retryProduct.id))).length === 0,
+			'failed flush rolls back view log')
+		check((await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))).length === 0,
+			'failed flush rolls back daily counters')
+	} finally {
+		await db.execute(sql`drop trigger fail_stats_sales on products`)
+		await db.execute(sql`drop function fail_stats_sales()`)
+	}
+	await service.flush()
+	const retriedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
+	const retriedCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
+	check(retriedProduct.views === 1 && retriedProduct.sales === 3, 'retry counts views and settled units exactly once')
+	check(retriedCell.views === 1 && retriedCell.cartAdds === 1 && retriedCell.orders === 3,
+		'retry does not add both requeued order IDs and their derived quantities')
+	check((await db.select().from(productViewLog).where(eq(productViewLog.productId, retryProduct.id))).length === 1,
+		'retry persists only one view log row')
+
+	// Nullable product IDs are valid historical order snapshots, not UUIDs.
+	const snapshotOrder = await makeOrder('ord-snapshot', 2, 9)
+	service.recordOrderSettlement(snapshotOrder.id)
+	await service.flush()
+	const snapshotProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
+	const snapshotCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
+	check(snapshotProduct.sales === 5 && snapshotCell.orders === 5,
+		'null product snapshots cannot poison valid product stats in the same batch')
+
+	// Nightly reconciliation can see a paid order before its buffered event flushes.
+	const bufferedOrder = await makeOrder('ord-buffered', 4)
+	service.recordOrderSettlement(bufferedOrder.id)
+	await service.syncSales()
+	await service.flush()
+	const syncedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
+	const syncedCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
+	check(syncedProduct.sales === 9, 'nightly sync followed by pending settlement flush does not count a sale twice')
+	check(syncedCell.orders === 9, 'nightly sync preserves additive daily settlement events')
+
+	const refundedOrder = await makeOrder('ord-refunded', 7)
+	await db.update(orders).set({ paymentStatus: 'REFUNDED' }).where(eq(orders.id, refundedOrder.id))
+	service.recordOrderSettlement(refundedOrder.id)
+	await service.flush()
+	const refundedCell = (await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id)))[0]!
+	check(refundedCell.orders === 9, 'an order without SUCCESS payment cannot contribute sold units')
+
+	// Crossing Tehran midnight while buffered cannot move a sale to the next day.
+	const midnightOrder = await makeOrder('ord-midnight', 1)
+	try {
+		setSystemTime(new Date('2026-01-01T20:29:59.000Z'))
+		service.recordOrderSettlement(midnightOrder.id)
+		setSystemTime(new Date('2026-01-01T20:30:01.000Z'))
+		await service.flush()
+	} finally {
+		setSystemTime()
+	}
+	const midnightCells = await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))
+	check(midnightCells.find((cell) => dayStr(cell.day) === '2026-01-01')?.orders === 1,
+		'buffered settlement retains its Tehran event day across midnight')
+	check(!midnightCells.some((cell) => dayStr(cell.day) === '2026-01-02'),
+		'flush day does not create a spurious daily sale')
+
+	// Shutdown must await beacons already accepted but still awaiting Redis.
+	let finishDedup!: (first: boolean) => void
+	const dedupPending = new Promise<boolean>((resolve) => { finishDedup = resolve })
+	const drainingService = new ProductStatsService({
+		db,
+		redis: { setNx: () => dedupPending } as unknown as RedisService,
+	})
+	try {
+		setSystemTime(new Date('2026-01-01T20:29:59.000Z'))
+		const recordPending = drainingService.recordView(retryProduct.id, crypto.randomUUID())
+		const closePending = drainingService.close()
+		await Promise.resolve()
+		setSystemTime(new Date('2026-01-01T20:30:01.000Z'))
+		finishDedup(true)
+		await Promise.all([recordPending, closePending])
+		const drainedProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
+		const drainedLogs = await db.select().from(productViewLog).where(eq(productViewLog.productId, retryProduct.id))
+		const drainedCells = await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))
+		check(drainedProduct.views === 2, 'close drains a beacon still awaiting Redis when shutdown starts')
+		check(drainedLogs.some((row) => dayStr(row.day) === '2026-01-01') &&
+			drainedCells.find((cell) => dayStr(cell.day) === '2026-01-01')?.views === 1,
+			'view log and daily count retain the same event day across Redis latency')
+	} finally {
+		setSystemTime()
+		finishDedup(true)
+		await drainingService.close()
+	}
+
+	const replica = new ProductStatsService({ db, redis })
+	try {
+		const firstConcurrent = await makeOrder('ord-concurrent-a', 2)
+		const secondConcurrent = await makeOrder('ord-concurrent-b', 3)
+		service.recordOrderSettlement(firstConcurrent.id)
+		replica.recordOrderSettlement(secondConcurrent.id)
+		await Promise.all([
+			service.recordView(retryProduct.id, crypto.randomUUID()),
+			replica.recordView(retryProduct.id, crypto.randomUUID()),
+		])
+		await Promise.all([service.flush(), replica.flush(), service.syncSales()])
+		const concurrentProduct = (await db.select().from(products).where(eq(products.id, retryProduct.id)))[0]!
+		const concurrentCells = await db.select().from(productDailyStats).where(eq(productDailyStats.productId, retryProduct.id))
+		check(concurrentProduct.sales === 15 && concurrentProduct.views === 4,
+			'concurrent replicas and nightly reconciliation preserve exact lifetime totals')
+		check(concurrentCells.reduce((total, cell) => total + cell.orders, 0) === 15,
+			'concurrent replica flushes preserve all daily settlement events')
+	} finally {
+		await replica.close()
+	}
 
 	console.log(`\n══ Product stats: ${checks} پاس ══`)
 } finally {

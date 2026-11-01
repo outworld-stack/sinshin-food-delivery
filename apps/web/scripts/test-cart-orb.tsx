@@ -50,6 +50,8 @@ const hooks = {
 	},
 }
 mock.module('react', () => ({ ...react, ...hooks, default: { ...react.default, ...hooks } }))
+// Cart feedback tests must not send analytics to the API configured in .env.
+mock.module('#/lib/product-stats-beacon', () => ({ trackCartAdd() {} }))
 const { useCartStore: cart } = await import('../src/stores/cartStore')
 let persisted: unknown = null
 cart.persist.setOptions({ storage: {

@@ -197,6 +197,7 @@ export class ReconcileService {
                 settledUserId = order.userId
             })
             if (settledUserId) {
+                this.deps.orders.recordSettlementAfterCommit(orderId)
                 await this.deps.orders.grantCouponsAfterCommit(settledUserId)
                 console.log(`[reconcile] R1 auto-fixed ${displayId}`)
             }

@@ -8,13 +8,23 @@
 // ═══════════════════════════════════════════════════════════════
 import assert from 'node:assert/strict'
 
+// Keep both URL cases independent of the developer's .env configuration.
+const originalApiUrl = process.env.VITE_API_URL
+delete process.env.VITE_API_URL
+
 // ── رهگیر fetch — URL/متد/keepalive هر بیکن ثبت می‌شود ──
-const calls: Array<{ url: string; method: string; keepalive: boolean }> = []
+const calls: Array<{
+	url: string
+	method: string
+	keepalive: boolean
+	credentials: RequestCredentials | undefined
+}> = []
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 	calls.push({
 		url: String(input),
 		method: init?.method ?? 'GET',
 		keepalive: init?.keepalive === true,
+		credentials: init?.credentials,
 	})
 	return new Response('{"counted":true}', { status: 200 })
 }) as typeof fetch
@@ -53,6 +63,14 @@ assert.equal(calls[0].method, 'POST', 'view beacon is a POST')
 assert.equal(calls[0].keepalive, true, 'view beacon survives early page exit (keepalive)')
 console.log('  ✓ view beacon → POST /api/menu/products/:id/view (keepalive)')
 
+// A separately hosted API must receive and set the anonymous visitor cookie.
+process.env.VITE_API_URL = 'http://localhost:3000'
+trackProductView(PID)
+assert.equal(calls.at(-1)!.url, `http://localhost:3000/api/menu/products/${PID}/view`)
+assert.equal(calls.at(-1)!.credentials, 'include', 'cross-origin views retain the visitor cookie for deduplication')
+delete process.env.VITE_API_URL
+console.log('  ✓ separate API origin retains the visitor cookie')
+
 // ── بیکن در SSR هیچ نمی‌فرستد ──
 Object.defineProperty(globalThis, 'window', { configurable: true, value: undefined })
 const before = calls.length
@@ -72,6 +90,7 @@ assert.equal(
 	'addItem fires the cart-event beacon for its own product',
 )
 assert.equal(cartCall.method, 'POST', 'cart beacon is a POST')
+assert.equal(cartCall.credentials, 'include', 'cart beacon shares the visitor cookie')
 assert.equal(useCartStore.getState().items.length, 1, 'item actually landed in the cart')
 assert.equal(useCartStore.getState().items[0]!.quantity, 2, 'quantity preserved')
 console.log('  ✓ cartStore.addItem fires the cart-event beacon (choke point)')
@@ -99,4 +118,7 @@ assert.equal(useCartStore.getState().items[0]!.quantity, 4, 'cart works even wit
 assert.equal(useCartStore.getState().addTick, ticksBefore + 1, 'addTick moved regardless of beacon failure')
 console.log('  ✓ beacon failure is swallowed — cart/UX never breaks')
 
-console.log('\n══ Product stats client: 6 checks passed ══')
+if (originalApiUrl === undefined) delete process.env.VITE_API_URL
+else process.env.VITE_API_URL = originalApiUrl
+
+console.log('\n══ Product stats client: 7 checks passed ══')

@@ -14,11 +14,11 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/domain/product-stats/product-stats.service.ts
-import { inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 
 import { sha256 } from '#/domain/shared/crypto'
 import type { OrderId } from '#/domain/shared/brand'
-import type { Db } from '#/infra/db/client'
+import type { Db, Tx } from '#/infra/db/client'
 import { orderItems, orders } from '#/infra/db/schema'
 import type { RedisService } from '#/infra/redis/redis'
 
@@ -56,8 +56,9 @@ export class ProductStatsService {
 	private readonly pendingViews: PendingView[] = []
 	/** `${kind}:${productId}:${day}` → تعداد تجمعی در انتظارِ فلش */
 	private readonly counters = new Map<string, number>()
-	/** شناسه‌ی سفارش‌های تسویه‌شده در انتظارِ فلش (وضعیت در فلش چک می‌شود) */
-	private readonly pendingOrderIds = new Set<string>()
+	/** Order ID → settlement day, retained across midnight and failed flushes. */
+	private readonly pendingOrderIds = new Map<string, string>()
+	private readonly recording = new Set<Promise<boolean>>()
 	private flushTimer: ReturnType<typeof setInterval> | null = null
 	private flushing: Promise<void> | null = null
 
@@ -82,36 +83,44 @@ export class ProductStatsService {
 	}
 
 	private async record(kind: 'v' | 'c', productId: string, visitorId: string): Promise<boolean> {
+		const pending = this.recordEvent(kind, productId, visitorId)
+		this.recording.add(pending)
+		try {
+			return await pending
+		} finally {
+			this.recording.delete(pending)
+		}
+	}
+
+	private async recordEvent(kind: 'v' | 'c', productId: string, visitorId: string): Promise<boolean> {
+		const day = tehranDay()
+		const visitorHash = sha256(visitorId)
 		// null = ردیس در دسترس نیست → شمارشِ باز (شکست‌بسته فقط برای مسیر پول است)
 		const first = await this.deps.redis.setNx(
-			`pv:${kind}:${productId}:${sha256(visitorId)}`,
+			`pv:${kind}:${productId}:${visitorHash}`,
 			'1',
 			{ ex: DEDUP_TTL_SECONDS },
 		)
 		if (first === false) return false
-		this.push(kind, productId, 1)
+		this.push(kind, productId, 1, day)
 		if (kind === 'v') {
-			this.pendingViews.push({ productId, visitorId: sha256(visitorId), day: tehranDay() })
+			this.pendingViews.push({ productId, visitorId: visitorHash, day })
 		}
 		return true
 	}
 
 	/**
-	 * صدورِ فروش — فقط از داخل settlePayment، «بعد از» گارد وضعیت
-	 * (PENDING_PAYMENT→PAID) صدا می‌شود ⇒ به‌ازای هر پرداختِ موفق دقیقاً
-	 * یک‌بار (تکرارِ تسویه به گارد می‌خورد و دیگر به اینجا نمی‌رسد؛
-	 * کلیدِ set هم بدرقه است). عمداً هیچ کاری داخل tx پرداخت نمی‌کند:
-	 * فقط شناسه را می‌سپارد؛ فلش وضعیت را می‌خواند — tx که برگشت بخورد،
-	 * سفارش PAID نیست و رد می‌شود. refund/لغو شبانه توسط syncSales از
-	 * ستون sales کنار می‌رود (بازسازی از منبع حقیقت).
+	 * Called once after the payment transaction commits its PENDING_PAYMENT → PAID
+	 * transition. No statistics IO belongs in that transaction. Keep the event's
+	 * day here; a later flush must not move a pre-midnight sale into the next day.
 	 */
 	recordOrderSettlement(orderId: string): void {
-		this.pendingOrderIds.add(orderId)
+		if (!this.pendingOrderIds.has(orderId)) this.pendingOrderIds.set(orderId, tehranDay())
 		this.ensureTimer()
 	}
 
-	private push(kind: Kind, productId: string, n: number): void {
-		const key = `${kind}:${productId}:${tehranDay()}`
+	private push(kind: Kind, productId: string, n: number, day: string): void {
+		const key = `${kind}:${productId}:${day}`
 		this.counters.set(key, (this.counters.get(key) ?? 0) + n)
 		this.ensureTimer()
 	}
@@ -123,7 +132,7 @@ export class ProductStatsService {
 		}
 	}
 
-	// ── فلش — یکجا روی اتصال اصلی (بیرون از هر tx) ──
+	// ── Flush in its own transaction, outside payment transactions ──
 
 	flush(): Promise<void> {
 		if (this.flushing) return this.flushing
@@ -134,11 +143,8 @@ export class ProductStatsService {
 	}
 
 	/**
-	 * ترتیب گام‌ها: (۱) اقلامِ سفارش‌های واقعاً تسویه‌شده به شمارنده‌ها
-	 * اضافه می‌شود (۲) لاگ بازدید (۳) upsert روزانه (۴) ستون‌های lifetime.
-	 * خطا در هر گام ⇒ همه‌چیز به بافر برمی‌گردد و تیک بعدی دوباره تلاش
-	 * می‌کند (شمارشِ مضاعفِ نادر در رویداد مرزی = بی‌ضرر؛ sales شبانه
-	 * همگرا می‌شود).
+	 * Apply the entire batch atomically, outside payment transactions. A failed
+	 * batch requeues only its original events, never the derived order quantities.
 	 */
 	private async apply(): Promise<void> {
 		if (
@@ -151,126 +157,120 @@ export class ProductStatsService {
 
 		const views = [...this.pendingViews]
 		this.pendingViews.length = 0
-		const counters = [...this.counters.entries()]
+		const pendingCounters = [...this.counters.entries()]
 		this.counters.clear()
-		const orderIds = [...this.pendingOrderIds]
+		const orderDays = new Map(this.pendingOrderIds)
 		this.pendingOrderIds.clear()
 
 		try {
-			// (۱) سفارش‌ها — وضعیتِ زنده دوباره چک می‌شود (بیرون از tx پرداخت)
-			const orderCounts = await this.settledOrderQuantities(orderIds)
-			for (const [productId, qty] of orderCounts) {
-				this.mergeCounter(counters, `o:${productId}:${tehranDay()}`, qty)
-			}
+			await this.deps.db.transaction(async (tx) => {
+				// Serialize statistics batches/rebuilds across API replicas. This lock is
+				// never taken by payment transactions, and precedes all statistics writes.
+				await this.lockStats(tx)
+				const orderCounts = await this.settledOrderQuantities(tx, orderDays)
+				const counters = [...pendingCounters, ...orderCounts.entries()]
 
-			// (۲) لاگ بازدید — یک insert چندردیفی
-			if (views.length > 0) {
-				await this.deps.db.execute(sql`
-					insert into product_view_log (product_id, visitor_id, day)
-					values ${sql.join(
-						views.map(
-							(v) => sql`(${v.productId}::uuid, ${v.visitorId}::varchar, ${v.day}::date)`,
-						),
-						sql`, `,
-					)}
-				`)
-			}
+				// (۲) لاگ بازدید — یک insert چندردیفی
+				if (views.length > 0) {
+					await tx.execute(sql`
+						insert into product_view_log (product_id, visitor_id, day)
+						values ${sql.join(
+							views.map(
+								(v) => sql`(${v.productId}::uuid, ${v.visitorId}::varchar, ${v.day}::date)`,
+							),
+							sql`, `,
+						)}
+					`)
+				}
 
-			// (۳) شمارنده‌های روزانه — یک upsert چندردیفیِ افزونه‌ای
-			const byCell = new Map<
-				string,
-				{ productId: string; day: string; v: number; c: number; o: number }
-			>()
-			for (const [key, n] of counters) {
-				const kind = key.slice(0, 1)
-				const productId = key.slice(2, key.lastIndexOf(':'))
-				const day = key.slice(key.lastIndexOf(':') + 1)
-				const cellKey = `${productId}|${day}`
-				const cell = byCell.get(cellKey) ?? { productId, day, v: 0, c: 0, o: 0 }
-				if (kind === 'v') cell.v += n
-				else if (kind === 'c') cell.c += n
-				else cell.o += n
-				byCell.set(cellKey, cell)
-			}
-			if (byCell.size > 0) {
-				const cells = [...byCell.values()]
-				await this.deps.db.execute(sql`
-					insert into product_daily_stats (product_id, day, views, cart_adds, orders)
-					values ${sql.join(
-						cells.map(
-							(c) =>
-								sql`(${c.productId}::uuid, ${c.day}::date, ${c.v}::int, ${c.c}::int, ${c.o}::int)`,
-						),
-						sql`, `,
-					)}
-					on conflict (product_id, day) do update set
-						views = product_daily_stats.views + excluded.views,
-						cart_adds = product_daily_stats.cart_adds + excluded.cart_adds,
-						orders = product_daily_stats.orders + excluded.orders,
-						updated_at = now()
-				`)
-			}
+				// (۳) شمارنده‌های روزانه — یک upsert چندردیفیِ افزونه‌ای
+				const byCell = new Map<
+					string,
+					{ productId: string; day: string; v: number; c: number; o: number }
+				>()
+				for (const [key, n] of counters) {
+					const kind = key.slice(0, 1)
+					const productId = key.slice(2, key.lastIndexOf(':'))
+					const day = key.slice(key.lastIndexOf(':') + 1)
+					const cellKey = `${productId}|${day}`
+					const cell = byCell.get(cellKey) ?? { productId, day, v: 0, c: 0, o: 0 }
+					if (kind === 'v') cell.v += n
+					else if (kind === 'c') cell.c += n
+					else cell.o += n
+					byCell.set(cellKey, cell)
+				}
+				if (byCell.size > 0) {
+					const cells = [...byCell.values()]
+					await tx.execute(sql`
+						insert into product_daily_stats (product_id, day, views, cart_adds, orders)
+						values ${sql.join(
+							cells.map(
+								(c) =>
+									sql`(${c.productId}::uuid, ${c.day}::date, ${c.v}::int, ${c.c}::int, ${c.o}::int)`,
+							),
+							sql`, `,
+						)}
+						on conflict (product_id, day) do update set
+							views = product_daily_stats.views + excluded.views,
+							cart_adds = product_daily_stats.cart_adds + excluded.cart_adds,
+							orders = product_daily_stats.orders + excluded.orders,
+							updated_at = now()
+					`)
+				}
 
-			// (۴) ستون‌های lifetime — views از بازدیدها، sales از فروش (دستورِ
-			// batch یک‌عباره با VALUES؛ آپدیتِ ردیفِ حذف‌شده = no-op بی‌ضرر)
-			await this.bumpColumn(
-				'views',
-				counters.filter(([key]) => key.startsWith('v:')),
-			)
-			await this.bumpColumn(
-				'sales',
-				counters.filter(([key]) => key.startsWith('o:')),
-			)
+				// Lifetime views are additive; deleted product rows are harmless no-ops.
+				await this.bumpViews(
+					tx,
+					counters.filter(([key]) => key.startsWith('v:')),
+				)
+				// A nightly rebuild may already include these orders. Recompute affected
+				// products instead of adding their quantities a second time.
+				const soldProducts = [...new Set([...orderCounts.keys()].map((key) => key.slice(2, key.lastIndexOf(':'))))]
+				if (soldProducts.length > 0) await this.rebuildSales(tx, soldProducts)
+			})
 		} catch (error) {
 			// برگشت به بافر — تیک بعدی دوباره؛ آمار جلوی ترافیک را نمی‌گیرد
 			console.error('[product-stats] flush failed; re-queued:', error)
 			this.pendingViews.push(...views)
-			for (const [key, n] of counters) {
+			for (const [key, n] of pendingCounters) {
 				this.counters.set(key, (this.counters.get(key) ?? 0) + n)
 			}
-			for (const id of orderIds) this.pendingOrderIds.add(id)
+			for (const [id, day] of orderDays) this.pendingOrderIds.set(id, day)
 		}
 	}
 
-	/** تجمیع در آرایه‌ی لحظه‌ایِ شمارنده‌ها (بین سفارش‌های هم‌محصول) */
-	private mergeCounter(counters: Array<[string, number]>, key: string, n: number): void {
-		const existing = counters.find(([k]) => k === key)
-		if (existing) existing[1] += n
-		else counters.push([key, n])
-	}
-
 	/**
-	 * اقلامِ سفارش‌های «واقعاً تسویه‌شده» را تجمیع می‌کند: هر وضعتی جز
-	 * PENDING_PAYMENT و CANCELED یعنی پرداخت جا افتاده (PAID/CONFIRMED/
-	 * ON_THE_WAY/DELIVERED). تمامِ خواندن‌ها بیرون از tx پرداخت.
+	 * Group paid, non-canceled items by their settlement day. Historical order
+	 * snapshots may have no product ID; those cannot contribute to product stats.
 	 */
-	private async settledOrderQuantities(orderIds: string[]): Promise<Map<string, number>> {
+	private async settledOrderQuantities(tx: Tx, orderDays: Map<string, string>): Promise<Map<string, number>> {
 		const out = new Map<string, number>()
-		if (orderIds.length === 0) return out
-		const rows = await this.deps.db
-			.select({ id: orders.id, status: orders.status })
-			.from(orders)
-			.where(inArray(orders.id, orderIds as OrderId[]))
-		const live = rows.filter((r) => r.status !== 'PENDING_PAYMENT' && r.status !== 'CANCELED')
-		if (live.length === 0) return out
-		const items = await this.deps.db
+		if (orderDays.size === 0) return out
+		const items = await tx
 			.select({
+				orderId: orderItems.orderId,
 				productId: orderItems.productId,
 				qty: sql<number>`sum(${orderItems.quantity})::int`,
 			})
 			.from(orderItems)
-			.where(inArray(orderItems.orderId, live.map((r) => r.id)))
-			.groupBy(orderItems.productId)
+			.innerJoin(orders, eq(orders.id, orderItems.orderId))
+			.where(and(
+				inArray(orderItems.orderId, [...orderDays.keys()] as OrderId[]),
+				isNotNull(orderItems.productId),
+				eq(orders.paymentStatus, 'SUCCESS'),
+				ne(orders.status, 'PENDING_PAYMENT'),
+				ne(orders.status, 'CANCELED'),
+			))
+			.groupBy(orderItems.orderId, orderItems.productId)
 		for (const it of items) {
-			const productId = String(it.productId)
-			out.set(productId, (out.get(productId) ?? 0) + it.qty)
+			const key = `o:${it.productId}:${orderDays.get(it.orderId)!}`
+			out.set(key, (out.get(key) ?? 0) + it.qty)
 		}
 		return out
 	}
 
-	/** ستون whitelist شده — sql.raw فقط دو ثابتِ خودِ این فایل است */
-	private async bumpColumn(
-		column: 'views' | 'sales',
+	private async bumpViews(
+		tx: Tx,
 		entries: Array<[string, number]>,
 	): Promise<void> {
 		if (entries.length === 0) return
@@ -280,13 +280,32 @@ export class ProductStatsService {
 			merged.set(productId, (merged.get(productId) ?? 0) + n)
 		}
 		const rows = [...merged.entries()]
-		await this.deps.db.execute(sql`
-			update products set ${sql.raw(column)} = ${sql.raw(column)} + v.n
+		await tx.execute(sql`
+			update products set views = views + v.n
 			from (values ${sql.join(
 				rows.map(([id, n]) => sql`(${id}::uuid, ${n}::int)`),
 				sql`, `,
 			)}) as v(id, n)
 			where products.id = v.id
+		`)
+	}
+
+	private async lockStats(tx: Tx): Promise<void> {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext('product-stats:write'))`)
+	}
+
+	private async rebuildSales(tx: Tx, productIds?: string[]): Promise<void> {
+		await tx.execute(sql`
+			update products p set sales = coalesce((
+				select sum(oi.quantity)
+				from order_items oi
+				join orders o on o.id = oi.order_id
+				where oi.product_id = p.id
+					and o.payment_status = 'SUCCESS'
+					and o.status <> 'PENDING_PAYMENT'
+					and o.status <> 'CANCELED'
+			), 0)
+			${productIds ? sql`where p.id in (${sql.join(productIds.map((id) => sql`${id}::uuid`), sql`, `)})` : sql``}
 		`)
 	}
 
@@ -301,29 +320,25 @@ export class ProductStatsService {
 	 * رتینشن می‌کاست.
 	 */
 	async syncSales(): Promise<void> {
-		await this.deps.db.execute(sql`
-			update products p set sales = coalesce((
-				select sum(oi.quantity)
-				from order_items oi
-				join orders o on o.id = oi.order_id
-				where oi.product_id = p.id
-					and o.payment_status = 'SUCCESS'
-					and o.status <> 'CANCELED'
-			), 0)
-		`)
-		await this.deps.db.execute(sql`
-			delete from product_view_log l
-			where not exists (select 1 from products p where p.id = l.product_id)
-		`)
-		await this.deps.db.execute(sql`
-			delete from product_daily_stats s
-			where not exists (select 1 from products p where p.id = s.product_id)
-		`)
+		await this.deps.db.transaction(async (tx) => {
+			await this.lockStats(tx)
+			await this.rebuildSales(tx)
+			await tx.execute(sql`
+				delete from product_view_log l
+				where not exists (select 1 from products p where p.id = l.product_id)
+			`)
+			await tx.execute(sql`
+				delete from product_daily_stats s
+				where not exists (select 1 from products p where p.id = s.product_id)
+			`)
+		})
 		console.log('[product-stats] nightly sync: sales rebuilt from order_items; orphan rows pruned')
 	}
 
 	/** shutdown — تایمر خاموش + بافرِ باقی‌مانده فلش (الگوی مقاله‌ها) */
 	async close(): Promise<void> {
+		// A beacon accepted before shutdown may still be awaiting Redis deduplication.
+		await Promise.allSettled([...this.recording])
 		if (this.flushTimer !== null) clearInterval(this.flushTimer)
 		this.flushTimer = null
 		if (this.flushing) await this.flushing

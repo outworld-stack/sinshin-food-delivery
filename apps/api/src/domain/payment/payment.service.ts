@@ -811,6 +811,7 @@ export class PaymentService {
     expectedReference?: string | null,
     expirySnapshot?: PaymentRow[],
   ): Promise<{ orderDisplayId: string; paymentStatus: string; userId: string }> {
+    let settledOrderId: string | undefined
     const result = await this.moneyTransaction(async (tx) => {
       // metadata فعلی برای ادغام — فقط خواندن؛ تصرف اتمیک همان update
       // با status=PENDING است، پس این select مسیر رقابت را عوض نمی‌کند
@@ -915,6 +916,7 @@ export class PaymentService {
 
       if (success) {
         await this.deps.orders.settlePayment(tx, orderRow)
+        settledOrderId = orderRow.id
         return { orderDisplayId: orderRow.displayId, paymentStatus: 'SUCCESS', userId: orderRow.userId }
       }
       // A failure callback proves only this attempt failed. Keep its receipt
@@ -926,6 +928,8 @@ export class PaymentService {
       await this.deps.orders.failPayment(tx, orderRow)
       return { orderDisplayId: orderRow.displayId, paymentStatus: 'FAILED', userId: orderRow.userId }
     })
+
+    if (settledOrderId) this.deps.orders.recordSettlementAfterCommit(settledOrderId)
 
     // رارد M9 — اعطای کوپنِ «بعد از commit»: grantCouponsAfterCommit خودش
     // try/catch دارد و هرگز مسیر پرداخت را نمی‌شکند.

@@ -139,10 +139,7 @@ export class OrderService {
                         coupons: CouponService;
                         /** فاز-۲ — پوش نوتیفیکیشن اعطای کوپن */
                         notifications: NotificationService;
-                        /** hundred-eleven — آمار فروش واقعی. اختیاری است تا
-                         *  آمار هرگز مسیر پول را نگرفته نگه دارد: فقط شناسه‌ی
-                         *  سفارش به بافر سپرده می‌شود (بدون هیچ IO در این tx)؛
-                         *  تست‌های قدیمی بدون آن همان قبل کار می‌کنند. */
+                        /** Optional analytics; enqueue only after the money transaction commits. */
                         stats?: ProductStatsService;
                 },
         ) {}
@@ -189,6 +186,7 @@ export class OrderService {
                 }
 
                 // رارد M9 — نتیجه‌ی tx گرفته می‌شود تا اعطای کوپن بعد از commit اجرا شود
+                let settledOrderId: string | undefined;
                 const result = await db.transaction(async (tx) => {
                         if (claim) {
                                 const [owned] = await tx.select().from(checkoutIdempotency)
@@ -572,6 +570,7 @@ export class OrderService {
                         // ── تمام-کیف‌پول → تسویه فوری ──
                         if (amountPaidOnline === 0) {
                                 await this.settlePayment(tx, orderRow);
+                                settledOrderId = orderRow.id;
                                 return persistResult({
                                         displayId: orderRow.displayId,
                                         requiresPayment: false,
@@ -636,10 +635,22 @@ export class OrderService {
                         });
                 });
 
+                if (settledOrderId) this.recordSettlementAfterCommit(settledOrderId);
+
                 // رارد M9 — اعطای کوپنِ «بعد از commit»: بیرون از tx و بدون قفل کاربر.
                 // خطا هرگز نباید چک‌اوتِ موفقِ قبلی را خراب کند — فقط لاگ.
                 await this.grantCouponsAfterCommit(userId);
                 return result;
+        }
+
+        /** A queued order must already be visible to the stats connection.
+         *  Analytics failure must never turn a committed payment into an error. */
+        recordSettlementAfterCommit(orderId: string): void {
+                try {
+                        this.deps.stats?.recordOrderSettlement(orderId);
+                } catch (error) {
+                        console.error(`[order] post-commit product stats failed for ${orderId}:`, error);
+                }
         }
 
         /**
@@ -949,12 +960,6 @@ export class OrderService {
                         )
                         .returning();
                 if (!updated) return { displayId: orderRow.displayId };
-
-                // hundred-eleven (فاز ۱) — فروش واقعی: فقط «شناسه» به بافرِ آمار
-                // سپرده می‌شود (بدون هیچ IO داخل این tx). فلش، وضعیت زنده را
-                // دوباره چک می‌کند؛ گارد بالا هم تکرارِ تسویه را به اینجا
-                // نمی‌رساند ⇒ به‌ازای هر پرداخت موفق دقیقاً یک‌بار.
-                this.deps.stats?.recordOrderSettlement(orderRow.id);
 
                 // سود معرف — درصدش از کانفیگ (REFERRAL_PERCENT؛ پیش‌فرض ۱۰٪) فقط از
                 // پرداخت آنلاینِ غذاها (بدون ارسال و بسته‌بندی)

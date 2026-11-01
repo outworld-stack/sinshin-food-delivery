@@ -50,14 +50,18 @@ try {
   })
   const couponService = new CouponService({ db })
   let trackingHook = async () => false
+  let restaurantStatusHook = async () => ({ anyClosed: false })
+  let statsHook = (_orderId: string): void => undefined
+  const settlementEvents: string[] = []
   const orderService = new OrderService({
     db, config, coupons: couponService,
+    stats: { recordOrderSettlement: (orderId: string) => { statsHook(orderId); settlementEvents.push(orderId) } } as never,
     // ترمیم استیج-۸۶ (میراثِ ۸۴): isBusy/enabledGateways از stage-84 به
     // order.service آمده بود ولی استابِ این تست به‌روز نشده بود (تست از
     // آن موقع در دروازه‌ها اجرا نمی‌شد) — حالا دوباره سبز و بخشِ دروازه.
     settings: {
       liveTrackingEnabled: () => trackingHook(),
-      restaurantStatus: async () => ({ anyClosed: false }),
+      restaurantStatus: () => restaurantStatusHook(),
       isBusy: async () => false,
       enabledGateways: async () => ({ mellat: false, zarinpal: true, sep: false }),
     } as never,
@@ -121,6 +125,7 @@ try {
   assert.equal((await idem.claim(buyer.id, owned.key, checkoutRequestHash(input))).kind, 'replay')
   await assert.rejects(() => orderService.checkout(buyer.id, input, owned))
   assert.equal(await orderService.walletBalance(db, buyer.id), 400_000)
+  assert.deepEqual(settlementEvents, [(await getOrder(paid.displayId)).id])
   passed('committed wallet order survives lost completion and repeated release/checkout without double debit')
   assert.equal((await idem.claim(buyer.id, owned.key, checkoutRequestHash({ ...input, useWallet: false }))).kind, 'mismatch')
   passed('idempotency key rejects a different checkout payload')
@@ -322,6 +327,79 @@ try {
   assert.equal(checked.length, 202)
   assert.equal(checked.filter((ref) => ref === 'cursor-0').length, 2)
   passed('reconciliation reaches paid attempts beyond 100 unresolved rows and wraps to revisit pending attempts')
+
+  // Hold settlement after the status write while another DB connection still
+  // sees the old state. Analytics may only receive the ID after commit.
+  const statsBuyer = await makeUser()
+  await db.insert(walletTransactions).values({ userId: statsBuyer.id, type: 'DEPOSIT', amount: 100_000, description: 'Stats regression funding' })
+  const walletEntered = gate(), walletResume = gate()
+  restaurantStatusHook = async () => { walletEntered.release(); await walletResume.promise; return { anyClosed: false } }
+  const beforeWalletStats = settlementEvents.length
+  const walletCheckout = orderService.checkout(statsBuyer.id, input)
+  await walletEntered.promise
+  try {
+    assert.equal(settlementEvents.length, beforeWalletStats)
+    assert.equal((await db.select().from(orders).where(eq(orders.userId, statsBuyer.id))).length, 0)
+  } finally { walletResume.release() }
+  const walletCommitted = await walletCheckout
+  restaurantStatusHook = async () => ({ anyClosed: false })
+  assert.deepEqual(settlementEvents.slice(beforeWalletStats), [(await getOrder(walletCommitted.displayId)).id])
+  passed('wallet settlement reaches analytics only after its order is committed and visible')
+
+  const rollbackBuyer = await makeUser()
+  await db.insert(walletTransactions).values({ userId: rollbackBuyer.id, type: 'DEPOSIT', amount: 100_000, description: 'Rollback regression funding' })
+  const beforeRollbackStats = settlementEvents.length
+  restaurantStatusHook = async () => { throw new Error('Injected settlement rollback') }
+  try {
+    await assert.rejects(() => orderService.checkout(rollbackBuyer.id, input), /Injected settlement rollback/)
+  } finally { restaurantStatusHook = async () => ({ anyClosed: false }) }
+  assert.equal(settlementEvents.length, beforeRollbackStats)
+  assert.equal((await db.select().from(orders).where(eq(orders.userId, rollbackBuyer.id))).length, 0)
+  assert.equal(await orderService.walletBalance(db, rollbackBuyer.id), 100_000)
+  passed('rolled-back wallet settlement leaves no analytics event or wallet debit')
+
+  const gatewayBuyer = await makeUser()
+  const gatewayCheckout = await orderService.checkout(gatewayBuyer.id, input)
+  await paymentService.initiate(gatewayCheckout.paymentId!, 'ZARINPAL', { displayId: gatewayCheckout.displayId, amount: gatewayCheckout.amountPaidOnline })
+  const gatewayEntered = gate(), gatewayResume = gate()
+  restaurantStatusHook = async () => { gatewayEntered.release(); await gatewayResume.promise; return { anyClosed: false } }
+  verdict = 'success'
+  const beforeGatewayStats = settlementEvents.length
+  const gatewayCallback = () => paymentService.handleCallback('ZARINPAL', { state: signState(gatewayCheckout.paymentId!, config.jwtSecret) })
+  const gatewaySettling = gatewayCallback()
+  await gatewayEntered.promise
+  try {
+    assert.equal(settlementEvents.length, beforeGatewayStats)
+    assert.equal((await getOrder(gatewayCheckout.displayId)).status, 'PENDING_PAYMENT')
+  } finally { gatewayResume.release() }
+  await gatewaySettling
+  restaurantStatusHook = async () => ({ anyClosed: false })
+  await gatewayCallback()
+  assert.deepEqual(settlementEvents.slice(beforeGatewayStats), [(await getOrder(gatewayCheckout.displayId)).id])
+  passed('gateway settlement enqueues after commit exactly once across repeated callbacks')
+
+  const retryBuyer = await makeUser()
+  const retryCheckout = await orderService.checkout(retryBuyer.id, input)
+  await paymentService.initiate(retryCheckout.paymentId!, 'ZARINPAL', { displayId: retryCheckout.displayId, amount: retryCheckout.amountPaidOnline })
+  const retryCallback = () => paymentService.handleCallback('ZARINPAL', { state: signState(retryCheckout.paymentId!, config.jwtSecret) })
+  const beforeRetryStats = settlementEvents.length
+  restaurantStatusHook = async () => { throw new Error('Injected settlement rollback') }
+  try {
+    await assert.rejects(retryCallback, /Injected settlement rollback/)
+  } finally { restaurantStatusHook = async () => ({ anyClosed: false }) }
+  assert.equal(settlementEvents.length, beforeRetryStats)
+  assert.equal((await getOrder(retryCheckout.displayId)).status, 'PENDING_PAYMENT')
+  await retryCallback()
+  assert.deepEqual(settlementEvents.slice(beforeRetryStats), [(await getOrder(retryCheckout.displayId)).id])
+  passed('a rolled-back gateway settlement enqueues nothing until its successful retry commits')
+
+  statsHook = () => { throw new Error('Injected analytics failure') }
+  let analyticsFailure: Awaited<ReturnType<OrderService['checkout']>>
+  try {
+    analyticsFailure = await orderService.checkout(rollbackBuyer.id, input)
+  } finally { statsHook = () => undefined }
+  assert.equal((await getOrder(analyticsFailure.displayId)).status, 'PAID')
+  passed('analytics enqueue failure cannot break an already committed wallet payment')
 
   const totals = await db.select({ count: sql<number>`count(*)::int` }).from(orderItems)
   assert(totals[0]!.count > 0)

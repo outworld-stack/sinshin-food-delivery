@@ -14,7 +14,12 @@ import { apiBase } from '#/lib/api'
 /** POST بیکنِ بدون-انتظار — keepalive تا با ترکِ زودهنگامِ صفحه هم برود */
 const beacon = (path: string): void => {
 	if (typeof window === 'undefined') return // SSR هیچ نمی‌فرستد
-	void fetch(`${apiBase()}${path}`, { method: 'POST', keepalive: true }).catch(() => {
+	void fetch(`${apiBase()}${path}`, {
+		method: 'POST',
+		keepalive: true,
+		// VITE_API_URL may use another origin; deduplication needs its cookie.
+		credentials: 'include',
+	}).catch(() => {
 		/* آمار هرگز UX را نمی‌گیرد */
 	})
 }
