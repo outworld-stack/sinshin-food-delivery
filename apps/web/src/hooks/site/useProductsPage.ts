@@ -308,9 +308,15 @@ export function useProductsPage() {
 		// Short/filtered lists can put a featured slot after an unavailable normal
 		// item. Keep smart availability priority after inserting featured products,
 		// preserving relative order within each availability class.
-		return sortBy === 'smart'
-			? merged.sort((a, b) => availabilityClass(a) - availabilityClass(b))
-			: merged
+		if (sortBy !== 'smart') return merged
+		// A stable linear partition preserves the score/pinning order without
+		// sorting the entire menu a second time.
+		const available: Product[] = []
+		const unavailable: Product[] = []
+		for (const product of merged) {
+			(availabilityClass(product) === 0 ? available : unavailable).push(product)
+		}
+		return available.concat(unavailable)
 	}, [products, tabCategories, activeCategory, sortBy, activeMainSlug])
 
 	const visibleProducts = useMemo(

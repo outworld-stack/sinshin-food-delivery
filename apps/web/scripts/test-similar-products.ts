@@ -43,6 +43,30 @@ assert.equal(
 assert.equal(mine[0]!.method, 'GET', 'similar fetcher is a GET')
 console.log('  ✓ fetcher → GET /api/menu/products/:id/similar')
 
+const PID2 = '22222222-2222-2222-2222-222222222222'
+const { similarProductsOptions } = await import('../src/utils/queryOptions')
+const detailOptions = similarProductsOptions(PID)
+const cartOptions = similarProductsOptions(PID, { context: 'cart', exclude: [PID2, PID, PID2] })
+assert.notDeepEqual(cartOptions.queryKey, detailOptions.queryKey,
+        'cart complements never reuse a product-detail similarity response')
+assert.deepEqual(cartOptions.queryKey,
+        similarProductsOptions(PID, { context: 'cart', exclude: [PID, PID2] }).queryKey,
+        'equivalent baskets share one canonical recommendation query')
+assert.notDeepEqual(cartOptions.queryKey,
+        similarProductsOptions(PID, { context: 'cart', exclude: [PID] }).queryKey,
+        'adding a product changes the recommendation query so the server can refill the list')
+await (cartOptions.queryFn as () => Promise<unknown>)()
+const cartUrl = new URL(calls.at(-1)!.url)
+assert.equal(cartUrl.searchParams.get('context'), 'cart')
+assert.equal(cartUrl.searchParams.get('exclude'), `${PID},${PID2}`,
+        'the API receives the same canonical basket encoded in the cache key')
+const manyIds = Array.from({ length: 60 }, (_, i) =>
+        `11111111-1111-1111-1111-${String(i).padStart(12, '0')}`)
+await getSimilarProducts({ data: { id: PID, context: 'cart', exclude: manyIds } })
+assert.equal(new URL(calls.at(-1)!.url).searchParams.get('exclude')!.split(',').length, 50,
+        'large carts respect the bounded API exclusion list')
+console.log('  ✓ cart context, canonical exclusions and cache isolation reach the API')
+
 // ── سازنده‌ی DTO محصول برای تستِ ادغام ──
 let seq = 0
 const p = (id: string, available = true): Product => ({
@@ -81,7 +105,7 @@ const b: SimilarProductsDto = {
         products: [p('W'), p('X')],
 }
 let merged = mergeSimilarCandidates([a, b], { excludeIds: new Set(), limit: 4 })
-// X = 1/1 + 1/2 = 1.5 │ W = 1 │ Y = 1/2 │ Z = 1/3
+// X = 1/9 + 1/10 │ W = 1/9 │ Y = 1/10 │ Z = 1/11
 assert.deepEqual(
         merged.map((m) => m.id),
         ['X', 'W', 'Y', 'Z'],
@@ -143,7 +167,7 @@ merged = mergeSimilarCandidates([null, undefined, a], {
 assert.equal(merged.length, 3, 'loading/failed anchors are skipped without breaking the merge')
 console.log('  ✓ null/undefined anchor results are skipped')
 
-// ── قطعیت: ورودی یکسان → خروجی یکسان (تساوی با اولین ظهور) ──
+// ── قطعیت: ورودی یکسان → خروجی یکسان (تساوی با شناسهٔ محصول) ──
 const first = mergeSimilarCandidates([a, b], { excludeIds: new Set(), limit: 4 })
 const second = mergeSimilarCandidates([a, b], { excludeIds: new Set(), limit: 4 })
 assert.deepEqual(
@@ -152,6 +176,33 @@ assert.deepEqual(
         'merge is deterministic',
 )
 console.log('  ✓ merge is deterministic')
+
+const consensus: SimilarProductsDto[] = [
+        { strict: false, products: [p('first-only'), p('a-only'), p('b-only'), p('shared')] },
+        { strict: false, products: [p('second-only'), p('c-only'), p('d-only'), p('shared')] },
+]
+assert.equal(mergeSimilarCandidates(consensus, { excludeIds: new Set(), limit: 4 })[0]!.id,
+        'shared', 'agreement between cart anchors beats an isolated first-place suggestion')
+const tied: SimilarProductsDto[] = [
+        { strict: false, products: [p('Z')] },
+        { strict: false, products: [p('A')] },
+]
+assert.deepEqual(mergeSimilarCandidates(tied, { excludeIds: new Set(), limit: 4 }).map((x) => x.id), ['A', 'Z'])
+assert.deepEqual(mergeSimilarCandidates([...tied].reverse(), { excludeIds: new Set(), limit: 4 }).map((x) => x.id), ['A', 'Z'],
+        'tie order does not depend on which cart anchor was added first')
+const filteredRanks: SimilarProductsDto[] = [
+        { strict: false, products: [p('cart'), p('sold-out', false), { ...p('hidden'), status: 'INACTIVE' }, p('A')] },
+        { strict: false, products: [p('Z'), p('Z'), p('Z')] },
+]
+const ranksSnapshot = JSON.stringify(filteredRanks)
+assert.deepEqual(mergeSimilarCandidates(filteredRanks, { excludeIds: new Set(['cart']), limit: 4 }).map((x) => x.id), ['A', 'Z'],
+        'filtering leaves comparable ranks and duplicate rows cannot manufacture consensus')
+assert.equal(JSON.stringify(filteredRanks), ranksSnapshot, 'fusion never mutates cached responses')
+for (const limit of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        assert.deepEqual(mergeSimilarCandidates([a], { excludeIds: new Set(), limit }), [],
+                'invalid or zero limits never expose an unintended recommendation list')
+}
+console.log('  ✓ consensus, stable ties, eligible ranks and distinct anchor votes')
 
 // React Query retains old data after a refetch fails. Optional recommendations
 // must hide that anchor while other successful cart anchors remain usable.
@@ -166,6 +217,7 @@ type Result = { data?: SimilarProductsDto | null; isError?: boolean }
 let detailResult: Result = {}
 let cartResults: Result[] = []
 let requestedAnchors: string[] = []
+let requestedOptions: Array<{ context?: string; exclude?: string[] }> = []
 let cartItems: Array<{ productId: string }> = []
 let refetches = 0
 const invalidated: Array<readonly unknown[]> = []
@@ -177,13 +229,14 @@ mock.module('@tanstack/react-query', () => ({
         useQueryClient: () => ({ invalidateQueries: async ({ queryKey }: { queryKey: readonly unknown[] }) => {
                 invalidated.push(queryKey)
         } }),
-        useQueries: ({ queries }: { queries: Array<{ id: string }> }) => {
+        useQueries: ({ queries }: { queries: Array<{ id: string; options: { context?: string; exclude?: string[] } }> }) => {
                 requestedAnchors = queries.map((query) => query.id)
+                requestedOptions = queries.map((query) => query.options)
                 return cartResults
         },
 }))
 mock.module('#/utils/queryOptions', () => ({
-        similarProductsOptions: (id: string) => ({ id }),
+        similarProductsOptions: (id: string, options = {}) => ({ id, options }),
         cartDetailsOptions: () => ({ kind: 'cart' }),
 }))
 mock.module('#/stores/cartStore', () => ({
@@ -248,6 +301,9 @@ try {
         ]
         assert.deepEqual(cardIds(renderCart()), ['fresh'], 'cart ignores failed anchors, all cart items and products that cannot be purchased')
         assert.deepEqual(requestedAnchors, ['anchor', 'second', 'third'], 'cart queries at most three distinct products')
+        assert(requestedOptions.every((options) => options.context === 'cart'), 'every cart anchor requests purchase complements')
+        assert(requestedOptions.every((options) => JSON.stringify(options.exclude) === JSON.stringify(['anchor', 'second', 'third', 'fourth'])),
+                'the API excludes all cart products, including products beyond the anchor cap')
         cartResults = [{ data: { strict: false, products: [p('stale')] }, isError: true }]
         assert.equal(renderCart(), null, 'cart recommendation block disappears when no successful anchor supplies products')
         cartItems = []

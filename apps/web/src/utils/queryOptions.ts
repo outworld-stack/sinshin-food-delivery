@@ -26,6 +26,7 @@ import type {
 // مزیت: loader سرور و useQuery کلاینت از همین تعریف استفاده می‌کنن؛
 // staleTime/کلید/queryFn هیچ‌وقت از هم دیگه جدا نمی‌شن
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
+import type { SimilarProductsOptions } from '#/lib/similar-products'
 import { getAboutContent, getAdminAboutContent } from '#/server/about'
 import {
         getAdmin2Options,
@@ -151,10 +152,10 @@ export const productByIdOptions = (productId: ProductId | string) =>
 // hundred-twelve (فاز ۲) — مشابه‌های رفتاری محصول (توصیه‌گر). سرور کش
 // نسخه‌دار ۳۰ثانیه‌ای + ETag دارد؛ staleTime هم‌قدمِ آن (نه بلندتر —
 // تغییر موجودیِ ادمین باید زود برسد؛ نه کوتاه‌تر — بی‌دلیل می‌کوبد).
-export const similarProductsOptions = (productId: ProductId | string) =>
+export const similarProductsOptions = (productId: ProductId | string, options: SimilarProductsOptions = {}) =>
         queryOptions({
-                queryKey: qk.similarProducts(productId),
-                queryFn: () => getSimilarProducts({ data: { id: productId } }),
+                queryKey: qk.similarProducts(productId, options),
+                queryFn: () => getSimilarProducts({ data: { id: productId, ...options } }),
                 staleTime: 30_000,
         })
 

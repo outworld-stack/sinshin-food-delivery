@@ -57,7 +57,8 @@
     "db:test:featured-animation": "bun scripts/test-featured-animation.ts",
     "db:test:product-stats": "bun scripts/test-product-stats-routes.ts && bun scripts/test-product-stats.ts",
     "db:test:similarity": "bun scripts/test-product-similarity.ts",
-    "db:test:ranking": "bun scripts/test-product-ranking.ts"
+    "db:test:ranking": "bun scripts/test-product-ranking.ts",
+    "db:test:recommendations": "bun scripts/test-product-recommendations.ts"
   },
   "dependencies": {
     "@elysia/html": "^1.4.1",

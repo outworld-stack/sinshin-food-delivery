@@ -16,6 +16,7 @@
 // قانون طلایی: هیچ رشته‌ی خام queryKey خارج از این فایل نوشته نشه؛
 // نامعتبرسازی همیشه از همین‌جا تا حوزه‌ی دقیق باشه
 import type { CartItemInput } from '@sinshin/shared'
+import { similarProductExclusions, type SimilarProductsOptions } from '#/lib/similar-products'
 
 export const qk = {
         // --- کاربر ---
@@ -57,8 +58,12 @@ export const qk = {
         productByIdAll: ['product-by-id'] as const,
         // hundred-twelve (فاز ۲) — مشابه‌های رفتاری محصول (توصیه‌گر)؛
         // کشِ سرور ۳۰ثانیه‌ای + ETag دارد، کلاینت هم staleTime کوتاه
-        similarProducts: (productId: string) =>
-                ['similar-products', productId] as const,
+        similarProducts: (productId: string, options: SimilarProductsOptions = {}) => {
+                const exclude = similarProductExclusions(options.exclude)
+                return options.context === 'cart' || exclude.length
+                        ? ['similar-products', productId, options.context ?? 'detail', exclude] as const
+                        : ['similar-products', productId] as const
+        },
         similarProductsAll: ['similar-products'] as const,
 
         // --- مقالات ---

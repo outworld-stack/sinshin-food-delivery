@@ -1,5 +1,7 @@
 # سند ۱ — الگوریتم شباهت به‌تفصیل: از سیگنال خام تا بلوک سبد
 
+> Historical design for stages 113–114. The current contextual scores, evidence weighting, and bounded queries are documented in [Product algorithm refinement](117-product-algorithm.md).
+
 > همه‌ی ثابت‌ها با نام در `similarity.service.ts` تعریف شده‌اند — این سند «چرا»شان را توضیح می‌دهد.
 
 ## ۱. دو سیگنال رفتاری — هر دو «واقعی» (میراث فاز ۱)

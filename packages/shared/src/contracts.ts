@@ -280,9 +280,11 @@ export interface MainData {
  * پاسخ GET /menu/products/:id/similar — توصیه‌ی رفتاری (فاز ۲).
  * products: مشابه‌های محصول به‌ترتیب امتیاز (هم‌بازدید + هم‌خرید؛
  * شبانه از product_similarity). strict = «حالت سختگیرانه» (تصمیمِ
- * سرور): لنگر ناموجود است ⇒ فقط مشابه‌های «موجود» برگشته‌اند —
+ * سرور): لنگر ناموجود یا خریدش قفل است ⇒ فقط مشابه‌های قابل خرید برگشته‌اند —
  * فرانت با همین پرچم عنوان بلوک را به «جایگزین‌های موجود» می‌برد.
  * null (نه خالی) = خودِ محصول وجود ندارد/غیرفعال است.
+ * context=cart uses only co-purchase evidence and excludes the current basket
+ * before limiting; strict is always true for this context.
  */
 export interface SimilarProductsDto {
   products: Product[]

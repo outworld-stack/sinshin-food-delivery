@@ -169,6 +169,13 @@
       "when": 1793548721055,
       "tag": "0023_chubby_tenebrous",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793580234003,
+      "tag": "0024_early_enchantress",
+      "breakpoints": true
     }
   ]
 }

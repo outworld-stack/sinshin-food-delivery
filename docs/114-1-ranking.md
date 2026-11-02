@@ -1,5 +1,7 @@
 # سند ۱ — الگوریتم رتبه‌بندی «منتخب» به‌تفصیل: تامپسونِ بایزی روی آمار بازدید/سبد و فروش واقعی
 
+> Historical design for stages 115–116. The current signal, continuous priors, and validation are documented in [Product algorithm refinement](117-product-algorithm.md).
+
 > همه‌ی ثابت‌ها با نام در `ranking.service.ts` تعریف شده‌اند — این سند «چرا»شان را توضیح می‌دهد.
 > قراردادهای تکرارشونده از فاز ۱/۲ عیناً برقرارند: بدون FK، بازمحاسبه‌ی اتمیک شبانه، فیلترِ مرده‌ها قبل از رتبه‌بندی، تای‌بریکِ قطعی، double precision در همه‌ی جمع‌ها.
 

@@ -48,7 +48,7 @@
 // ═══════════════════════════════════════════════════════════
 
 //src/domain/menu/menu.service.ts
-import { and, asc, desc, eq, ilike, inArray, ne, or, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, ilike, inArray, ne, notInArray, or, sql, type SQL } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { RedisService } from '#/infra/redis/redis'
@@ -90,6 +90,12 @@ const VERSION_KEY = 'menu:ver'
  *  اسکیمای دیتابیس می‌آیند و nameAr سایز هم حالا در تایپ دیده می‌شود —
  *  قبلاً کپی محلی فیلد nameAr سایز را نداشت و پاسخ ادمین بی‌تایپ بود). */
 export type ProductDto = Product
+
+export const SIMILAR_EXCLUDE_LIMIT = 50
+export interface SimilarProductsOptions {
+  context?: 'detail' | 'cart'
+  exclude?: readonly string[]
+}
 
 /**
  * stage-47 — منطق مشترک تخفیف زمان‌دار (محصول + سایز):
@@ -684,7 +690,9 @@ export class MenuService {
    * سایه دعوت کند. لنگرِ موجود ⇒ ترتیب امتیاز؛ کارتِ ناموجود خودش با
    * لایه‌ی خاکستری ProductCard می‌ایستد (همان زبان بصری سایت).
    *
-   * کش: همان کشِ نسخه‌دار منو (sim:{lang}:{id}:{limit}) — باطل‌شدنِ خودکار با
+   * Cart requests use co-purchase scores and always filter buyability and the
+   * current basket before LIMIT. Detail requests retain the mixed signal.
+   * کش: همان کشِ نسخه‌دار منو — باطل‌شدنِ خودکار با
    * هر write ادمین (INCR menu:ver) + باطل‌شدنِ جاب شبانه. null (= لنگرِ
    * ناموجود/حذف‌شده) کش نمی‌شود — مثل productById.
    */
@@ -692,25 +700,52 @@ export class MenuService {
     id: string,
     lang: Lang = 'fa',
     limit: number = MenuService.SIMILAR_LIMIT,
+    options: SimilarProductsOptions = {},
   ): Promise<SimilarProductsDto | null> {
     const pid = UUID_RE.test(id) ? asProductId(id) : null
     const count = Number.isFinite(limit)
       ? Math.min(MenuService.SIMILAR_LIMIT, Math.max(0, Math.floor(limit)))
       : MenuService.SIMILAR_LIMIT
+    const context = options.context ?? 'detail'
+    const exclude = [...new Set(options.exclude ?? [])].sort()
+    if ((context !== 'detail' && context !== 'cart') ||
+      (options.exclude?.length ?? 0) > SIMILAR_EXCLUDE_LIMIT ||
+      exclude.some((productId) => !UUID_RE.test(productId))) {
+      throw Err.validation()
+    }
 
     const load = async (): Promise<SimilarProductsDto | null> => {
-      const anchor = await this.deps.db.query.products.findFirst({
-        where: pid ? eq(products.id, pid) : eq(products.slug, id),
-      })
-      if (!anchor || anchor.status !== 'ACTIVE') return null
+      const [anchorRow] = await this.deps.db
+        .select({
+          product: products,
+          categoryPurchase: categories.purchaseEnabled,
+          mainPurchase: mainCategories.purchaseEnabled,
+        })
+        .from(products)
+        .innerJoin(categories, eq(categories.id, products.categoryId))
+        .innerJoin(mainCategories, eq(mainCategories.id, categories.mainCategoryId))
+        .where(and(
+          pid ? eq(products.id, pid) : eq(products.slug, id),
+          eq(products.status, 'ACTIVE'),
+        ))
+        .limit(1)
+      if (!anchorRow) return null
+      const anchor = anchorRow.product
 
-      const strict = anchor.isAvailable !== true
+      const strict = context === 'cart' || anchor.isAvailable !== true ||
+        !anchorRow.categoryPurchase || !anchorRow.mainPurchase
       if (count === 0) return { products: [], strict }
+      const score = context === 'cart' ? productSimilarity.purchaseScore : productSimilarity.score
 
       // Filter before limiting: stale rows and purchase-locked alternatives must
       // not displace live recommendations. Keep equal-score results deterministic.
       const simRows = await this.deps.db
-        .select({ product: products })
+        .select({
+          product: products,
+          category: categories,
+          mainPurchase: mainCategories.purchaseEnabled,
+          mainName: mainCategories.name,
+        })
         .from(productSimilarity)
         .innerJoin(products, eq(products.id, productSimilarity.similarId))
         .innerJoin(categories, eq(categories.id, products.categoryId))
@@ -718,23 +753,30 @@ export class MenuService {
         .where(and(
           eq(productSimilarity.productId, anchor.id),
           eq(products.status, 'ACTIVE'),
+          ne(products.id, anchor.id),
+          gt(score, 0),
+          exclude.length > 0 ? notInArray(products.id, exclude as ProductId[]) : undefined,
           strict ? and(
             eq(products.isAvailable, true),
             eq(categories.purchaseEnabled, true),
             eq(mainCategories.purchaseEnabled, true),
           ) : undefined,
         ))
-        .orderBy(desc(productSimilarity.score), asc(productSimilarity.similarId))
+        .orderBy(desc(score), asc(productSimilarity.similarId))
         .limit(count)
       const picked = simRows.map((r) => r.product)
       if (picked.length === 0) return { products: [], strict }
 
       // DTO — همان ماشینِ productById (نام دسته، حالت‌های مؤثر، خرید زنجیره)
-      const catIds = [...new Set(picked.map((r) => r.categoryId))]
-      const catRows = await this.deps.db
-        .select()
-        .from(categories)
-        .where(inArray(categories.id, catIds))
+      // Reuse the category joins used for eligibility; no extra category or
+      // purchase-state queries, and the DTO reflects the same eligibility snapshot.
+      const catRows = [...new Map(simRows.map((r) => [r.category.id, r.category])).values()]
+      const catPurchase = new Map<CategoryId, CategoryPurchaseState>(simRows.map((r) => [r.category.id, {
+        categoryPurchase: r.category.purchaseEnabled,
+        mainPurchase: r.mainPurchase,
+        categoryName: r.category.name,
+        mainName: r.mainName,
+      }]))
       const links = await this.deps.db
         .select()
         .from(productCategories)
@@ -751,12 +793,12 @@ export class MenuService {
       const list = await this.withSizes(picked, new Map(catRows.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)])), lang, {
         catModes: new Map(catRows.map((c) => [c.id, categoryModesOf(c)] as const)),
         categoryIdsMap,
-        catPurchase: await loadCategoryPurchaseStates(this.deps.db, catIds),
+        catPurchase,
       })
       return { products: list, strict }
     }
 
-    return this.cache.cachedNullable(`sim:${lang}:${id}:${count}`, load)
+    return this.cache.cachedNullable(`sim:v2:${lang}:${id}:${context}:${count}:${exclude.join(',')}`, load)
   }
 
   async allCategories(lang: Lang = 'fa') {

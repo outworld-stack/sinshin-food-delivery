@@ -29,7 +29,11 @@ const { qk } = await import('../src/utils/queryKeys')
 const { invalidateProductQueries, invalidateCategoryQueries, invalidatePackagingQueries } =
 	await import('../src/utils/productCache')
 
-const activeKeys = [qk.similarProducts('11111111-1111-1111-1111-111111111111'), qk.similarProducts('pizza')]
+const activeKeys = [
+	qk.similarProducts('11111111-1111-1111-1111-111111111111'),
+	qk.similarProducts('pizza'),
+	qk.similarProducts('cart-anchor', { context: 'cart', exclude: ['11111111-1111-1111-1111-111111111111'] }),
+]
 const inactiveKey = qk.similarProducts('another-product')
 const unrelatedKey = ['unrelated'] as const
 const calls = new Map<string, number>()

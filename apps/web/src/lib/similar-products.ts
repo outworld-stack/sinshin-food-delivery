@@ -1,54 +1,61 @@
-// ═══════════════════════════════════════════════════════════════
-// hundred-twelve (فاز ۲ — محصولات مشابه) — sinshin-food-delivery
-// مسیر مقصد: apps/web/src/lib/similar-products.ts
-//
-// ادغامِ لیست‌های «مشابه» برای بلوک سبد — خالص و بدون React تا
-// مستقیم تست شود. ورودی: پاسخ‌های /menu/products/:id/similar برای
-// تا ۳ لنگرِ سبد؛ خروجی: حداکثر `limit` کاندیدِ «موجود» که خودِ
-// سبد ندارد.
-//
-// امتیاز = Reciprocal Rank Fusion: رتبه‌ی k در هر لیست سهم ۱/(k+۱)
-// می‌دهد و سهم‌ها جمع می‌شوند — روش استانداردِ ادغامِ رتبه‌بندی‌ها:
-// بدون نرمال‌سازیِ امتیازهای ناهم‌مقیاسِ سرور، قطعی (deterministic)
-// و ساده. تساوی: اولین ظهور (شماره‌ی لیست، بعد رتبه) جلوتر می‌افتد.
-// ═══════════════════════════════════════════════════════════════
-
-// src/lib/similar-products.ts
 import type { Product, SimilarProductsDto } from '@sinshin/shared'
 
-/** ورودی‌های undefined/null (لودینگ/خطا/لنگرِ مرده) نادیده گرفته می‌شوند */
+export interface SimilarProductsOptions {
+	context?: 'detail' | 'cart'
+	exclude?: readonly string[]
+}
+
+/** Match the API bound and canonicalize both request URLs and query keys. */
+export function similarProductExclusions(ids: readonly string[] = []): string[] {
+	return [...new Set(ids)].sort().slice(0, 50)
+}
+
+// Each anchor returns up to eight candidates. This offset prevents a single
+// first-place result from overwhelming agreement between independent anchors.
+const RRF_OFFSET = 8
+
+/** Fuse eligible cart complements; loading/failed anchors contribute no votes. */
 export function mergeSimilarCandidates(
-        results: ReadonlyArray<SimilarProductsDto | null | undefined>,
-        opts: { excludeIds: ReadonlySet<string>; limit: number },
+	results: ReadonlyArray<SimilarProductsDto | null | undefined>,
+	opts: { excludeIds: ReadonlySet<string>; limit: number },
 ): Product[] {
-        // id → { product, rrf, order } — order = اولین ظهور برای تساوی‌شکنی
-        const best = new Map<
-                string,
-                { product: Product; rrf: number; order: number }
-        >()
-        let order = 0
-        for (const res of results) {
-                if (!res) continue
-                for (const [rank, p] of res.products.entries()) {
-                        // سبدِ فعلی و خودِ لنگرها هرگز توصیه نمی‌شوند
-                        if (opts.excludeIds.has(p.id)) continue
-                        // بلوک سبد فقط «موجود» می‌دهد — افزودنِ ناموجود به
-                        // سبد ممکن نیست و کارتِ خاکستری اینجا فقط نویز است
-                        if (p.isAvailable === false || p.purchasable === false) continue
-                        const entry = best.get(p.id)
-                        if (entry) {
-                                entry.rrf += 1 / (rank + 1)
-                        } else {
-                                best.set(p.id, {
-                                        product: p,
-                                        rrf: 1 / (rank + 1),
-                                        order: order++,
-                                })
-                        }
-                }
-        }
-        return [...best.values()]
-                .sort((a, b) => b.rrf - a.rrf || a.order - b.order)
-                .slice(0, opts.limit)
-                .map((e) => e.product)
+	const limit = Number.isFinite(opts.limit) ? Math.max(0, Math.floor(opts.limit)) : 0
+	if (limit === 0) return []
+	const candidates = new Map<string, { product: Product; ranks: number[] }>()
+	for (const result of results) {
+		if (!result) continue
+		const seen = new Set<string>()
+		let rank = 0
+		for (const product of result.products) {
+			if (seen.has(product.id)) continue
+			seen.add(product.id)
+			if (
+				opts.excludeIds.has(product.id) ||
+				product.status !== 'ACTIVE' ||
+				product.isAvailable === false ||
+				product.purchasable === false
+			) continue
+			// Rank after filtering: cart contents and unavailable products do not
+			// penalize the remaining useful candidates from this anchor.
+			rank++
+			const entry = candidates.get(product.id)
+			if (entry) entry.ranks.push(rank)
+			else candidates.set(product.id, { product, ranks: [rank] })
+		}
+	}
+	return [...candidates.values()]
+		.map(({ product, ranks }) => ({
+			product,
+			// Canonical addition order also avoids floating-point tie drift when
+			// the same anchors are supplied in a different order.
+			score: ranks
+				.sort((a, b) => a - b)
+				.reduce((sum, rank) => sum + 1 / (RRF_OFFSET + rank), 0),
+		}))
+		.sort((a, b) =>
+			b.score - a.score ||
+			(a.product.id < b.product.id ? -1 : a.product.id > b.product.id ? 1 : 0),
+		)
+		.slice(0, limit)
+		.map(({ product }) => product)
 }

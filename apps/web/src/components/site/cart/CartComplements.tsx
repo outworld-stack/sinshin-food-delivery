@@ -3,7 +3,7 @@
 // مسیر مقصد: apps/web/src/components/site/cart/CartComplements.tsx
 //
 // بلوک «مکمل خرید شما» در صفحه‌ی سبد — از مشابه‌های «تا ۳ لنگرِ»
-// سبد (useQueries روی همان فکتوریِ صفحه‌ی محصول؛ کش سرور مشترک)
+// سبد (useQueries با زمینه‌ی cart و کش مستقل از صفحه‌ی محصول)
 // و ادغام RRF در lib/similar-products (خالص و تست‌شده).
 //
 // قواعد قفل‌شده: فقط محصولِ «موجود» که خودِ سبد ندارد؛ لنگرِ بیشتر
@@ -39,19 +39,21 @@ export const CartComplements = memo(function CartComplements() {
 		[items],
 	)
 
-	// همان فکتوری صفحه‌ی محصول — کش سرور/کلاینت مشترک بین دو بلوک
+	// Cart queries use co-purchases and exclude the entire basket before the
+	// server's limit; their cache is distinct from product-detail similarity.
+	const exclude = useMemo(() => [...new Set(items.map((i) => i.productId))], [items])
 	const results = useQueries({
-		queries: anchors.map((id) => similarProductsOptions(id)),
+		queries: anchors.map((id) => similarProductsOptions(id, { context: 'cart', exclude })),
 	})
 
 	const products = useMemo(() => {
 		// حذفِ خودِ اقلام سبد از کاندیدها + فقطِ موجودها (در ادغام)
-		const excludeIds = new Set(items.map((i) => i.productId))
+		const excludeIds = new Set(exclude)
 		return mergeSimilarCandidates(
 			results.map((r) => r.isError ? null : (r.data ?? null)),
 			{ excludeIds, limit: CART_BLOCK_LIMIT },
 		)
-	}, [results, items])
+	}, [results, exclude])
 
 	if (products.length === 0) return null
 

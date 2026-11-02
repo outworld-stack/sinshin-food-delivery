@@ -6,7 +6,9 @@ import { Elysia } from 'elysia'
 
 import {
         CART_ADD_WEIGHT,
+        CATEGORY_PRIOR_STRENGTH,
         EMA_HALF_LIFE_DAYS,
+        PRIOR_FALLBACK_RATE,
         PRIOR_STRENGTH,
         ProductRankingService,
 } from '../src/domain/product-ranking/ranking.service'
@@ -177,13 +179,13 @@ try {
                         .returning()
                         .then((rs) => rs[0]!)
 
-        // cat1 — نرخِ تبدیلِ روشن (شاهدِ ≥ ۳۰۰ بازدیدِ وزن‌دار)
-        const p1 = await mk(cat1.id, 'پیتزا') // v=1000, r=100
+        // Main 1 has more evidence; main 2 blends more strongly toward global.
+        const p1 = await mk(cat1.id, 'پیتزا') // v=1000, r=1 buyer
         const p2 = await mk(cat1.id, 'سرد') // بدون هیچ آمار (سردِ مطلق)
         const p5 = await mk(cat1.id, 'ای‌ام‌ا') // دو روز: ۱۰ + ۱۰×۰.۵ = ۱۵
-        const p6 = await mk(cat1.id, 'ناموجود', { isAvailable: false }) // v=50, r=25 — موجودی تصمیمِ لحظه‌ی نمایش است
-        const p7 = await mk(cat1.id, 'غیرفعال', { status: 'INACTIVE' }) // v=500, r=500 — فیلترِ مرده‌ها قبل از رتبه
-        // cat2 — زیر سقفِ شاهد ⇒ پیشینِ سراسری
+        const p6 = await mk(cat1.id, 'ناموجود', { isAvailable: false }) // v=50, r=1; availability is a read-time gate
+        const p7 = await mk(cat1.id, 'غیرفعال', { status: 'INACTIVE' }) // Excluded before ranking
+        // Main 2: sparse evidence still contributes to the smoothed prior.
         const p3 = await mk(cat2.id, 'لاته') // v=100, r=1
         const p4 = await mk(cat2.id, 'سبدسنگین') // v=100, c=30 ⇒ r=9
 
@@ -217,15 +219,24 @@ try {
         )
 
         // ── محاسبه‌ی مرحله‌ی A — اعدادِ روی کاغذ ──
-        // cat1 (فقط ACTIVEها): v=1000+15+50=1065، r=100+25=125 ⇒ نرخ=125/1065
-        // cat2: v=200، r=10 — زیر ۳۰۰ ⇒ پیشینِ سراسری
-        // سراسری: v=1265، r=135 ⇒ نرخ=135/1265
-        const catRate = 125 / 1065
-        const globalRate = 135 / 1265
+        // Main 1: n=1065, r=2. Main 2: n=200, r=10. Global: n=1265, r=12.
+        // Sales count independent buyers, not units. Priors exclude the target
+        // from both levels and blend continuously toward the global baseline.
+        const expectedPrior = (v: number, r: number, mainV: number, mainR: number) => {
+                const global = Math.max(0.005, Math.min(0.5,
+                        (12 - r + PRIOR_STRENGTH * PRIOR_FALLBACK_RATE) / (1265 - v + PRIOR_STRENGTH)))
+                return Math.max(0.005, Math.min(0.5,
+                        (mainR - r + CATEGORY_PRIOR_STRENGTH * global) /
+                        (mainV - v + CATEGORY_PRIOR_STRENGTH)))
+        }
+        const catRate = expectedPrior(0, 0, 1065, 2)
+        const pizzaPrior = expectedPrior(1000, 1, 1065, 2)
+        const coffeePrior = expectedPrior(100, 1, 200, 10)
+        const cartPrior = expectedPrior(100, 9, 200, 10)
+        const emaPrior = expectedPrior(15, 0, 1065, 2)
+        const unavailablePrior = expectedPrior(50, 1, 1065, 2)
         const a0c = PRIOR_STRENGTH * catRate
         const b0c = PRIOR_STRENGTH * (1 - catRate)
-        const a0g = PRIOR_STRENGTH * globalRate
-        const b0g = PRIOR_STRENGTH * (1 - globalRate)
 
         const resultA = await ranking.recompute({ day })
         const rowsA = await db.select().from(productRanking)
@@ -240,38 +251,39 @@ try {
         )
         check(
                 resultA.categories.find((c) => c.mainId === main1.id)?.fallback === false &&
-                        resultA.categories.find((c) => c.mainId === main2.id)?.fallback === true,
-                'two-level prior: big category keeps its own rate, small one falls back to global',
+                        resultA.categories.find((c) => c.mainId === main2.id)?.fallback === false,
+                'both populated categories contribute continuously to their priors',
         )
 
         // پارامترهای پسینی — فرمول روی کاغذ در برابر ستون‌های alpha/beta
         check(
-                Math.abs(rowOf(p1.id)!.alpha - (a0c + 100)) < T,
-                `pizza alpha = prior(${a0c.toFixed(4)}) + 100 sales`,
+                Math.abs(rowOf(p1.id)!.alpha - (PRIOR_STRENGTH * pizzaPrior + 1)) < T,
+                '100 units from one buyer provide one success with a leave-one-out prior',
         )
         check(
-                Math.abs(rowOf(p1.id)!.beta - (b0c + 900)) < T,
-                'pizza beta = prior + (1000−100) non-converted views',
+                Math.abs(rowOf(p1.id)!.beta - (PRIOR_STRENGTH * (1 - pizzaPrior) + 999)) < T,
+                'pizza failures reflect 1000 opportunities and one buyer',
         )
         check(
                 Math.abs(rowOf(p2.id)!.alpha - a0c) < T && Math.abs(rowOf(p2.id)!.beta - b0c) < T,
                 'cold-start product gets the finite category prior (alpha/beta = 25 pseudo-views)',
         )
         check(
-                Math.abs(rowOf(p3.id)!.alpha - (a0g + 1)) < T && Math.abs(rowOf(p3.id)!.beta - (b0g + 99)) < T,
-                'small-category product uses the global prior',
+                Math.abs(rowOf(p3.id)!.alpha - (PRIOR_STRENGTH * coffeePrior + 1)) < T &&
+                        Math.abs(rowOf(p3.id)!.beta - (PRIOR_STRENGTH * (1 - coffeePrior) + 99)) < T,
+                'small-category product blends category peers and smoothed global peers',
         )
         check(
-                Math.abs(rowOf(p4.id)!.alpha - (a0g + CART_ADD_WEIGHT * 30)) < T,
+                Math.abs(rowOf(p4.id)!.alpha - (PRIOR_STRENGTH * cartPrior + CART_ADD_WEIGHT * 30)) < T,
                 `r = S + ${CART_ADD_WEIGHT}·C (30 cart adds ⇒ +9 successes)`,
         )
         check(
-                Math.abs(rowOf(p5.id)!.beta - (b0c + 15)) < T,
+                Math.abs(rowOf(p5.id)!.beta - (PRIOR_STRENGTH * (1 - emaPrior) + 15)) < T,
                 'EMA half-life: 10 views today + 10 views 10 days ago ⇒ 15 weighted views',
         )
         check(
-                Math.abs(rowOf(p6.id)!.alpha - (a0c + 25)) < T,
-                'sales below views retain their full weight (25 sales, 50 views)',
+                Math.abs(rowOf(p6.id)!.alpha - (PRIOR_STRENGTH * unavailablePrior + 1)) < T,
+                '25 units from one buyer do not masquerade as 25 conversions',
         )
         check(rowsA.every((r) => r.score >= 0 && r.score <= 1), 'every Thompson sample stays within 0..1')
         check(rowsA.every((r) => dayOf(r.computedDay) === day), 'computed_day records the reference day')
@@ -329,8 +341,8 @@ try {
                         overflowRow.score >= 0 &&
                         overflowRow.score <= 1 &&
                         Number.isFinite(overflowRow.alpha) &&
-                        overflowRow.alpha > 1e8,
-                'a billion-view product recomputes without overflow (double precision all the way)',
+                        overflowRow.beta > 1e8 && overflowRow.alpha < PRIOR_STRENGTH + 2,
+                'a billion views stay finite and a billion units still count as one buyer',
         )
         check(
                 resultB.products === 7 &&
@@ -405,7 +417,6 @@ try {
 
         // Exercise real order state, not just manually seeded daily sale counters.
         await db.update(products).set({ status: 'INACTIVE' })
-        const cold = await mk(cat1.id, 'Signal prior reference')
         const historical = await mk(cat1.id, 'Historical and refunded sales')
         await db.insert(productDailyStats).values(stat(historical.id, day, 100, 0, 777))
         const walletOrder = await sale(historical.id, 3)
@@ -418,17 +429,20 @@ try {
                 orderId: walletOrder.id, productId: null, name: 'Legacy snapshot', unitPrice: 100_000, quantity: 999,
         })
         const signal = async (productId: string) => {
+                // Isolate the signal: with no peers, prior is exactly the fixed
+                // fallback. Other fixtures must not change its evidence counts.
+                await db.update(products).set({ status: 'INACTIVE' })
+                await db.update(products).set({ status: 'ACTIVE' }).where(eq(products.id, productId as ProductId))
                 await ranking.recompute({ day })
                 const rows = await db.select().from(productRanking)
                 const row = rows.find((r) => r.productId === productId)!
-                const prior = rows.find((r) => r.productId === cold.id)!
-                return { r: row.alpha - prior.alpha, v: row.alpha + row.beta - PRIOR_STRENGTH }
+                return { r: row.alpha - PRIOR_STRENGTH * PRIOR_FALLBACK_RATE, v: row.alpha + row.beta - PRIOR_STRENGTH }
         }
-        check(Math.abs((await signal(historical.id)).r - 5) < T,
-                'wallet and legacy paid orders backfill sales without a buffer; stale daily counters and unpaid orders are ignored')
+        check(Math.abs((await signal(historical.id)).r - 1) < T,
+                'wallet and legacy orders from one buyer/day count once; stale counters and unpaid orders are ignored')
         await db.update(orders).set({ status: 'CANCELED', paymentStatus: 'REFUNDED' }).where(eq(orders.id, walletOrder.id))
-        check(Math.abs((await signal(historical.id)).r - 2) < T,
-                'refunded units disappear on recompute even though the additive daily counter remains')
+        check(Math.abs((await signal(historical.id)).r - 1) < T,
+                'refunding one of two orders preserves the remaining purchase evidence')
         await db.update(orders).set({ status: 'CANCELED' }).where(eq(orders.id, legacyOrder.id))
         check(Math.abs((await signal(historical.id)).r) < T,
                 'canceled orders are excluded even if their payment status is still SUCCESS')
@@ -447,20 +461,55 @@ try {
         await payment(gatewayOrder.id, '2025-04-01T10:00:00.000Z', 'FAILED')
         const futureOrder = await sale(dated.id, 100, day, { paymentMethod: 'GATEWAY' })
         await payment(futureOrder.id, '2025-06-15T20:30:00.000Z')
-        check(Math.abs((await signal(dated.id)).r - 4) < T,
+        check(Math.abs((await signal(dated.id)).r - 0.5) < T,
                 'gateway sales use the first successful Tehran settlement day, count duplicate attempts once, and exclude future settlements')
 
         const clipped = await mk(cat1.id, 'Clipped conversions')
         await db.insert(productDailyStats).values(stat(clipped.id, day, 2, 10))
         await sale(clipped.id, 3)
         const clippedSignal = await signal(clipped.id)
-        check(Math.abs(clippedSignal.r - 2) < T && Math.abs(clippedSignal.v - 2) < T,
-                'sales plus weighted cart additions above views are actually clipped to views')
+        check(Math.abs(clippedSignal.r - (1 + CART_ADD_WEIGHT * 9)) < T && Math.abs(clippedSignal.v - 10) < T,
+                'quick-add evidence supplies missing opportunities and purchase replaces cart credit')
         const noViews = await mk(cat1.id, 'Sales without views')
         await sale(noViews.id, 10)
         const noViewSignal = await signal(noViews.id)
-        check(Math.abs(noViewSignal.r) < T && Math.abs(noViewSignal.v) < T,
-                'backfilled sales with zero views retain only the finite prior')
+        check(Math.abs(noViewSignal.r - 1) < T && Math.abs(noViewSignal.v - 1) < T,
+                'real sales with zero detail views supply one opportunity and one success')
+
+        // Quantity, size rows, and repeated orders cannot manufacture confidence.
+        const singleBuyerSnapshot = snapshot(await db.select().from(productRanking))
+        const repeatedOrder = await sale(noViews.id, 500)
+        await db.insert(orderItems).values({
+                orderId: repeatedOrder.id, productId: noViews.id, name: 'Another size', unitPrice: 100_000, quantity: 20,
+        })
+        await ranking.recompute({ day })
+        check(snapshot(await db.select().from(productRanking)) === singleBuyerSnapshot,
+                'repeat orders and multiple size rows from the same buyer/day leave the posterior unchanged')
+        const secondBuyer = (await db.insert(users).values({ phone: '09120000002', name: 'Independent buyer' }).returning())[0]!
+        await sale(noViews.id, 1, day, { userId: secondBuyer.id })
+        const independentSignal = await signal(noViews.id)
+        check(Math.abs(independentSignal.r - 2) < T && Math.abs(independentSignal.v - 2) < T,
+                'an independent buyer contributes additional purchase evidence')
+        await sale(noViews.id, 1, dayMinus10)
+        const returningSignal = await signal(noViews.id)
+        check(Math.abs(returningSignal.r - 2.5) < T && Math.abs(returningSignal.v - 2.5) < T,
+                'a returning buyer on a different day supplies decayed evidence')
+
+        const funnel = await mk(cat1.id, 'Daily funnel')
+        await db.insert(productDailyStats).values([
+                stat(funnel.id, day, 0, 1),
+                stat(funnel.id, dayMinus10, 10, 0),
+        ])
+        await sale(funnel.id, 1)
+        const funnelSignal = await signal(funnel.id)
+        check(Math.abs(funnelSignal.v - 6) < T && Math.abs(funnelSignal.r - 1) < T,
+                'daily opportunities retain both old views and a direct purchase; a cart followed by purchase is not counted twice')
+
+        const cartOnly = await mk(cat1.id, 'Quick-add without checkout')
+        await db.insert(productDailyStats).values(stat(cartOnly.id, day, 0, 10))
+        const cartOnlySignal = await signal(cartOnly.id)
+        check(Math.abs(cartOnlySignal.v - 10) < T && Math.abs(cartOnlySignal.r - 3) < T,
+                'cart-only quick-add supplies partial intent even without a detail-page visit')
 
         const boundary = await mk(cat1.id, 'Window boundaries')
         const firstDay = '2025-05-02' // Reference day minus 44: included.
@@ -476,8 +525,45 @@ try {
         const edgeSignal = await signal(boundary.id)
         const oldestWeight = Math.pow(0.5, 44 / EMA_HALF_LIFE_DAYS)
         check(Math.abs(edgeSignal.v - 160 * oldestWeight) < T &&
-                Math.abs(edgeSignal.r - (16 + CART_ADD_WEIGHT * 20) * oldestWeight) < T,
+                Math.abs(edgeSignal.r - (1 + CART_ADD_WEIGHT * 19) * oldestWeight) < T,
                 'views, carts, and sales share the inclusive 45-day window and exclude old and future days')
+
+        // A category passing the old hard threshold must not suddenly promote
+        // every cold-start product. Also check the peer never supplies its own prior.
+        await db.update(products).set({ status: 'INACTIVE' })
+        const peer = await mk(cat1.id, 'Category evidence')
+        const newcomer = await mk(cat1.id, 'New product')
+        const globalPeer = await mk(cat2.id, 'Global evidence')
+        await db.insert(productDailyStats).values([
+                stat(peer.id, day, 299, 100),
+                stat(globalPeer.id, day, 1000, 10),
+        ])
+        await ranking.recompute({ day })
+        const priorRows = await db.select().from(productRanking)
+        const beforeThreshold = priorRows.find((r) => r.productId === newcomer.id)!
+        const selfExcluded = priorRows.find((r) => r.productId === peer.id)!
+        check(Math.abs(selfExcluded.alpha - (30 + 25 * 0.005)) < T,
+                'a dominant product cannot inflate its own global or category prior')
+        await db.update(productDailyStats).set({ views: 300 }).where(eq(productDailyStats.productId, peer.id))
+        await ranking.recompute({ day })
+        const afterThreshold = (await db.select().from(productRanking)).find((r) => r.productId === newcomer.id)!
+        check(Math.abs(afterThreshold.alpha - beforeThreshold.alpha) < 0.01,
+                'crossing 300 category opportunities changes the cold-start prior smoothly')
+        check(Math.abs(afterThreshold.alpha + afterThreshold.beta - PRIOR_STRENGTH) < T,
+                'a new product explores with bounded prior confidence')
+
+        const consistentSnapshot = snapshot(await db.select().from(productRanking))
+        await Promise.all([ranking.recompute({ day }), ranking.recompute({ day })])
+        check(snapshot(await db.select().from(productRanking)) === consistentSnapshot,
+                'overlapping rebuilds serialize and publish one complete deterministic snapshot')
+
+        // Fail during publication, after DELETE has executed: the old snapshot
+        // must survive intact, including its day. Constraint exists only in scratch DB.
+        await db.execute(sql`alter table product_ranking add constraint ranking_test_failure check (computed_day = '2025-06-15')`)
+        await assert.rejects(ranking.recompute({ day: nextDay }))
+        check(snapshot(await db.select().from(productRanking)) === consistentSnapshot,
+                'a failed publication rolls back deletion and preserves the last ranking')
+        await db.execute(sql`alter table product_ranking drop constraint ranking_test_failure`)
 
         await db.update(products).set({ status: 'INACTIVE' })
         const empty = await ranking.recompute({ day })

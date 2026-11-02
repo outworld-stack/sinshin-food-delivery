@@ -4,7 +4,8 @@ import { eq, sql } from 'drizzle-orm'
 import { SQL } from 'bun'
 import { Elysia } from 'elysia'
 
-import { ProductSimilarityService, TOP_N_PER_PRODUCT, W_COVIEW, W_COPURCHASE } from '../src/domain/product-similarity/similarity.service'
+import { ProductSimilarityService, TOP_N_PER_PRODUCT, W_COVIEW, W_COPURCHASE, COVIEW_PRIOR_SUPPORT, COPURCHASE_PRIOR_SUPPORT, COVIEW_WINDOW_DAYS } from '../src/domain/product-similarity/similarity.service'
+import { tehranDay } from '../src/domain/product-stats/product-stats.service'
 import { MenuService } from '../src/domain/menu/menu.service'
 import { Database } from '../src/infra/db/client'
 import {
@@ -206,6 +207,7 @@ try {
                         displayId: 'sim-test-02',
                         userId: user.id,
                         status: 'PENDING_PAYMENT',
+                        paymentStatus: 'SUCCESS',
                         deliveryType: 'PICKUP',
                         totalAmount: 100_000,
                         breakdown,
@@ -253,18 +255,22 @@ try {
 
         // امتیاز — فرمول سرویس با جمعیت‌های روی کاغذ:
         //   vhub: پیتزا=۶، سالاد=۳ │ ohub: پیتزا=۱، سالاد=۱
-        //   score = 0.35·3/√18 + 0.65·1/√1
-        const expectedAB = (W_COVIEW * 3) / Math.sqrt(6 * 3) + (W_COPURCHASE * 1) / Math.sqrt(1 * 1)
+        // Each cosine is shrunk by independent support before blending.
+        const expectedAB = (W_COVIEW * 3) / Math.sqrt(6 * 3) * 3 / (3 + COVIEW_PRIOR_SUPPORT)
+                + W_COPURCHASE / (1 + COPURCHASE_PRIOR_SUPPORT)
         check(
-                Math.abs(ab.score - expectedAB) < 0.001,
-                `score(pizza,salad) matches cosine formula (${expectedAB.toFixed(4)})`,
+                Math.abs(ab.score - expectedAB) < 1e-12,
+                `score(pizza,salad) matches confidence-shrunk cosine (${expectedAB.toFixed(4)})`,
         )
-        const expectedAC = (W_COVIEW * 2) / Math.sqrt(6 * 2)
+        check(ab.purchaseScore === 1 / (1 + COPURCHASE_PRIOR_SUPPORT),
+                'cart score uses purchase evidence alone with confidence shrinkage')
+        const expectedAC = (W_COVIEW * 2) / Math.sqrt(6 * 2) * 2 / (2 + COVIEW_PRIOR_SUPPORT)
         check(
-                Math.abs(ac.score - expectedAC) < 0.001,
+                Math.abs(ac.score - expectedAC) < 1e-12,
                 `score(pizza,drink) matches formula (${expectedAC.toFixed(4)})`,
         )
         check(ab.score > ac.score, 'purchase-backed pair outranks view-only pair')
+        check(ac.purchaseScore === 0, 'view-only alternatives have no cart complement score')
 
         check(pair(pizza.id, hub.id) === undefined, 'single co-view below evidence floor is dropped')
         check(pair(salad.id, hub.id) === undefined, 'CANCELED order contributes no pair')
@@ -435,6 +441,121 @@ try {
         const afterRankDelete = await rankedIds()
         check(afterRankDelete.length === TOP_N_PER_PRODUCT && afterRankDelete.every((id, i) => id === rankedNeighborIds[i + TOP_N_PER_PRODUCT]),
                 'deleted products are excluded before selecting top-N neighbors')
+
+        await db.update(products).set({ status: 'INACTIVE' }).where(sql`${products.id} in (${sql.join(
+                rankedNeighborIds.slice(TOP_N_PER_PRODUCT, TOP_N_PER_PRODUCT * 2).map((id) => sql`${id}::uuid`), sql`, `,
+        )})`)
+        await similarity.recompute()
+        const afterDeactivate = await rankedIds()
+        check(afterDeactivate.length === 10 && afterDeactivate.every((id, i) => id === rankedNeighborIds[i + TOP_N_PER_PRODUCT * 2]),
+                'inactive products cannot crowd active neighbors out of the stored top-N')
+
+        const newProducts = async (count: number, prefix: string) => db.insert(products).values(
+                Array.from({ length: count }, (_, i) => ({ categoryId: cat.id, name: `${prefix} ${i}`, originalPrice: 1000 })),
+        ).returning()
+        const day = tehranDay()
+        const dayOffset = (offset: number) => {
+                const date = new Date(`${day}T00:00:00Z`)
+                date.setUTCDate(date.getUTCDate() + offset)
+                return date.toISOString().slice(0, 10)
+        }
+        const temporal = await newProducts(10, 'temporal')
+        await db.insert(productViewLog).values([
+                // Two people saw these products on different days: no shopping context in common.
+                ...[0, 1].flatMap((i) => [
+                        { ...viewRow(temporal[0]!.id, `split-${i}`), day: dayOffset(-5) },
+                        { ...viewRow(temporal[1]!.id, `split-${i}`), day: dayOffset(-6) },
+                ]),
+                // One person repeatedly seeing a pair must not pass the two-person evidence floor.
+                ...[-2, -3].flatMap((offset) => temporal.slice(2, 4).map((p) => ({
+                        ...viewRow(p.id, 'repeat-context'), day: dayOffset(offset),
+                }))),
+                ...[-(COVIEW_WINDOW_DAYS - 1), -COVIEW_WINDOW_DAYS, 1].flatMap((offset, group) =>
+                        [0, 1].flatMap((i) => temporal.slice(4 + group * 2, 6 + group * 2).map((p) => ({
+                                ...viewRow(p.id, `boundary-${group}-${i}`), day: dayOffset(offset),
+                        }))),
+                ),
+        ])
+        // Loyal visitors see >30 products across many days, but only two per shopping day.
+        const loyal = await newProducts(32, 'loyal')
+        await db.insert(productViewLog).values([0, 1].flatMap((visitor) => loyal.map((p, i) => ({
+                ...viewRow(p.id, `loyal-${visitor}`), day: dayOffset(-Math.floor(i / 2)),
+        }))))
+        await similarity.recompute(day)
+        const temporalRows = await db.select().from(productSimilarity)
+        const temporalPair = (a: string, b: string) => temporalRows.find((r) => r.productId === a && r.similarId === b)
+        check(!temporalPair(temporal[0]!.id, temporal[1]!.id),
+                'visits on separate shopping days do not create false co-view associations')
+        check(!temporalPair(temporal[2]!.id, temporal[3]!.id),
+                'repeat visits by one person do not manufacture independent evidence')
+        check(temporalPair(temporal[4]!.id, temporal[5]!.id)?.coViews === 2,
+                'the earliest day inside the exact Tehran 60-day window is included')
+        check(!temporalPair(temporal[6]!.id, temporal[7]!.id) && !temporalPair(temporal[8]!.id, temporal[9]!.id),
+                'out-of-window and future view rows are excluded')
+        check(temporalPair(loyal[0]!.id, loyal[1]!.id)?.coViews === 2,
+                'per-day crawler filtering preserves loyal visitors across multiple days')
+        check(!temporalPair(loyal[0]!.id, loyal[2]!.id),
+                'retained loyal visitors do not connect unrelated shopping days')
+
+        const support = await newProducts(4, 'support')
+        await db.execute(sql`
+                insert into orders (display_id, user_id, status, delivery_type, payment_status, total_amount, breakdown)
+                select 'sim-support-' || n, ${user.id}::uuid, 'PAID', 'PICKUP', 'SUCCESS', 2000, '{}'::jsonb
+                from generate_series(0, 40) n
+        `)
+        await db.execute(sql`
+                insert into order_items (order_id, product_id, name, unit_price, quantity)
+                select o.id, p.id, 'support', 1000, 1
+                from orders o
+                join generate_series(0, 40) n on o.display_id = 'sim-support-' || n
+                join (values
+                        (${support[0]!.id}::uuid, 0, 0), (${support[1]!.id}::uuid, 0, 0),
+                        (${support[2]!.id}::uuid, 1, 30), (${support[3]!.id}::uuid, 11, 40)
+                ) p(id, first_order, last_order)
+                  on n between p.first_order and p.last_order
+        `)
+
+        // Strong co-view alternatives may fill every mixed slot; keep an independent
+        // budget for purchase-backed cart complements instead of losing them at truncation.
+        const contexts = await newProducts(41, 'contexts')
+        const contextAnchor = contexts[0]!
+        const viewNeighbors = contexts.slice(1, 21)
+        const purchaseNeighbors = contexts.slice(21)
+        await db.execute(sql`
+                insert into product_view_log (product_id, visitor_id, day)
+                select p.id, 'context-' || n, ${day}::date
+                from generate_series(1, 100) n
+                cross join (values ${sql.join([contextAnchor, ...viewNeighbors].map((p) => sql`(${p.id}::uuid)`), sql`, `)}) p(id)
+        `)
+        for (const [i, p] of purchaseNeighbors.entries()) {
+                const order = (await db.insert(orders).values({
+                        displayId: `sim-context-${i}`, userId: user.id, status: 'PAID', deliveryType: 'PICKUP',
+                        paymentStatus: 'SUCCESS', totalAmount: 2000, breakdown,
+                }).returning())[0]!
+                await db.insert(orderItems).values([contextAnchor, p].map((item) => ({
+                        orderId: order.id, productId: item.id, name: item.name, unitPrice: 1000, quantity: 1,
+                })))
+        }
+        await similarity.recompute(day)
+        const supportRows = await db.select().from(productSimilarity)
+        const rare = supportRows.find((r) => r.productId === support[0]!.id && r.similarId === support[1]!.id)!
+        const established = supportRows.find((r) => r.productId === support[2]!.id && r.similarId === support[3]!.id)!
+        check(established.purchaseScore > rare.purchaseScore,
+                'twenty supporting baskets outrank an accidental singleton even with lower raw cosine')
+        const contextRows = supportRows.filter((r) => r.productId === contextAnchor.id)
+        check(contextRows.length === 2 * TOP_N_PER_PRODUCT,
+                'mixed recommendations and cart complements retain independent top-N budgets')
+        const topMixed = [...contextRows].sort((a, b) => b.score - a.score).slice(0, TOP_N_PER_PRODUCT)
+        check(topMixed.every((r) => viewNeighbors.some((p) => p.id === r.similarId)),
+                'co-view alternatives can lead the mixed ranking without diluting cart evidence')
+        check(contextRows.filter((r) => r.purchaseScore > 0).length === TOP_N_PER_PRODUCT,
+                'purchase-backed neighbors survive outside the mixed top-N')
+        const beforeConcurrent = supportRows.map((r) => `${r.productId}:${r.similarId}:${r.score}:${r.purchaseScore}`).sort()
+        await Promise.all([similarity.recompute(day), similarity.recompute(day)])
+        const afterConcurrent = (await db.select().from(productSimilarity))
+                .map((r) => `${r.productId}:${r.similarId}:${r.score}:${r.purchaseScore}`).sort()
+        check(JSON.stringify(beforeConcurrent) === JSON.stringify(afterConcurrent),
+                'concurrent rebuilds serialize and preserve the complete deterministic snapshot')
 
         // Multiplying two int4 popularity counts overflows at just 46,341 each.
         const popular = await db.insert(products).values([0, 1].map((n) => ({

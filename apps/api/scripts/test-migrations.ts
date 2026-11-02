@@ -555,6 +555,13 @@ await withScratch('b', async (url) => {
   ok('B1: بک‌فیل‌ها روی جدولِ خالی no-op بودند', devices === 0)
   const marker = await scalar(url, `select count(*)::int as n from "backfill_runs"`)
   ok('B1: مارکر نسخه‌دار روی DB فریش ثبت شد', marker === 1)
+  const similarityColumns = await q<{ column_name: string; data_type: string; column_default: string | null }>(url,
+    `select column_name, data_type, column_default from information_schema.columns
+     where table_name = 'product_similarity' and column_name in ('score', 'purchase_score')`)
+  ok('B1: both recommendation scores preserve double precision',
+    similarityColumns.length === 2 && similarityColumns.every((column) => column.data_type === 'double precision'))
+  ok('B1: legacy recommendations default to no purchase evidence until recomputed',
+    similarityColumns.some((column) => column.column_name === 'purchase_score' && column.column_default === '0'))
   const res2 = await runRealMigrate(url)
   ok('B2: اجرای دوباره no-op موفق', res2.code === 0 && /بک‌فیل جدیدی لازم نبود/.test(res2.out))
 })

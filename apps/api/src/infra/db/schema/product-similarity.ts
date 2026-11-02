@@ -11,15 +11,14 @@
 // منبع حقیقت — محصولِ حذف‌شده با joinِ خواندن بیرون می‌افتد و ردیفِ
 // یتیمش شبِ بعد با بازمحاسبه‌ی کامل (delete + insert) ناپدید می‌شود.
 // هر دو جهتِ جفت رتبه‌بندی می‌شود (a→b و b→a) تا خواندن یک select ساده
-// بماند؛ score متقارن است، اما هر محصول فقط ۲۰ همسایهٔ برتر خودش را نگه می‌دارد.
+// بماند؛ اجتماعِ ۲۰ همسایهٔ ترکیبی و ۲۰ مکملِ خرید ذخیره می‌شود (حداکثر ۴۰).
 // ═══════════════════════════════════════════════════════════════
-import { index, integer, pgTable, primaryKey, real, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { doublePrecision, index, integer, pgTable, primaryKey, timestamp, uuid } from 'drizzle-orm/pg-core'
 import type { ProductId } from '#/domain/shared/brand'
 
 /**
- * شبیه‌ترین محصول‌ها به هر محصول — حداکثرِ TOP_N_PER_PRODUCT ردیف
- * به‌ازای هر جهت (ثابتِ SimilarityService). score = ترکیبِ نرمال‌شده‌ی
- * هم‌بازدید و هم‌خرید (cosine-like؛ از خودِ جاب درج می‌شود).
+ * Union of the mixed and purchase-only top-N lists for each product.
+ * Both scores use confidence-shrunk cosine; each source has at most 2N rows.
  */
 export const productSimilarity = pgTable(
   'product_similarity',
@@ -27,7 +26,9 @@ export const productSimilarity = pgTable(
     productId: uuid('product_id').$type<ProductId>().notNull(),
     similarId: uuid('similar_id').$type<ProductId>().notNull(),
     /** ۰..۱ تقریبی — وزن‌دار: هم‌خرید قوی‌تر از هم‌بازدید */
-    score: real('score').notNull(),
+    score: doublePrecision('score').notNull(),
+    /** Confidence-shrunk co-purchase cosine for cart complements; zero means no purchase evidence. */
+    purchaseScore: doublePrecision('purchase_score').notNull().default(0),
     /** تعداد بازدیدکننده‌ای که هر دو محصول را دیده (پس از فیلتر نویز) */
     coViews: integer('co_views').notNull().default(0),
     /** تعداد سفارشِ پرداخت‌شده‌ای که هر دو محصول را داشته */

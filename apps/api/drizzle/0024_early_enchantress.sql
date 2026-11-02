@@ -1,0 +1,2 @@
+ALTER TABLE "product_similarity" ALTER COLUMN "score" SET DATA TYPE double precision;--> statement-breakpoint
+ALTER TABLE "product_similarity" ADD COLUMN "purchase_score" double precision DEFAULT 0 NOT NULL;

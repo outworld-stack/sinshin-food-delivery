@@ -29,6 +29,7 @@ import type {
         SimilarProductsDto,
 } from '@sinshin/shared'
 import { authJson, getJson, postJson } from '#/lib/api-fetch'
+import { similarProductExclusions, type SimilarProductsOptions } from '#/lib/similar-products'
 import type { ProductFormData } from '#/types/forms'
 // stage-100 — قرارداد انیمیشن صفحه‌ی محصول ویژه
 import {
@@ -79,10 +80,15 @@ export async function getProductById(input: {
 // همان الگوی getProductById: پارامتر UUID یا slug؛ null = لنگر ناموجود.
 // strict (تصمیم سرور) = لنگر ناموجود ⇒ فقط مشابه‌های موجود برگشته‌اند.
 export async function getSimilarProducts(input: {
-        data: { id: ProductId | string }
+        data: { id: ProductId | string } & SimilarProductsOptions
 }): Promise<SimilarProductsDto | null> {
+        const params = new URLSearchParams()
+        if (input.data.context === 'cart') params.set('context', 'cart')
+        const exclude = similarProductExclusions(input.data.exclude)
+        if (exclude.length) params.set('exclude', exclude.join(','))
+        const query = params.size ? `?${params}` : ''
         return getJson<SimilarProductsDto | null>(
-                `/menu/products/${input.data.id}/similar`,
+                `/menu/products/${encodeURIComponent(input.data.id)}/similar${query}`,
         )
 }
 

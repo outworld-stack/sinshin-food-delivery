@@ -30,9 +30,9 @@ export const productRanking = pgTable(
      *  بیت‌به‌بیت یکی است — در float4 ممیزهای آخر بین دو مسیر می‌ریزد
      *  (درسِ double-everywhere فاز ۲) */
     score: doublePrecision('score').notNull(),
-    /** پارامتر الفای پسینی (موفقیت‌های وزن‌دار + پیشین) — پایش + پلِ فاز ۴ */
+    /** Decayed buyer/cart utility plus prior; not sold units or calibrated conversions. */
     alpha: doublePrecision('alpha').notNull(),
-    /** پارامتر بتای پسینی (شکست‌های وزن‌دار + پیشین) */
+    /** Effective opportunities minus reward, plus prior. */
     beta: doublePrecision('beta').notNull(),
     /** رتبه‌ی سراسری ۱-مبنا — score نزولی، تای‌بریکِ قطعی id صعودی */
     rank: integer('rank').notNull(),

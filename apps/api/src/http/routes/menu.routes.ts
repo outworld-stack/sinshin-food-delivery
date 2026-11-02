@@ -16,7 +16,7 @@
 //src/http/routes/menu.routes.ts
 import { Elysia, t } from 'elysia'
 
-import type { MenuService } from '#/domain/menu/menu.service'
+import { SIMILAR_EXCLUDE_LIMIT, type MenuService } from '#/domain/menu/menu.service'
 import type { CartService } from '#/domain/cart/cart.service'
 import type { ProductStatsService } from '#/domain/product-stats/product-stats.service'
 import type { SettingsService } from '#/domain/settings/settings.service'
@@ -184,15 +184,25 @@ export const menuRoutes = (deps: MenuRoutesDeps) =>
       '/products/:id/similar',
       (ctx) =>
         withMenuCache(ctx, () =>
-          deps.menu.similarProducts(ctx.params.id, langFromHeaders(ctx.headers)),
+          deps.menu.similarProducts(ctx.params.id, langFromHeaders(ctx.headers), undefined, {
+            context: ctx.query.context,
+            exclude: ctx.query.exclude?.split(','),
+          }),
           'public, no-cache',
         ),
       {
         params: t.Object({ id: t.String({ pattern: SLUG_OR_ID_PATTERN }) }),
+        query: t.Object({
+          context: t.Optional(t.Union([t.Literal('detail'), t.Literal('cart')])),
+          exclude: t.Optional(t.String({
+            maxLength: SIMILAR_EXCLUDE_LIMIT * 37 - 1,
+            pattern: `^(?:${UUID_PATTERN.slice(1, -1)})(?:,${UUID_PATTERN.slice(1, -1)}){0,${SIMILAR_EXCLUDE_LIMIT - 1}}$`,
+          })),
+        }),
         detail: {
           summary: 'Behaviorally similar products (public — phase 2 recommendations)',
           description:
-            'hundred-twelve: top similar products from nightly co-view/co-purchase signals (product_similarity). Same Product DTO as menu lists. strict=true means the anchor is unavailable and ONLY available similars are returned (locked decision). null = anchor not found/inactive.',
+            'Detail recommendations use nightly co-view/co-purchase scores. context=cart uses purchase-backed complements and filters buyability before limiting. exclude accepts up to 50 comma-separated product UUIDs. strict=true means only buyable recommendations are returned (cart context or an unavailable/purchase-locked anchor). null = anchor not found/inactive.',
         },
       },
     )
