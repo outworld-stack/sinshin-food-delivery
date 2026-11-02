@@ -118,9 +118,10 @@ function checkoutReducer(
 export function useCheckoutPage(deps: {
 	items: CheckoutItemInput[]
 	isAuthenticated: boolean
+	paymentsDisabled?: boolean
 }) {
 	const navigate = useNavigate()
-	const { items, isAuthenticated } = deps
+	const { items, isAuthenticated, paymentsDisabled = false } = deps
 	const [state, dispatch] = useReducer(checkoutReducer, initialState)
 	const queryClient = useQueryClient()
 	const setActiveOrderId = useAuthStore((s) => s.setActiveOrderId)
@@ -310,6 +311,7 @@ export function useCheckoutPage(deps: {
 				: blocked.dineInBlockedNames
 	const isDeliveryBlocked = deliveryBlockedFor.length > 0
 	const isSubmitBlocked =
+		paymentsDisabled ||
 		!isPreviewReady ||
 		!isDeliveryQuoteReady ||
 		(state.couponStatus === 'HAVE' && !couponApplied) ||
@@ -383,6 +385,7 @@ export function useCheckoutPage(deps: {
 			processCheckout(payload, checkoutIntentKey(payload)),
 		onSuccess: async (res) => {
 			queryClient.invalidateQueries({ queryKey: qk.userProfile })
+			queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
 			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
 			// stage-56 — سفارش تازه باید در «سفارشات من» (صفحه‌بندی سروری) ظاهر شود
 			queryClient.invalidateQueries({ queryKey: qk.myOrdersPrefix })
@@ -441,7 +444,7 @@ export function useCheckoutPage(deps: {
 							})
 						}
 						showToast(
-							err instanceof Error ? err.message : t['checkout.payError'],
+							apiError(err instanceof Error ? err.message : t['checkout.payError']),
 							'error',
 						)
 					} finally {
@@ -471,11 +474,17 @@ export function useCheckoutPage(deps: {
 		},
 		// onError عمداً کلید را عوض «نمی‌کند»: خطای شبکه → تلاش مجدد با همان کلید
 		// امن است (اگر سفارش ساخته شده باشد، پاسخ کش‌شده برمی‌گردد)
-		onError: (err) =>
-			showToast(err.message || t['checkout.orderProcessError'], 'error'),
+		onError: (err) => {
+			showToast(apiError(err.message || t['checkout.orderProcessError']), 'error')
+			void queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
+		},
 	})
 
 	const handleFinalSubmit = useCallback(() => {
+		if (paymentsDisabled) {
+			showToast(t['checkout.paymentsPausedHint'], 'error')
+			return
+		}
 		if (
 			checkoutMutation.isPending ||
 			mockPayPending ||
@@ -540,6 +549,7 @@ export function useCheckoutPage(deps: {
 	}, [
 		state,
 		items,
+		paymentsDisabled,
 		isSubmitBlocked,
 		isGatewayDisabled,
 		couponApplied,

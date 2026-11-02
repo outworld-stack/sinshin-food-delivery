@@ -34,10 +34,20 @@ export const RestaurantHoursForm = memo(function RestaurantHoursForm() {
 	const mutation = useMutation({
 		mutationFn: (data: RestaurantHoursDto) => setRestaurantHours({ data }),
 		onSuccess: async (saved) => {
-			// An older request must not replace the acknowledged hours in the
-			// footer. The returned value is also the form's new saved baseline.
-			await queryClient.cancelQueries({ queryKey: qk.restaurantHours })
+			// Older requests must not restore opening times from before this save.
+			await Promise.all([
+				queryClient.cancelQueries({ queryKey: qk.restaurantHours }),
+				queryClient.cancelQueries({ queryKey: qk.restaurantStatus }),
+				queryClient.cancelQueries({ queryKey: qk.settingsRestaurant }),
+				queryClient.cancelQueries({ queryKey: qk.settingsRestaurantStatus }),
+			])
 			queryClient.setQueryData(qk.restaurantHours, saved)
+			// Opening-time notices come from the same saved hours via status.
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: qk.restaurantStatus }),
+				queryClient.invalidateQueries({ queryKey: qk.settingsRestaurant }),
+				queryClient.invalidateQueries({ queryKey: qk.settingsRestaurantStatus }),
+			])
 			showToast('ساعت کاری رستوران ذخیره شد')
 		},
 	})
@@ -88,7 +98,7 @@ export const RestaurantHoursForm = memo(function RestaurantHoursForm() {
 				ساعت کاری روزانه
 			</h3>
 			<p className="mt-1 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-				این ساعت‌ها هر روز در پایین سایت به مشتریان نمایش داده می‌شوند.
+				این ساعت‌ها در پایین سایت و ساعت باز شدن در پیام بسته بودن صفحه تسویه‌حساب نمایش داده می‌شوند.
 			</p>
 			<fieldset
 				disabled={disabled}

@@ -14,7 +14,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 // src/components/admin/settings/RestaurantStatusCard.tsx
 import { memo } from 'react'
-import { Clock, Store, Users } from 'reicon-react'
+import { Store, Users } from 'reicon-react'
 import { Toggle } from '#/components/shared/Toggle'
 import { setRestaurantBusy } from '#/server/admin'
 import { useToastStore } from '#/stores/toastStore'
@@ -37,8 +37,6 @@ interface RestaurantStatusCardProps {
 	/** بسته‌ی موقت است؟ (برای بج وضعیت) */
 	temporarilyClosed: boolean
 	onToggleHourly: () => void
-	nextOpenTime: string
-	onNextOpenTimeChange: (value: string) => void
 }
 
 export const RestaurantStatusCard = memo(function RestaurantStatusCard({
@@ -49,8 +47,6 @@ export const RestaurantStatusCard = memo(function RestaurantStatusCard({
 	busy,
 	temporarilyClosed,
 	onToggleHourly,
-	nextOpenTime,
-	onNextOpenTimeChange,
 }: RestaurantStatusCardProps) {
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
@@ -140,25 +136,6 @@ export const RestaurantStatusCard = memo(function RestaurantStatusCard({
 							label="باز/بسته بودن رستوران"
 						/>
 					</div>
-					{!hourlyOpen && (
-						<div className="mt-3">
-							<label
-								htmlFor="restaurant-next-open-time"
-								className="flex items-center gap-1.5 text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
-							>
-								<Clock size={14} />
-								ساعت باز شدن بعدی (به مشتریان نمایش داده می‌شود)
-							</label>
-							<input
-								id="restaurant-next-open-time"
-								type="text"
-								value={nextOpenTime}
-								onChange={(e) => onNextOpenTimeChange(e.target.value)}
-								className="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-sm"
-								placeholder="مثلاً: ۱۱:۰۰ صبح"
-							/>
-						</div>
-					)}
 				</div>
 			)}
 

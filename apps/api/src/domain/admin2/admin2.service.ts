@@ -30,7 +30,7 @@ import { ensureUserReferralCode } from '#/domain/shared/referral-code'
 import { asUserId } from '#/domain/shared/brand'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
-import type { AdminSessionDto, SubAdminPermissionsDto, SubAdminPermissionsPatch, SubAdminRecordDto } from '@sinshin/shared'
+import { TEMPORARY_CLOSE_REASON_MIN_LENGTH, type AdminSessionDto, type SubAdminPermissionsDto, type SubAdminPermissionsPatch, type SubAdminRecordDto } from '@sinshin/shared'
 
 /** ساختار حوزه — از دو ستون boolean */
 export interface Admin2Scope {
@@ -430,6 +430,7 @@ export class Admin2Service {
      * علت ذخیره‌شده پاک می‌شود تا متن کهنه به مشتری نشت نکند.
      * round-29: reopenTime — زمان باز شدن مجددِ بسته‌ی موقت (جدا از ساعتِ کاری
      * اصلی)؛ فقط هنگام بستن معنا دارد و با باز شدن پاک می‌شود (هم‌الگوی علت).
+     * disablePayments blocks new order payments only for this closure and resets on reopening.
      */
     async setTemporaryClose(
         actorUserId: string,
@@ -439,25 +440,44 @@ export class Admin2Service {
         reopenTime?: string | null,
         /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = پشتیبان فارسی) */
         reasonAr?: string | null,
+        disablePayments = false,
     ): Promise<void> {
         const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
         if (actorRole !== 'admin' && (actorRole !== 'admin2' || !p?.isActive || !p.canToggleTemporaryClose)) {
             throw Err.forbidden('اجازه‌ی اعلام وضعیت موقت را ندارید.')
         }
-        await this.deps.settings.set(SETTING_KEYS.temporarilyClosed, closed)
+        const normalizedReason = typeof reason === 'string' ? reason.trim() : ''
+        const minimumLength = closed ? TEMPORARY_CLOSE_REASON_MIN_LENGTH : 3
+        if (normalizedReason.length < minimumLength || normalizedReason.length > 120) {
+            throw Err.validation(`علت باید بین ${minimumLength} تا ۱۲۰ نویسه باشد.`)
+        }
+        const normalizedReasonAr = typeof reasonAr === 'string' ? reasonAr.trim() : ''
+        if (closed && normalizedReasonAr !== '' && (
+            normalizedReasonAr.length < TEMPORARY_CLOSE_REASON_MIN_LENGTH || normalizedReasonAr.length > 120
+        )) {
+            throw Err.validation(`علت عربی باید بین ${TEMPORARY_CLOSE_REASON_MIN_LENGTH} تا ۱۲۰ نویسه باشد.`)
+        }
+        if (typeof disablePayments !== 'boolean') {
+            throw Err.validation('وضعیت غیرفعال‌سازی پرداخت نامعتبر است.')
+        }
+        // Publish a new closure only after its message and payment policy are ready.
+        // Reopening immediately removes the effective payment block, then clears metadata.
+        if (!closed) await this.deps.settings.set(SETTING_KEYS.temporarilyClosed, false)
         await this.deps.settings.set(
             SETTING_KEYS.temporaryCloseReason,
-            closed ? (reason ?? '').slice(0, 120) : '',
+            closed ? normalizedReason : '',
         )
         // round-34 — کلید موازی عربی؛ فقط موقع بسته‌بودن معنا دارد و با باز شدن پاک می‌شود
         await this.deps.settings.set(
             SETTING_KEYS.temporaryCloseReasonAr,
-            closed ? (reasonAr ?? '').trim().slice(0, 120) : '',
+            closed ? normalizedReasonAr : '',
         )
         await this.deps.settings.set(
             SETTING_KEYS.temporaryReopenTime,
             closed ? (reopenTime ?? '').trim().slice(0, 40) : '',
         )
+        await this.deps.settings.set(SETTING_KEYS.temporaryPaymentsDisabled, closed && disablePayments)
+        if (closed) await this.deps.settings.set(SETTING_KEYS.temporarilyClosed, true)
         if (actorRole === 'admin2') {
             await this.log(
                 actorUserId,
@@ -465,7 +485,8 @@ export class Admin2Service {
                 null,
                 reason
                     ? {
-                            reason,
+                            reason: normalizedReason,
+                            disablePayments: closed && disablePayments,
                             ...(closed && reopenTime ? { reopenTime } : {}),
                         }
                     : {},

@@ -25,15 +25,12 @@ import type { RestaurantStatus } from '#/types/site/checkout'
 // ─── وضعیت رستوران ───
 export async function getRestaurantStatus(): Promise<RestaurantStatus> {
 	const s = await getJson<RestaurantStatusDto>('/orders/restaurant-status')
-	// round-13 — علت بسته‌شدن موقت برای نمایش در باکس خلاصه سفارش
-	// round-29 — بسته‌ی موقت: زمانِ باز شدن مجددِ موقت (اگر ثبت شده) بر ساعتِ کاری
-	// اصلی مقدم است؛ قبلاً چک‌اوت در بسته‌شدن موقت هم ساعت اصلی را نشان می‌داد.
+	// Temporary closures show the admin's reason only in the order summary.
 	return {
 		isOpen: s.isOpen && !s.temporarilyClosed,
-		nextOpenTime:
-			s.temporarilyClosed && s.temporaryReopenTime
-				? s.temporaryReopenTime
-				: s.nextOpenTime,
+		temporarilyClosed: s.temporarilyClosed,
+		paymentsDisabled: s.paymentsDisabled === true,
+		nextOpenTime: s.nextOpenTime,
 		closeReason: s.temporarilyClosed ? s.temporaryCloseReason : null,
 		// stage-84 — شلوغی: جدا از بسته‌بودن (هشدارِ یادداشت سرو در محل)
 		isBusy: s.isBusy === true,

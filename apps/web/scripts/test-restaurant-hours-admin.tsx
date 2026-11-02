@@ -121,6 +121,8 @@ assert.equal(retries, 1, 'a failed initial load offers a working retry')
 loadFailed = false
 const initial = { openingTime: '11:00', closingTime: '00:00' }
 client.setQueryData(qk.restaurantHours, initial)
+const statusKeys = [qk.restaurantStatus, qk.settingsRestaurant, qk.settingsRestaurantStatus]
+for (const queryKey of statusKeys) client.setQueryData(queryKey, { nextOpenTime: '11:00' })
 renderForm()
 assert.equal(field('openingTime').props.value, '11:00')
 assert.equal(field('closingTime').props.value, '00:00')
@@ -142,6 +144,9 @@ assert.equal(field('openingTime').props.value, '10:30', 'failed saving retains t
 assert.equal(button().props.disabled, false, 'failed saving remains retryable')
 assert.equal(find(tree, (node) => node.props.role === 'alert').props.children, 'Connection lost')
 assert.equal(toasts.at(-1)?.kind, 'error')
+for (const queryKey of statusKeys) {
+	assert.equal(client.getQueryState(queryKey)?.isInvalidated, false, 'failed saving does not invalidate status with unsaved hours')
+}
 
 let finishSave!: (value: RestaurantHoursDto) => void
 saveWork = () => new Promise((resolve) => { finishSave = resolve })
@@ -165,6 +170,9 @@ finishSave(saved)
 await firstSubmit
 renderForm()
 assert.deepEqual(client.getQueryData(qk.restaurantHours), saved, 'acknowledged hours immediately update the footer query')
+for (const queryKey of statusKeys) {
+	assert.equal(client.getQueryState(queryKey)?.isInvalidated, true, 'saved hours invalidate customer and admin restaurant status')
+}
 assert.equal(button().props.disabled, true, 'successful saving marks the draft clean')
 finishOldFetch(initial)
 await oldFetch
@@ -196,8 +204,6 @@ const cardProps = {
 	busy: false,
 	temporarilyClosed: false,
 	onToggleHourly() {},
-	nextOpenTime: '11:00',
-	onNextOpenTimeChange() {},
 }
 assert.equal(nodes(RestaurantStatusCard(cardProps)).some((node) => node.type === RestaurantHoursForm), false,
 	'level-2 admins cannot mount the hours form even with temporary-close and busy permissions')

@@ -60,7 +60,7 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 	order,
 }: PendingPaymentBoxProps) {
 	const { t, fmt } = useI18n()
-	const { retryMutation, handleRetry } = useOrderPaymentRetry(order.id)
+	const { retryMutation, handleRetry, paymentsDisabled } = useOrderPaymentRetry(order.id)
 
 	// ?payment=pending — فقط بعد از هیدریشن بخوان (SSR بی‌خطر؛ پارامترِ
 	// ریدایرکتِ سرورِ callback است و اثری روی رندر اولیه ندارد)
@@ -162,7 +162,7 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 					<p className="text-xs text-yellow-600/80 dark:text-yellow-400/80 font-DanaMedium mt-1 leading-relaxed">
 						{justReturned
 							? t['dash.orderDetail.pendingVerifyHint']
-							: t['dash.orderDetail.pendingHint']}
+							: paymentsDisabled ? t['checkout.paymentsPausedHint'] : t['dash.orderDetail.pendingHint']}
 					</p>
 				</div>
 			</div>
@@ -190,12 +190,12 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 				<button
 					type="button"
 					onClick={handleRetry}
-					disabled={retryMutation.isPending}
+					disabled={retryMutation.isPending || paymentsDisabled}
 					className="px-5 py-3 rounded-xl bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-DanaDemiBold transition cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
 				>
 					{retryMutation.isPending
 						? t['dash.orderDetail.pendingRetrying']
-						: t['dash.orderDetail.continuePayment']}
+						: paymentsDisabled ? t['checkout.paymentsPaused'] : t['dash.orderDetail.continuePayment']}
 				</button>
 			</div>
 		</div>

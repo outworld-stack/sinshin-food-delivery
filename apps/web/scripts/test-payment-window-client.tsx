@@ -31,8 +31,9 @@ mock.module('#/i18n', () => ({
   }),
   tpl: (text: string, values: { n: string }) => `${text} ${values.n}`,
 }))
+let paymentsDisabled = false
 mock.module('#/hooks/dashboard/useOrderPaymentRetry', () => ({
-  useOrderPaymentRetry: () => ({ retryMutation: { isPending: false }, handleRetry() {} }),
+  useOrderPaymentRetry: () => ({ retryMutation: { isPending: false }, handleRetry() {}, paymentsDisabled }),
 }))
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { search: '' } } })
 let wallTime = Date.parse('2030-01-01T00:00:00Z')
@@ -94,6 +95,13 @@ try {
   assert(text(client).includes('۰۰:۵۹'))
   assert(nodes(client.tree).some(node => node.props.className?.includes('text-red-600')), 'last minute is highlighted')
   assert(hasButton(client), 'changing the device date must not prematurely hide payment')
+  paymentsDisabled = true
+  render(client)
+  assert(nodes(client.tree).find(node => node.type === 'button')?.props.disabled, 'temporary payment pause disables existing-order payment too')
+  assert(text(client).includes('checkout.paymentsPausedHint'))
+  paymentsDisabled = false
+  render(client)
+  assert.equal(nodes(client.tree).find(node => node.type === 'button')?.props.disabled, false)
   locale = 'ar'
   render(client)
   assert(text(client).includes('٠٠:٥٩'), 'language switching localizes the running countdown')

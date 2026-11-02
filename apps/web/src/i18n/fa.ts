@@ -287,6 +287,9 @@ export const fa = {
         'checkout.submitPay': 'پرداخت و ثبت نهایی سفارش',
         'checkout.processing': 'در حال پردازش...',
         'checkout.closedTitle': 'رستوران در حال حاضر بسته است',
+        'checkout.temporaryClosed': 'رستوران به‌صورت موقت بسته است.',
+        'checkout.paymentsPaused': 'پرداخت موقتاً غیرفعال است',
+        'checkout.paymentsPausedHint': 'پرداخت سفارش‌ها تا پایان بسته بودن موقت رستوران غیرفعال است.',
         'checkout.closedNote':
                 'بعد از پرداخت، سفارش شما در اولین زمان ممکن بعد از باز شدن رستوران برایتان ارسال می‌شود.',
         'checkout.closedSummary':

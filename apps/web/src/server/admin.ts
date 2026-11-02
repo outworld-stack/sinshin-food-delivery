@@ -12,6 +12,7 @@ import type {
 	Admin2SessionDto,
 	Admin2StatsDto,
 	AdminOrdersData,
+	AdminRestaurantStatusDto,
 	AdminStatsDto,
 	AdminUserDetailsDto,
 	AdminUsersData,
@@ -28,7 +29,6 @@ import type {
 	PrinterNetworkReportDto,
 	RegistrationPermitDto,
 	RestaurantHoursDto,
-	RestaurantStatusDto,
 	StaffInvoice,
 	StaffInvoiceItem,
 	SubAdminPermissionsPatch,
@@ -561,8 +561,8 @@ export function setRestaurantHours(input: {
 // رارد ۴۷ — نام مستعار قدیمی RestaurantFullStatus حذف شد — صفر مصرف‌کننده داشت.
 // (تولیدکننده‌ی بک‌اند هم با همان تایپ annotate شد — شکل بدون تغییر)
 
-export async function getRestaurantStatusFull(): Promise<RestaurantStatusDto> {
-	return authJson<RestaurantStatusDto>(
+export async function getRestaurantStatusFull(): Promise<AdminRestaurantStatusDto> {
+	return authJson<AdminRestaurantStatusDto>(
 		'/admin/settings/restaurant/status',
 		'GET',
 	)
@@ -571,6 +571,7 @@ export async function getRestaurantStatusFull(): Promise<RestaurantStatusDto> {
 export async function setTemporaryClose(input: {
 	data: {
 		closed: boolean
+		disablePayments?: boolean
 		reason: string
 		reopenTime?: string
 		reasonAr?: string | null

@@ -1,10 +1,11 @@
 import { useCallback, useRef } from 'react'
 import { parsePaymentTarget } from '@sinshin/shared'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '#/i18n'
 import { mockPay, retryOrderPayment } from '#/server/checkout'
 import { useToastStore } from '#/stores/toastStore'
 import { qk } from '#/utils/queryKeys'
+import { restaurantStatusOptions } from '#/utils/queryOptions'
 import { navigateToPayment } from '#/lib/payment-navigation'
 
 export function useOrderPaymentRetry(orderId: string) {
@@ -12,6 +13,8 @@ export function useOrderPaymentRetry(orderId: string) {
   const showToast = useToastStore((s) => s.showToast)
   const queryClient = useQueryClient()
   const retryInFlight = useRef(false)
+  const { data: restaurantStatus } = useQuery(restaurantStatusOptions)
+  const paymentsDisabled = restaurantStatus?.paymentsDisabled === true
 
   const retryMutation = useMutation({
     mutationFn: () => retryOrderPayment({ orderId }),
@@ -42,15 +45,20 @@ export function useOrderPaymentRetry(orderId: string) {
       retryInFlight.current = false
       // A conflict or lost response can mean settlement already committed.
       void queryClient.invalidateQueries({ queryKey: qk.orderDetails(orderId) })
+      void queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
     },
   })
 
   const handleRetry = useCallback(() => {
+    if (paymentsDisabled) {
+      showToast(t['checkout.paymentsPausedHint'], 'error')
+      return
+    }
     // Close the same-frame double-click window before React renders pending.
     if (retryInFlight.current || retryMutation.isPending) return
     retryInFlight.current = true
     retryMutation.mutate()
-  }, [retryMutation])
+  }, [retryMutation, paymentsDisabled, showToast, t])
 
-  return { retryMutation, handleRetry }
+  return { retryMutation, handleRetry, paymentsDisabled }
 }

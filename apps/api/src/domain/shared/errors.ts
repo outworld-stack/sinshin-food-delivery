@@ -35,6 +35,13 @@ export class AppError extends Error {
   }
 }
 
+/** Distinguishes an intentional payment stop from a failed PSP connection. */
+export class OrderPaymentsDisabledError extends AppError {
+  constructor() {
+    super('CONFLICT', 'پرداخت سفارش‌ها به‌دلیل بسته بودن موقت رستوران غیرفعال است.', 409)
+  }
+}
+
 export const Err = {
   validation: (msg = 'ورودی ارسالی معتبر نیست.', details?: unknown) =>
     new AppError('VALIDATION_ERROR', msg, 422, details),

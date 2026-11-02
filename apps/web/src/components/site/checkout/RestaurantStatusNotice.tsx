@@ -10,7 +10,7 @@ interface RestaurantStatusNoticeProps {
 
 // آیتم ۲۲: اگر رستوران بسته بود → اطلاع‌رسانی
 export const RestaurantStatusNotice = memo(function RestaurantStatusNotice({ isOpen, nextOpenTime }: RestaurantStatusNoticeProps) {
-  const { t } = useI18n()
+  const { t, fmt } = useI18n()
   if (isOpen) return null
 
   return (
@@ -25,7 +25,7 @@ export const RestaurantStatusNotice = memo(function RestaurantStatusNotice({ isO
         </p>
         <p className="text-xs text-orange-600 dark:text-orange-400 font-DanaDemiBold mt-2 flex items-center gap-1">
           <Clock size={14} />
-          {tpl(t['checkout.openTime'], { n: nextOpenTime })}
+          {tpl(t['checkout.openTime'], { n: nextOpenTime.replace(/\d/g, (digit) => fmt.num(Number(digit))) })}
         </p>
       </div>
     </div>

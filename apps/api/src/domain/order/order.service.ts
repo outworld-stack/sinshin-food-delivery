@@ -170,6 +170,7 @@ export class OrderService {
         ): Promise<CheckoutServiceResult> {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
+                await this.deps.settings.assertOrderPaymentsAllowed(db);
 
                 // A slow maps provider must not hold wallet/user/campaign locks.
                 // Only route measurements are prepared; ownership, coordinates and
@@ -500,6 +501,11 @@ export class OrderService {
 
                         // ── تصویر لحظه‌ایِ ردیابی — لحظه‌ی ثبت ──
                         const trackingEnabled = await this.deps.settings.liveTrackingEnabled(tx);
+
+                        // Pricing/locks may have taken time. Read fresh before creating
+                        // the order or debiting its wallet; a rejection rolls back any
+                        // coupon reservation made earlier in this transaction.
+                        await this.deps.settings.assertOrderPaymentsAllowed(tx);
 
                         // ── سفارش ──
                         // امن-۶: برخورد displayId با onConflictDoNothing حل می‌شود —

@@ -21,7 +21,7 @@
 // بدون نوشتن DB). منبع = متن کامل فارسی (faSource) یا مرجع نمایشی؛ خروجی
 // در فیلد قرار می‌گیرد تا ادمین بازبینی و ذخیره کند (ذخیره = بج «دستی»).
 
-import { memo, useCallback, useId, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Loader, Wand2 } from 'reicon-react'
 import { translatePreview } from '#/server/translation'
 import { useToastStore } from '#/stores/toastStore'
@@ -63,6 +63,7 @@ interface ArFieldProps {
   /** متن راهنمای داخل فیلد — پیش‌فرض: «خالی = نمایش همان متن فارسی» */
   placeholder?: string
   maxLength?: number
+  minLength?: number
   /** نمایش متن فارسیِ مرجع زیر برچسب (برای ترجمه‌ی راحت‌تر) */
   faReference?: string
   /** round-35 — متن کامل فارسی برای ترجمه‌ی ماشینی (وقتی faReference کوتاه‌شده است) */
@@ -82,6 +83,7 @@ export const ArField = memo(function ArField({
   rows = 3,
   placeholder = 'خالی = نمایش همان متن فارسی',
   maxLength,
+  minLength,
   faReference,
   faSource,
   disabled,
@@ -98,33 +100,72 @@ export const ArField = memo(function ArField({
   // منبع ترجمه: متن کامل اگر آمده، وگرنه مرجع نمایشی
   const translateSource = faSource ?? faReference
   const canSuggest = (translateSource ?? '').trim() !== ''
+  const request = useRef<symbol | null>(null)
+  const mounted = useRef(true)
+  const latest = useRef({ translateSource, value, disabled })
+  latest.current = { translateSource, value, disabled }
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      request.current = null
+    }
+  }, [])
+  useEffect(() => {
+    // A preview belongs to the exact source and draft that requested it.
+    request.current = null
+    setIsPreviewing(false)
+  }, [translateSource, value, disabled])
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (disabled) return
+      request.current = null
+      setIsPreviewing(false)
       setMachineSuggested(false) // ویرایش دستی → حالت «پیشنهاد ماشینی» پاک می‌شود
       onChange(e.target.value)
     },
-    [onChange],
+    [disabled, onChange],
   )
 
   // round-35 — پیشنهاد ماشینی: پر کردن فیلد بدون ذخیره؛ بازبینی با ادمین
   const handlePreview = useCallback(async () => {
     const source = (translateSource ?? '').trim()
-    if (source === '' || isPreviewing || disabled) return
+    if (source === '' || request.current !== null || disabled) return
+    const token = Symbol('translation-preview')
+    request.current = token
+    const isCurrent = () => mounted.current && request.current === token
+      && latest.current.translateSource === translateSource
+      && latest.current.value === value && !latest.current.disabled
     setIsPreviewing(true)
     try {
       const translations = await translatePreview([source])
-      if (translations[0] !== undefined) {
-        onChange(translations[0])
-        setMachineSuggested(true)
-        showToast('ترجمه‌ی پیشنهادی قرار گرفت — بازبینی و ذخیره کنید')
+      if (!isCurrent()) return
+      const translated = translations[0]?.trim()
+      if (!translated) {
+        showToast('ترجمه‌ای دریافت نشد؛ دوباره تلاش کنید', 'error')
+        return
       }
+      if (minLength !== undefined && translated.length < minLength) {
+        showToast(`ترجمه باید حداقل ${minLength.toLocaleString('fa-IR')} نویسه داشته باشد؛ متن را بازبینی کنید`, 'error')
+        return
+      }
+      if (maxLength !== undefined && translated.length > maxLength) {
+        showToast(`ترجمه بیشتر از ${maxLength.toLocaleString('fa-IR')} نویسه است؛ متن فارسی را کوتاه‌تر کنید یا ترجمه را دستی بنویسید`, 'error')
+        return
+      }
+      onChange(translated)
+      setMachineSuggested(true)
+      showToast('ترجمه‌ی پیشنهادی قرار گرفت — بازبینی و ذخیره کنید')
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'خطای ترجمه', 'error')
+      if (isCurrent()) showToast(err instanceof Error ? err.message : 'خطای ترجمه', 'error')
     } finally {
-      setIsPreviewing(false)
+      if (request.current === token) {
+        request.current = null
+        setIsPreviewing(false)
+      }
     }
-  }, [translateSource, isPreviewing, disabled, onChange, showToast])
+  }, [translateSource, value, disabled, minLength, maxLength, onChange, showToast])
 
   return (
     <div>
@@ -181,6 +222,7 @@ export const ArField = memo(function ArField({
           dir="rtl"
           placeholder={placeholder}
           maxLength={maxLength}
+          minLength={minLength}
           disabled={disabled}
           className={`${inputCls} resize-y`}
         />
@@ -193,6 +235,7 @@ export const ArField = memo(function ArField({
           dir="rtl"
           placeholder={placeholder}
           maxLength={maxLength}
+          minLength={minLength}
           disabled={disabled}
           className={inputCls}
         />

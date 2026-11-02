@@ -107,6 +107,7 @@ try {
   const orderService = new OrderService({
     db, config, coupons: new CouponService({ db }),
     settings: {
+      assertOrderPaymentsAllowed: async () => undefined,
       liveTrackingEnabled: async () => false,
       restaurantStatus: async () => ({ anyClosed: false }),
       isBusy: async () => busy,

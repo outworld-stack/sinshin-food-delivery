@@ -35,6 +35,9 @@ mock.module('#/server/checkout', () => ({
   },
   mockPay: async () => pay(),
 }))
+mock.module('#/utils/queryOptions', () => ({
+  restaurantStatusOptions: { queryKey: qk.restaurantStatus, queryFn: async () => ({ paymentsDisabled: false }) },
+}))
 const location = { href: 'https://sinshin.test/dashboard/orders/order-a' }
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { location } })
 

@@ -48,8 +48,11 @@ export const Route = createFileRoute('/checkout/')({
 
 function CheckoutPage() {
 	const navigate = useNavigate()
-	// خودِ وضعیت — loaderData مستقیم دیتای کوئری است
-	const restaurantStatus = Route.useLoaderData()
+	// Subscribe to refreshed status/hours while retaining the loader's SSR data.
+	const { data: restaurantStatus } = useQuery({
+		...restaurantStatusOptions,
+		initialData: Route.useLoaderData(),
+	})
 	const hasHydrated = useHydrated()
 	const { t } = useI18n()
 
@@ -64,7 +67,11 @@ function CheckoutPage() {
 	})
 
 	// ⬅ هوک صاحب کوئری جزئیات — آدرس و نوع تحویل و آیتم‌ها → هزینه‌ی ناحیه‌ای زنده
-	const page = useCheckoutPage({ items, isAuthenticated })
+	const page = useCheckoutPage({
+		items,
+		isAuthenticated,
+		paymentsDisabled: restaurantStatus.paymentsDisabled,
+	})
 
 	// ریدایرکت سبد خالی — با useEffect نه پیمایش وسط رندر (SSR-safe)
 	useEffect(() => {
@@ -101,13 +108,15 @@ function CheckoutPage() {
 				{t['checkout.title']}
 			</h1>
 
-			{/* آیتم ۲۲: اطلاع بسته بودن رستوران */}
-			<div className="mb-6">
-				<RestaurantStatusNotice
-					isOpen={restaurantStatus.isOpen}
-					nextOpenTime={restaurantStatus.nextOpenTime}
-				/>
-			</div>
+			{/* Temporary closures are explained only below the payment button. */}
+			{!restaurantStatus.isOpen && !restaurantStatus.temporarilyClosed && (
+				<div className="mb-6">
+					<RestaurantStatusNotice
+						isOpen={restaurantStatus.isOpen}
+						nextOpenTime={restaurantStatus.nextOpenTime}
+					/>
+				</div>
+			)}
 
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 				<div className="lg:col-span-2 space-y-6">

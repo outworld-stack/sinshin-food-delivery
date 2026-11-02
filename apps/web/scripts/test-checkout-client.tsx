@@ -82,11 +82,11 @@ type Page = ReturnType<typeof useCheckoutPage>
 
 // Render-phase updates exercise React's real reducer and preserve its refs;
 // no hook source extraction, reducer copies, browser APIs or live API calls.
-function renderCheckout(coupon?: string, delivery?: { addressId?: string }): Page {
+function renderCheckout(coupon?: string, delivery?: { addressId?: string }, paymentsDisabled = false): Page {
   let page!: Page
   let step = 0
   function Probe() {
-    page = useCheckoutPage({ items: [{ productId: 'product-1', sizeId: 'size-1', quantity: 1 }], isAuthenticated: true })
+    page = useCheckoutPage({ items: [{ productId: 'product-1', sizeId: 'size-1', quantity: 1 }], isAuthenticated: true, paymentsDisabled })
     if (step === 0) {
       step++
       page.handleDeliveryTypeChange(delivery ? 'DELIVERY' : 'PICKUP')
@@ -113,6 +113,16 @@ async function submit(page: Page) {
   assert(pendingMutation, 'real submit handler must reach checkout mutation')
   await pendingMutation
   assert.equal(checkoutRequests.length, count + 1)
+}
+
+for (const amount of [0, 100]) {
+  onlineAmount = amount
+  const blocked = renderCheckout(undefined, undefined, true)
+  assert(blocked.isSubmitBlocked, 'temporary payment pause blocks wallet and gateway submission')
+  const before = checkoutRequests.length
+  blocked.handleFinalSubmit()
+  assert.equal(checkoutRequests.length, before, 'direct submit handler cannot bypass the pause')
+  assert.equal(toasts.at(-1), 'checkout.paymentsPausedHint')
 }
 
 // Blocked storage cannot interrupt wallet success, order activation or routing.
@@ -371,7 +381,7 @@ const summaryProps = {
   subtotal: 100_000, discount: 0, walletDeduction: 0, deliveryFee: 60_000, packagingFee: 0,
   total: 160_000, amountPaidOnline: 160_000, deliveryType: 'DELIVERY' as const,
   isLoading: false, isSubmitBlocked: false, isSubmitting: false, onSubmit: () => {},
-  restaurantStatus: { isOpen: true, nextOpenTime: '', closeReason: null, isBusy: false },
+  restaurantStatus: { isOpen: true, temporarilyClosed: false, paymentsDisabled: false, nextOpenTime: '', closeReason: null, isBusy: false },
 }
 const readySummary = renderToStaticMarkup(createElement(OrderSummary, { ...summaryProps, deliveryDistanceKm: 5.001 }))
 assert(readySummary.includes('60000'))

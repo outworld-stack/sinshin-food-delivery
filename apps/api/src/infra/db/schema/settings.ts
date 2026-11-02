@@ -15,7 +15,7 @@ import type { AboutLocationDto, ArticleBlocksDoc } from '@sinshin/shared'
  * دو نوع بسته‌بودن:
  *  restaurant_open       → ساعتی (باز/بسته روزانه) — فقط ادمین اصلی؛ بسته = لاگین ادمین۲ رد
  *  temporarily_closed    → موقت (قطع گاز/برق/...) — ادمین اصلی + ادمین۲ با permission؛
- *                          قوانین کاربر مثل ساعتی است (سفارش آزاد) ولی ادمین۲ می‌تواند لاگین/بماند
+ *                          پرداخت با temporary_payments_disabled اختیاری است؛ ادمین۲ می‌تواند لاگین/بماند
  */
 export const settings = pgTable('settings', {
   key: varchar('key', { length: 60 }).primaryKey(),
@@ -31,6 +31,8 @@ export const SETTING_KEYS = {
   restaurantHours: 'restaurant_hours', // { openingTime, closingTime } in HH:mm
   /** موقت — نوع ۲ */
   temporarilyClosed: 'temporarily_closed', // boolean
+  /** Blocks new order payments only while temporarily_closed is true. */
+  temporaryPaymentsDisabled: 'temporary_payments_disabled', // boolean; missing = false
   temporaryCloseReason: 'temporary_close_reason', // string — نمایش به کاربر
   /** round-29 — زمان باز شدن مجددِ بسته‌ی موقت (مثلاً «۱۹:۰۰») — جدا از next_open_time ساعتی */
   temporaryReopenTime: 'temporary_reopen_time', // string

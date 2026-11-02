@@ -754,16 +754,27 @@ export interface RestaurantHoursDto {
   closingTime: string
 }
 
+/** Minimum trimmed length of a temporary-closure message shown to customers. */
+export const TEMPORARY_CLOSE_REASON_MIN_LENGTH = 20
+
 export interface RestaurantStatusDto {
   isOpen: boolean
   temporarilyClosed: boolean
+  /** Order payments are paused only while a temporary closure is active. */
+  paymentsDisabled: boolean
   temporaryCloseReason: string | null
-  /** round-29 — زمان باز شدن مجددِ بسته‌ی موقت ('' = ثبت نشده) — جدا از nextOpenTime ساعتی */
+  /** Optional administrative estimate for reopening after a temporary closure. */
   temporaryReopenTime: string
+  /** Saved daily opening time in restaurant-local HH:mm for regular closure notices. */
   nextOpenTime: string
   anyClosed: boolean
   /** stage-84 — وضعیت «شلوغ» (فقط اطلاع‌رسانی؛ سفارش‌دهی آزاد) */
   isBusy: boolean
+}
+
+/** Untranslated editing fields are exposed only to restaurant administrators. */
+export interface AdminRestaurantStatusDto extends RestaurantStatusDto {
+  temporaryCloseReasonAr: string | null
 }
 
 // ═══════════ مجوز ثبت‌نام ویژه (stage-79) ═══════════
@@ -786,11 +797,12 @@ export interface RegistrationPermitDto {
   revokedAt: string | null
 }
 
-/** رارد ۴۷ — نمای نمایشی وضعیت رستوران در چک‌اوت — view-model عمدی:
- *  «بسته‌ی ساعتی» و «بسته‌ی موقت» (round-29) در یک isOpen ادغام می‌شوند و
- *  علت/زمانِ موقت بر ساعت اصلی مقدم است. مبدل در server/checkout فرانت است. */
+/** Checkout status keeps temporary closures distinct so only their reason is shown. */
 export interface RestaurantStatusDisplay {
   isOpen: boolean
+  temporarilyClosed: boolean
+  paymentsDisabled: boolean
+  /** Regular daily opening time, used for the permanent-closure notices. */
   nextOpenTime: string
   closeReason: string | null
   /** stage-84 — شلوغی (برای هشدارِ زیر باکس توضیحات در سرو در محل) */

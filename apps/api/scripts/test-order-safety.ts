@@ -60,6 +60,7 @@ try {
     // order.service آمده بود ولی استابِ این تست به‌روز نشده بود (تست از
     // آن موقع در دروازه‌ها اجرا نمی‌شد) — حالا دوباره سبز و بخشِ دروازه.
     settings: {
+      assertOrderPaymentsAllowed: async () => undefined,
       liveTrackingEnabled: () => trackingHook(),
       restaurantStatus: () => restaurantStatusHook(),
       isBusy: async () => false,

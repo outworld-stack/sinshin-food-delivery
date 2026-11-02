@@ -307,6 +307,8 @@ export const restaurantStatusOptions = queryOptions({
         queryFn: () => getRestaurantStatus(),
         // ۳۰s — باز/بسته بودن نباید کل کش رو شلوغ کنه ولی رفرش هم لازمه
         staleTime: 30_000,
+        // Keep both checkout notices current after an admin changes the hours.
+        refetchInterval: 60_000,
 })
 
 // جزئیات چک‌اوت — آیتم‌ها + نوع تحویل + آدرس

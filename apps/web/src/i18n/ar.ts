@@ -284,6 +284,9 @@ export const ar: Dict = {
         'checkout.submitPay': 'الدفع وتسجيل الطلب نهائياً',
         'checkout.processing': 'جارٍ المعالجة...',
         'checkout.closedTitle': 'المطعم مغلق حالياً',
+        'checkout.temporaryClosed': 'المطعم مغلق بشكل مؤقت حالياً.',
+        'checkout.paymentsPaused': 'الدفع معطّل مؤقتاً',
+        'checkout.paymentsPausedHint': 'دفع الطلبات معطّل حتى انتهاء الإغلاق المؤقت للمطعم.',
         'checkout.closedNote':
                 'بعد الدفع، سيُرسل طلبك في أول وقت ممكن بعد افتتاح المطعم.',
         'checkout.closedSummary':

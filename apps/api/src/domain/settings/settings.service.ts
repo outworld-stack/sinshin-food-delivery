@@ -14,7 +14,7 @@ import type { AppConfig } from '#/infra/config/env'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
 import { DEFAULT_RESTAURANT_HOURS, isRestaurantHours, type RestaurantHoursDto, type RestaurantStatusDto } from '@sinshin/shared'
 import type { Lang } from '#/domain/shared/lang'
-import { Err } from '#/domain/shared/errors'
+import { Err, OrderPaymentsDisabledError } from '#/domain/shared/errors'
 
 // رارد ۴۶ — تایپ inline خروجی restaurantStatus با قرارداد مشترک
 // RestaurantStatusDto جایگزین شد (تولیدکننده حالا تایپ‌چک می‌شود)؛
@@ -91,8 +91,8 @@ export class SettingsService {
   }
 
   /** One KV value keeps the opening and closing times consistent on every read. */
-  async restaurantHours(): Promise<RestaurantHoursDto> {
-    const raw = await this.get<unknown>(SETTING_KEYS.restaurantHours, DEFAULT_RESTAURANT_HOURS)
+  async restaurantHours(db?: DbOrTx): Promise<RestaurantHoursDto> {
+    const raw = await this.get<unknown>(SETTING_KEYS.restaurantHours, DEFAULT_RESTAURANT_HOURS, db)
     const hours = isRestaurantHours(raw) ? raw : DEFAULT_RESTAURANT_HOURS
     return { openingTime: hours.openingTime, closingTime: hours.closingTime }
   }
@@ -110,14 +110,15 @@ export class SettingsService {
    *  round-34 — lang='ar': علت بسته‌بودن موقت از کلید موازی عربی
    *  (temporary_close_reason_ar) می‌آید؛ خالی = همان فارسی (fallback). */
   async restaurantStatus(lang: Lang = 'fa', db?: DbOrTx): Promise<RestaurantStatusDto> {
-    const [open, tempClosed, reason, reasonAr, tempReopen, nextOpenTime, busy] = await Promise.all([
+    const [open, tempClosed, reason, reasonAr, tempReopen, hours, busy, paymentsDisabled] = await Promise.all([
       this.get<boolean>(SETTING_KEYS.restaurantOpen, true, db),
       this.get<boolean>(SETTING_KEYS.temporarilyClosed, false, db),
       this.get<string>(SETTING_KEYS.temporaryCloseReason, '', db),
       this.get<string>(SETTING_KEYS.temporaryCloseReasonAr, '', db),
       this.get<string>(SETTING_KEYS.temporaryReopenTime, '', db),
-      this.get<string>(SETTING_KEYS.nextOpenTime, '۱۱:۰۰ صبح', db),
+      this.restaurantHours(db),
       this.get<boolean>(SETTING_KEYS.restaurantBusy, false, db),
+      this.get<boolean>(SETTING_KEYS.temporaryPaymentsDisabled, false, db),
     ])
     // round-34 — COALESCE: عربی خالی → همان فارسی (بدون ترجمه‌ی برچسب‌های زمانی —
     // ساعت‌ها عددی‌اند و فرانت با فرمتر خودش ارقام را عربی می‌کند)
@@ -128,10 +129,27 @@ export class SettingsService {
       temporarilyClosed: tempClosed,
       temporaryCloseReason: tempClosed ? effectiveReason : null,
       temporaryReopenTime: tempClosed ? tempReopen : '',
-      nextOpenTime,
+      nextOpenTime: hours.openingTime,
       anyClosed: !open || tempClosed,
       // stage-84 — شلوغی: مستقل از بسته‌بودن (رستورانِ بازِ شلوغ ممکن است)
       isBusy: busy,
+      paymentsDisabled: tempClosed === true && paymentsDisabled === true,
+    }
+  }
+
+  /** Money paths need fresh settings, including callers outside a transaction. */
+  async orderPaymentsDisabled(db?: DbOrTx): Promise<boolean> {
+    const readDb = db ?? this.deps.db
+    const [tempClosed, disabled] = await Promise.all([
+      this.get<boolean>(SETTING_KEYS.temporarilyClosed, false, readDb),
+      this.get<boolean>(SETTING_KEYS.temporaryPaymentsDisabled, false, readDb),
+    ])
+    return tempClosed === true && disabled === true
+  }
+
+  async assertOrderPaymentsAllowed(db?: DbOrTx): Promise<void> {
+    if (await this.orderPaymentsDisabled(db)) {
+      throw new OrderPaymentsDisabledError()
     }
   }
 

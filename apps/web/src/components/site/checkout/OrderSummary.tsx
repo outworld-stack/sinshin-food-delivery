@@ -49,7 +49,9 @@ export const OrderSummary = memo(function OrderSummary({
 	const finalAmount = total - walletDeduction
 	const deliveryUnquoted = deliveryType === 'DELIVERY' && deliveryFeeMessage !== null
 	const buttonText =
-		finalAmount === 0 && !deliveryUnquoted ? t['checkout.submitFree'] : t['checkout.submitPay']
+		restaurantStatus.paymentsDisabled
+			? t['checkout.paymentsPaused']
+			: finalAmount === 0 && !deliveryUnquoted ? t['checkout.submitFree'] : t['checkout.submitPay']
 
 	return (
 		<div className="lg:col-span-1">
@@ -138,7 +140,7 @@ export const OrderSummary = memo(function OrderSummary({
 						<button
 							type="button"
 							onClick={onSubmit}
-							disabled={isSubmitting || isSubmitBlocked || deliveryUnquoted}
+							disabled={isSubmitting || isSubmitBlocked || deliveryUnquoted || restaurantStatus.paymentsDisabled}
 							className="block w-full py-4 rounded-xl bg-primary dark:bg-dark-primary text-white font-DanaDemiBold text-lg hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 						>
 							{isSubmitting ? t['checkout.processing'] : buttonText}
@@ -160,16 +162,11 @@ export const OrderSummary = memo(function OrderSummary({
 						{/* رستوران بسته — تو باکس خلاصه، زیر دکمه */}
 						{!restaurantStatus.isOpen && (
 							<div className="mt-4 p-3 rounded-xl bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20">
-								<p className="text-xs text-orange-600 dark:text-orange-400 font-DanaMedium leading-relaxed text-center">
-									{tpl(t['checkout.closedSummary'], { n: restaurantStatus.nextOpenTime })}
+								<p className="text-xs text-orange-600 dark:text-orange-400 font-DanaMedium leading-relaxed text-center whitespace-pre-wrap wrap-break-word">
+									{restaurantStatus.temporarilyClosed
+										? restaurantStatus.closeReason?.trim() || t['checkout.temporaryClosed']
+										: tpl(t['checkout.closedSummary'], { n: restaurantStatus.nextOpenTime.replace(/\d/g, (digit) => fmt.num(Number(digit))) })}
 								</p>
-								{/* round-13 — علت بسته‌شدن موقت (اعلام‌شده توسط ادمین) */}
-								{restaurantStatus.closeReason && (
-									<p className="text-[11px] text-orange-500 dark:text-orange-300 font-DanaMedium leading-relaxed text-center mt-2 pt-2 border-t border-orange-200 dark:border-orange-500/20">
-										<span className="font-DanaDemiBold">{t['checkout.closeReason']} </span>
-										{restaurantStatus.closeReason}
-									</p>
-								)}
 							</div>
 						)}
 						{/* قانون: بدون لغو — فقط پرداخت ناموفق (پرسش ۴) */}

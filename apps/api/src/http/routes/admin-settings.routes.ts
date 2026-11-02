@@ -7,7 +7,7 @@
 
 // src/http/routes/admin-settings.routes.ts
 import { Elysia, t } from 'elysia'
-import { RESTAURANT_TIME_PATTERN } from '@sinshin/shared'
+import { RESTAURANT_TIME_PATTERN, TEMPORARY_CLOSE_REASON_MIN_LENGTH, type AdminRestaurantStatusDto } from '@sinshin/shared'
 import type { SessionService } from '#/domain/auth/session.service'
 import type { Admin2Service } from '#/domain/admin2/admin2.service'
 import type { DeliveryZoneService } from '#/domain/delivery/delivery-zone.service'
@@ -51,7 +51,16 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     })
     .get(
       '/restaurant/status',
-      () => deps.settings.restaurantStatus(),
+      async (): Promise<AdminRestaurantStatusDto> => {
+        const [status, reasonAr] = await Promise.all([
+          deps.settings.restaurantStatus(),
+          deps.settings.get<string>(SETTING_KEYS.temporaryCloseReasonAr, ''),
+        ])
+        return {
+          ...status,
+          temporaryCloseReasonAr: status.temporarilyClosed ? reasonAr || null : null,
+        }
+      },
       { detail: { summary: 'Full status — schedule + temporary + busy' } },
     )
     // stage-84 — اعلام وضعیت «شلوغ» (ادمین اصلی + ادمین۲ با canAnnounceBusy؛
@@ -89,6 +98,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           body.reopenTime ?? null,
           // round-34 — علت عربی (اختیاری؛ خالی = همان فارسی در حالت عربی چک‌اوت)
           body.reasonAr ?? null,
+          body.disablePayments ?? false,
         )
         // round-13 — ممیزی برای هر دو نقش (قبلاً ادمین اصلی هیچ ردی نداشت)
         await deps.audit.log({
@@ -100,6 +110,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
             reason: body.reason,
             reopenTime: body.reopenTime ?? null,
             reasonAr: body.reasonAr ?? null,
+            disablePayments: body.closed && (body.disablePayments ?? false),
           },
         })
         return { success: true }
@@ -107,17 +118,19 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       {
         body: t.Object({
           closed: t.Boolean(),
-          /** round-13 — علت برای بستن «و» باز کردن اجباری است (به مشتری در چک‌اوت نمایش داده می‌شود) */
+          /** Closing requires 20 trimmed characters; reopening requires 3 for the audit trail. */
           reason: t.String({ minLength: 3, maxLength: 120 }),
-          /** round-29 — زمان باز شدن مجدد (اختیاری؛ فقط هنگام بستن معنا دارد) — در چک‌اوت به‌جای ساعت کاری اصلی نمایش داده می‌شود */
+          /** Optional legacy metadata; temporary checkout warnings show only the reason. */
           reopenTime: t.Optional(t.String({ maxLength: 40 })),
           /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = پشتیبان فارسی) */
           reasonAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
+          /** Optional: block new order payments for this temporary closure. Defaults to false. */
+          disablePayments: t.Optional(t.Boolean()),
         }),
         detail: {
           summary: 'Temporary close/open — reason REQUIRED (shown to customers)',
           description:
-            'Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Reason (3-120 chars) is required for BOTH closing and opening; customers see it in the checkout order-summary box. reopenTime (optional, closing only) replaces the scheduled next-open time shown to customers while temporarily closed. Same rules as schedule-close (orders queue), but level-2 login stays allowed. round-34: reasonAr is the Arabic reason shown when x-sinshin-lang: ar.',
+            `Admin always allowed. Level-2 with canToggleTemporaryClose allowed. Closing requires a trimmed reason of ${TEMPORARY_CLOSE_REASON_MIN_LENGTH}-120 characters; reopening requires a trimmed audit reason of 3-120 characters. Temporary closures show only the reason below the checkout payment button, without a top-of-page alert or scheduled reopening time. Orders queue unless disablePayments=true blocks new order payments for this temporary closure; it defaults to false and is cleared on reopening. Level-2 login stays allowed. Optional reasonAr uses the same closing length limit when nonblank; empty/null falls back to the primary reason. Optional reopenTime remains closing-only metadata and is cleared together with both reasons on reopening.`,
         },
       },
     )

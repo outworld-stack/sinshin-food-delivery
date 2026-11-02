@@ -40,7 +40,7 @@ import { checkoutRequestHash, type CheckoutIdempotency } from '#/domain/order/ch
 import type { SseHub } from '#/infra/realtime/sse-hub'
 import type { NotificationService } from '#/domain/notification/notification.service'
 import { requireAuth } from '#/http/hooks/require-auth'
-import { Err } from '#/domain/shared/errors'
+import { Err, OrderPaymentsDisabledError } from '#/domain/shared/errors'
 import { langFromHeaders } from '#/domain/shared/lang'
 import type { CheckoutResponse } from '@sinshin/shared'
 import { normalizeCouponCode } from '@sinshin/shared'
@@ -286,15 +286,17 @@ export const orderRoutes = (deps: OrderRoutesDeps) => {
             // ✅ رارد C2: سفارش در DB ثبت شده — release ممنوع. پاسخِ قفل‌شده
             // باعث می‌شود replayِ همان کلید دوباره سفارش نسازد؛ کاربر پرداخت
             // را از صفحه‌ی سفارش ادامه می‌دهد (job تایم‌اوت هم آن را می‌پاید).
-            if (idemKey) {
-              await deps.idempotency.complete(user.id, ownedClaim, {
-                orderCompleted: false,
-                orderId: committed.displayId,
-                requiresPayment: true,
-                paymentUrl: undefined,
-                breakdown: committed.breakdown,
-              })
+            const recovery: CheckoutResponse = {
+              orderCompleted: false,
+              orderId: committed.displayId,
+              requiresPayment: true,
+              paymentUrl: undefined,
+              breakdown: committed.breakdown,
             }
+            if (idemKey) await deps.idempotency.complete(user.id, ownedClaim, recovery)
+            // A newly announced payment stop is not a PSP outage. Keep the
+            // durable order response so the customer reaches its recovery page.
+            if (e instanceof OrderPaymentsDisabledError) return recovery
             throw Err.serviceUnavailable(
               `سفارش ${committed.displayId} ثبت شد اما اتصال به درگاه برقرار نشد؛ ` +
                 'پرداخت را از صفحه‌ی سفارش ادامه دهید.',

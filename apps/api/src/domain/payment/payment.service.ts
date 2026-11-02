@@ -22,7 +22,7 @@ import type { Db, DbOrTx, Tx } from '#/infra/db/client'
 import { coupons, orders, payments, reconcileFindings, users, type OrderRow, type PaymentRow } from '#/infra/db/schema'
 import type { PaymentId } from '#/domain/shared/brand'
 import type { AppConfig } from '#/infra/config/env'
-import { AppError, Err } from '#/domain/shared/errors'
+import { AppError, Err, OrderPaymentsDisabledError } from '#/domain/shared/errors'
 import { lockWalletAccounts } from '#/domain/shared/wallet-sql'
 import type { OrderService } from '#/domain/order/order.service'
 import { SettingsService } from '#/domain/settings/settings.service'
@@ -46,6 +46,7 @@ class PaymentReviewError extends AppError {
 
 export class PaymentService {
   private readonly gateways: Map<string, PaymentGateway>
+  private readonly settings: SettingsService
   private reconcileAfterId: PaymentId | null = null
   private expiryAfterId: OrderRow['id'] | null = null
 
@@ -60,6 +61,7 @@ export class PaymentService {
       notifications: NotificationService
     },
   ) {
+    this.settings = new SettingsService({ db: deps.db })
     this.gateways = new Map<string, PaymentGateway>([
       ['MOCK', new MockAdapter(deps.config)],
       ['ZARINPAL', new ZarinpalAdapter(deps.config)],
@@ -96,7 +98,7 @@ export class PaymentService {
   ): Promise<{ paymentUrl: string }> {
     const { db } = this.deps
     const initToken = crypto.randomUUID()
-    const { pending, order, gw } = await this.moneyTransaction(async (tx) => {
+    const initiation = await this.moneyTransaction(async (tx) => {
       const [pending] = await tx.select().from(payments).where(eq(payments.id, paymentId)).for('update')
       if (!pending || pending.status !== 'PENDING' || pending.gatewayRef || pending.metadata?.paymentUrl ||
         (pending.metadata?.initToken && pending.metadata?.initFailed !== true)) {
@@ -108,11 +110,25 @@ export class PaymentService {
       const invalid = this.paymentIntegrity(pending, order)
       if (invalid) throw new PaymentReviewError(pending, invalid)
       const gw = this.gateway(pending.gateway)
+      try {
+        await this.settings.assertOrderPaymentsAllowed(tx)
+      } catch (error) {
+        if (!(error instanceof OrderPaymentsDisabledError)) throw error
+        // This locked attempt has no PSP reference, URL, or active initiation.
+        // Record that nothing was sent so reopening need not wait the normal
+        // grace period reserved for a possibly running PSP request.
+        await tx.update(payments).set({
+          metadata: { ...(pending.metadata ?? {}), initFailed: true }, updatedAt: new Date(),
+        }).where(eq(payments.id, paymentId))
+        return { blocked: error }
+      }
       await tx.update(payments).set({
         metadata: { ...(pending.metadata ?? {}), initToken, initFailed: false }, updatedAt: new Date(),
       }).where(eq(payments.id, paymentId))
       return { pending, order, gw }
     })
+    if ('blocked' in initiation) throw initiation.blocked
+    const { pending, order, gw } = initiation
     // The persisted attempt is the authority for its gateway and amount.
 
     // phase-2 (باگ 🔴۲): state داخل callbackUrl —
@@ -128,6 +144,7 @@ export class PaymentService {
 
     let r: Awaited<ReturnType<PaymentGateway['init']>>
     try {
+      await this.settings.assertOrderPaymentsAllowed(db)
       r = await gw.init({
         paymentId,
         displayId: order.displayId,
@@ -153,6 +170,9 @@ export class PaymentService {
     // A slow initialization may finish after the order deadline. Keep its
     // reference for reconciliation, but never hand out an expired session.
     if (this.paymentWindowClosed(order)) throw Err.conflict('مهلت شروع پرداخت این سفارش به پایان رسیده است.')
+    // A closure during a slow PSP request must not expose another payable URL.
+    // Keep its reference above so an already authorized payment can still settle.
+    await this.settings.assertOrderPaymentsAllowed(db)
 
     return { paymentUrl: r.paymentUrl }
   }
@@ -413,6 +433,7 @@ export class PaymentService {
       if (this.paymentWindowClosed(currentOrder)) {
         throw Err.conflict('مهلت شروع پرداخت به پایان رسیده است؛ وضعیت سفارش را به‌روز کنید.')
       }
+      await this.settings.assertOrderPaymentsAllowed(tx)
       const invalid = this.paymentIntegrity(last, currentOrder)
       if (invalid) throw new PaymentReviewError(last, invalid)
       const [settled] = await tx.select().from(payments)
@@ -441,7 +462,7 @@ export class PaymentService {
 
       // A fresh attempt must respect the current gateway switch. Existing
       // sessions can still resume and settle after their gateway is disabled.
-      const enabled = await new SettingsService({ db }).enabledGateways(tx)
+      const enabled = await this.settings.enabledGateways(tx)
       const key = gwId.toLowerCase() as keyof typeof enabled
       if (key in enabled && !enabled[key]) {
         throw Err.validation('درگاه پرداخت انتخابی در حال حاضر غیرفعال است.')
@@ -462,6 +483,7 @@ export class PaymentService {
     if ('paymentUrl' in attempt) {
       // Payment-row locks and sibling cleanup can also outlast the deadline.
       if (this.paymentWindowClosed(order)) throw Err.conflict('مهلت شروع پرداخت به پایان رسیده است؛ وضعیت سفارش را به‌روز کنید.')
+      await this.settings.assertOrderPaymentsAllowed(db)
       return { paymentUrl: attempt.paymentUrl, displayId: order.displayId }
     }
 
@@ -499,6 +521,7 @@ export class PaymentService {
     if (!last) return 'failed'
     if (last.status === 'SUCCESS') return 'success'
     if (last.status !== 'PENDING') return 'failed'
+    if (await this.settings.orderPaymentsDisabled(this.deps.db)) return 'stale'
     if (cachedUrl && last.metadata?.paymentUrl !== cachedUrl) return 'stale'
     return !this.paymentWindowClosed(order) &&
       Date.now() - last.updatedAt.getTime() < this.deps.config.pendingOrderExpiryMinutes * 60_000 ? 'fresh' : 'stale'
@@ -842,6 +865,11 @@ export class PaymentService {
       const invalid = this.paymentIntegrity(current, orderRow)
       if (invalid || orderRow.status !== 'PENDING_PAYMENT') {
         throw new PaymentReviewError(current, invalid ?? 'payment result for an order that is no longer pending')
+      }
+      // MOCK success is a new user payment action, unlike a PSP callback that
+      // proves money was already charged. Never block real settlement here.
+      if (success && current.gateway === 'MOCK') {
+        await this.settings.assertOrderPaymentsAllowed(tx)
       }
       let otherPending = false
       if (!success && !expirySnapshot) {

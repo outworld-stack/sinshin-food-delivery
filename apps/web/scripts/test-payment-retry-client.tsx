@@ -12,6 +12,7 @@ let response: unknown = { paymentUrl: 'https://sep.shaparak.ir/api/v1/Payment/Pa
 let requestError: Error | undefined
 let requestGate: Promise<void> = Promise.resolve()
 let pendingMutation: Promise<void> | undefined
+let paymentsDisabled = false
 
 mock.module('#/lib/api-fetch', () => ({
   authJson: async (path: string, method: string, body: unknown) => {
@@ -24,6 +25,7 @@ mock.module('#/lib/api-fetch', () => ({
   fetchWithTimeout: async () => { throw new Error('Unexpected mock payment') },
 }))
 mock.module('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: { paymentsDisabled } }),
   useQueryClient: () => ({ invalidateQueries: async (input: unknown) => { invalidations.push(input) } }),
   useMutation: (options: any) => ({
     // Keep false to exercise the real hook's same-frame double-click guard.
@@ -37,6 +39,7 @@ mock.module('@tanstack/react-query', () => ({
     },
   }),
 }))
+mock.module('#/utils/queryOptions', () => ({ restaurantStatusOptions: { queryKey: qk.restaurantStatus } }))
 mock.module('#/i18n', () => ({
   useI18n: () => ({ t: new Proxy({}, { get: (_target, key) => String(key) }), apiError: (message: string) => message }),
 }))
@@ -59,7 +62,7 @@ assert.equal(location.href, '', 'wait for the gateway response before navigating
 release()
 await pendingMutation
 assert.equal(location.href, 'https://sep.shaparak.ir/api/v1/Payment/PaymentPage?Token=existing-token')
-assert.deepEqual(invalidations.at(-1), { queryKey: qk.orderDetails('ord-retry') })
+assert.deepEqual(invalidations.slice(-2), [{ queryKey: qk.orderDetails('ord-retry') }, { queryKey: qk.restaurantStatus }])
 assert.equal(toasts.length, 0)
 
 // A timeout/conflict can mean the payment settled meanwhile. Refresh the
@@ -71,7 +74,7 @@ await pendingMutation
 assert.equal(requests.length, 2)
 assert.equal(location.href, '')
 assert.equal(toasts.at(-1), requestError.message)
-assert.equal(invalidations.length, 2)
+assert.equal(invalidations.length, 4)
 requestError = undefined
 response = { paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/new-token', displayId: 'ord-retry' }
 page.handleRetry()
@@ -85,7 +88,7 @@ page.handleRetry()
 await pendingMutation
 assert.equal(location.href, '')
 assert.equal(toasts.at(-1), 'dash.orderDetail.pendingRetryNoUrl')
-assert.equal(invalidations.length, 4)
+assert.equal(invalidations.length, 8)
 for (const paymentUrl of ['https://attacker.example/pay', 'javascript:alert(1)', '/api/payments/not-mock/id']) {
   response = { paymentUrl, displayId: 'ord-retry' }
   page.handleRetry()
@@ -112,5 +115,17 @@ assert.equal(form.method, 'POST')
 assert.equal(form.action, 'https://bpm.shaparak.ir/pgwchannel/startpay.mellat')
 assert.deepEqual(form.fields, [{ type: 'hidden', name: 'RefId', value: 'REF123' }])
 assert.equal(location.href, '', 'Mellat must use form POST, never a GET redirect')
-assert.deepEqual(invalidations.at(-1), { queryKey: qk.orderDetails('ord-retry') })
+assert.deepEqual(invalidations.slice(-2), [{ queryKey: qk.orderDetails('ord-retry') }, { queryKey: qk.restaurantStatus }])
+paymentsDisabled = true
+renderToStaticMarkup(createElement(Probe))
+assert.equal(page.paymentsDisabled, true)
+const beforePaused = requests.length
+page.handleRetry()
+assert.equal(requests.length, beforePaused, 'payment retry does not make a request while paused')
+assert.equal(toasts.at(-1), 'checkout.paymentsPausedHint')
+paymentsDisabled = false
+renderToStaticMarkup(createElement(Probe))
+page.handleRetry()
+await pendingMutation
+assert.equal(requests.length, beforePaused + 1, 'retry becomes available after the pause is lifted')
 console.log('Payment retry client passed: authenticated order request, gateway redirect, double-click guard, recoverable errors and order refresh.')

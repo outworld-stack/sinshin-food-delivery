@@ -20,9 +20,7 @@ export type { DeliveryType }
 
 export type CouponStatus = 'NONE' | 'HAVE'
 
-// رارد ۴۷ — وضعیت نمایشی رستوران = قرارداد مشترک (view-model عمدی چک‌اوت:
-// ادغام بسته‌ی ساعتی/موقت — مبدل در server/checkout). قبلاً کپی محلی بود
-// و closeReason را اختیاری می‌خواند در حالی که همیشه ارسال می‌شود.
+// The shared checkout view model preserves temporary closures for distinct notices.
 export type RestaurantStatus = RestaurantStatusDisplay
 
 // رارد ۴۳ — InvoiceData مرده بود و حذف شد؛ تایپ‌های پیش‌نمایش

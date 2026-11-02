@@ -133,7 +133,7 @@ try {
   await service.setPermissions(ordinary.id, { canAnnounceBusy: true })
   await db.insert(admin2Sessions).values({ adminUserId: asUserId(ordinary.id) })
   await service.setBusy(ordinary.id, 'admin2', true)
-  await service.setTemporaryClose(ordinary.id, 'admin2', true, 'Maintenance')
+  await service.setTemporaryClose(ordinary.id, 'admin2', true, 'Scheduled kitchen maintenance')
   assert.equal((await service.sessions(ordinary.id))[0]!.wasActive, true)
   const writesBeforeDisable = settingsWrites.length
   await service.toggleActive(ordinary.id)

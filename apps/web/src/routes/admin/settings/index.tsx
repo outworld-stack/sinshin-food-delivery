@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 // ⬅ NEW: پیش‌واکشی نقش‌محور در loader — هر دو نقش: ناحیه‌های ارسال؛
 // ادمین اصلی: پرچم‌های تنظیمات + محتوای درباره‌ما/گالری (مهم‌ترین کوئری‌های صفحه)
 import { createFileRoute } from '@tanstack/react-router'
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback } from 'react'
 import { Discover2, Pin } from 'reicon-react'
 import { AboutContentForm } from '#/components/admin/settings/AboutContentForm'
 import { DeliveryZonesManager } from '#/components/admin/settings/DeliveryZonesManager'
@@ -65,7 +65,6 @@ const SettingsContent = memo(function SettingsContent() {
 	const content = useSiteContentSettings({ enabled: isMainAdmin })
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
-	const [nextOpenTime, setNextOpenTime] = useState('۱۱:۰۰ صبح')
 
 	// پرچم‌های تنظیمات از فکتوری — staleTime داخل فکتوری متمرکزه
 	const { data: tracking } = useQuery({
@@ -94,7 +93,7 @@ const SettingsContent = memo(function SettingsContent() {
 
 	const restaurantMutation = useMutation({
 		mutationFn: (isOpen: boolean) =>
-			setRestaurantOpen({ data: { isOpen, nextOpenTime } }),
+			setRestaurantOpen({ data: { isOpen } }),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: qk.settingsRestaurant })
 			queryClient.invalidateQueries({ queryKey: qk.settingsRestaurantStatus })
@@ -116,8 +115,6 @@ const SettingsContent = memo(function SettingsContent() {
 		if (statusFull && !restaurantMutation.isPending)
 			restaurantMutation.mutate(!statusFull.isOpen)
 	}, [statusFull, restaurantMutation])
-
-	// stage-84 — ساعت باز شدن از طریق onNextOpenTimeChange باکس وضعیت آپدیت می‌شود
 
 	const handlePatchImage = useCallback(
 		(id: string, fields: Omit<UpdateGalleryImageInput, 'id'>) =>
@@ -162,8 +159,6 @@ const SettingsContent = memo(function SettingsContent() {
 					busy={statusFull?.isBusy === true}
 					temporarilyClosed={statusFull?.temporarilyClosed === true}
 					onToggleHourly={handleRestaurantToggle}
-					nextOpenTime={nextOpenTime}
-					onNextOpenTimeChange={setNextOpenTime}
 				/>
 
 				{isMainAdmin && (

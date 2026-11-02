@@ -77,6 +77,7 @@ try {
   const orderService = new OrderService({
     db, config, coupons,
     settings: {
+      assertOrderPaymentsAllowed: async () => undefined,
       liveTrackingEnabled: async () => false,
       restaurantStatus: async () => ({ anyClosed: false }),
       // stage-84 — preview/checkout درگاه‌های فعال + شلوغی را می‌خواند
