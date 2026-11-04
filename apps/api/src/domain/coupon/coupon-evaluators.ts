@@ -83,6 +83,8 @@ export function evaluateCondition(
       return {
         satisfied: sql`${successfulOrdersExpr()} = 0 and not exists (
           select 1 from first_purchase_reservations fpr where fpr.user_id = u.id
+        ) and not exists (
+          select 1 from orders o where o.user_id = u.id and o.status = 'PENDING_PAYMENT'
         )`,
         current: successfulOrdersExpr(),
       }

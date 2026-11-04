@@ -97,7 +97,18 @@ try {
   }
   ;(paymentService as unknown as { gateways: Map<string, PaymentGateway> }).gateways.set('ZARINPAL', gateway)
   let userNumber = 0
-  const makeUser = async () => (await db.insert(users).values({ phone: `0915${String(++userNumber).padStart(7, '0')}` }).returning())[0]!
+  const makeUser = async (returning = false) => {
+    const user = (await db.insert(users).values({ phone: `0915${String(++userNumber).padStart(7, '0')}` }).returning())[0]!
+    // Coupon-capacity and retry scenarios below exercise established customers
+    // with multiple orders, independently of the first-order reservation gate.
+    if (returning) await db.insert(orders).values({
+      userId: user.id, displayId: `ord-history-${userNumber}`, status: 'PAID', paymentStatus: 'SUCCESS',
+      deliveryType: 'DINE_IN', totalAmount: 0,
+      breakdown: { foodTotal: 0, discount: 0, walletDeduction: 0, deliveryFee: 0,
+        packagingFee: 0, totalAmount: 0, amountPaidOnline: 0 },
+    })
+    return user
+  }
   const [main] = await db.insert(mainCategories).values({ name: 'Main', slug: 'main', isActive: true }).returning()
   const [category] = await db.insert(categories).values({ mainCategoryId: main!.id, name: 'Food', slug: 'food' }).returning()
   const [product] = await db.insert(products).values({ categoryId: category!.id, name: 'Meal', originalPrice: 100_000, status: 'ACTIVE' }).returning()
@@ -156,7 +167,7 @@ try {
   trackingHook = async () => false
   passed('checkout row lock prevents aged live claims from being stolen')
 
-  const indebted = await makeUser()
+  const indebted = await makeUser(true)
   await db.insert(walletTransactions).values({ userId: indebted.id, type: 'WITHDRAW', amount: 20_000, description: 'Referral reversal' })
   const preview = await orderService.preview(indebted.id, input)
   const negativeOrder = await orderService.checkout(indebted.id, input)
@@ -175,7 +186,7 @@ try {
   passed('deleted products, removed sizes, empty size sets and overflowing totals are rejected')
 
   const limited = await makeCoupon('LIMITED', 1)
-  const another = await makeUser()
+  const another = await makeUser(true)
   const competing = await Promise.allSettled([indebted.id, another.id].map((uid) => orderService.checkout(uid, { ...input, couponCode: limited.code })))
   assert.equal(competing.filter((r) => r.status === 'fulfilled').length, 1)
   assert.equal((await db.select().from(coupons).where(eq(coupons.id, limited.id)))[0]!.usedCount, 1)

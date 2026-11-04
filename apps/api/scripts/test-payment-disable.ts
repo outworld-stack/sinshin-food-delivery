@@ -76,6 +76,13 @@ try {
   }
   ;(service as unknown as { gateways: Map<string, PaymentGateway> }).gateways.set('ZARINPAL', gateway)
   const [buyer] = await db.insert(users).values({ phone: '09150000001' }).returning()
+  // This suite tests several independent pending payments for a repeat buyer.
+  await db.insert(orders).values({
+    userId: buyer!.id, displayId: 'ord-disable-history', status: 'PAID', paymentStatus: 'SUCCESS',
+    deliveryType: 'DINE_IN', totalAmount: 0,
+    breakdown: { foodTotal: 0, discount: 0, walletDeduction: 0, deliveryFee: 0,
+      packagingFee: 0, totalAmount: 0, amountPaidOnline: 0 },
+  })
   const [main] = await db.insert(mainCategories).values({ name: 'Main', slug: 'main' }).returning()
   const [category] = await db.insert(categories).values({ mainCategoryId: main!.id, name: 'Food', slug: 'food' }).returning()
   const [product] = await db.insert(products).values({ categoryId: category!.id, name: 'Meal', originalPrice: 100_000, status: 'ACTIVE' }).returning()

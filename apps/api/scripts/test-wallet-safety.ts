@@ -219,6 +219,8 @@ try {
   assert.equal(spent.breakdown.walletDeduction, 10_000)
   assert.equal(await balance(spendingReferrer.id), -10_000)
   assert.equal(await balance(spendingBuyer.id), 100_000)
+  // Complete the first order before testing a later purchase with wallet debt.
+  await settle(spent.displayId)
   const indebted = await main.orders.checkout(spendingReferrer.id, dineIn)
   assert.equal(indebted.breakdown.walletDeduction, 0)
   assert.equal(indebted.amountPaidOnline, 100_000)

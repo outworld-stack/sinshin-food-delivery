@@ -37,6 +37,7 @@ let created = false
 let checks = 0
 const passed = (name: string) => { checks++; console.log(`PASS ${name}`) }
 const validation = (error: unknown) => error instanceof AppError && error.code === 'VALIDATION_ERROR'
+const firstOrderPending = (error: unknown) => error instanceof AppError && error.code === 'CONFLICT' && /سفارش|پرداخت/.test(error.message)
 const originalFetch = globalThis.fetch
 globalThis.fetch = (() => { throw new Error('External requests forbidden in coupon integration tests') }) as unknown as typeof fetch
 
@@ -182,6 +183,8 @@ try {
       assert.deepEqual(checkout.breakdown, preview.breakdown)
       assert.equal(checkout.amountPaidOnline, preview.breakdown.amountPaidOnline)
       const saved = await order(checkout.displayId)
+      assert.equal((await reservation(buyer.id)).length, checkout.requiresPayment ? 1 : 0,
+        'every first pending order reserves the user, including public coupons')
       assert.equal(saved.couponEligibleSubtotal, eligible)
       const lines = await db.select().from(orderItems).where(eq(orderItems.orderId, saved.id))
       assert.equal(lines.length, 3)
@@ -229,6 +232,98 @@ try {
   assert.equal(rounded.breakdown.discount, 2)
   assert.equal(roundedLines.reduce((sum, line) => sum + line.couponDiscountAmount, 0), 2)
   passed('fractional per-line savings allocate exactly the aggregate discount without money drift')
+
+  // A: an ordinary first order owns the same user entitlement as a coupon order.
+  const normalBuyer = await makeUser()
+  await fund(normalBuyer.id, 30_000)
+  const normalFirstCoupon = await makeCoupon({ maxUses: 1, rules: [firstRule] })
+  const normalPending = await service.checkout(normalBuyer.id, simple)
+  const normalRow = await order(normalPending.displayId)
+  assert.equal((await reservation(normalBuyer.id)).length, 1)
+  assert.equal((await reservation(normalBuyer.id))[0]!.orderId, normalRow.id)
+  assert.equal(normalRow.couponId, null)
+  const normalSecondInput = { ...simple, couponCode: normalFirstCoupon.code }
+  assert.equal((await couponService.findUsableCoupon(db, normalBuyer.id, normalFirstCoupon.code)).ok, false)
+  const beforeBlockedPreview = await snapshot()
+  await assert.rejects(() => service.preview(normalBuyer.id, normalSecondInput), firstOrderPending)
+  await assert.rejects(() => service.preview(normalBuyer.id, simple), firstOrderPending)
+  assert.deepEqual(await snapshot(), beforeBlockedPreview, 'blocked preview must remain read-only')
+  await assert.rejects(() => service.checkout(normalBuyer.id, normalSecondInput), firstOrderPending)
+  assert.equal((await campaign(normalFirstCoupon.id)).usedCount, 0)
+  assert.equal(await grant(normalFirstCoupon.id, normalBuyer.id), undefined)
+  const normalCallback = await startPayment(normalPending)
+  verdict = 'indeterminate'
+  await normalCallback()
+  assert.equal((await order(normalPending.displayId)).status, 'PENDING_PAYMENT')
+  assert.equal((await reservation(normalBuyer.id)).length, 1)
+  assert.equal(await balance(normalBuyer.id), 0)
+  assert.equal((await ledger(normalRow.id)).length, 1)
+  verdict = 'failed'
+  await Promise.all([normalCallback(), normalCallback(), normalCallback()])
+  assert.equal((await order(normalPending.displayId)).paymentStatus, 'FAILED')
+  assert.equal((await reservation(normalBuyer.id)).length, 0)
+  assert.equal(await balance(normalBuyer.id), 30_000)
+  const normalFailedLedger = await ledger(normalRow.id)
+  assert.equal(normalFailedLedger.length, 2)
+  assert.equal(normalFailedLedger.filter(row => row.type === 'DEPOSIT').length, 1)
+  await normalCallback()
+  assert.deepEqual(await ledger(normalRow.id), normalFailedLedger)
+  assert.equal((await service.preview(normalBuyer.id, normalSecondInput)).coupon?.valid, true)
+  const normalRecovered = await service.checkout(normalBuyer.id, normalSecondInput)
+  assert.equal((await reservation(normalBuyer.id))[0]!.orderId, (await order(normalRecovered.displayId)).id)
+  assert.equal((await campaign(normalFirstCoupon.id)).usedCount, 1)
+  assert((await grant(normalFirstCoupon.id, normalBuyer.id))?.consumedAt)
+  await successful(normalRecovered)
+  passed('A normal first checkout blocks coupon and normal retries, retains uncertain funds, releases once on failure, then allows FIRST')
+
+  // B: the protection also applies when the second order omits the coupon.
+  const reverseBuyer = await makeUser()
+  const reverseFirst = await makeCoupon({ rules: [firstRule] })
+  const reverseOther = await makeCoupon({ rules: [firstRule] })
+  const reversePending = await service.checkout(reverseBuyer.id, { ...simple, couponCode: reverseFirst.code })
+  await assert.rejects(() => service.checkout(reverseBuyer.id, simple), firstOrderPending)
+  await assert.rejects(() => service.checkout(reverseBuyer.id, { ...simple, couponCode: reverseOther.code }), firstOrderPending)
+  await assert.rejects(() => service.preview(reverseBuyer.id, simple), firstOrderPending)
+  assert.equal((await reservation(reverseBuyer.id)).length, 1)
+  await successful(reversePending)
+  assert.equal((await reservation(reverseBuyer.id)).length, 0)
+  const laterNormal = await service.checkout(reverseBuyer.id, simple)
+  assert(laterNormal.requiresPayment)
+  assert.equal((await reservation(reverseBuyer.id)).length, 0, 'returning customers never create first-order reservations')
+  assert.equal((await service.preview(reverseBuyer.id, { ...simple, couponCode: reverseOther.code })).coupon?.valid, false)
+  await assert.rejects(() => service.checkout(reverseBuyer.id, { ...simple, couponCode: reverseOther.code }))
+  passed('B FIRST pending blocks any second checkout; success permits normal future orders without a new first reservation')
+
+  // D: competing normal/coupon requests share the existing database user lock.
+  for (const couponFirst of [false, true, false, true]) {
+    const racer = await makeUser()
+    await fund(racer.id, 20_000)
+    const raceCoupon = await makeCoupon({ maxUses: 1, rules: [firstRule] })
+    const raceInputs = [simple, { ...simple, couponCode: raceCoupon.code }]
+    if (couponFirst) raceInputs.reverse()
+    const attempts = await Promise.allSettled(raceInputs.map(input => service.checkout(racer.id, input)))
+    const winners = attempts.filter((attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<OrderService['checkout']>>> => attempt.status === 'fulfilled')
+    assert.equal(winners.length, 1)
+    assert(attempts.some(attempt => attempt.status === 'rejected' && firstOrderPending(attempt.reason)))
+    const raceOrder = await order(winners[0]!.value.displayId)
+    assert.equal((await db.select().from(orders).where(eq(orders.userId, racer.id))).length, 1)
+    assert.equal((await reservation(racer.id)).length, 1)
+    assert.equal((await reservation(racer.id))[0]!.orderId, raceOrder.id)
+    assert.equal((await ledger(raceOrder.id)).filter(row => row.type === 'WITHDRAW').length, 1)
+    assert.equal(await balance(racer.id), 0)
+    assert.equal((await campaign(raceCoupon.id)).usedCount, raceOrder.couponId === raceCoupon.id ? 1 : 0)
+    assert.equal(Boolean((await grant(raceCoupon.id, racer.id))?.consumedAt), raceOrder.couponId === raceCoupon.id)
+    assert.equal((await db.select().from(couponRedemptions).where(eq(couponRedemptions.orderId, raceOrder.id))).length, 0)
+  }
+  passed('D concurrent normal and coupon first checkouts create exactly one order, user reservation, withdrawal and coupon consumption')
+
+  const unrelatedBuyer = await makeUser()
+  const unrelatedCoupon = await makeCoupon({ rules: [{ type: 'REGISTERED_DAYS_AGO', params: { days: 1 } }] })
+  const unrelatedOrder = await service.checkout(unrelatedBuyer.id, { ...simple, couponCode: unrelatedCoupon.code })
+  assert.equal((await reservation(unrelatedBuyer.id)).length, 1)
+  assert.equal((await reservation(unrelatedBuyer.id))[0]!.orderId, (await order(unrelatedOrder.displayId)).id)
+  await assert.rejects(() => service.checkout(unrelatedBuyer.id, simple), firstOrderPending)
+  passed('an unrelated private coupon still reserves the customer actual first pending order')
 
   // FIRST_PURCHASE works before any grant/settlement; reservation spans campaigns.
   const firstA = await makeCoupon({ isPublic: false, maxUses: 1, rules: [firstRule] })
@@ -312,14 +407,25 @@ try {
 
   const historical = await makeUser()
   const historicalCoupon = await makeCoupon({ rules: [firstRule] })
-  await db.insert(orders).values([
+  const [legacyPending] = await db.insert(orders).values([
     { userId: historical.id, displayId: `hist-${++serial}`, deliveryType: 'DINE_IN', totalAmount: 1,
       status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', breakdown: won.breakdown },
     { userId: historical.id, displayId: `hist-${++serial}`, deliveryType: 'DINE_IN', totalAmount: 1,
       status: 'CANCELED', paymentStatus: 'FAILED', breakdown: won.breakdown },
     { userId: historical.id, displayId: `hist-${++serial}`, deliveryType: 'DINE_IN', totalAmount: 1,
       status: 'CANCELED', paymentStatus: 'SUCCESS', breakdown: won.breakdown },
-  ])
+  ]).returning()
+  assert.equal((await reservation(historical.id)).length, 0)
+  assert.equal((await couponService.findUsableCoupon(db, historical.id, historicalCoupon.code)).ok, false)
+  const beforeLegacyPreview = await snapshot()
+  await assert.rejects(() => service.preview(historical.id, { ...simple, couponCode: historicalCoupon.code }), firstOrderPending)
+  await assert.rejects(() => service.preview(historical.id, simple), firstOrderPending)
+  assert.deepEqual(await snapshot(), beforeLegacyPreview)
+  await assert.rejects(() => service.checkout(historical.id, { ...simple, couponCode: historicalCoupon.code }), firstOrderPending)
+  await assert.rejects(() => service.checkout(historical.id, simple), firstOrderPending)
+  assert.equal((await reservation(historical.id)).length, 0, 'preview and rejected checkout must not backfill legacy rows')
+  await db.update(orders).set({ status: 'CANCELED', paymentStatus: 'FAILED' }).where(eq(orders.id, legacyPending!.id))
+  passed('C legacy pending first orders without reservation rows block normal and FIRST previews/checkouts')
   assert.equal((await service.preview(historical.id, { ...simple, couponCode: historicalCoupon.code })).coupon?.valid, true)
   const [pastSuccess] = await db.insert(orders).values({ userId: historical.id, displayId: `hist-${++serial}`,
     deliveryType: 'DINE_IN', totalAmount: 1, status: 'PAID', paymentStatus: 'SUCCESS', breakdown: won.breakdown }).returning()
@@ -337,9 +443,11 @@ try {
   assert.equal((await reservation(historical.id)).length, 0)
   assert.equal(veteran.breakdown.discount, 16_000)
   const alternative = await makeCoupon({ conditionMode: 'OR', rules: [firstRule, { type: 'REGISTERED_DAYS_AGO', params: { days: 1 } }] })
+  const alternativeEligibility = await couponService.findUsableCoupon(db, old.id, alternative.code)
+  assert(alternativeEligibility.ok && !alternativeEligibility.requiresFirstPurchase, 'independent OR eligibility must not require the FIRST branch')
   await service.checkout(old.id, { ...simple, couponCode: alternative.code })
-  assert.equal((await reservation(old.id)).length, 0, 'a satisfied independent OR branch does not consume first purchase')
-  passed('AND requires every condition; OR accepts each independent branch and reserves FIRST only when needed')
+  assert.equal((await reservation(old.id)).length, 1, 'the actual first pending order reserves the user independently of the satisfied OR branch')
+  passed('AND/OR eligibility is preserved while general first-order reservations depend on purchase history, not coupon branches')
   await assert.rejects(() => makeCoupon({ conditionMode: 'AND', rules: [firstRule, { type: 'MIN_ORDERS_COUNT', params: { count: 1 } }] }), validation)
   await assert.rejects(() => makeCoupon({ conditionMode: 'AND', rules: [firstRule, { type: 'MIN_TOTAL_SPEND', params: { amount: 1 } }] }), validation)
   const zeroRule = await makeCoupon({ rules: [firstRule, { type: 'MIN_PRODUCT_ORDERS', params: { productId: plain!.id, count: 0 } }] })

@@ -104,6 +104,8 @@ function underMaxUses(maxUses: number) {
         return maxUses === 0 ? sql`true` : sql`${coupons.usedCount} < ${maxUses}`;
 }
 
+const FIRST_ORDER_PENDING_MESSAGE = 'اولین سفارش شما هنوز در انتظار تعیین وضعیت پرداخت است؛ پیش از ثبت سفارش جدید، پرداخت همان سفارش را پیگیری کنید.';
+
 // رارد ۴۷ — ورودی چک‌اوت (DeliveryType و کل شکل) از قرارداد مشترک
 // می‌آید — شکل خام سیم بدون برند؛ اسکیمای روت، سرویس و فرانت حالا
 // یک تعریف واحد دارند (کپی محلی حذف شد).
@@ -143,6 +145,26 @@ export class OrderService {
                         .from(walletTransactions)
                         .where(eq(walletTransactions.userId, userId));
                 return Number(rows[0]?.balance ?? 0);
+        }
+
+        /** Read-only in preview; checkout calls this under the existing wallet/user locks. */
+        private async needsFirstPurchaseReservation(db: DbOrTx, userId: string): Promise<boolean> {
+                const [state] = await db.select({
+                        successful: sql<boolean>`exists (
+                                select 1 from orders o where o.user_id = ${userId}::uuid
+                                and o.payment_status = 'SUCCESS' and o.status <> 'CANCELED'
+                        )`,
+                        pending: sql<boolean>`exists (
+                                select 1 from first_purchase_reservations r where r.user_id = ${userId}::uuid
+                        ) or exists (
+                                select 1 from orders o where o.user_id = ${userId}::uuid and o.status = 'PENDING_PAYMENT'
+                        )`,
+                }).from(users).where(eq(users.id, userId));
+                if (!state) throw Err.unauthorized();
+                if (state.successful) return false;
+                // Pending orders from before user-level reservations also block a new first order.
+                if (state.pending) throw Err.conflict(FIRST_ORDER_PENDING_MESSAGE);
+                return true;
         }
 
         /**
@@ -208,6 +230,7 @@ export class OrderService {
                                 .for("no key update");
                         if (!user) throw Err.unauthorized();
                         if (user.bannedAt) throw Err.banned();
+                        const reserveFirstPurchase = await this.needsFirstPurchaseReservation(tx, userId);
 
                         // ── آدرس (DELIVERY اجباری — قرارداد فرانت) ──
                         let addressRow: typeof addresses.$inferSelect | undefined;
@@ -246,7 +269,6 @@ export class OrderService {
                         // پس در چک‌اوت، null بودن کوپن یعنی رقابت/تغییر لحظه‌ای — نه غلط تایپی.
                         let discount = 0;
                         let couponEligibleSubtotal = 0;
-                        let requiresFirstPurchase = false;
                         let couponId: CampaignId | null = null;
                         if (input.couponCode) {
                                 // stage-66 — خروجی دلیل‌دار: سهم per-user تمام‌شده پیام خودش را دارد
@@ -262,7 +284,6 @@ export class OrderService {
                                 if (!couponPricing.hasEligibleProduct) throw Err.validation(NO_COUPON_PRODUCTS);
                                 discount = couponPricing.discount;
                                 couponEligibleSubtotal = couponPricing.eligibleSubtotal;
-                                requiresFirstPurchase = outcome.requiresFirstPurchase;
                                 const [reserved] = await tx
                                         .update(coupons)
                                         .set({ usedCount: sql`${coupons.usedCount} + 1` })
@@ -356,13 +377,14 @@ export class OrderService {
                         if (!orderRow)
                                 throw Err.internal("ساخت سفارش ناموفق بود؛ دوباره تلاش کنید.");
 
-                        if (requiresFirstPurchase) {
+                        if (reserveFirstPurchase) {
                                 // The user wallet lock serializes eligibility with every checkout,
                                 // settlement and refund; the unique user key also enforces it in SQL.
+                                // Every first order reserves the user, independently of coupon usage.
                                 const [reservation] = await tx.insert(firstPurchaseReservations)
                                         .values({ userId, orderId: orderRow.id })
                                         .onConflictDoNothing().returning();
-                                if (!reservation) throw Err.conflict(couponRejectionMessage('first_purchase_reserved'));
+                                if (!reservation) throw Err.conflict(FIRST_ORDER_PENDING_MESSAGE);
                         }
 
                         await tx.insert(orderItems).values(
@@ -543,6 +565,7 @@ export class OrderService {
         ): Promise<CheckoutPreviewData> {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
+                await this.needsFirstPurchaseReservation(db, userId);
 
                 // Address selection is optional during preview; delivery stays
                 // unquoted until the customer selects an owned address.

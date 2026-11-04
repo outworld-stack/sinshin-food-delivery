@@ -350,6 +350,16 @@ const failedRefresh = renderCheckout(undefined, { addressId: 'work' })
 assert(failedRefresh.isSubmitBlocked)
 assert.equal(failedRefresh.deliveryDistanceKm, null)
 assert(failedRefresh.canRetryDelivery)
+// A pending first order can invalidate a previously successful preview. Cached
+// coupon data must neither advertise eligibility nor allow any second checkout.
+for (const code of [undefined, 'FIRST']) {
+  const blockedFirstOrder = renderCheckout(code)
+  assert(blockedFirstOrder.isSubmitBlocked)
+  assert.equal(blockedFirstOrder.couponApplied, false)
+  const before = checkoutRequests.length
+  blockedFirstOrder.handleFinalSubmit()
+  assert.equal(checkoutRequests.length, before, 'a rejected first-order preview blocks normal and coupon checkouts')
+}
 previewFailed = false
 for (const status of ['unavailable', 'no_route'] as const) {
   deliveryQuote = { status, message: `Shipping ${status}` }

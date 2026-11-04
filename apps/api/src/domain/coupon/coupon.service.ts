@@ -345,7 +345,8 @@ export class CouponService {
     const [eligibility] = await tx.select({
       eligible: sql<boolean>`${built.allSatisfied}`,
       otherEligible: sql<boolean>`${otherEligible}`,
-      firstReserved: sql<boolean>`exists (select 1 from first_purchase_reservations fpr where fpr.user_id = u.id)`,
+      firstReserved: sql<boolean>`exists (select 1 from first_purchase_reservations fpr where fpr.user_id = u.id)
+        or exists (select 1 from orders o where o.user_id = u.id and o.status = 'PENDING_PAYMENT')`,
     }).from(sql`users u`).where(sql`u.id = ${userId}::uuid`)
     if (!eligibility?.eligible) {
       return { ok: false, reason: hasFirstPurchase && eligibility?.firstReserved

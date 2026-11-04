@@ -254,7 +254,6 @@ export function useCheckoutPage(deps: {
 		}
 	}, [previewData])
 
-	const couponApplied = previewData?.coupon?.valid === true
 	const deliveryQuote = previewData?.deliveryQuote
 	// A paused request can retain the previous address's quote without fetching
 	// or reporting an error. Only the current, completed preview may authorize payment.
@@ -264,6 +263,7 @@ export function useCheckoutPage(deps: {
 		!isPreviewPlaceholder &&
 		!isPreviewPaused &&
 		!isPreviewError
+	const couponApplied = isPreviewReady && previewData?.coupon?.valid === true
 	const isDeliveryQuoteReady = state.deliveryType !== 'DELIVERY' || (
 		!!state.selectedAddressId && isPreviewReady && (deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback')
 	)
