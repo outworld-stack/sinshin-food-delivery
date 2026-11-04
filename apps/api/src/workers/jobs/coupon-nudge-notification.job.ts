@@ -60,6 +60,7 @@ import { and, eq, isNull, notExists, sql } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import type { NotificationService } from '#/domain/notification/notification.service'
+import { CouponService } from '#/domain/coupon/coupon.service'
 import { couponConditions, couponGrants, couponNudges, users, coupons } from '#/infra/db/schema'
 // stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
 import { faNum } from '#/domain/report/format'
@@ -164,6 +165,8 @@ export class CouponNudgeJob implements DailyJob {
     const pending = await db
       .select({
         nudgeId: couponNudges.id,
+        couponId: couponNudges.couponId,
+        missingConditionId: couponNudges.missingConditionId,
         userId: couponNudges.userId,
         couponTitle: coupons.title,
         couponCode: coupons.code,
@@ -209,6 +212,7 @@ export class CouponNudgeJob implements DailyJob {
 
     let sent = 0
     let skipped = 0
+    const couponService = new CouponService({ db })
     // stage-77 (N12) — بازبینیِ مهلت «قبل از ۱۳:۰۰» داخل حلقه: فهرستِ
     // نامزدها بدون سقف ردیف خوانده می‌شود و هر notifyUser (درج + فان‌اوت
     // پوش با تایم‌اوت‌های ۱۰ ثانیه‌ای) زمان می‌برد — با انباشتگیِ زیاد،
@@ -238,10 +242,18 @@ export class CouponNudgeJob implements DailyJob {
         skipped++
         continue
       }
+      // Conditions and purchase history can change after the nightly scan.
+      // Reuse exactly the same AND/OR eligibility and reminder-limit checks,
+      // and calculate today's real gap before sending an idempotent notice.
+      const [candidate] = await couponService.findNudgeCandidates(row.couponId, { userId: row.userId })
+      if (!candidate || candidate.missingConditionId !== row.missingConditionId) {
+        skipped++
+        continue
+      }
       // سیاست ۲ — فاصله‌ی واقعی؛ ردیف قدیمی بدون remaining → «یک قدم»
       const gap =
-        row.remainingCount !== null && row.remainingCount !== undefined && row.remainingCount > 0
-          ? gapLabel(row.conditionType, row.remainingCount)
+        candidate.remainingCount > 0
+          ? gapLabel(row.conditionType, candidate.remainingCount)
           : 'یک قدم'
       const title = row.couponTitle ?? row.couponCode
 
@@ -256,12 +268,12 @@ export class CouponNudgeJob implements DailyJob {
         title: `🎁 ${gap} تا کوپن تخفیف!`,
         body:
           `تا کوپن «${title}» ` +
-          `(٪${faNum(row.discountPercentage)} تخفیف) فاصله دارید — سفارش بعدی‌تان را ثبت کنید.`,
+          `(٪${faNum(row.discountPercentage)} تخفیف) فاصله دارید — شرایط کوپن را بررسی کنید.`,
         url: '/products',
         data: {
           couponCode: row.couponCode,
-          missingCount: row.missingCount,
-          remainingCount: row.remainingCount,
+          missingCount: candidate.missingCount,
+          remainingCount: candidate.remainingCount,
         },
       }, { notificationId: row.nudgeId })
       if (res.id === null) {

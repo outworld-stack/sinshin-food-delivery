@@ -5,6 +5,8 @@
 // stage-65 — سوییچ «کوپن بی‌صدا» + فچ مصرف‌کنندگان (صفحه‌بندی سروری).
 
 import type {
+	CouponConditionMode,
+	CouponDiscountScope,
 	CouponConsumersPageDto,
 	CouponRule,
 	CouponWithConditionsDto,
@@ -26,6 +28,10 @@ export async function createCoupon(input: {
 	code: string
 	title?: string | null
 	discountPercentage: number
+	conditionMode?: CouponConditionMode
+	discountScope?: CouponDiscountScope
+	discountCategoryId?: string | null
+	discountProductId?: string | null
 	maxUses: number
 	/** stage-66 — سقف مصرف به‌ازای کاربر (کوپن عمومی)؛ ۰ = نامحدود (پیش‌فرض) */
 	maxPerUser?: number
@@ -41,6 +47,10 @@ export async function createCoupon(input: {
 		code: input.code,
 		title: input.title ?? null,
 		discountPercentage: input.discountPercentage,
+		conditionMode: input.conditionMode ?? 'AND',
+		discountScope: input.discountScope ?? 'ALL_PRODUCTS',
+		discountCategoryId: input.discountCategoryId ?? null,
+		discountProductId: input.discountProductId ?? null,
 		maxUses: input.maxUses,
 		// stage-66 — سقف per-user (۰ = نامحدود)
 		maxPerUser: input.maxPerUser ?? 0,
@@ -61,6 +71,10 @@ export async function updateCoupon(input: {
 	code: string
 	title?: string | null
 	discountPercentage: number
+	conditionMode?: CouponConditionMode
+	discountScope?: CouponDiscountScope
+	discountCategoryId?: string | null
+	discountProductId?: string | null
 	maxUses: number
 	/** stage-66 — سقف per-user (undefined = دست‌نخورده در ویرایش) */
 	maxPerUser?: number
@@ -76,6 +90,10 @@ export async function updateCoupon(input: {
 		code: input.code,
 		title: input.title ?? null,
 		discountPercentage: input.discountPercentage,
+		conditionMode: input.conditionMode,
+		discountScope: input.discountScope,
+		discountCategoryId: input.discountCategoryId,
+		discountProductId: input.discountProductId,
 		maxUses: input.maxUses,
 		// stage-66 — سقف per-user (نیامد = دست‌نخورده)
 		maxPerUser: input.maxPerUser,

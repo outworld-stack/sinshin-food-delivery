@@ -435,6 +435,7 @@ export class LiveService {
 				sizeName: i.sizeName,
 				quantity: i.quantity,
 				price: i.unitPrice,
+				couponDiscountAmount: i.couponDiscountAmount,
 			})),
 			breakdown: row.breakdown,
 		};

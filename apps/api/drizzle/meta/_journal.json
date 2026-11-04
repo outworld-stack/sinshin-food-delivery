@@ -176,6 +176,13 @@
       "when": 1793580234003,
       "tag": "0024_early_enchantress",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793825462751,
+      "tag": "0025_curious_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

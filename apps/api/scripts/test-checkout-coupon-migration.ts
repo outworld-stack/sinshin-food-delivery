@@ -42,7 +42,9 @@ try {
   await migrate(db, { migrationsFolder: workDir })
 
   const [user] = await db.insert(users).values({ phone: '09301100000', role: 'user' }).returning()
-  const [coupon] = await db.insert(coupons).values({ code: 'MIGRATION0011', discountPercentage: 10 }).returning()
+  // The fixture intentionally runs against the pre-0011 schema. Do not use
+  // current ORM columns that only exist after later additive migrations.
+  const [coupon] = await db.execute<{ id: typeof coupons.$inferSelect.id }>(sql`insert into coupons (code, discount_percentage) values ('MIGRATION0011', 10) returning id`)
   const orphanId = crypto.randomUUID()
   const validOrderId = crypto.randomUUID()
   const orphanOrderId = crypto.randomUUID()

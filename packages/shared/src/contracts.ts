@@ -412,6 +412,8 @@ export type PaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED'
 
 export interface OrderBreakdown {
   foodTotal: number
+  /** Effective selling-price subtotal eligible for the coupon; absent on historical orders. */
+  couponEligibleSubtotal?: number
   discount: number
   walletDeduction: number
   deliveryFee: number
@@ -458,6 +460,8 @@ export interface CheckoutPreviewCoupon {
   code: string
   valid: boolean
   discount: number
+  eligibleSubtotal?: number
+  discountScope?: CouponDiscountScope
   message?: string
 }
 
@@ -466,6 +470,8 @@ export interface CheckoutPreviewItem {
   sizeName: string | null
   unitPrice: number
   quantity: number
+  /** Coupon discount across the complete line. */
+  couponDiscountAmount?: number
   /** stage-48 — ناموجود: هشدار نارنجی در چک‌اوت + قفل ثبت */
   available: boolean
   /**
@@ -509,6 +515,8 @@ export interface UserOrderItem {
   name: string
   quantity: number
   price: number
+  /** Coupon discount across the complete line; absent on older API responses. */
+  couponDiscountAmount?: number
 }
 
 export interface UserOrder {
@@ -659,7 +667,11 @@ export interface AdminReviewDto {
 
 // ═══════════ کوپن‌ها ═══════════
 
+export type CouponConditionMode = 'AND' | 'OR'
+export type CouponDiscountScope = 'ALL_PRODUCTS' | 'CATEGORY' | 'PRODUCT'
+
 export type CouponConditionType =
+  | 'FIRST_PURCHASE'
   | 'MIN_ORDERS_COUNT'
   | 'MIN_TOTAL_SPEND'
   | 'MIN_PRODUCT_ORDERS'
@@ -946,6 +958,10 @@ export interface CouponWithConditionsDto {
     code: string
     title: string | null
     discountPercentage: number
+    conditionMode?: CouponConditionMode
+    discountScope?: CouponDiscountScope
+    discountCategoryId?: string | null
+    discountProductId?: string | null
     maxUses: number
     usedCount: number
     /** stage-66 — سقف مصرف به‌ازای هر کاربر (کوپن عمومی)؛ ۰ = نامحدود */
@@ -1325,7 +1341,7 @@ export interface LiveOrderDto {
  */
 export interface LiveOrderDetailDto extends LiveOrderDto {
   address: string | null
-  items: { name: string; sizeName: string | null; quantity: number; price: number }[]
+  items: { name: string; sizeName: string | null; quantity: number; price: number; couponDiscountAmount?: number }[]
   breakdown: OrderBreakdown
 }
 
@@ -1383,6 +1399,7 @@ export interface StaffInvoiceItem {
   sizeName: string | null
   quantity: number
   price: number
+  couponDiscountAmount?: number
 }
 
 export interface StaffInvoice {

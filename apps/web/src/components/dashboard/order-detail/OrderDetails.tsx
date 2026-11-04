@@ -41,9 +41,16 @@ export const OrderDetails = memo(function OrderDetails({ items, breakdown }: Ord
                 )}
               </div>
             </div>
-            <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">
-              {fmt.price(item.price * item.quantity)} {t['common.tomanShort']}
-            </p>
+            <div className="text-end">
+              <p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">
+                {fmt.price(item.price * item.quantity - (item.couponDiscountAmount ?? 0))} {t['common.tomanShort']}
+              </p>
+              {(item.couponDiscountAmount ?? 0) > 0 && (
+                <p className="text-xs text-green-600 dark:text-green-400">
+                  {t['checkout.couponDiscount']}: {fmt.price(item.couponDiscountAmount ?? 0)} {t['common.tomanShort']}
+                </p>
+              )}
+            </div>
           </Link>
         ))}
       </div>

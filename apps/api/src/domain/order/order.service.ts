@@ -46,6 +46,7 @@ import {
         checkoutIdempotency,
         couponRedemptions,
         couponGrants,
+        firstPurchaseReservations,
         coupons,
         couriers,
         courierDeliveries,
@@ -61,26 +62,19 @@ import {
 import {
         asAddressId,
         asCampaignId,
-        asProductId,
-        asSizeId,
         type CampaignId,
         type CourierId,
         type OrderId,
         type PaymentId,
-        type ProductId,
-        type SizeId,
 } from "#/domain/shared/brand";
 import type { AppConfig } from "#/infra/config/env";
 import { Err } from "#/domain/shared/errors";
 import { lockWalletAccounts, signedWalletAmount } from "#/domain/shared/wallet-sql";
 import type { ProductStatsService } from "#/domain/product-stats/product-stats.service";
 import {
-        finalPriceOf,
-        loadCategoryModes,
-        loadCategoryPurchaseStates,
-        loadPricingBases,
-        sizeFinalPriceOf,
-} from "#/domain/menu/menu.service";
+        priceCheckoutItems, assertCheckoutItemsAvailable, priceCouponDiscount,
+        priceCheckoutTotals, couponRejectionMessage, NO_COUPON_PRODUCTS,
+} from './checkout-pricing'
 import type { DeliveryZoneService, PreparedDeliveryRoute } from "#/domain/delivery/delivery-zone.service";
 import type { SettingsService } from "#/domain/settings/settings.service";
 import type { CouponService } from "../coupon/coupon.service";
@@ -108,12 +102,6 @@ function newDisplayId(): string {
 /** شرط رزرو کوپن: نامحدود (۰) یا زیر سقف */
 function underMaxUses(maxUses: number) {
         return maxUses === 0 ? sql`true` : sql`${coupons.usedCount} < ${maxUses}`;
-}
-
-function assertMoneyAmounts(...amounts: number[]): void {
-        if (amounts.some((amount) => !Number.isSafeInteger(amount) || amount < 0 || amount > 2_147_483_647)) {
-                throw Err.validation("مبلغ سفارش معتبر نیست یا از سقف مجاز بیشتر است.");
-        }
 }
 
 // رارد ۴۷ — ورودی چک‌اوت (DeliveryType و کل شکل) از قرارداد مشترک
@@ -249,171 +237,16 @@ export class OrderService {
                                 }
                         }
 
-                        // ── قیمت آیتم‌ها — سروری، تصویر لحظه‌ای ──
-                        // perf-fix (کار-۲): قبلاً به‌ازای هر آیتم تا ۲ کوئری (محصول + سایزها)
-                        // داخل tx → سبد ۵ آیتمه = تا ۱۰ کوئری. الان: حداکثر ۲ کوئریِ دسته‌ای.
-                        const itemRows: {
-                                productId: ProductId;
-                                sizeId: SizeId | null;
-                                sizeName: string | null;
-                                name: string;
-                                unitPrice: number;
-                                quantity: number;
-                                packagingCost: number;
-                        }[] = [];
-                        // ── stage-48 — قفل‌های سفارش ──
-                        // ناموجود → خطای صریح (نه skip بی‌صدا): کاربر باید هشدار نارنجی
-                        // سبد/چک‌اوت را ببیند، نه اینکه آیتم‌ها بی‌سروصدا حذف شوند.
-                        const unavailableNames: string[] = [];
-                        // stage-86 — آیتم‌هایِ دسته/والدِ خریدِغیرفعال (پیام مخصوص)
-                        const categoryBlockedNames: string[] = [];
-                        const courierBlockedNames: string[] = [];
-                        const takeawayBlockedNames: string[] = [];
-                        const dineInBlockedNames: string[] = [];
-                        let foodTotal = 0;
-                        // stage-10: بسته‌بندیِ هر محصول — جمع (هزینه بسته‌بندی محصول × تعداد)
-                        // فقط برای DELIVERY و PICKUP؛ DINE_IN (سرو در محل) بسته‌بندی ندارد.
-                        let packagingTotal = 0;
-                        const { productMap, sizesByProduct, packagingByProduct } = await loadPricingBases(
-                                tx,
-                                input.items,
-                        );
-                        // stage-84 — هزینه بسته‌بندی مؤثر: اقلامِ فعالِ انتخابی (اگر لینکی
-                        // باشد) وگرنه پشتیبانِ ستونِ legacy — بقیه‌ی منطق دست‌نخورده.
-                        const packagingCostOf = (productId: ProductId, legacy: number): number => {
-                                const v = packagingByProduct.get(productId);
-                                return v === undefined ? legacy : v;
-                        };
-                        // stage-48 — حالت‌های دسته (یک کوئری) → مؤثر = دسته AND محصول
-                        const catModes = await loadCategoryModes(
-                                tx,
-                                [...new Set([...productMap.values()].map((p) => p.categoryId))],
-                        );
-                        // stage-86 — وضعیت خرید زنجیره‌ی اولیه (دسته AND والد) —
-                        // گارد پولی: آیتمِ دسته/والدِ غیرفعال، سفارش را قفل می‌کند
-                        const catPurchase = await loadCategoryPurchaseStates(
-                                tx,
-                                [...new Set([...productMap.values()].map((p) => p.categoryId))],
-                        );
-                        for (const item of input.items) {
-                                const product = productMap.get(asProductId(item.productId));
-                                if (!product) throw Err.validation("یکی از محصولات سبد دیگر موجود نیست — سبد خرید را به‌روز کنید.");
-
-                                // stage-48 — ناموجود: فعال در منو ولی فروش قفل → سفارش قابل ثبت نیست
-                                if (product.status !== "ACTIVE" || !product.isAvailable) {
-                                        unavailableNames.push(product.name);
-                                        continue;
-                                }
-                                // stage-86 — دسته/والدِ غیرفعال: خرید قفل — پیامِ
-                                // مشخص تا کاربر بداند مشکل از دسته‌بندی است
-                                const purchaseState = catPurchase.get(product.categoryId);
-                                if (
-                                        !(purchaseState?.categoryPurchase ?? true) ||
-                                        !(purchaseState?.mainPurchase ?? true)
-                                ) {
-                                        categoryBlockedNames.push(
-                                                purchaseState?.categoryPurchase === false
-                                                        ? purchaseState.categoryName
-                                                        : purchaseState?.mainName ?? product.name,
-                                        );
-                                        continue;
-                                }
-                                // stage-48 — حالت مؤثر سفارش این آیتم (برای گزینه‌ی تحویلِ انتخابی)
-                                const modes = catModes.get(product.categoryId);
-                                const courierAllowed =
-                                        (modes?.courier ?? true) && product.courierAllowed;
-                                const takeawayAllowed =
-                                        (modes?.takeaway ?? true) && product.takeawayAllowed;
-                                const dineInAllowed =
-                                        (modes?.dineIn ?? true) && product.dineInAllowed;
-                                if (!courierAllowed) courierBlockedNames.push(product.name);
-                                if (!takeawayAllowed) takeawayBlockedNames.push(product.name);
-                                if (!dineInAllowed) dineInBlockedNames.push(product.name);
-
-                                let unitPrice = finalPriceOf(product);
-                                let sizeId: SizeId | null = null;
-                                let sizeName: string | null = null;
-                                if (item.sizeId && !product.sizesEnabled) {
-                                        throw Err.validation(`سایز انتخابی «${product.name}» دیگر موجود نیست — سبد خرید را به‌روز کنید.`);
-                                }
-                                if (product.sizesEnabled) {
-                                        const sizes = sizesByProduct.get(product.id) ?? [];
-                                        if (sizes.length === 0) throw Err.validation(`سایزهای «${product.name}» در دسترس نیست — سبد خرید را به‌روز کنید.`);
-                                        if (sizes.length > 0) {
-                                                // phase-2: تعویض بی‌صدای سایز ممنوع — اگر سایزِ سبد حذف/تغییر کرده،
-                                                // مشتری باید خطا ببیند، نه اینکه بی‌سروصدا اولین سایز قیمت شود
-                                                if (item.sizeId) {
-                                                        const wanted = asSizeId(item.sizeId);
-                                                        const size = sizes.find((s) => s.id === wanted);
-                                                        if (!size) {
-                                                                throw Err.validation(
-                                                                        `سایز انتخابی «${product.name}» دیگر موجود نیست — سبد خرید را به‌روز کنید.`,
-                                                                );
-                                                        }
-                                                        // stage-47 — قیمت مؤثر سایز (تخفیف مستقل/زمان‌دار)
-                                                        unitPrice = sizeFinalPriceOf(size);
-                                                        sizeId = size.id;
-                                                        sizeName = size.name;
-                                                } else {
-                                                        const size = sizes[0]!;
-                                                        unitPrice = sizeFinalPriceOf(size);
-                                                        sizeId = size.id;
-                                                        sizeName = size.name;
-                                                }
-                                        }
-                                }
-                                foodTotal += unitPrice * item.quantity;
-                                packagingTotal += packagingCostOf(product.id, product.packagingCost) * item.quantity;
-                                itemRows.push({
-                                        productId: product.id,
-                                        sizeId,
-                                        sizeName,
-                                        name: product.name,
-                                        unitPrice,
-                                        quantity: item.quantity,
-                                        packagingCost: packagingCostOf(product.id, product.packagingCost),
-                                });
-                        }
-                        if (itemRows.length === 0 && unavailableNames.length === 0 && categoryBlockedNames.length === 0)
-                                throw Err.validation("هیچ آیتم معتبری در سبد نیست.");
-
-                        // ── stage-48 — گارد ناموجودی و حالت تحویل ──
-                        // ناموجود → خطا (پرداخت قفل؛ فرانت هشدار نارنجی داده)
-                        // (ترتیب: ناموجودی/دسته‌ی غیرفعال مقدم بر «هیچ آیتم معتبری» —
-                        // پیامِ مشخص‌تر برای سبدِ تک‌آیتمیِ تماماً قفل‌شده)
-                        if (unavailableNames.length > 0) {
-                                throw Err.validation(
-                                        `محصول «${unavailableNames[0]}» فعلاً ناموجود است — سبد خرید را به‌روز کنید.`,
-                                );
-                        }
-                        // stage-86 — دسته/والدِ غیرفعال → خطا با ذکرِ نامِ دسته
-                        if (categoryBlockedNames.length > 0) {
-                                throw Err.validation(
-                                        `خرید «${categoryBlockedNames[0]}» فعلاً غیرفعال شده است — این محصول را از سبد حذف کنید.`,
-                                );
-                        }
-                        // یک آیتم محدود ⇒ کل سفارش در آن حالت ارسال نمی‌شود
-                        if (input.deliveryType === "DELIVERY" && courierBlockedNames.length > 0) {
-                                throw Err.validation(
-                                        `ارسال با پیک برای «${courierBlockedNames[0]}» امکان ندارد — حالت تحویل را عوض کنید یا آن را از سبد حذف کنید.`,
-                                );
-                        }
-                        if (input.deliveryType === "PICKUP" && takeawayBlockedNames.length > 0) {
-                                throw Err.validation(
-                                        `تحویل حضوری بیرون‌بر برای «${takeawayBlockedNames[0]}» امکان ندارد — حالت تحویل را عوض کنید یا آن را از سبد حذف کنید.`,
-                                );
-                        }
-                        if (input.deliveryType === "DINE_IN" && dineInBlockedNames.length > 0) {
-                                throw Err.validation(
-                                        `سرو در محل برای «${dineInBlockedNames[0]}» امکان ندارد — حالت تحویل را عوض کنید یا آن را از سبد حذف کنید.`,
-                                );
-                        }
+                        const { items: itemRows, foodTotal, packagingTotal } = await priceCheckoutItems(tx, input);
+                        assertCheckoutItemsAvailable(itemRows, input.deliveryType);
 
                         // ── کوپن — اعتبار سروری + رزرو اتمیک زیر قفل ──
                         // phase-fix: باخت رقابت (ظرفیت/گرنت) = خطای صریح، نه سقوط بی‌صدای تخفیف.
                         // فرانت فقط وقتی ثبتِ نهایی می‌کند که پیش‌نمایشِ کوپن را «معتبر» دیده است؛
                         // پس در چک‌اوت، null بودن کوپن یعنی رقابت/تغییر لحظه‌ای — نه غلط تایپی.
                         let discount = 0;
+                        let couponEligibleSubtotal = 0;
+                        let requiresFirstPurchase = false;
                         let couponId: CampaignId | null = null;
                         if (input.couponCode) {
                                 // stage-66 — خروجی دلیل‌دار: سهم per-user تمام‌شده پیام خودش را دارد
@@ -423,14 +256,13 @@ export class OrderService {
                                         input.couponCode,
                                         { forUpdate: true },
                                 );
-                                if (!outcome.ok) {
-                                        throw Err.conflict(
-                                                outcome.reason === "per_user_exhausted"
-                                                        ? "سهم شما از این کد تخفیف به پایان رسیده است — این کد برای هر کاربر سقف مصرف دارد."
-                                                        : "این کد تخفیف دیگر قابل استفاده نیست — سبد خرید را به‌روز کنید.",
-                                        );
-                                }
+                                if (!outcome.ok) throw Err.conflict(couponRejectionMessage(outcome.reason));
                                 const coupon = outcome.coupon;
+                                const couponPricing = await priceCouponDiscount(tx, itemRows, coupon);
+                                if (!couponPricing.hasEligibleProduct) throw Err.validation(NO_COUPON_PRODUCTS);
+                                discount = couponPricing.discount;
+                                couponEligibleSubtotal = couponPricing.eligibleSubtotal;
+                                requiresFirstPurchase = outcome.requiresFirstPurchase;
                                 const [reserved] = await tx
                                         .update(coupons)
                                         .set({ usedCount: sql`${coupons.usedCount} + 1` })
@@ -456,14 +288,9 @@ export class OrderService {
                                         }
                                 }
                                 couponId = asCampaignId(coupon.id);
-                                discount = Math.round((foodTotal * coupon.discountPercentage) / 100);
                         }
 
-                        const payableFood = foodTotal - discount;
                         const balance = await this.walletBalance(tx, userId);
-                        const walletDeduction = input.useWallet
-                                ? Math.min(Math.max(0, balance), payableFood)
-                                : 0;
 
                         // ── هزینه ارسال/بسته‌بندی — ناحیه‌ای برای DELIVERY؛ بسته‌بندیِ هر محصول ──
                         // stage-10: بسته‌بندی دیگر تنظیم سراسری نیست — جمع هزینه بسته‌بندی
@@ -476,28 +303,12 @@ export class OrderService {
                                                         deliveryRoute,
                                                 )
                                         : 0;
-                        const packagingFee =
-                                input.deliveryType === "DINE_IN" ? 0 : packagingTotal;
-
-                        const totalAmount = payableFood + deliveryFee + packagingFee;
-                        const amountPaidOnline =
-                                payableFood - walletDeduction + deliveryFee + packagingFee;
-                        assertMoneyAmounts(foodTotal, discount, walletDeduction, deliveryFee, packagingFee, totalAmount, amountPaidOnline);
-                        const paymentMethod =
-                                amountPaidOnline === 0
-                                        ? "WALLET"
-                                        : walletDeduction > 0
-                                                ? "MIXED"
-                                                : "GATEWAY";
-                        const breakdown: OrderBreakdown = {
-                                foodTotal,
-                                discount,
-                                walletDeduction,
-                                deliveryFee,
-                                packagingFee,
-                                totalAmount,
-                                amountPaidOnline,
-                        };
+                        const breakdown = priceCheckoutTotals({
+                                foodTotal, couponEligibleSubtotal, discount, balance, useWallet: input.useWallet,
+                                deliveryFee, packagingTotal, deliveryType: input.deliveryType,
+                        });
+                        const { walletDeduction, totalAmount, amountPaidOnline } = breakdown;
+                        const paymentMethod = amountPaidOnline === 0 ? 'WALLET' : walletDeduction > 0 ? 'MIXED' : 'GATEWAY';
 
                         // ── تصویر لحظه‌ایِ ردیابی — لحظه‌ی ثبت ──
                         const trackingEnabled = await this.deps.settings.liveTrackingEnabled(tx);
@@ -529,6 +340,7 @@ export class OrderService {
                                                         input.customerNote && input.customerNote.trim().length > 0
                                                 ),
                                                 couponId,
+                                                couponEligibleSubtotal,
                                                 paymentStatus: "PENDING",
                                                 paymentMethod,
                                                 totalAmount,
@@ -544,6 +356,15 @@ export class OrderService {
                         if (!orderRow)
                                 throw Err.internal("ساخت سفارش ناموفق بود؛ دوباره تلاش کنید.");
 
+                        if (requiresFirstPurchase) {
+                                // The user wallet lock serializes eligibility with every checkout,
+                                // settlement and refund; the unique user key also enforces it in SQL.
+                                const [reservation] = await tx.insert(firstPurchaseReservations)
+                                        .values({ userId, orderId: orderRow.id })
+                                        .onConflictDoNothing().returning();
+                                if (!reservation) throw Err.conflict(couponRejectionMessage('first_purchase_reserved'));
+                        }
+
                         await tx.insert(orderItems).values(
                                 itemRows.map((it) => ({
                                         orderId: orderRow.id,
@@ -552,6 +373,7 @@ export class OrderService {
                                         name: it.name,
                                         sizeName: it.sizeName,
                                         unitPrice: it.unitPrice,
+                                        couponDiscountAmount: it.couponDiscountAmount,
                                         quantity: it.quantity,
                                 })),
                         );
@@ -690,6 +512,7 @@ export class OrderService {
         private async notifyCouponGrant(userId: string, count: number): Promise<void> {
                 try {
                         const granted = await this.deps.coupons.grantedRecently(userId, count);
+                        if (granted.length === 0) return;
                         const best = granted[0];
                         const title =
                                 granted.length > 1
@@ -736,116 +559,12 @@ export class OrderService {
                         }
                 }
 
-                // آیتم‌ها — همان منطق چک‌اوت (فقط‌خواندنی)
-                // perf-fix (کار-۲): همان دسته‌ای — قبلاً N+1 (بدون قفل هم بود، فقط کوئری‌های زائد)
-                // stage-48 — هر آیتم: موجودی + حالت‌های مؤثر سفارش را هم برمی‌گرداند
-                // تا UI چک‌اوت گزینه‌ی تحویلِ محدود را قفل + هشدار نارنجی نشان دهد.
-                const items: {
-                        name: string;
-                        sizeName: string | null;
-                        unitPrice: number;
-                        quantity: number;
-                        available: boolean;
-                        blockedReason?: "unavailable" | "category";
-                        courierAllowed: boolean;
-                        takeawayAllowed: boolean;
-                        dineInAllowed: boolean;
-                }[] = [];
-                let foodTotal = 0;
-                // stage-10: بسته‌بندیِ هر محصول — همان جمعِ چک‌اوت
-                let packagingTotal = 0;
-                const { productMap, sizesByProduct, packagingByProduct } = await loadPricingBases(
-                        db,
-                        input.items,
-                );
-                // stage-84 — همان پشتیبانِ چک‌اوت: اقلام فعال یا ستونِ legacy
-                const packagingCostOf = (productId: ProductId, legacy: number): number => {
-                        const v = packagingByProduct.get(productId);
-                        return v === undefined ? legacy : v;
-                };
-                // stage-48 — حالت‌های دسته (یک کوئری) → مؤثر = دسته AND محصول
-                const catModes = await loadCategoryModes(
-                        db,
-                        [...new Set([...productMap.values()].map((p) => p.categoryId))],
-                );
-                // stage-86 — وضعیت خرید زنجیره‌ی اولیه (دسته AND والد) —
-                // آیتمِ قفل‌شده با هشدار نارنجیِ مخصوص برمی‌گردد
-                const catPurchase = await loadCategoryPurchaseStates(
-                        db,
-                        [...new Set([...productMap.values()].map((p) => p.categoryId))],
-                );
-                for (const item of input.items) {
-                        const product = productMap.get(asProductId(item.productId));
-                        if (!product) throw Err.validation("یکی از محصولات سبد دیگر موجود نیست — سبد خرید را به‌روز کنید.");
-
-                        const modes = catModes.get(product.categoryId);
-                        const courierAllowed =
-                                (modes?.courier ?? true) && product.courierAllowed;
-                        const takeawayAllowed =
-                                (modes?.takeaway ?? true) && product.takeawayAllowed;
-                        const dineInAllowed =
-                                (modes?.dineIn ?? true) && product.dineInAllowed;
-                        // stage-48 — ناموجود: نمایش با هشدار نارنجی، بدون محاسبه
-                        // stage-86 — دسته/والدِ غیرفعال: همان برخورد + دلیل مخصوص
-                        const purchaseState = catPurchase.get(product.categoryId);
-                        const purchaseBlocked =
-                                !(purchaseState?.categoryPurchase ?? true) ||
-                                !(purchaseState?.mainPurchase ?? true);
-                        const unavailable = product.status !== "ACTIVE" || !product.isAvailable;
-                        const available = !unavailable && !purchaseBlocked;
-
-                        let unitPrice = finalPriceOf(product);
-                        let sizeName: string | null = null;
-                        if (item.sizeId && !product.sizesEnabled) {
-                                throw Err.validation(`سایز انتخابی «${product.name}» دیگر موجود نیست — سبد خرید را به‌روز کنید.`);
-                        }
-                        if (product.sizesEnabled) {
-                                const sizes = sizesByProduct.get(product.id) ?? [];
-                                if (sizes.length === 0) throw Err.validation(`سایزهای «${product.name}» در دسترس نیست — سبد خرید را به‌روز کنید.`);
-                                if (sizes.length > 0) {
-                                        if (item.sizeId) {
-                                                const size = sizes.find((s) => s.id === item.sizeId);
-                                                if (!size) {
-                                                        throw Err.validation(
-                                                                `سایز انتخابی «${product.name}» دیگر موجود نیست — سبد خرید را به‌روز کنید.`,
-                                                        );
-                                                }
-                                                // stage-47 — قیمت مؤثر سایز (تخفیف مستقل/زمان‌دار)
-                                                unitPrice = sizeFinalPriceOf(size);
-                                                sizeName = size.name;
-                                        } else {
-                                                unitPrice = sizeFinalPriceOf(sizes[0]!);
-                                                sizeName = sizes[0]!.name;
-                                        }
-                                }
-                        }
-                        foodTotal += available ? unitPrice * item.quantity : 0;
-                        packagingTotal += available ? packagingCostOf(product.id, product.packagingCost) * item.quantity : 0;
-                        items.push({
-                                name: product.name,
-                                sizeName,
-                                unitPrice: available ? unitPrice : 0,
-                                quantity: item.quantity,
-                                available,
-                                ...(available
-                                        ? {}
-                                        : { blockedReason: unavailable ? ("unavailable" as const) : ("category" as const) }),
-                                courierAllowed,
-                                takeawayAllowed,
-                                dineInAllowed,
-                        });
-                }
-                if (items.length === 0)
-                        throw Err.validation("هیچ آیتم معتبری در سبد نیست.");
+                const { items, foodTotal, packagingTotal } = await priceCheckoutItems(db, input);
 
                 // کوپن — فقط اعتبارسنجی؛ رزرو در چک‌اوت اتمیک می‌ماند
                 let discount = 0;
-                let coupon: {
-                        code: string;
-                        valid: boolean;
-                        discount: number;
-                        message?: string;
-                } | null = null;
+                let couponEligibleSubtotal = 0;
+                let coupon: CheckoutPreviewData['coupon'] = null;
                 if (input.couponCode) {
                         // stage-66 — خروجی دلیل‌دار findUsableCoupon: سهم per-user
                         // تمام‌شده پیام مخصوص خودش را می‌گیرد (نه «نامعتبر» کلی)
@@ -854,49 +573,40 @@ export class OrderService {
                                 userId,
                                 input.couponCode,
                         );
-                        if (found.ok && found.coupon.maxUses > 0 && found.coupon.usedCount >= found.coupon.maxUses) {
-                                coupon = {
-                                        code: found.coupon.code,
-                                        valid: false,
-                                        discount: 0,
-                                        message: "ظرفیت این کد تخفیف تکمیل شده است.",
-                                };
-                        } else if (found.ok) {
-                                discount = Math.round((foodTotal * found.coupon.discountPercentage) / 100);
-                                coupon = { code: found.coupon.code, valid: true, discount };
+                        if (found.ok) {
+                                const pricing = await priceCouponDiscount(db, items, found.coupon);
+                                if (pricing.hasEligibleProduct) {
+                                        discount = pricing.discount;
+                                        couponEligibleSubtotal = pricing.eligibleSubtotal;
+                                        coupon = {
+                                                code: found.coupon.code, valid: true, discount,
+                                                eligibleSubtotal: pricing.eligibleSubtotal,
+                                                discountScope: found.coupon.discountScope,
+                                        };
+                                } else {
+                                        coupon = { code: found.coupon.code, valid: false, discount: 0, message: NO_COUPON_PRODUCTS };
+                                }
                         } else {
                                 coupon = {
                                         code: input.couponCode.trim().toUpperCase().slice(0, 32),
-                                        valid: false,
-                                        discount: 0,
-                                        message:
-                                                found.reason === "per_user_exhausted"
-                                                        ? "سهم شما از این کد تخفیف به پایان رسیده است — این کد برای هر کاربر سقف مصرف دارد."
-                                                        : "کد تخفیف نامعتبر است یا برای شما فعال نیست.",
+                                        valid: false, discount: 0, message: couponRejectionMessage(found.reason),
                                 };
                         }
                 }
-
-                const payableFood = foodTotal - discount;
                 const balance = await this.walletBalance(db, userId);
-                const walletDeduction = input.useWallet
-                        ? Math.min(Math.max(0, balance), payableFood)
-                        : 0;
 
                 const deliveryQuote =
                         input.deliveryType === "DELIVERY"
                                 ? await this.deps.zones.quoteFor(
                                                 addressRow ? { lat: addressRow.lat, lng: addressRow.lng } : null,
+                                                db,
                                         )
                                 : null;
                 const deliveryFee = deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback' ? deliveryQuote.fee : 0;
-                // stage-10: بسته‌بندیِ هر محصول — فقط سرو در محل صفر
-                const packagingFee = input.deliveryType === "DINE_IN" ? 0 : packagingTotal;
-
-                const totalAmount = payableFood + deliveryFee + packagingFee;
-                const amountPaidOnline =
-                        payableFood - walletDeduction + deliveryFee + packagingFee;
-                assertMoneyAmounts(foodTotal, discount, walletDeduction, deliveryFee, packagingFee, totalAmount, amountPaidOnline);
+                const breakdown = priceCheckoutTotals({
+                        foodTotal, couponEligibleSubtotal, discount, balance, useWallet: input.useWallet,
+                        deliveryFee, packagingTotal, deliveryType: input.deliveryType,
+                });
 
                 // stage-84 — درگاه‌های فعال + وضعیت شلوغی برای UI چک‌اوت (پیش‌نمایش
                 // همیشه قبل از انتخاب درگاه صدا زده می‌شود — کانال طبیعیِ همین دو فیلد).
@@ -916,15 +626,7 @@ export class OrderService {
                           );
 
                 return {
-                        breakdown: {
-                                foodTotal,
-                                discount,
-                                walletDeduction,
-                                deliveryFee,
-                                packagingFee,
-                                totalAmount,
-                                amountPaidOnline,
-                        },
+                        breakdown,
                         items,
                         coupon,
                         gateways,
@@ -966,6 +668,11 @@ export class OrderService {
                         )
                         .returning();
                 if (!updated) return { displayId: orderRow.displayId };
+                // SUCCESS now blocks eligibility; remove only this order's pending entitlement.
+                await tx.delete(firstPurchaseReservations).where(and(
+                        eq(firstPurchaseReservations.userId, orderRow.userId),
+                        eq(firstPurchaseReservations.orderId, orderRow.id),
+                ));
 
                 // سود معرف — درصدش از کانفیگ (REFERRAL_PERCENT؛ پیش‌فرض ۱۰٪) فقط از
                 // پرداخت آنلاینِ غذاها (بدون ارسال و بسته‌بندی)
@@ -1074,6 +781,12 @@ export class OrderService {
                         )
                         .returning();
                 if (!updated) return;
+                // Called only after definitive payment failure. The guarded order transition
+                // makes this release and the compensating wallet entry exactly-once.
+                await tx.delete(firstPurchaseReservations).where(and(
+                        eq(firstPurchaseReservations.userId, orderRow.userId),
+                        eq(firstPurchaseReservations.orderId, orderRow.id),
+                ));
 
                 // phase-2: پس‌گرفتن رزرو کیف پول — دفترِ فقط-افزودنی → ردیف جبرانی
                 if (orderRow.breakdown.walletDeduction > 0) {
@@ -1437,6 +1150,7 @@ export class OrderService {
                                 sizeName: i.sizeName,
                                 quantity: i.quantity,
                                 price: i.unitPrice,
+                                couponDiscountAmount: i.couponDiscountAmount,
                         })),
                         breakdown: row.breakdown,
                 };
@@ -1581,6 +1295,7 @@ export class OrderService {
                                 name: i.name,
                                 quantity: i.quantity,
                                 price: i.unitPrice,
+                                couponDiscountAmount: i.couponDiscountAmount,
                         })),
                         courierLocation: row.courierLocation,
                         customerLocation: row.customerLocation,

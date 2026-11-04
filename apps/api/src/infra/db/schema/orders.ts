@@ -1,6 +1,7 @@
 //src/infra/db/schema/orders.ts
 import {
 	type AnyPgColumn,
+	bigint,
 	boolean,
 	index,
 	integer,
@@ -104,6 +105,7 @@ export const orders = pgTable(
 			.default("GATEWAY"),
 		totalAmount: integer("total_amount").notNull(),
 		breakdown: jsonb("breakdown").$type<OrderBreakdown>().notNull(),
+		couponEligibleSubtotal: bigint("coupon_eligible_subtotal", { mode: "number" }).notNull().default(0),
 		couponId: uuid("coupon_id").$type<CampaignId>()
 			.references((): AnyPgColumn => coupons.id, { onDelete: "set null" }),
 
@@ -164,6 +166,8 @@ export const orderItems = pgTable(
 		sizeName: varchar("size_name", { length: 60 }),
 		unitPrice: integer("unit_price").notNull(),
 		quantity: integer("quantity").notNull(),
+		/** Coupon discount allocated to this entire line, including its quantity. */
+		couponDiscountAmount: bigint("coupon_discount_amount", { mode: "number" }).notNull().default(0),
 	},
 	(t) => [
 		index("order_items_order_idx").on(t.orderId),

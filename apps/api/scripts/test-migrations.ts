@@ -259,6 +259,25 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     drop table if exists "product_similarity";
     -- hundred-fifteen — اشیاءِ ۰۰۲۳: جدول رتبه‌بندی هوشمند «منتخب» (فاز ۳)
     drop table if exists "product_ranking";
+    -- Restore the pre-upgrade coupon shape before replaying additive 0025.
+    drop table if exists "first_purchase_reservations";
+    alter table "coupons" drop constraint if exists "coupons_discount_scope_target_check";
+    alter table "coupons"
+      drop column if exists "condition_mode",
+      drop column if exists "discount_scope",
+      drop column if exists "discount_category_id",
+      drop column if exists "discount_product_id";
+    alter table "order_items" drop column if exists "coupon_discount_amount";
+    alter table "orders" drop column if exists "coupon_eligible_subtotal";
+    drop type if exists "coupon_condition_mode";
+    drop type if exists "coupon_discount_scope";
+    alter type "coupon_condition_type" rename to "coupon_condition_type_upgrade";
+    create type "coupon_condition_type" as enum (
+      'MIN_ORDERS_COUNT', 'MIN_TOTAL_SPEND', 'MIN_PRODUCT_ORDERS', 'MIN_CATEGORY_ORDERS',
+      'REGISTERED_DAYS_AGO', 'MIN_REFERRALS', 'MIN_REFERRAL_ORDERS', 'MIN_REFERRAL_SPEND', 'ORDERS_IN_LAST_DAYS'
+    );
+    alter table "coupon_conditions" alter column "type" type "coupon_condition_type" using "type"::text::"coupon_condition_type";
+    drop type "coupon_condition_type_upgrade";
     alter table "devices"
       drop column if exists "device_type",
       drop column if exists "device_brand",

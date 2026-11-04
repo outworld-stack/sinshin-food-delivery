@@ -53,6 +53,7 @@ import { UUID_PATTERN } from '#/domain/shared/ids'
 
 
 const CONDITION_TYPES = [
+  'FIRST_PURCHASE',
   'MIN_ORDERS_COUNT', 'MIN_TOTAL_SPEND', 'MIN_PRODUCT_ORDERS', 'MIN_CATEGORY_ORDERS',
   'REGISTERED_DAYS_AGO', 'MIN_REFERRALS', 'MIN_REFERRAL_ORDERS', 'MIN_REFERRAL_SPEND',
   'ORDERS_IN_LAST_DAYS',
@@ -100,6 +101,10 @@ const couponBody = t.Object({
   code: t.String({ minLength: 3, maxLength: 16 }),
   title: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
   discountPercentage: t.Number({ minimum: 1, maximum: 99 }),
+  conditionMode: t.Optional(t.Union([t.Literal('AND'), t.Literal('OR')])),
+  discountScope: t.Optional(t.Union([t.Literal('ALL_PRODUCTS'), t.Literal('CATEGORY'), t.Literal('PRODUCT')])),
+  discountCategoryId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
+  discountProductId: t.Optional(t.Nullable(t.String({ pattern: UUID_PATTERN }))),
   maxUses: t.Number({ minimum: 0, maximum: 1000000 }),
   /** stage-66 (سیاست ۱) — سقف مصرف به‌ازای هر کاربر برای کوپن عمومی؛ ۰ = نامحدود (پیش‌فرض) */
   maxPerUser: t.Optional(t.Number({ minimum: 0, maximum: 1000000 })),
@@ -169,6 +174,10 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           code,
           title: body.title ?? null,
           discountPercentage: body.discountPercentage,
+          conditionMode: body.conditionMode ?? 'AND',
+          discountScope: body.discountScope ?? 'ALL_PRODUCTS',
+          discountCategoryId: body.discountCategoryId ?? null,
+          discountProductId: body.discountProductId ?? null,
           maxUses: body.maxUses,
           // stage-66 (سیاست ۱) — سقف per-user (نیامد = ۰ = نامحدود)
           maxPerUser: body.maxPerUser ?? 0,
@@ -228,6 +237,10 @@ export const couponRoutes = (deps: CouponRoutesDeps) =>
           code: body.code,
           title: body.title ?? null,
           discountPercentage: body.discountPercentage,
+          conditionMode: body.conditionMode,
+          discountScope: body.discountScope,
+          discountCategoryId: body.discountCategoryId,
+          discountProductId: body.discountProductId,
           maxUses: body.maxUses,
           // stage-66 (سیاست ۱) — سقف per-user (نیامد = دست‌نخورده)
           maxPerUser: body.maxPerUser,

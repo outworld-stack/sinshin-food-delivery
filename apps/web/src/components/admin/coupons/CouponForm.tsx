@@ -10,6 +10,8 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type {
+        CouponConditionMode,
+        CouponDiscountScope,
         CouponConditionType,
         CouponRule,
         CouponWithConditionsDto,
@@ -47,6 +49,10 @@ import {
 export interface CouponFormPayload {
         code: string
         discountPercentage: number
+        conditionMode: CouponConditionMode
+        discountScope: CouponDiscountScope
+        discountCategoryId: string | null
+        discountProductId: string | null
         maxUses: number
         /** stage-66 — سقف مصرف به‌ازای هر کاربر (کوپن عمومی)؛ ۰ = نامحدود */
         maxPerUser: number
@@ -67,13 +73,17 @@ const ruleConfig: Record<
         {
                 label: string
                 placeholder?: string
-                inputType: 'number' | 'select_products' | 'select_categories'
+                inputType: 'number' | 'select_products' | 'select_categories' | 'none'
                 needsQuantity?: boolean
                 quantityLabel?: string
                 /** stage-47 — تعداد خرید اختیاری است؛ پیش‌فرض مخفی/صفر */
                 optionalQuantity?: boolean
         }
 > = {
+        FIRST_PURCHASE: {
+                label: 'اولین خرید موفق',
+                inputType: 'none',
+        },
         MIN_ORDERS_COUNT: {
                 label: 'حداقل تعداد سفارش کل',
                 placeholder: 'مثلا: 5',
@@ -125,6 +135,7 @@ const ruleConfig: Record<
 
 // پیام‌های پویا برای منطق «تقریباً رسیدن»
 const ruleHints: Record<CouponConditionType, string> = {
+        FIRST_PURCHASE: 'مشتری پیش از این سفارش نباید خرید موفق و لغونشده داشته باشد. پرداخت در انتظار، سهم اولین خرید را موقتاً رزرو می‌کند.',
         MIN_ORDERS_COUNT: 'با ثبت ۱ سفارش دیگر، این تخفیف برای شما فعال می‌شود.',
         MIN_TOTAL_SPEND: 'با X تومان خرید دیگر، این تخفیف برای شما فعال می‌شود.',
         MIN_PRODUCT_ORDERS:
@@ -150,6 +161,8 @@ function paramsToRule(
         params: Record<string, unknown>,
 ): { value: string | number; quantity?: number } {
         switch (type) {
+                case 'FIRST_PURCHASE':
+                        return { value: 0 }
                 case 'MIN_TOTAL_SPEND':
                 case 'MIN_REFERRAL_SPEND':
                         return { value: Number(params.amount ?? 0) }
@@ -182,6 +195,10 @@ type FormRule = CouponRule & { key: string }
 interface CouponFormState {
         code: string
         discount: number
+        conditionMode: CouponConditionMode
+        discountScope: CouponDiscountScope
+        discountCategoryId: string
+        discountProductId: string
         expiryJalali: string | null // «1404-06-13»
         expiryTime: string // «23:59»
         maxUses: number
@@ -199,6 +216,10 @@ interface CouponFormState {
 const EMPTY_FORM: CouponFormState = {
         code: '',
         discount: 10,
+        conditionMode: 'AND',
+        discountScope: 'ALL_PRODUCTS',
+        discountCategoryId: '',
+        discountProductId: '',
         expiryJalali: null,
         expiryTime: '23:59',
         maxUses: 0,
@@ -222,6 +243,10 @@ function hydrate(data: CouponWithConditionsDto | undefined): CouponFormState {
         return {
                 code: c.code,
                 discount: c.discountPercentage,
+                conditionMode: c.conditionMode ?? 'AND',
+                discountScope: c.discountScope ?? 'ALL_PRODUCTS',
+                discountCategoryId: c.discountCategoryId ?? '',
+                discountProductId: c.discountProductId ?? '',
                 expiryJalali: d ? jalaliToISO(gregorianToJalali(d)) : null,
                 expiryTime: d ? `${p(d.getHours())}:${p(d.getMinutes())}` : '23:59',
                 maxUses: c.maxUses,
@@ -238,6 +263,8 @@ function hydrate(data: CouponWithConditionsDto | undefined): CouponFormState {
 }
 
 const CODE_PATTERN = /^[A-Z0-9\u0600-\u06FF_-]{3,16}$/
+const newRuleKey = (): string =>
+        crypto.randomUUID?.() ?? `rule-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
 interface CouponFormProps {
         /** برای ویرایش — خالی یعنی ساخت */
@@ -256,6 +283,7 @@ export function CouponForm({
         submitLabel,
 }: CouponFormProps) {
         const showToast = useToastStore((state) => state.showToast)
+        const [productSearch, setProductSearch] = useState('')
 
         // کش مشترک با بقیه‌ی مصرف‌کننده‌ها (فرم محصول، فیلتر لیست‌ها)
         const { data: categories } = useQuery(adminCategoriesOptions)
@@ -263,7 +291,7 @@ export function CouponForm({
                 adminProductsOptions({
                         page: 1,
                         limit: 100,
-                        search: '',
+                        search: productSearch,
                         status: '',
                         categoryId: '',
                 }),
@@ -284,11 +312,6 @@ export function CouponForm({
                 d.setHours(Number.isFinite(h) ? h : 23, Number.isFinite(m) ? m : 59, 0, 0)
                 return d.toISOString()
         }, [form.expiryJalali, form.expiryTime])
-
-        // stage-77 (P3-17) — پشتیبان مرورگرهای قدیمی (iOS < 15.4): نبود
-        // randomUUID یعنی TypeError لحظه‌ی «افزودن شرط» — الگوی چک‌اوت
-        const newRuleKey = (): string =>
-                crypto.randomUUID?.() ?? `rule-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
         const addRule = useCallback(() => {
                 set({
@@ -376,7 +399,7 @@ export function CouponForm({
                         )
                         return
                 }
-                const emptyRule = !form.isPublic && form.rules.some((r) => String(r.value).trim() === '')
+                const emptyRule = !form.isPublic && form.rules.some((r) => r.type !== 'FIRST_PURCHASE' && String(r.value).trim() === '')
                 if (emptyRule) {
                         showToast('مقدار همه‌ی شرط‌ها را کامل کنید', 'error')
                         return
@@ -396,9 +419,26 @@ export function CouponForm({
                         return
                 }
 
+                if ((form.discountScope === 'CATEGORY' && !form.discountCategoryId) ||
+                    (form.discountScope === 'PRODUCT' && !form.discountProductId)) {
+                        showToast('محصول یا دسته‌بندی مشمول تخفیف را انتخاب کنید', 'error')
+                        return
+                }
+                if (!form.isPublic && form.conditionMode === 'AND' &&
+                    form.rules.some((rule) => rule.type === 'FIRST_PURCHASE') &&
+                    form.rules.some((rule) => ['MIN_ORDERS_COUNT', 'MIN_TOTAL_SPEND', 'ORDERS_IN_LAST_DAYS'].includes(rule.type) ||
+                        (['MIN_PRODUCT_ORDERS', 'MIN_CATEGORY_ORDERS'].includes(rule.type) && (rule.quantity ?? 0) > 0))) {
+                        showToast('شرط اولین خرید با شرط خرید قبلی در حالت «همه شرط‌ها» سازگار نیست', 'error')
+                        return
+                }
+
                 onSubmit({
                         code,
                         discountPercentage: form.discount,
+                        conditionMode: form.conditionMode,
+                        discountScope: form.discountScope,
+                        discountCategoryId: form.discountScope === 'CATEGORY' ? form.discountCategoryId : null,
+                        discountProductId: form.discountScope === 'PRODUCT' ? form.discountProductId : null,
                         // stage-72 (P2-۲۰) — هم‌الگوی maxPerUser: عدد صحیح ≥ ۰
                         maxUses: Math.max(0, Math.floor(form.maxUses)),
                         // stage-66 — سقف per-user؛ خصوصی گرنت یکتا دارد (ذاتی ۱) → ۰
@@ -417,7 +457,7 @@ export function CouponForm({
                                 ? []
                                 : form.rules.map((r) => ({
                                                 type: r.type,
-                                                value: r.value,
+                                                value: r.type === 'FIRST_PURCHASE' ? 0 : r.value,
                                                 quantity: ruleConfig[r.type].optionalQuantity
                                                         ? (r.quantity ?? 0)
                                                         : r.quantity,
@@ -613,6 +653,55 @@ export function CouponForm({
                                 )}
                         </section>
 
+                        <section className="bg-white dark:bg-[#2a1015] p-4 sm:p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm space-y-3">
+                                <h3 className="font-DanaDemiBold text-gray-800 dark:text-white">محدوده اعمال تخفیف</h3>
+                                <p className="text-xs text-gray-500">شرط‌ها مشخص می‌کنند چه کسی واجد شرایط است؛ محدوده مشخص می‌کند تخفیف روی کدام اقلام سبد اعمال شود.</p>
+                                <select
+                                        aria-label="محدوده اعمال تخفیف"
+                                        value={form.discountScope}
+                                        onChange={(event) => set({ discountScope: event.target.value as CouponDiscountScope })}
+                                        className="w-full px-3 py-2 rounded-md bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm"
+                                >
+                                        <option value="ALL_PRODUCTS">همه محصولات</option>
+                                        <option value="CATEGORY">دسته‌بندی مشخص</option>
+                                        <option value="PRODUCT">محصول مشخص</option>
+                                </select>
+                                {form.discountScope === 'CATEGORY' && (
+                                        <select
+                                                aria-label="دسته‌بندی مشمول تخفیف"
+                                                value={form.discountCategoryId}
+                                                onChange={(event) => set({ discountCategoryId: event.target.value })}
+                                                className="w-full px-3 py-2 rounded-md bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm"
+                                        >
+                                                <option value="">انتخاب دسته‌بندی...</option>
+                                                {categories?.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                                        </select>
+                                )}
+                                {form.discountScope === 'PRODUCT' && (
+                                        <>
+                                                <input
+                                                        aria-label="جستجوی محصول مشمول تخفیف"
+                                                        placeholder="جستجوی محصول..."
+                                                        value={productSearch}
+                                                        onChange={(event) => setProductSearch(event.target.value)}
+                                                        className="w-full px-3 py-2 rounded-md bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm"
+                                                />
+                                                <select
+                                                        aria-label="محصول مشمول تخفیف"
+                                                        value={form.discountProductId}
+                                                        onChange={(event) => set({ discountProductId: event.target.value })}
+                                                        className="w-full px-3 py-2 rounded-md bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm"
+                                                >
+                                                        <option value="">انتخاب محصول...</option>
+                                                        {form.discountProductId && !productsData?.products.some((product) => product.id === form.discountProductId) && (
+                                                                <option value={form.discountProductId}>محصول انتخاب‌شده</option>
+                                                        )}
+                                                        {productsData?.products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                                                </select>
+                                        </>
+                                )}
+                        </section>
+
                         {/* ── قوانین هدف‌یابی (فقط کوپن خصوصی) ── */}
                         {!form.isPublic && (
                                 <section className="bg-white dark:bg-[#2a1015] p-4 sm:p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm">
@@ -629,6 +718,15 @@ export function CouponForm({
                                                 </button>
                                         </div>
 
+                                        <select
+                                                aria-label="روش ترکیب شرط‌ها"
+                                                value={form.conditionMode}
+                                                onChange={(event) => set({ conditionMode: event.target.value as CouponConditionMode })}
+                                                className="w-full mb-3 px-3 py-2 rounded-md bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm"
+                                        >
+                                                <option value="AND">همه شرط‌ها (AND)</option>
+                                                <option value="OR">حداقل یک شرط (OR)</option>
+                                        </select>
                                         <div className="space-y-3">
                                                 {form.rules.map((rule) => {
                                                         const config = ruleConfig[rule.type]
@@ -641,6 +739,7 @@ export function CouponForm({
                                                                 >
                                                                         <div className="flex items-center gap-2">
                                                                                 <select
+                                                                                        aria-label="نوع شرط"
                                                                                         value={rule.type}
                                                                                         onChange={(e) => {
                                                                                                 // round-11 (اسکن M-4): تعویض نوع شرط مقدار قدیمی را نگه
@@ -658,7 +757,7 @@ export function CouponForm({
                                                                                                                         ? {
                                                                                                                                         ...r,
                                                                                                                                         type: newType,
-                                                                                                                                        value: '',
+                                                                                                                                        value: newType === 'FIRST_PURCHASE' ? 0 : '',
                                                                                                                                         quantity: ruleConfig[newType].optionalQuantity
                                                                                                                                                 ? 0
                                                                                                                                                 : ruleConfig[newType].needsQuantity
@@ -809,8 +908,8 @@ export function CouponForm({
                                                                         {ruleConfig[rule.type].optionalQuantity &&
                                                                         (rule.quantity ?? 0) < 1
                                                                                 ? rule.type === 'MIN_PRODUCT_ORDERS'
-                                                                                        ? 'بدون نیاز به خرید قبلی — با انتخاب همین محصول فعال می‌شود.'
-                                                                                        : 'بدون نیاز به خرید قبلی — با خرید از همین دسته فعال می‌شود.'
+                                                                                        ? 'حداقل خرید قبلی از محصول صفر است؛ محدوده تخفیف را جداگانه تعیین کنید.'
+                                                                                        : 'حداقل خرید قبلی از دسته صفر است؛ محدوده تخفیف را جداگانه تعیین کنید.'
                                                                                 : ruleHints[rule.type]}
                                                                 </li>
                                                         ))}

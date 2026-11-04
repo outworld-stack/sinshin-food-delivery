@@ -8,8 +8,9 @@
 import { sql, type SQL } from 'drizzle-orm'
 
 import type { Db } from '#/infra/db/client'
+import type { CouponConditionMode } from '@sinshin/shared'
 import { UUID_RE } from '#/domain/shared/ids'
-import { validCouponRule } from './coupon-validation'
+import { hasContradictoryCouponRules, validCouponRule } from './coupon-validation'
 
 /**
  * ۹ ارزیاب شرط کوپن — SQL خالص ایندکس‌دار.
@@ -28,6 +29,7 @@ export interface EvaluatorContext {
 }
 
 export type ConditionType =
+  | 'FIRST_PURCHASE'
   | 'MIN_ORDERS_COUNT'
   | 'MIN_TOTAL_SPEND'
   | 'MIN_PRODUCT_ORDERS'
@@ -77,6 +79,14 @@ export function evaluateCondition(
   // Legacy malformed parameters must never silently become an easier rule.
   if (!validCouponRule(type, params)) return { satisfied: sql`false`, current: sql`0` }
   switch (type) {
+    case 'FIRST_PURCHASE': {
+      return {
+        satisfied: sql`${successfulOrdersExpr()} = 0 and not exists (
+          select 1 from first_purchase_reservations fpr where fpr.user_id = u.id
+        )`,
+        current: successfulOrdersExpr(),
+      }
+    }
     case 'MIN_ORDERS_COUNT': {
       const count = num(params.count, 1)
       return {
@@ -131,11 +141,14 @@ export function evaluateCondition(
         select coalesce(sum(oi.quantity), 0)::int
         from order_items oi
         join orders o on o.id = oi.order_id
-        join product_categories pc on pc.product_id = oi.product_id
+        join products p on p.id = oi.product_id
         where o.user_id = u.id
           and o.payment_status = 'SUCCESS'
           and o.status <> 'CANCELED'
-          and pc.category_id = ${categoryId}::uuid
+          and (p.category_id = ${categoryId}::uuid or exists (
+            select 1 from product_categories pc
+            where pc.product_id = p.id and pc.category_id = ${categoryId}::uuid
+          ))
       )`
       return { satisfied: sql`${bought} >= ${count}`, current: bought }
     }
@@ -206,20 +219,25 @@ export function evaluateCondition(
 export function buildUserCondition(
   ctx: EvaluatorContext,
   conditions: Array<{ type: ConditionType; params: ConditionParams }>,
+  mode: CouponConditionMode = 'AND',
 ): { allSatisfied: SQL; allButOne: SQL; satisfiedCount: SQL; totalConditions: number } {
   if (conditions.length === 0) {
     return {
       allSatisfied: sql`true`,
-      allButOne: sql`true`,
+      allButOne: sql`false`,
       satisfiedCount: sql`0`,
       totalConditions: 0,
     }
   }
 
+  if (hasContradictoryCouponRules(conditions, mode)) {
+    return { allSatisfied: sql`false`, allButOne: sql`false`, satisfiedCount: sql`0`, totalConditions: conditions.length }
+  }
+
   const results = conditions.map((c) => evaluateCondition(ctx, c.type, c.params))
   const all = sql.join(
-    results.map((r) => r.satisfied),
-    sql` and `,
+    results.map((r) => sql`(${r.satisfied})`),
+    mode === 'OR' ? sql` or ` : sql` and `,
   )
   const counts = sql.join(
     results.map((r) => sql`case when ${r.satisfied} then 1 else 0 end`),
@@ -229,7 +247,7 @@ export function buildUserCondition(
 
   return {
     allSatisfied: sql`(${all})`,
-    allButOne: sql`(${counts}) >= ${total - 1}`,
+    allButOne: mode === 'OR' ? sql`(${counts}) = 0` : sql`(${counts}) >= ${total - 1}`,
     satisfiedCount: sql`(${counts})`,
     totalConditions: total,
   }
@@ -242,6 +260,7 @@ export function buildUserCondition(
  */
 export function conditionThreshold(type: ConditionType, params: ConditionParams): number {
   switch (type) {
+    case 'FIRST_PURCHASE': return 0
     case 'MIN_TOTAL_SPEND':
     case 'MIN_REFERRAL_SPEND':
       return num(params.amount, 1)

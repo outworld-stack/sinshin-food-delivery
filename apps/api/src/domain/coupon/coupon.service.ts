@@ -76,8 +76,8 @@ import {
   type ConditionType,
 } from './coupon-evaluators'
 import { UUID_RE } from '#/domain/shared/ids'
-import { normalizeCouponCode } from '@sinshin/shared'
-import { assertFutureCouponExpiry, validateCouponNumbers } from './coupon-validation'
+import { normalizeCouponCode, type CouponConditionMode, type CouponDiscountScope } from '@sinshin/shared'
+import { assertFutureCouponExpiry, validateCouponConfiguration, validateCouponNumbers, validCouponRule } from './coupon-validation'
 
 // Include legacy spellings when resolving and reserving the code namespace.
 const couponCodeMatches = (code: string): SQL =>
@@ -96,8 +96,8 @@ export const MAX_NUDGES_PER_USER = 2
  * خالی همه‌جا یکسان بود).
  */
 export type UsableCouponOutcome =
-  | { ok: true; coupon: typeof coupons.$inferSelect }
-  | { ok: false; reason: 'invalid' | 'inactive' | 'not_granted' | 'per_user_exhausted' }
+  | { ok: true; coupon: typeof coupons.$inferSelect; requiresFirstPurchase: boolean }
+  | { ok: false; reason: 'invalid' | 'inactive' | 'exhausted' | 'not_granted' | 'per_user_exhausted' | 'not_eligible' | 'first_purchase_reserved' }
 
 
 // رارد ۴۷ — شکل سیم این خروجی = CouponWithConditionsDto در قرارداد مشترک؛
@@ -112,6 +112,22 @@ export interface CouponWithConditions {
 
 export class CouponService {
   constructor(private readonly deps: { db: Db }) { }
+
+  private async assertScopeTarget(tx: DbOrTx, input: {
+    discountScope?: CouponDiscountScope
+    discountCategoryId?: string | null
+    discountProductId?: string | null
+  }): Promise<void> {
+    if (input.discountScope === 'CATEGORY') {
+      const [target] = await tx.select({ id: sql<string>`id` }).from(sql`categories`)
+        .where(sql`id = ${input.discountCategoryId}::uuid`).for('key share')
+      if (!target) throw Err.validation('دسته انتخاب‌شده برای تخفیف پیدا نشد')
+    } else if (input.discountScope === 'PRODUCT') {
+      const [target] = await tx.select({ id: sql<string>`id` }).from(sql`products`)
+        .where(sql`id = ${input.discountProductId}::uuid`).for('key share')
+      if (!target) throw Err.validation('محصول انتخاب‌شده برای تخفیف پیدا نشد')
+    }
+  }
 
   // ══ اعطا ══
 
@@ -177,6 +193,7 @@ export class CouponService {
           type: c.type as ConditionType,
           params: (c.params ?? {}) as Record<string, unknown>,
         })),
+        coupon.conditionMode,
       )
 
       const eligible = await tx
@@ -224,10 +241,12 @@ export class CouponService {
       })
       .from(couponGrants)
       .innerJoin(coupons, eq(coupons.id, couponGrants.couponId))
-      .where(eq(couponGrants.userId, userId))
+      .where(and(eq(couponGrants.userId, userId), isNull(couponGrants.consumedAt)))
       .orderBy(desc(couponGrants.grantedAt))
       .limit(Math.min(Math.max(1, count), 10))
-    return rows
+    const usable = await Promise.all(rows.map(async row =>
+      (await this.findUsableCoupon(this.deps.db, userId, row.code)).ok ? row : null))
+    return usable.filter((row): row is NonNullable<typeof row> => row !== null)
   }
 
   // ══ اعتبار در چک‌اوت ══
@@ -278,6 +297,7 @@ export class CouponService {
     if (!coupon.isActive) return { ok: false, reason: 'inactive' }
     if (coupon.startsAt.getTime() > now) return { ok: false, reason: 'inactive' }
     if (coupon.endsAt !== null && coupon.endsAt.getTime() <= now) return { ok: false, reason: 'inactive' }
+    if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) return { ok: false, reason: 'exhausted' }
 
     if (coupon.isPublic) {
       // stage-66 (② عمق دفاعی) — قرارداد: کوپن عمومی شرط ندارد. اگر داده‌ی
@@ -298,21 +318,53 @@ export class CouponService {
         if (usage >= coupon.maxPerUser) return { ok: false, reason: 'per_user_exhausted' }
       }
 
-      return { ok: true, coupon }
+      return { ok: true, coupon, requiresFirstPurchase: false }
     }
 
-    const grant = await tx
-      .select()
-      .from(couponGrants)
-      .where(
-        and(
-          eq(couponGrants.couponId, coupon.id),
-          eq(couponGrants.userId, userId),
-          isNull(couponGrants.consumedAt),
-        ),
-      )
-      .then((rows) => rows[0])
-    return grant ? { ok: true, coupon } : { ok: false, reason: 'not_granted' }
+    let grant = await tx.select().from(couponGrants)
+      .where(and(eq(couponGrants.couponId, coupon.id), eq(couponGrants.userId, userId)))
+      .then(rows => rows[0])
+    const conds = await tx.select().from(couponConditions).where(eq(couponConditions.couponId, coupon.id))
+    const conditions = conds.map(c => ({ type: c.type as ConditionType, params: (c.params ?? {}) as Record<string, unknown> }))
+    const hasFirstPurchase = conditions.some(c => c.type === 'FIRST_PURCHASE')
+    // Ordinary grants are earned entitlements: a rolling history window,
+    // refund or later campaign edit must not revoke an existing unused grant.
+    // FIRST_PURCHASE is different: every redemption must revalidate its full
+    // AND/OR conditions, even when the customer already holds a grant.
+    if (grant && !hasFirstPurchase) {
+      return grant.consumedAt ? { ok: false, reason: 'not_granted' }
+        : { ok: true, coupon, requiresFirstPurchase: false }
+    }
+    if (conds.length === 0) return { ok: false, reason: 'not_eligible' }
+    const ctx = { db: this.deps.db, userId, now: new Date() }
+    const built = buildUserCondition(ctx, conditions, coupon.conditionMode)
+    const withoutFirst = conditions.filter(c => c.type !== 'FIRST_PURCHASE')
+    const otherEligible = withoutFirst.length > 0
+      ? buildUserCondition(ctx, withoutFirst, coupon.conditionMode).allSatisfied
+      : sql`false`
+    const [eligibility] = await tx.select({
+      eligible: sql<boolean>`${built.allSatisfied}`,
+      otherEligible: sql<boolean>`${otherEligible}`,
+      firstReserved: sql<boolean>`exists (select 1 from first_purchase_reservations fpr where fpr.user_id = u.id)`,
+    }).from(sql`users u`).where(sql`u.id = ${userId}::uuid`)
+    if (!eligibility?.eligible) {
+      return { ok: false, reason: hasFirstPurchase && eligibility?.firstReserved
+        ? 'first_purchase_reserved' : 'not_eligible' }
+    }
+    const requiresFirstPurchase = hasFirstPurchase &&
+      (coupon.conditionMode === 'AND' || !eligibility.otherEligible)
+
+    if (grant?.consumedAt) return { ok: false, reason: 'not_granted' }
+    // Preview may advertise eligibility without mutating grants. The final
+    // checkout owns the user lock and creates the grant in its order transaction.
+    if (!grant && options.forUpdate) {
+      await tx.insert(couponGrants).values({ couponId: coupon.id, userId }).onConflictDoNothing()
+      grant = await tx.select().from(couponGrants)
+        .where(and(eq(couponGrants.couponId, coupon.id), eq(couponGrants.userId, userId)))
+        .then(rows => rows[0])
+      if (!grant || grant.consumedAt) return { ok: false, reason: 'not_granted' }
+    }
+    return { ok: true, coupon, requiresFirstPurchase }
   }
 
   /**
@@ -381,7 +433,7 @@ export class CouponService {
    *
    * ORDER BY قطعی (N5): نزدیک‌ترین‌ها به شرایط اول؛ سقف ۵۰۰۰ نامزد.
    */
-  async findNudgeCandidates(couponId: CampaignId): Promise<
+  async findNudgeCandidates(couponId: CampaignId, options: { userId?: string } = {}): Promise<
     Array<{
       userId: string
       phone: string
@@ -390,6 +442,10 @@ export class CouponService {
       remainingCount: number
     }>
   > {
+    const [coupon] = await this.deps.db.select().from(coupons).where(eq(coupons.id, couponId))
+    if (!coupon || !coupon.isActive || coupon.isPublic || coupon.startsAt.getTime() > Date.now() ||
+        (coupon.endsAt !== null && coupon.endsAt.getTime() <= Date.now()) ||
+        (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses)) return []
     const conds = await this.deps.db
       .select()
       .from(couponConditions)
@@ -402,7 +458,7 @@ export class CouponService {
       type: c.type as ConditionType,
       params: (c.params ?? {}) as Record<string, unknown>,
     })
-    const built = buildUserCondition(ctx, conds.map(toInput))
+    const built = buildUserCondition(ctx, conds.map(toInput), coupon.conditionMode)
     const evaluators = conds.map((c) => {
       const input = toInput(c)
       return evaluateCondition(ctx, input.type, input.params)
@@ -427,6 +483,7 @@ export class CouponService {
       .where(
         sql`${built.allButOne}
            and not ${built.allSatisfied}
+           and ${options.userId ? sql`u.id = ${options.userId}::uuid` : sql`true`}
            and u.banned_at is null
            and u.role = 'user'
            and not exists (
@@ -460,6 +517,14 @@ export class CouponService {
       let missingIdx = -1
       for (let i = 0; i < total; i++) {
         if (row[`sat_${i}`] !== true) {
+          const condition = conds[i]
+          // A past purchase cannot be undone by the reminder's requested
+          // action. In OR mode another branch may still be attainable.
+          if (!condition || condition.type === 'FIRST_PURCHASE' ||
+              !validCouponRule(condition.type, (condition.params ?? {}) as Record<string, unknown>)) {
+            if (coupon.conditionMode === 'AND') break
+            continue
+          }
           missingIdx = i
           break
         }
@@ -475,7 +540,7 @@ export class CouponService {
         userId: String(row.userId),
         phone: String(row.phone),
         missingConditionId: cond.id as string,
-        missingCount: Math.max(1, total - satisfiedCount),
+        missingCount: coupon.conditionMode === 'OR' ? 1 : Math.max(1, total - satisfiedCount),
         remainingCount: Math.max(1, Math.ceil(threshold - current)),
       })
     }
@@ -532,6 +597,10 @@ export class CouponService {
     code: string
     title?: string | null
     discountPercentage: number
+    conditionMode?: CouponConditionMode
+    discountScope?: CouponDiscountScope
+    discountCategoryId?: string | null
+    discountProductId?: string | null
     maxUses: number
     /** stage-66 (سیاست ۱) — سقف مصرف به‌ازای کاربر برای کوپن عمومی؛ ۰ = نامحدود (پیش‌فرض) */
     maxPerUser?: number
@@ -544,6 +613,7 @@ export class CouponService {
     announceSuppressed?: boolean
   }): Promise<{ success: boolean; id?: string }> {
     validateCouponNumbers(input)
+    validateCouponConfiguration(input)
     // stage-66 (①/②) — قرارداد ساخت، در سرویس (نه فقط روت — هر فراخوان‌کننده‌ای):
     // عمومی ⇔ بدون شرط / خصوصی ⇔ حداقل یک شرط. قبلاً کوپن خصوصیِ بی‌شرط
     // (هیچ موتوری اعطایش نمی‌کرد — کوپن مرده) و کوپن عمومیِ همراه‌شرط
@@ -580,6 +650,7 @@ export class CouponService {
     try {
       return await this.deps.db.transaction(async (tx) => {
         await this.assertCodeAvailable(tx, code)
+        await this.assertScopeTarget(tx, input)
         // stage-55 — کل فرایند اتمی: قبلاً بین insert کوپن و insert شرط‌ها
         // پنجره‌ای بود که کوپنِ بی‌شرط (کمپین عمومی!) قابل استفاده می‌شد.
         // onConflictDoNothing روی کد یکتا → مسیر race-safe بدون 500.
@@ -589,6 +660,10 @@ export class CouponService {
             code,
             title: input.title ?? null,
             discountPercentage: input.discountPercentage,
+            conditionMode: input.conditionMode ?? 'AND',
+            discountScope: input.discountScope ?? 'ALL_PRODUCTS',
+            discountCategoryId: input.discountCategoryId ?? null,
+            discountProductId: input.discountProductId ?? null,
             maxUses: input.maxUses,
             // stage-66 (سیاست ۱) — سقف per-user (۰ = نامحدود؛ فقط مسیر عمومی می‌خواندش)
             maxPerUser: input.maxPerUser ?? 0,
@@ -632,6 +707,10 @@ export class CouponService {
       code: string
       title?: string | null
       discountPercentage: number
+      conditionMode?: CouponConditionMode
+      discountScope?: CouponDiscountScope
+      discountCategoryId?: string | null
+      discountProductId?: string | null
       maxUses: number
       /** stage-66 (سیاست ۱) — سقف per-user (undefined = دست‌نخورده در ویرایش) */
       maxPerUser?: number
@@ -682,6 +761,14 @@ export class CouponService {
         await this.assertCodeAvailable(tx, code, cid)
         const [current] = await tx.select().from(coupons).where(eq(coupons.id, cid)).for('update')
         if (!current) throw Err.notFound('کوپن پیدا نشد')
+        const configuration = {
+          conditionMode: input.conditionMode ?? current.conditionMode,
+          discountScope: input.discountScope ?? current.discountScope,
+          discountCategoryId: input.discountCategoryId === undefined ? current.discountCategoryId : input.discountCategoryId,
+          discountProductId: input.discountProductId === undefined ? current.discountProductId : input.discountProductId,
+        }
+        validateCouponConfiguration({ ...configuration, rules: input.rules })
+        await this.assertScopeTarget(tx, configuration)
         // A pending or redeemed order must keep the same grant semantics
         // through settlement, failure and refund.
         if (current.isPublic !== input.isPublic && current.usedCount > 0) {
@@ -693,6 +780,7 @@ export class CouponService {
             code,
             title: input.title ?? null,
             discountPercentage: input.discountPercentage,
+            ...configuration,
             maxUses: input.maxUses,
             // stage-66 (سیاست ۱) — سقف per-user (نیامد = دست‌نخورده)
             ...(input.maxPerUser !== undefined ? { maxPerUser: input.maxPerUser } : {}),

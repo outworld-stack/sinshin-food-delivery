@@ -29,6 +29,7 @@
     "db:test:notification-hardening": "bun scripts/test-notification-hardening.ts",
     "test:push": "bun scripts/test-push-transport.ts",
     "db:test:coupon": "bun scripts/test-coupon-policy.ts",
+    "db:test:coupon-upgrade": "bun scripts/test-coupon-upgrade.ts && bun scripts/test-coupon-upgrade-migration.ts",
     "db:test:checkout-coupon-migration": "bun scripts/test-checkout-coupon-migration.ts",
     "db:test:zarinpal": "bun scripts/test-zarinpal-verify.ts",
     "db:test:sep": "bun scripts/test-sep-verify.ts",

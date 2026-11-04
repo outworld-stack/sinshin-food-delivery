@@ -98,10 +98,12 @@ function kitchenSection(inv: StaffInvoice) {
 }
 
 async function salesSection(inv: StaffInvoice) {
+	const hasLineDiscounts = inv.items.some((item) => (item.couponDiscountAmount ?? 0) > 0)
 	const rows = inv.items.map((i) => [
 		itemLabel(i.name, i.sizeName),
 		faNum(i.quantity),
 		formatPrice(i.price * i.quantity),
+		...(hasLineDiscounts ? [formatPrice(i.couponDiscountAmount ?? 0)] : []),
 	])
 	const b = inv.breakdown
 	// stage-77 (P2-5) — حسابِ رسید سر و ته می‌خورد: قرارداد سرور:
@@ -179,7 +181,7 @@ async function salesSection(inv: StaffInvoice) {
 		stats,
 		tables: [
 			{
-				head: ['محصول', 'تعداد', 'جمع (تومان)'],
+				head: ['محصول', 'تعداد', 'جمع (تومان)', ...(hasLineDiscounts ? ['تخفیف کوپن'] : [])],
 				rows,
 			},
 		],

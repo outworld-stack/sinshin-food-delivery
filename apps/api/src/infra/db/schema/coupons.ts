@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  check,
   date,
   index,
   integer,
@@ -17,6 +18,7 @@ import {
 import type { CampaignId, ConditionId, OrderId } from '#/domain/shared/brand'
 import { users } from './users'
 import { orders } from './orders'
+import { categories, products } from './menu'
 
 /**
  * کوپن — موجودیت واحد بر اساس قرارداد فرانت.
@@ -24,6 +26,7 @@ import { orders } from './orders'
  * خصوصی (isPublic=false): با N شرط — فقط به هدف‌یابی‌شده‌ها اعطا می‌شود (coupon_grants).
  */
 export const couponConditionTypeEnum = pgEnum('coupon_condition_type', [
+  'FIRST_PURCHASE', // no successful, non-canceled purchases
   'MIN_ORDERS_COUNT', // { count }
   'MIN_TOTAL_SPEND', // { amount }
   'MIN_PRODUCT_ORDERS', // { productId, count }
@@ -35,6 +38,9 @@ export const couponConditionTypeEnum = pgEnum('coupon_condition_type', [
   'ORDERS_IN_LAST_DAYS', // { days, count } — اختصاصی موتور کمپین
 ])
 
+export const couponConditionModeEnum = pgEnum('coupon_condition_mode', ['AND', 'OR'])
+export const couponDiscountScopeEnum = pgEnum('coupon_discount_scope', ['ALL_PRODUCTS', 'CATEGORY', 'PRODUCT'])
+
 export const coupons = pgTable(
   'coupons',
   {
@@ -43,6 +49,10 @@ export const coupons = pgTable(
     code: varchar('code', { length: 32 }).notNull(),
     title: varchar('title', { length: 120 }),
     discountPercentage: integer('discount_percentage').notNull(),
+    conditionMode: couponConditionModeEnum('condition_mode').notNull().default('AND'),
+    discountScope: couponDiscountScopeEnum('discount_scope').notNull().default('ALL_PRODUCTS'),
+    discountCategoryId: uuid('discount_category_id').references(() => categories.id, { onDelete: 'restrict' }),
+    discountProductId: uuid('discount_product_id').references(() => products.id, { onDelete: 'restrict' }),
     /** ۰ = نامحدود */
     maxUses: integer('max_uses').notNull().default(0),
     usedCount: integer('used_count').notNull().default(0),
@@ -78,6 +88,11 @@ export const coupons = pgTable(
   (t) => [
     uniqueIndex('coupons_code_key').on(t.code),
     index('coupons_active_idx').on(t.isActive, t.startsAt, t.endsAt),
+    check('coupons_discount_scope_target_check', sql`
+      (${t.discountScope} = 'ALL_PRODUCTS' and ${t.discountCategoryId} is null and ${t.discountProductId} is null)
+      or (${t.discountScope} = 'CATEGORY' and ${t.discountCategoryId} is not null and ${t.discountProductId} is null)
+      or (${t.discountScope} = 'PRODUCT' and ${t.discountProductId} is not null and ${t.discountCategoryId} is null)
+    `),
   ],
 )
 
@@ -94,6 +109,17 @@ export const couponConditions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('conditions_coupon_idx').on(t.couponId)],
+)
+
+/** One pending first-purchase entitlement per customer, across all campaigns. */
+export const firstPurchaseReservations = pgTable(
+  'first_purchase_reservations',
+  {
+    userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'restrict' }),
+    orderId: uuid('order_id').notNull().$type<OrderId>().references(() => orders.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('first_purchase_reservations_order_key').on(t.orderId)],
 )
 
 /** مصرف کوپن روی سفارش — در تسویه ثبت می‌شود؛ در شکست رزرو آزاد می‌شود */

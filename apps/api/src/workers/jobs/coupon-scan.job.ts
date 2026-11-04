@@ -36,8 +36,9 @@ import type { DailyJob } from '#/workers/scheduler'
 
 /**
  * اسکن شبانه‌ی شایستگی کوپن — ۰۲:۰۰ تهران.
- * کاربرانی که «همه‌ی شرط‌ها به‌جز یکی» دارند و گرنت ندارند → coupon_nudges.
- * اعطای واقعی: لحظه‌ی تسویه سفارش.
+ * AND: one remaining condition; OR: one attainable alternative, with no
+ * already-satisfied branch. Eligibility and impossible FIRST_PURCHASE
+ * reminders are checked by CouponService and checked again before delivery.
  */
 export class CouponScanJob implements DailyJob {
   readonly name = 'coupon-eligibility-scan'
@@ -45,13 +46,14 @@ export class CouponScanJob implements DailyJob {
   readonly catchUp = true
 
   constructor(
-    private readonly deps: { config: AppConfig; db: Db; coupons: CouponService },
+    private readonly deps: { config: AppConfig; db: Db; coupons: CouponService; now?: () => Date },
   ) {
     this.time = deps.config.couponScanTime
   }
 
   async run(): Promise<void> {
     const { db } = this.deps
+    const now = this.deps.now ?? (() => new Date())
 
     // stage-67 — گارد پنجره‌ی ارسال (کامنت سربرگ): اگر الان در تهران
     // گذشته‌تر از ساعتِ ارسالِ یادآور (COUPON_NUDGE_TIME) است، ردیف‌های
@@ -62,7 +64,7 @@ export class CouponScanJob implements DailyJob {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
-    }).format(new Date())
+    }).format(now())
     if (nowHm >= this.deps.config.couponNudgeTime) {
       console.log(
         `[cron:coupon-scan] ${nowHm} Tehran is past nudge time (${this.deps.config.couponNudgeTime}) — ` +
@@ -99,7 +101,7 @@ export class CouponScanJob implements DailyJob {
     const scanDate = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran',
       year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date())
+    }).format(now())
 
     let totalNudges = 0
 

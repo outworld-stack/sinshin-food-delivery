@@ -5,7 +5,9 @@ const whole = (value: unknown, minimum: number, maximum = Number.MAX_SAFE_INTEGE
   typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum && value <= maximum
 
 export function validCouponRule(type: string, params: Record<string, unknown>): boolean {
+  if (params === null || typeof params !== 'object' || Array.isArray(params)) return false
   switch (type) {
+    case 'FIRST_PURCHASE': return Object.keys(params).length === 0
     case 'MIN_TOTAL_SPEND':
     case 'MIN_REFERRAL_SPEND': return whole(params.amount, 1)
     case 'REGISTERED_DAYS_AGO': return whole(params.days, 1, 1_000_000)
@@ -20,6 +22,42 @@ export function validCouponRule(type: string, params: Record<string, unknown>): 
     case 'MIN_REFERRALS':
     case 'MIN_REFERRAL_ORDERS': return whole(params.count, 1)
     default: return false
+  }
+}
+
+/** FIRST_PURCHASE and positive purchase-history requirements cannot both hold. */
+export function hasContradictoryCouponRules(
+  rules: Array<{ type: string; params: Record<string, unknown> }>,
+  mode: 'AND' | 'OR' = 'AND',
+): boolean {
+  if (mode !== 'AND' || !rules.some(rule => rule.type === 'FIRST_PURCHASE')) return false
+  return rules.some(rule =>
+    rule.type === 'MIN_ORDERS_COUNT' || rule.type === 'MIN_TOTAL_SPEND' ||
+    rule.type === 'ORDERS_IN_LAST_DAYS' ||
+    ((rule.type === 'MIN_PRODUCT_ORDERS' || rule.type === 'MIN_CATEGORY_ORDERS') &&
+      typeof rule.params.count === 'number' && rule.params.count > 0))
+}
+
+export function validateCouponConfiguration(input: {
+  conditionMode?: string
+  discountScope?: string
+  discountCategoryId?: string | null
+  discountProductId?: string | null
+  rules: Array<{ type: string; params: Record<string, unknown> }>
+}): void {
+  const mode = input.conditionMode ?? 'AND'
+  if (mode !== 'AND' && mode !== 'OR') throw Err.validation('شیوه ترکیب شرط‌های کوپن معتبر نیست')
+  if (hasContradictoryCouponRules(input.rules, mode)) {
+    throw Err.validation('شرط اولین خرید با شرط داشتن خرید موفق قبلی در حالت «همه شرط‌ها» سازگار نیست')
+  }
+  const scope = input.discountScope ?? 'ALL_PRODUCTS'
+  const categoryId = input.discountCategoryId ?? null
+  const productId = input.discountProductId ?? null
+  if ((scope === 'ALL_PRODUCTS' && (categoryId !== null || productId !== null)) ||
+      (scope === 'CATEGORY' && (categoryId === null || !UUID_RE.test(categoryId) || productId !== null)) ||
+      (scope === 'PRODUCT' && (productId === null || !UUID_RE.test(productId) || categoryId !== null)) ||
+      !['ALL_PRODUCTS', 'CATEGORY', 'PRODUCT'].includes(scope)) {
+    throw Err.validation('محدوده تخفیف و محصول یا دسته انتخاب‌شده معتبر نیست')
   }
 }
 
