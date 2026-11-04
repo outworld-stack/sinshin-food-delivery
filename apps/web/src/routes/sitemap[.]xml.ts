@@ -1,44 +1,11 @@
-// ═══════════════════════════════════════════════════════════════
-// stage-56 — sinshin-food-delivery
-// مسیر مقصد: apps/web/src/routes/sitemap[.]xml.ts
-// تغییر: URL محصولات از slug انگلیسی (اگر تعیین شده باشد) — همان
-//        مسیرهای canonical؛ بدون slug همان UUID قبلی
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-// round-38 — sinshin-food-delivery — فایل 18 از 18
-// مسیر مقصد: web/src/routes/sitemap[.]xml.ts
-// وضعیت: جایگزینی کامل فایل موجود
-// کامیت پیشنهادی: stage thirty-four
-// ═══════════════════════════════════════════════════════════════
-
-// src/routes/sitemap[.]xml.ts
-// سئو-۳ → رارد ۳۸ — sitemap داینامیک دوزبانه.
-// نام فایل [.] یعنی «نقطه‌ی literal» — مسیر نهایی /sitemap.xml است.
-//
-// مکانیزم: هندلرهای سروری روی خودِ روت (بدون کامپوننت) — قبل از SSR
-// پاسخ می‌دهد و Content-Type درست (application/xml) برمی‌گرداند.
-//
-// رارد ۳۸ — ساختار hreflang: هر صفحه یک <url> با هر سه واریانت زبان
-// (xhtml:link: fa تمیز + ar با ?lang=ar + x-default) — استاندارد گوگل
-// برای sitemap چندزبانه. URLها دقیقاً همان‌هایی هستند که canonical/
-// hreflang صفحات می‌سازند (lib/seo.ts alternateHrefs — منبع واحد).
-//
-// مقاوم بودن: اگر API در دسترس نباشد، sitemap با «صفحات ثابت» برمی‌گردد
-// (خطا فقط بخش داینامیک را حذف می‌کند، کل sitemap نمی‌میرد) + کش ۱ ساعته.
 import { createFileRoute } from '@tanstack/react-router'
-// فقط برای اعمال augmentation نوعِ گزینه‌ی `server` روی FilebaseRouteOptions —
-// بدون این، tsc نمی‌داند روت‌ها handler سرور می‌پذیرند
-import type { } from '@tanstack/react-start'
+import type {} from '@tanstack/react-start'
 import { alternateHrefs } from '#/lib/seo'
 import { getArticles } from '#/server/articles'
 import { getActiveMainCategories, getProductsByMain } from '#/server/products'
 
 interface SitemapEntry {
-	/** مسیر نسبی (بدون دامنه) — hreflangها از همین ساخته می‌شوند */
 	path: string
-	changefreq?: 'daily' | 'weekly' | 'monthly'
-	priority?: string
 	lastmod?: string
 }
 
@@ -46,100 +13,106 @@ export const Route = createFileRoute('/sitemap.xml')({
 	server: {
 		handlers: {
 			GET: async () => {
-				const entries: SitemapEntry[] = [
-					{ path: '/', changefreq: 'daily', priority: '1.0' },
-					{ path: '/products', changefreq: 'daily', priority: '0.9' },
-					{ path: '/articles', changefreq: 'weekly', priority: '0.7' },
-					{ path: '/gallery', changefreq: 'monthly', priority: '0.5' },
-					{ path: '/about', changefreq: 'monthly', priority: '0.5' },
-				]
-
-				// ── محصولات — از هر main فعال (dedup با id) ──
 				try {
-					const mains = await getActiveMainCategories()
+					// Public APIs return all published articles and active menu items.
+					const [mains, articles] = await Promise.all([
+						getActiveMainCategories(),
+						getArticles({ data: {} }),
+					])
+					const menus = await Promise.all(
+						mains.map((main) =>
+							getProductsByMain({ data: { mainSlug: main.slug } }),
+						),
+					)
+					const entries: SitemapEntry[] = [
+						{ path: '/' },
+						{ path: '/products' },
+						{ path: '/articles' },
+						{ path: '/gallery' },
+						{ path: '/about' },
+					]
 					const seen = new Set<string>()
-					for (const m of mains) {
-						// روت عمومی منو، همه‌ی محصولات فعالِ آن main را یک‌جا می‌دهد
-						const products = await getProductsByMain({
-							data: { mainSlug: m.slug },
-						})
-						for (const p of products) {
-							if (seen.has(p.id)) continue
-							seen.add(p.id)
-							// stage-56 — URL سئوپسند: slug اگر باشد، وگرنه UUID
+					for (const products of menus) {
+						for (const product of products) {
+							if (seen.has(product.id)) continue
+							seen.add(product.id)
 							entries.push({
-								path: `/products/${p.slug || p.id}`,
-								changefreq: 'weekly',
-								priority: '0.8',
+								path: `/products/${encodeURIComponent(product.slug || product.id)}`,
 							})
 						}
 					}
-				} catch (e) {
-					console.warn('[sitemap] products unavailable:', e)
-				}
-
-				// ── مقالات — با lastmod اگر تاریخ انتشار باشد ──
-				try {
-					const articles = await getArticles({ data: {} })
-					for (const a of articles) {
+					for (const article of articles) {
 						entries.push({
-							path: `/articles/${a.id}`,
-							changefreq: 'monthly',
-							priority: '0.6',
-							...(a.publishedAt ? { lastmod: a.publishedAt.slice(0, 10) } : {}),
+							path: `/articles/${encodeURIComponent(article.id)}`,
+							lastmod:
+								sitemapDate(article.updatedAt) ??
+								sitemapDate(article.publishedAt),
 						})
 					}
-				} catch (e) {
-					console.warn('[sitemap] articles unavailable:', e)
+
+					// Every language URL needs its own entry, with the same reciprocal
+					// alternates, including itself. These match the HTML canonical URLs.
+					const xml =
+						'<?xml version="1.0" encoding="UTF-8"?>\n' +
+						'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n' +
+						entries
+							.flatMap((entry) => {
+								const hrefs = alternateHrefs(entry.path)
+								return [hrefs.fa, hrefs.ar].map(
+									(url) =>
+										'  <url>' +
+										`<loc>${escapeXml(url)}</loc>` +
+										(entry.lastmod
+											? `<lastmod>${entry.lastmod}</lastmod>`
+											: '') +
+										`<xhtml:link rel="alternate" hreflang="fa" href="${escapeXml(hrefs.fa)}"/>` +
+										`<xhtml:link rel="alternate" hreflang="ar" href="${escapeXml(hrefs.ar)}"/>` +
+										`<xhtml:link rel="alternate" hreflang="x-default" href="${escapeXml(hrefs.xDefault)}"/>` +
+										'</url>',
+								)
+							})
+							.join('\n') +
+						'\n</urlset>'
+
+					return new Response(xml, {
+						headers: {
+							'content-type': 'application/xml; charset=utf-8',
+							'cache-control': 'public, max-age=300',
+						},
+					})
+				} catch (error) {
+					// A temporary outage must not publish/cache an incomplete inventory.
+					console.warn('[sitemap] content unavailable:', error)
+					return new Response('Sitemap temporarily unavailable', {
+						status: 503,
+						headers: {
+							'content-type': 'text/plain; charset=utf-8',
+							'cache-control': 'no-store',
+							'retry-after': '60',
+						},
+					})
 				}
-
-				// هر صفحه: loc = واریانت پیش‌فرض (فارسی تمیز) + سه alternate زبان
-				const xml =
-					'<?xml version="1.0" encoding="UTF-8"?>\n' +
-					'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n' +
-					'        xmlns:xhtml="http://www.w3.org/1999/xhtml">\n' +
-					entries
-						.map((u) => {
-							const h = alternateHrefs(u.path)
-							return (
-								'  <url>' +
-								`<loc>${escapeXml(h.fa)}</loc>` +
-								`<xhtml:link rel="alternate" hreflang="fa" href="${escapeXml(h.fa)}"/>` +
-								`<xhtml:link rel="alternate" hreflang="ar" href="${escapeXml(h.ar)}"/>` +
-								`<xhtml:link rel="alternate" hreflang="x-default" href="${escapeXml(h.xDefault)}"/>` +
-								(u.changefreq
-									? `<changefreq>${u.changefreq}</changefreq>`
-									: '') +
-								(u.priority ? `<priority>${u.priority}</priority>` : '') +
-								(u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : '') +
-								'</url>'
-							)
-						})
-						.join('\n') +
-					'\n</urlset>'
-
-				return new Response(xml, {
-					headers: {
-						'content-type': 'application/xml; charset=utf-8',
-						// sitemap هر ساعت تازه می‌شود؛ بین‌دو-کرال از کش لبه/مرورگر
-						'cache-control': 'public, max-age=3600',
-					},
-				})
 			},
 		},
 	},
 })
 
-function escapeXml(s: string): string {
-	return s.replace(
+function sitemapDate(value?: string): string | undefined {
+	if (!value) return undefined
+	const date = new Date(value)
+	return Number.isFinite(date.getTime()) ? date.toISOString() : undefined
+}
+
+function escapeXml(value: string): string {
+	return value.replace(
 		/[<>&'"]/g,
-		(c) =>
+		(char) =>
 			({
 				'<': '&lt;',
 				'>': '&gt;',
 				'&': '&amp;',
 				"'": '&apos;',
 				'"': '&quot;',
-			})[c] ?? c,
+			})[char] ?? char,
 	)
 }

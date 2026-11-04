@@ -726,6 +726,8 @@ export interface ArticleDto {
   status: string
   /** رارد ۴۷ — تولیدکننده همیشه می‌فرستد (toISOString)؛ قبلاً optional بود */
   publishedAt: string
+  /** Content modification time; optional while older API responses expire. */
+  updatedAt?: string
   /** رارد ۴۷ — دسته/زیردسته ممکن است نباشد: null نه undefined (آینه‌ی تولیدکننده) */
   categorySlug: string | null
   categoryName: string | null

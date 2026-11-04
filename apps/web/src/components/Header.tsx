@@ -19,7 +19,6 @@ import { memo } from 'react'
 import { Bell, BellRing, Cart, Package, Shield, User } from 'reicon-react'
 import { Brand } from '#/components/Brand'
 import { LangSwitcher } from '#/components/LangSwitcher'
-import { HeaderSkeleton } from '#/components/LoadingSkeletons'
 import { ThemeToggle } from '#/components/ThemeToggle'
 import { useActiveOrder } from '#/hooks/shared/useActiveOrder'
 import { useHydrated } from '#/hooks/useHydrated'
@@ -45,8 +44,12 @@ import {
 //   تک‌دکمه در موبایل — تصمیم ۳) کنار آیکون تم.
 export const Header = memo(function Header() {
         const hydrated = useHydrated()
-        const totalItems = useCartStore((state) => state.getTotalItems())
-        const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+        const storedTotalItems = useCartStore((state) => state.getTotalItems())
+        const storedIsAuthenticated = useAuthStore((state) => state.isAuthenticated)
+        // Render navigation in the initial HTML while browser-persisted state
+        // stays hidden until hydration, keeping the first client render stable.
+        const totalItems = hydrated ? storedTotalItems : 0
+        const isAuthenticated = hydrated && storedIsAuthenticated
         const role = useAuthStore((state) => state.role)
         const activeOrderId = useAuthStore((state) => state.activeOrderId)
         const { t, fmt } = useI18n()
@@ -72,8 +75,6 @@ export const Header = memo(function Header() {
                 notificationsUnreadOptions(isAuthenticated ? user?.id : undefined),
         )
         const unreadCount = notifBadge?.unread ?? 0
-
-        if (!hydrated) return <HeaderSkeleton />
 
         // سایز آیکون: موبایل 18px / دسکتاپ 20-22px — CSS روی اتریبیوت size غلبه می‌کند
         const ico = 'h-[18px] w-[18px] sm:h-5 sm:w-5'

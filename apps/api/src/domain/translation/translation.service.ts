@@ -477,7 +477,7 @@ export class TranslationService {
     if (processesAr !== undefined) patch.processesAr = processesAr
     if (Object.keys(patch).length > 0) {
       if (!skippedManual) patch.arAuto = true
-      await db.update(articles).set(patch).where(eq(articles.id, entityId))
+      await db.update(articles).set({ ...patch, updatedAt: new Date() }).where(eq(articles.id, entityId))
       await this.deps.articles.bustCache()
       return null
     }

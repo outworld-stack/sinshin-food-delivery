@@ -8,7 +8,7 @@
     email {$ACME_EMAIL:dev@sinshin.localhost}
 }
 
-# ── دامنه‌ی بدون پیشوند — همیشه به‌صورت دائمی به دامنه‌ی اصلی هدایت می‌شود ──
+# APEX_DOMAIN is the redirect alias; DOMAIN is canonical (with or without www).
 {$APEX_DOMAIN:sinshin.localhost} {
     redir https://{$DOMAIN:www.sinshin.localhost}{uri} permanent
 }
@@ -65,6 +65,8 @@
             +Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
             X-Content-Type-Options nosniff
             Referrer-Policy no-referrer
+            # Public JSON remains crawlable for page rendering, without becoming search results.
+            X-Robots-Tag noindex
         }
 
         reverse_proxy {$API_UPSTREAMS:api:3000} {

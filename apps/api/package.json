@@ -39,6 +39,7 @@
     "db:test:courier": "bun scripts/test-courier-safety.ts",
     "db:test:delivery": "bun scripts/test-delivery-safety.ts",
     "test:maps": "bun scripts/test-maps-service.ts",
+    "test:geo": "bun scripts/test-geo-gate.ts",
     "test:otp": "bun scripts/test-otp-core.ts",
     "test:otp-limit": "bun scripts/test-otp-distinct-limit.ts",
     "db:test:blocks": "bun scripts/test-article-blocks.ts",

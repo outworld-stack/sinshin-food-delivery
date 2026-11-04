@@ -71,6 +71,10 @@ CMD ["bun", "run", "dev", "--host", "0.0.0.0"]
 # ──────────────────────────────────────────────────────────
 FROM deps AS build
 
+# Public canonical host, shared by SSR metadata, robots and the sitemap.
+ARG DOMAIN
+ENV DOMAIN=${DOMAIN}
+
 # round-49 — کلید نقشهٔ نشان باید «موقع build» داخل باندل برود —
 # Vite متغیرهای VITE_* را از محیط build جایگزین می‌کند. compose این
 # مقدار را از ‎.env ریشه (VITE_NESHAN_API_KEY) به‌عنوان build arg

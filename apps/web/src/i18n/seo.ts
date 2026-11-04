@@ -46,6 +46,7 @@ export interface SeoStrings {
 	appleTitle: string
 	/** نام Restaurant در JSON-LD */
 	restaurantName: string
+	restaurantAddress: { streetAddress: string; addressLocality: string; addressRegion: string }
 	servesCuisine: string[]
 	home: RouteSeo
 	products: RouteSeo
@@ -72,6 +73,7 @@ const fa: SeoStrings = {
 	brand: '| سین شین',
 	appleTitle: 'سین‌شین',
 	restaurantName: 'سین‌شین',
+	restaurantAddress: { streetAddress: 'کیلومتر یک پاسداران', addressLocality: 'بندرانزلی', addressRegion: 'گیلان' },
 	servesCuisine: ['فست‌فود', 'پیتزا', 'کباب', 'سوخاری', 'پاستا'],
 	home: {
 		title: 'سین شین | فودپارک آنلاین',
@@ -134,6 +136,7 @@ const ar: SeoStrings = {
 	brand: '| سين شين',
 	appleTitle: 'سين شين',
 	restaurantName: 'سين شين',
+	restaurantAddress: { streetAddress: 'الكيلومتر الأول من پاسداران', addressLocality: 'بندر أنزلي', addressRegion: 'جيلان' },
 	servesCuisine: ['وجبات سريعة', 'بيتزا', 'مشاوي', 'دجاج مقلي', 'معكرونة'],
 	home: {
 		title: 'سين شين | فود بارك — اطلب طعامك أونلاين',

@@ -12,11 +12,16 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import { nitro } from 'nitro/vite'
 import { defineConfig, loadEnv } from 'vite'
+import { siteOriginFromDomain } from './src/lib/site-origin.ts'
 
 const mapKeyFrom = (env: Record<string, string | undefined>) =>
 	env.VITE_NESHAN_MAP_KEY || env.VITE_NESHAN_API_KEY
 
 const config = defineConfig(({ mode }) => {
+	const domain = process.env.DOMAIN ||
+		loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'DOMAIN').DOMAIN ||
+		loadEnv(mode, fileURLToPath(new URL('../../', import.meta.url)), 'DOMAIN').DOMAIN
+	const siteOrigin = siteOriginFromDomain(domain)
 	// Native Vite runs in apps/web; Docker receives the public map key from the
 	// root .env. Share that fallback without loading server secrets into Vite.
 	// Resolve each source together so a local legacy key still overrides root.
@@ -39,6 +44,7 @@ const config = defineConfig(({ mode }) => {
 
 	return {
 		define: {
+			'import.meta.env.VITE_SITE_URL': JSON.stringify(siteOrigin),
 			'import.meta.env.VITE_NESHAN_MAP_KEY': JSON.stringify(mapKey ?? ''),
 		},
 		resolve: { tsconfigPaths: true },

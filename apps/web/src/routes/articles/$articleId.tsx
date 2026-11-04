@@ -8,6 +8,7 @@
 // src/routes/articles/$articleId.tsx
 import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { ChevronRight, Feather } from 'reicon-react'
+import { z } from 'zod'
 import { Gallery } from '#/components/Gallery'
 import { ArticleBlocksRenderer } from '#/components/site/articles/ArticleBlocksRenderer'
 import { ArticleDetailSkeleton } from '#/components/LoadingSkeletons'
@@ -27,6 +28,7 @@ import { absoluteUrl, DEFAULT_OG_IMAGE } from '#/lib/site'
 import { getArticleById } from '#/server/articles'
 
 export const Route = createFileRoute('/articles/$articleId')({
+        validateSearch: z.object({ lang: z.enum(['fa', 'ar']).optional().catch(undefined) }),
         component: ArticleDetailPage,
 
         // رندر سمت سرور — دریافت مستقیم یک مقاله، نه کل لیست (الگوی صفحه محصول)
@@ -47,7 +49,10 @@ export const Route = createFileRoute('/articles/$articleId')({
         head: ({ matches, loaderData }) => {
                 const lang = headLang(matches)
                 if (!loaderData) {
-                        return { meta: [{ title: SEO[lang].notFoundArticle.title }] }
+                        return { meta: [
+                                { title: SEO[lang].notFoundArticle.title },
+                                { name: 'robots', content: 'noindex, follow' },
+                        ] }
                 }
                 const ogImage =
                         absoluteUrl(loaderData.profileImage) ??
@@ -66,7 +71,9 @@ export const Route = createFileRoute('/articles/$articleId')({
                                 { property: 'og:title', content: title },
                                 { property: 'og:description', content: description },
                                 { property: 'og:type', content: 'article' },
+                                { property: 'og:url', content: canonical },
                                 { property: 'og:image', content: ogImage },
+                                { property: 'og:image:alt', content: localizedFor(lang, loaderData.titleAr, loaderData.title) },
                                 ...(loaderData.publishedAt
                                         ? [
                                                 {
@@ -75,8 +82,14 @@ export const Route = createFileRoute('/articles/$articleId')({
                                                 },
                                         ]
                                         : []),
-                                { 'twitter:card': 'summary_large_image' },
-                                { 'twitter:image': ogImage },
+                                ...(loaderData.updatedAt
+                                        ? [{ property: 'article:modified_time', content: loaderData.updatedAt }]
+                                        : []),
+                                { name: 'twitter:card', content: 'summary_large_image' },
+                                { name: 'twitter:title', content: title },
+                                { name: 'twitter:description', content: description },
+                                { name: 'twitter:image', content: ogImage },
+                                { name: 'twitter:image:alt', content: localizedFor(lang, loaderData.titleAr, loaderData.title) },
                                 { 'script:ld+json': articleJsonLd(loaderData, lang) },
                         ],
                         links: [
@@ -91,7 +104,7 @@ function ArticleDetailPage() {
         // داده از لودر — بدون کوئری کلاینت
         const article = Route.useLoaderData()
         const back = useBack('/articles')
-        const { t, fmt } = useI18n()
+        const { t, fmt, lang } = useI18n()
 
         const galleryImages = article.galleryImages ?? []
 
@@ -99,7 +112,7 @@ function ArticleDetailPage() {
         // دوزبانه (بومی‌سازی‌شده) و با اسکیپ بومی روتر — این کامپوننت فقط UI است.
 
         return (
-                <div className="py-10 px-4 max-w-3xl mx-auto">
+                <article className="py-10 px-4 max-w-3xl mx-auto">
                         <button
                                 type="button"
                                 onClick={back}
@@ -117,9 +130,9 @@ function ArticleDetailPage() {
                                         <span className="font-DanaDemiBold text-gray-800 dark:text-white text-lg">
                                                 {article.author}
                                         </span>
-                                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                                        <time dateTime={article.publishedAt} className="text-sm text-gray-500 dark:text-gray-400">
                                                 {fmt.date(article.publishedAt)}
-                                        </span>
+                                        </time>
                                 </div>
                         </div>
 
@@ -194,7 +207,7 @@ function ArticleDetailPage() {
                                 {article.categorySlug && (
                                         <Link
                                                 to="/articles"
-                                                search={{ category: article.categorySlug ?? undefined }}
+                                                search={{ category: article.categorySlug ?? undefined, lang: lang === 'ar' ? 'ar' : undefined }}
                                                 className="cursor-pointer px-4 py-2 rounded-full bg-gray-100 dark:bg-[#2a1015] text-gray-700 dark:text-gray-300 hover:bg-primary hover:text-white dark:hover:bg-dark-primary transition text-sm font-DanaMedium"
                                         >
                                                 {article.categoryName}
@@ -206,6 +219,7 @@ function ArticleDetailPage() {
                                                 search={{
                                                         category: article.categorySlug ?? undefined,
                                                         subCategory: article.subCategorySlug ?? undefined,
+                                                        lang: lang === 'ar' ? 'ar' : undefined,
                                                 }}
                                                 className="cursor-pointer px-4 py-2 rounded-full bg-gray-100 dark:bg-[#2a1015] text-gray-700 dark:text-gray-300 hover:bg-primary hover:text-white dark:hover:bg-dark-primary transition text-sm font-DanaMedium"
                                         >
@@ -213,6 +227,6 @@ function ArticleDetailPage() {
                                         </Link>
                                 )}
                         </div>
-                </div>
+                </article>
         )
 }

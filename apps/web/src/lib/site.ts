@@ -1,9 +1,9 @@
 // src/lib/site.ts
 // ثابت‌ها و هلپرهای سئو — یک منبع واحد برای canonical / og:image / sitemap / JSON-LD.
-// اگر روزی دامنه عوض شد، فقط همین فایل را تغییر بده.
-// (با canonical صفحه‌ی about هم‌راستاست: https://www.sinshin-foodpark.ir)
+// Vite resolves DOMAIN at build time so server and browser use the same origin.
+import { DEFAULT_SITE_URL } from './site-origin'
 
-export const SITE_URL = 'https://sinshin-foodpark.ir'
+export const SITE_URL = import.meta.env?.VITE_SITE_URL || DEFAULT_SITE_URL
 
 /** تصویر پیش‌فرض og — همان برندینگ فعلی (مربع ۱۱۵۵×۱۱۵۵) */
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/images/main.png`

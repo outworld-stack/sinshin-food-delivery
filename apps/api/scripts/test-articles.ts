@@ -94,9 +94,15 @@ try {
   }
   const { id } = await articlesService.create(input)
   assert.ok(id)
-  await db.update(articles).set({ arAuto: true }).where(eq(articles.id, id))
+  const publishedAt = new Date('2026-01-01T10:00:00.000Z')
+  await db.update(articles).set({ arAuto: true, createdAt: publishedAt, updatedAt: publishedAt }).where(eq(articles.id, id))
   await articlesService.update(id, { title: 'ویرایش', excerpt: 'خلاصه جدید', content: 'ignored for blocks', categoryId: category.id })
   const edited = (await articlesService.adminDetail(id))!
+  const summary = (await articlesService.listPublic()).find((article) => article.id === id)!
+  check(edited.publishedAt === publishedAt.toISOString()
+    && Date.parse(edited.updatedAt) > publishedAt.getTime()
+    && summary.updatedAt === edited.updatedAt && summary.publishedAt === edited.publishedAt,
+  'article detail and sitemap summaries expose actual edit time without changing publication time')
   check(edited.content === 'متن بلوکی' && edited.blocks?.blocks.length === 1, 'omitting blocks preserves the layout and its derived content')
   check(edited.titleAr === input.titleAr && edited.arAuto === true && edited.author === input.author
     && edited.profileImage === input.profileImage && edited.galleryImages.length === 1
@@ -106,6 +112,9 @@ try {
   check(arabic.processes[0]?.title === 'مرحله اول' && arabic.processes[0]?.items.join('|') === 'یک|اثنان'
     && arabic.processes[1]?.items[0] === 'سه', 'Arabic process placeholders fall back to the corresponding Persian fields')
   check(arabic.blocks === null && arabic.content === 'محتوى', 'Arabic detail serves translated text without Persian blocks')
+  await articlesService.close()
+  check((await articlesService.adminDetail(id))?.updatedAt === edited.updatedAt,
+    'counting article views does not advertise a content change to search engines')
   const huge = { version: 1, blocks: Array.from({ length: 30 }, (_, i) => ({
     id: `p${i}`, type: 'paragraph', props: { text: 'م'.repeat(5000) },
   })) }

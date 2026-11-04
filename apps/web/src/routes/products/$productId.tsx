@@ -82,7 +82,7 @@ export const Route = createFileRoute('/products/$productId')({
         head: ({ matches, loaderData }) => {
                 const lang = headLang(matches)
                 if (!loaderData) {
-                        return { meta: [{ title: SEO[lang].notFoundProduct.title }] }
+                        return { meta: [{ title: SEO[lang].notFoundProduct.title }, { name: 'robots', content: 'noindex, follow' }] }
                 }
                 const ogImage = absoluteUrl(loaderData.profileImage) ?? DEFAULT_OG_IMAGE
                 const name = localizedFor(lang, loaderData.nameAr, loaderData.name)
@@ -102,9 +102,14 @@ export const Route = createFileRoute('/products/$productId')({
                                 { property: 'og:title', content: title },
                                 { property: 'og:description', content: description },
                                 { property: 'og:type', content: 'product' },
+                                { property: 'og:url', content: canonical },
                                 { property: 'og:image', content: ogImage },
-                                { 'twitter:card': 'summary_large_image' },
-                                { 'twitter:image': ogImage },
+                                { property: 'og:image:alt', content: name },
+                                { name: 'twitter:card', content: 'summary_large_image' },
+                                { name: 'twitter:image', content: ogImage },
+                                { name: 'twitter:image:alt', content: name },
+                                { name: 'twitter:title', content: title },
+                                { name: 'twitter:description', content: description },
                                 { 'script:ld+json': productJsonLd(loaderData, lang) },
                         ],
                         links: [

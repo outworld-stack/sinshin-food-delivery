@@ -160,7 +160,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:-www.sinshin.localhost}
 
-      # دامنه‌ی بدون پیشوند — سرو ریدایرکت دائمی به دامنه‌ی اصلی
+      # Redirect alias (www in production) points permanently to DOMAIN.
       APEX_DOMAIN: ${APEX_DOMAIN:-sinshin.localhost}
 
       ACME_EMAIL: ${ACME_EMAIL:-dev@sinshin.localhost}
@@ -242,6 +242,7 @@ services:
       # Vite متغیرهای VITE_* را موقع build داخل باندل می‌بندد —
       # خالی = فرم مختصات دستی جای نقشه (رفتار قبلی).
       args:
+        DOMAIN: ${DOMAIN:-www.sinshin.localhost}
         VITE_NESHAN_API_KEY: ${VITE_NESHAN_API_KEY:-}
         # فاز-۲ — کلید web نشان (SDK MapLibre)؛ نام جدید، قدیمی هم کار می‌کند
         VITE_NESHAN_MAP_KEY: ${VITE_NESHAN_MAP_KEY:-}

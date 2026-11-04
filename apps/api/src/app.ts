@@ -61,8 +61,7 @@ import type { NeshanService } from '#/infra/maps/neshan.service'
 import type { TranslationService } from '#/domain/translation/translation.service'
 
 import { AppError } from '#/domain/shared/errors'
-import { clientIp } from '#/domain/shared/net'
-import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
+import { createGeoGate } from '#/http/hooks/geo-gate'
 import { openapiPlugin } from '#/http/openapi'
 import cors from '@elysiajs/cors'
 import { healthRoutes } from '#/http/routes/health.routes'
@@ -159,63 +158,9 @@ export const buildApp = (deps: AppDeps) => {
   }, 60_000)
   geoWarmTimer.unref?.()
 
-  // ── دروازه‌ی جغرافیایی «فقط ایران» — round-28 ──
-  // یک پیاده‌سازی برای «کل» سطح حمله، سوار روی نمونه‌ی بیرونی: قبلاً فقط
-  // نمونه‌ی /api گیت داشت → /uploads/:name و POST /api/uploads و /swagger
-  // بیرون دروازه بودند. حالا هر مسیری که به این پروسه می‌رسد از همین
-  // یک گیت رد می‌شود (DRY — نه دو هوک موازی با هم‌پوشانی).
-  //
-  // سئو-۱ — معافیت کرالر، آینه‌ی همان منطق دروازه‌ی SSR (geoGate.ts):
-  // کرالرهایی که صفحه را رندر می‌کنند (مثل Googlebot WRS) درخواست‌های
-  // /api را با IP خودشان (غیرایرانی) می‌فرستند؛ بدون این معافیت، محتوای
-  // رندرشده‌شان ۴۰۳ می‌شد. اما معافیت فقط برای «خواندنِ محتوای قابل
-  // ایندکس» (GET/HEAD) است — متدهای نوشتن (OTP/چک‌اوت/آپلود) و استریم
-  // زنده‌ی SSE هیچ‌وقت معاف نیستند: جعل User-Agent دیگر سپر را دور نمی‌زند.
-  // (تماس‌های SSR وب با API از IP خصوصی‌اند و از قبل عبور می‌کنند.)
-  const geoGate = async (request: Request): Promise<Response | undefined> => {
-    // stage-58 — معافیتِ برگشت از بانک: state امضاشده‌ی HMAC خودش گارد است؛
-    // مشتری ممکن است وسط پرداخت VPN روشن/خاموش کند و IP برگشتش بیرون ایران
-    // باشد — قبلاً 403/JSON خام می‌گرفت در حالی که پولش در PSP گرفته شده
-    // بود و سفارش فقط با کارِ تایم‌اوت ۵ دقیقه‌ای خودش را درست می‌کرد.
-    // (مسیر mock/:state فقط در dev با GATEWAY_MODE=mock زنده است.)
-    try {
-      const path = new URL(request.url).pathname
-      if (/^\/api\/payments\/[^/]+\/callback$/.test(path)) return
-    } catch {
-      /* URL نامعتبر — گیت عادی ادامه می‌دهد */
-    }
-    if (request.method === 'GET' || request.method === 'HEAD') {
-      if (
-        isTrustedCrawlerUserAgent(request.headers.get('user-agent')) &&
-        !new URL(request.url).pathname.startsWith('/api/realtime')
-      ) {
-        return // محتوای عمومی — رندر کرالر آزاد
-      }
-    }
-    const ip = clientIp(request.headers.get('x-forwarded-for'))
-    if (ip && (await deps.geo.shouldBlock(ip))) {
-      // phase-fix: 404 گیج‌کننده بود → 403 + پیام روشن برای کاربر ایرانیِ VPN-دار
-      // round-37 — پیام با حالت واقعی دروازه هماهنگ می‌شود: در حالت
-      // «ایران + عراق» کاربرِ کشور دیگری باید بداند چرا مسدود است.
-      const mode = await deps.geo.accessMode()
-      const message =
-        mode === 'iran-iraq'
-          ? 'دسترسی به این سرویس فقط از ایران و عراق امکان‌پذیر است. اگر داخل یکی از این دو کشور هستید، لطفاً VPN خود را خاموش کنید و صفحه را رفرش کنید.'
-          : 'لطفاً اگر از ایران هستید، لطفاً VPN خودتان را خاموش کنید و صفحه را رفرش کنید.'
-      return new Response(
-        JSON.stringify({
-          error: {
-            code: 'GEO_BLOCKED',
-            message,
-            /** round-37 — حالت دروازه برای لایه‌های بالاتر (نگاشت خطای وب) */
-            policy: mode,
-          },
-        }),
-        { status: 403, headers: { 'content-type': 'application/json' } },
-      )
-    }
-    return
-  }
+  // The outer onRequest hook covers API routes and uploaded media. Crawler
+  // exemptions are limited to anonymous reads needed to render public pages.
+  const geoGate = createGeoGate(deps.geo)
 
   const api = new Elysia({ prefix: '/api' })
     .use(

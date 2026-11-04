@@ -99,7 +99,11 @@ export function headLang(matches: HeadFnCtx['matches']): Lang {
 
 /** URL مطلق یک مسیر در زبان داده‌شده — fa تمیز، ar با ?lang=ar */
 export function langUrl(path: string, lang: Lang): string {
-    return lang === 'ar' ? `${SITE_URL}${path}?lang=ar` : `${SITE_URL}${path}`
+    const url = new URL(path, `${SITE_URL}/`)
+    url.hash = ''
+    url.searchParams.delete('lang')
+    if (lang === 'ar') url.searchParams.set('lang', 'ar')
+    return url.href
 }
 
 /** سه href یک صفحه برای hreflang/sitemap — fa تمیز، ar واریانت، x-default = fa */
@@ -109,9 +113,9 @@ export function alternateHrefs(path: string): {
     xDefault: string
 } {
     return {
-        fa: `${SITE_URL}${path}`,
-        ar: `${SITE_URL}${path}?lang=ar`,
-        xDefault: `${SITE_URL}${path}`,
+        fa: langUrl(path, 'fa'),
+        ar: langUrl(path, 'ar'),
+        xDefault: langUrl(path, 'fa'),
     }
 }
 
@@ -178,6 +182,8 @@ export function seoHead(key: SeoPathKey) {
                 { property: 'og:description', content: s.ogDescription },
                 { property: 'og:type', content: s.ogType ?? 'website' },
                 { property: 'og:url', content: canonical },
+                { name: 'twitter:title', content: s.ogTitle },
+                { name: 'twitter:description', content: s.ogDescription },
             ],
             links: [
                 { rel: 'canonical', href: canonical },
@@ -222,7 +228,7 @@ export function siteHead(ctx: HeadFnCtx) {
             ...(s.home.keywords
                 ? [{ name: 'keywords', content: s.home.keywords }]
                 : []),
-            { name: 'robots', content: 'index, follow' },
+            { name: 'robots', content: 'index, follow, max-image-preview:large' },
             { name: 'theme-color', content: '#f6339a' },
             { name: 'apple-mobile-web-app-capable', content: 'yes' },
             { name: 'apple-mobile-web-app-status-bar-style', content: 'default' },
@@ -237,16 +243,8 @@ export function siteHead(ctx: HeadFnCtx) {
             },
             { property: 'og:site_name', content: s.siteName },
             { property: 'og:image', content: DEFAULT_OG_IMAGE },
-            { property: 'og:image:width', content: '1155' },
-            { property: 'og:image:height', content: '1155' },
-            ...(s.home.ogImageAlt
-                ? [{ property: 'og:image:alt', content: s.home.ogImageAlt }]
-                : []),
-            { 'twitter:card': 'summary_large_image' },
-            { 'twitter:image': DEFAULT_OG_IMAGE },
-            ...(s.home.ogImageAlt
-                ? [{ 'twitter:image:alt': s.home.ogImageAlt }]
-                : []),
+            { name: 'twitter:card', content: 'summary_large_image' },
+            { name: 'twitter:image', content: DEFAULT_OG_IMAGE },
             { 'script:ld+json': siteJsonLd(lang) },
         ],
     }
@@ -266,6 +264,7 @@ export function siteJsonLd(lang: Lang) {
                 url: SITE_URL,
                 name: s.siteName,
                 inLanguage: LOCALE_TAG[lang],
+                publisher: { '@id': `${SITE_URL}/#restaurant` },
             },
             {
                 '@type': 'Restaurant',
@@ -275,6 +274,11 @@ export function siteJsonLd(lang: Lang) {
                 logo: `${SITE_URL}/icons/icon-512-v1.png`,
                 image: DEFAULT_OG_IMAGE,
                 telephone: '+981344552313',
+                address: {
+                    '@type': 'PostalAddress',
+                    ...s.restaurantAddress,
+                    addressCountry: 'IR',
+                },
                 geo: {
                     '@type': 'GeoCoordinates',
                     latitude: 37.4822056,
@@ -361,6 +365,7 @@ export function productJsonLd(product: Product, lang: Lang) {
 export function articleJsonLd(article: ArticleDto, lang: Lang) {
     const s = SEO[lang]
     const title = localizedFor(lang, article.titleAr, article.title)
+    const canonical = langUrl(`/articles/${article.id}`, lang)
     const ogImage =
         absoluteUrl(article.profileImage) ??
         absoluteUrl(article.galleryImages?.[0]) ??
@@ -370,15 +375,25 @@ export function articleJsonLd(article: ArticleDto, lang: Lang) {
         '@graph': [
             {
                 '@type': 'Article',
+                '@id': `${canonical}#article`,
+                url: canonical,
                 headline: title,
                 description: localizedFor(lang, article.excerptAr, article.excerpt),
                 image: [ogImage],
                 ...(article.publishedAt ? { datePublished: article.publishedAt } : {}),
+                ...(article.updatedAt ? { dateModified: article.updatedAt } : {}),
                 inLanguage: LOCALE_TAG[lang],
                 author: article.author
                     ? { '@type': 'Person', name: article.author }
-                    : { '@type': 'Organization', name: s.siteName },
-                mainEntityOfPage: langUrl(`/articles/${article.id}`, lang),
+                    : { '@type': 'Organization', '@id': `${SITE_URL}/#restaurant`, name: s.siteName, url: SITE_URL },
+                publisher: {
+                    '@type': 'Organization',
+                    '@id': `${SITE_URL}/#restaurant`,
+                    name: s.siteName,
+                    url: SITE_URL,
+                    logo: { '@type': 'ImageObject', url: `${SITE_URL}/icons/icon-512-v1.png` },
+                },
+                mainEntityOfPage: { '@type': 'WebPage', '@id': canonical },
             },
             breadcrumbJsonLd(
                 [

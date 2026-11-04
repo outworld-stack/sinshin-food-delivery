@@ -348,6 +348,7 @@ export const fa = {
         'articles.emptyTitle': 'مقاله‌ای یافت نشد',
         'articles.emptyDesc': 'در حال حاضر مقاله‌ای در این دسته‌بندی وجود ندارد.',
         'articles.loadMore': 'مشاهده مقالات بیشتر',
+        'articles.previousPage': 'صفحه قبل',
         'articles.process': 'روند تهیه',
         'articles.tags': 'تگ‌ها:',
         'articles.sort.newest': 'جدیدترین',

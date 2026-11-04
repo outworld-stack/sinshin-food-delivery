@@ -31,12 +31,12 @@
  * مسدود = ریدایرکت به صفحه‌ی اختصاصی /geo-blocked (با پارامتر m).
  * IPهای خصوصی/داخلی و بیلد/پیش‌رندر بدون تماس با API عبور می‌کنند.
  *
- * سئو-۱: کرالرهای معتبر (گوگل/بینگ/… + بات‌های پیش‌نمایش شبکه‌های اجتماعی)
- * قبل از هر بررسی IP معاف می‌شوند — منطق مشترک در @sinshin/shared
- * (crawlers.ts) و همان در هوک onRequest بک‌اند هم اعمال شده است.
+ * کرالرها (گوگل/بینگ/… + بات‌های پیش‌نمایش شبکه‌های اجتماعی) فقط برای
+ * خواندن صفحات عمومی قبل از بررسی IP معاف می‌شوند؛ منطق مشترک در
+ * @sinshin/shared و هوک onRequest بک‌اند نیز استفاده می‌شود.
  */
 import { getRequest } from '@tanstack/react-start/server'
-import { isTrustedCrawlerUserAgent } from '@sinshin/shared'
+import { isCrawlerGeoExemptRequest } from '@sinshin/shared'
 import type { GeoAccessMode, GeoGateVerdict } from '@sinshin/shared'
 import { apiBase } from '#/lib/api'
 
@@ -102,9 +102,9 @@ function parseMode(raw: unknown): GeoAccessMode {
 export async function getGeoGate(): Promise<GeoGateVerdict> {
   const request = getRequest()
 
-  // سئو-۱ — معافیت کرالرها: قبل از هر چیز (حتی استخراج IP و کش)،
-  // ربات‌های معتبر عبور می‌کنند. برای بقیه، مسیر دقیقاً همان قبلی است.
-  if (isTrustedCrawlerUserAgent(request?.headers.get('user-agent'))) {
+  // Only public document reads can use a crawler UA to bypass geography.
+  // Private pages and mutations retain the normal country policy.
+  if (request && isCrawlerGeoExemptRequest(request, 'web')) {
     return { blocked: false, mode: 'world' }
   }
 

@@ -1,5 +1,6 @@
 // src/hooks/site/useArticlesPage.ts
 
+import type { ArticleSummaryDto } from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useReducer } from 'react'
@@ -9,6 +10,7 @@ import { articleCategoriesOptions, articlesOptions } from '#/utils/queryOptions'
 // --- وضعیت: فقط UI — سورتِ اعمال‌شده از URL میاد ---
 export type SortBy = 'newest' | 'most-viewed'
 const DEFAULT_SORT: SortBy = 'newest'
+export const ARTICLES_PAGE_SIZE = 12
 
 interface ArticlesState {
 	tempSubCategory: string
@@ -32,7 +34,7 @@ const initialState: ArticlesState = {
 	tempSortBy: DEFAULT_SORT,
 	isFilterOpen: false,
 	// stage-84 — ۱۲ = مضربِ ۶: در ۲ و ۳ ستونه (sm/lg) ردیف‌ها پُر می‌مانند
-	visibleCount: 12,
+	visibleCount: ARTICLES_PAGE_SIZE,
 }
 
 function articlesReducer(
@@ -46,7 +48,7 @@ function articlesReducer(
 			return { ...state, tempSortBy: action.payload }
 		// APPLY فقط مودال رو می‌بنده — سورت/sub توسط پیمایش به URL رفت
 		case 'APPLY_FILTERS':
-			return { ...state, isFilterOpen: false, visibleCount: 12 }
+			return { ...state, isFilterOpen: false, visibleCount: ARTICLES_PAGE_SIZE }
 		case 'OPEN_FILTER':
 			return {
 				...state,
@@ -63,9 +65,9 @@ function articlesReducer(
 		case 'CLOSE_FILTER':
 			return { ...state, isFilterOpen: false }
 		case 'RESET_COUNT':
-			return { ...state, visibleCount: 12 }
+			return { ...state, visibleCount: ARTICLES_PAGE_SIZE }
 		case 'LOAD_MORE':
-			return { ...state, visibleCount: state.visibleCount + 6 }
+			return { ...state, visibleCount: state.visibleCount + ARTICLES_PAGE_SIZE }
 		default:
 			return state
 	}
@@ -142,15 +144,34 @@ function mergePinnedIntoSlots<T>(
 	return merged
 }
 
+/** The loader and UI use the same ordering to validate paginated archives. */
+export function orderArticles(
+	articles: readonly ArticleSummaryDto[],
+	allArticles: readonly ArticleSummaryDto[],
+	category: string,
+	subCategory: string,
+	sort: SortBy,
+) {
+	const rng = mulberry32(hashSeed(`${category}|${subCategory}|${sort}`))
+	const flagged = allArticles.filter((article) => article.isFeatured === true)
+	const pinned = shuffleWithRng(flagged, rng).slice(0, 4)
+	const pinnedIds = new Set(pinned.map((article) => article.id))
+	const normal = articles.filter((article) => !pinnedIds.has(article.id))
+	if (sort === 'most-viewed') normal.sort((a, b) => b.views - a.views)
+	return mergePinnedIntoSlots(normal, pinned, rng)
+}
+
 // --- هوک ---
 export function useArticlesPage() {
 	const navigate = useNavigate()
 	const search = useSearch({ from: '/articles/' })
-	const { t } = useI18n()
+	const { t, lang } = useI18n()
 
 	// از URL — منبع حقیقت
 	const category: string = search.category ?? 'all'
 	const subCategory: string = search.subCategory ?? 'all'
+	const currentPage = search.page ?? 1
+	const offset = (currentPage - 1) * ARTICLES_PAGE_SIZE
 	// ⬅ سورت اعمال‌شده = URL (قبلاً کاهنده بود — با رفرش گم می‌شد)
 	const appliedSortBy: SortBy = search.sort ?? DEFAULT_SORT
 	const [state, dispatch] = useReducer(articlesReducer, {
@@ -160,9 +181,10 @@ export function useArticlesPage() {
 	})
 
 	// Shared URLs, category changes and history navigation reset the mobile draft.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Category and page navigation must reset appended cards even when the other filters stay equal.
 	useEffect(() => {
 		dispatch({ type: 'SYNC_FILTERS', subCategory, sort: appliedSortBy })
-	}, [category, subCategory, appliedSortBy])
+	}, [category, subCategory, appliedSortBy, currentPage])
 
 	// --- دیتا: گزینه‌های مرکزی — loader روت با کوئری پرشون کرده ---
 	const { data: categories } = useQuery({
@@ -195,25 +217,17 @@ export function useArticlesPage() {
 	// stage-60 — سنجاش ویژه: فلگ‌دارها از «کل» لیست مقالات (فارغ از فیلتر
 	// دسته/زیردسته) تا ۴ مورد در جایگاه‌های تصادفی ۰..۳؛ بقیه‌ی فلگ‌دارها
 	// (بیش از ۴) مثل آیتم‌های عادی در جریان فیلتر + سورت می‌مانند.
-	const sortedArticles = useMemo(() => {
-		const rng = mulberry32(
-			hashSeed(`${category}|${subCategory}|${appliedSortBy}`),
-		)
-		const flagged = (allArticles ?? []).filter((a) => a.isFeatured === true)
-		const pinned = shuffleWithRng(flagged, rng).slice(0, 4)
-		const pinnedIds = new Set(pinned.map((a) => a.id))
-		const normal = (articles ?? []).filter((a) => !pinnedIds.has(a.id))
-		if (appliedSortBy === 'most-viewed') {
-			normal.sort((a, b) => b.views - a.views)
-		}
-		return mergePinnedIntoSlots(normal, pinned, rng)
-	}, [articles, allArticles, category, subCategory, appliedSortBy])
+	const sortedArticles = useMemo(
+		() => orderArticles(articles ?? [], allArticles ?? [], category, subCategory, appliedSortBy),
+		[articles, allArticles, category, subCategory, appliedSortBy],
+	)
 
 	const visibleArticles = useMemo(
-		() => sortedArticles.slice(0, state.visibleCount),
-		[sortedArticles, state.visibleCount],
+		() => sortedArticles.slice(offset, offset + state.visibleCount),
+		[sortedArticles, offset, state.visibleCount],
 	)
-	const hasMore = sortedArticles.length > state.visibleCount
+	const hasMore = sortedArticles.length > offset + state.visibleCount
+	const nextPage = currentPage + state.visibleCount / ARTICLES_PAGE_SIZE
 
 	// --- هندلرها (useCallback) ---
 	const handleCategoryClick = useCallback(
@@ -224,6 +238,7 @@ export function useArticlesPage() {
 					...search,
 					category: slug !== 'all' ? slug : undefined,
 					subCategory: undefined,
+					page: undefined,
 				},
 				replace: true,
 			})
@@ -241,6 +256,7 @@ export function useArticlesPage() {
 				subCategory:
 					state.tempSubCategory !== 'all' ? state.tempSubCategory : undefined,
 				sort: state.tempSortBy !== DEFAULT_SORT ? state.tempSortBy : undefined,
+				page: undefined,
 			},
 			replace: true,
 		})
@@ -256,7 +272,7 @@ export function useArticlesPage() {
 		(slug: string) => {
 			navigate({
 				to: '/articles',
-				search: { ...search, subCategory: slug !== 'all' ? slug : undefined },
+				search: { ...search, subCategory: slug !== 'all' ? slug : undefined, page: undefined },
 				replace: true,
 			})
 			dispatch({ type: 'RESET_COUNT' })
@@ -267,7 +283,7 @@ export function useArticlesPage() {
 		(sort: SortBy) => {
 			navigate({
 				to: '/articles',
-				search: { ...search, sort: sort !== DEFAULT_SORT ? sort : undefined },
+				search: { ...search, sort: sort !== DEFAULT_SORT ? sort : undefined, page: undefined },
 				replace: true,
 			})
 			dispatch({ type: 'RESET_COUNT' })
@@ -317,6 +333,9 @@ export function useArticlesPage() {
 		subCategory,
 		visibleArticles,
 		hasMore,
+		currentPage,
+		nextPageSearch: { ...search, lang: lang === 'ar' ? 'ar' as const : undefined, page: nextPage },
+		previousPageSearch: { ...search, lang: lang === 'ar' ? 'ar' as const : undefined, page: currentPage > 2 ? currentPage - 1 : undefined },
 		scrollerItems,
 		handleCategoryClick,
 		handleApplyFilters,

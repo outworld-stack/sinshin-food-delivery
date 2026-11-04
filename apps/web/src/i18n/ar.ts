@@ -345,6 +345,7 @@ export const ar: Dict = {
         'articles.emptyTitle': 'لم يُعثر على مقال',
         'articles.emptyDesc': 'لا توجد حالياً مقالات في هذا التصنيف.',
         'articles.loadMore': 'عرض المزيد من المقالات',
+        'articles.previousPage': 'الصفحة السابقة',
         'articles.process': 'طريقة التحضير',
         'articles.tags': 'الوسوم:',
         'articles.sort.newest': 'الأحدث',

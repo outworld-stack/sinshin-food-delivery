@@ -45,6 +45,7 @@ export interface ArticleView {
     views: number
     status: string
     publishedAt: string
+    updatedAt: string
     categorySlug: string | null
     categoryName: string | null
     subCategorySlug: string | null
@@ -116,7 +117,7 @@ type ArticleRow = typeof articles.$inferSelect
 /** ردیف سبک لیست — دقیقاً ستون‌هایی که joinedSummary انتخاب می‌کند */
 type ArticleSummaryRow = Pick<
     ArticleRow,
-    'id' | 'title' | 'excerpt' | 'author' | 'profileImage' | 'categoryId' | 'subCategoryId' | 'views' | 'status' | 'createdAt' | 'titleAr' | 'excerptAr' | 'isFeatured'
+    'id' | 'title' | 'excerpt' | 'author' | 'profileImage' | 'categoryId' | 'subCategoryId' | 'views' | 'status' | 'createdAt' | 'updatedAt' | 'titleAr' | 'excerptAr' | 'isFeatured'
 >
 type CategoryRow = typeof articleCategories.$inferSelect
 type SubRow = typeof articleSubCategories.$inferSelect
@@ -513,6 +514,7 @@ export class ArticleService {
                     views: articles.views,
                     status: articles.status,
                     createdAt: articles.createdAt,
+                    updatedAt: articles.updatedAt,
                     // round-34 — برای COALESCE در toSummary (بدون content سنگین)
                     titleAr: articles.titleAr,
                     excerptAr: articles.excerptAr,
@@ -615,6 +617,7 @@ export class ArticleService {
             views: a.views,
             status: a.status,
             publishedAt: a.createdAt.toISOString(),
+            updatedAt: a.updatedAt.toISOString(),
             categorySlug: c?.slug ?? null,
             categoryName: c ? pickAr(lang, c.nameAr, c.name) : null,
             subCategorySlug: s?.slug ?? null,
@@ -655,6 +658,7 @@ export class ArticleService {
             views: a.views,
             status: a.status,
             publishedAt: a.createdAt.toISOString(),
+            updatedAt: a.updatedAt.toISOString(),
             categorySlug: c?.slug ?? null,
             categoryName: c ? pickAr(lang, c.nameAr, c.name) : null,
             subCategorySlug: s?.slug ?? null,
