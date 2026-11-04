@@ -27,6 +27,7 @@ const TRUSTED_CRAWLER_UA_RE = new RegExp(
   [
     // ── موتورهای جست‌وجو (ایندکس صفحات) ──
     'Googlebot', // Google — همه‌ی variantها: -News/-Image/-Video/Smartphone…
+    'Google-InspectionTool',
     'bingbot', // Microsoft Bing
     'DuckDuckBot', // DuckDuckGo
     'YandexBot', // یاندکس

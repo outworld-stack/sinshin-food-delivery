@@ -3,7 +3,7 @@
 // اگر روزی دامنه عوض شد، فقط همین فایل را تغییر بده.
 // (با canonical صفحه‌ی about هم‌راستاست: https://www.sinshin-foodpark.ir)
 
-export const SITE_URL = 'https://www.sinshin-foodpark.ir'
+export const SITE_URL = 'https://sinshin-foodpark.ir'
 
 /** تصویر پیش‌فرض og — همان برندینگ فعلی (مربع ۱۱۵۵×۱۱۵۵) */
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/images/main.png`

@@ -28,4 +28,4 @@ Disallow: /sw-reset.html
 # نکته: /login عمداً Disallow نیست — چون noindex متا دارد و گوگل برای دیدنِ
 # آن noindex باید بتواند صفحه را بخواند.
 
-Sitemap: https://www.sinshin-foodpark.ir/sitemap.xml
+Sitemap: https://sinshin-foodpark.ir/sitemap.xml
