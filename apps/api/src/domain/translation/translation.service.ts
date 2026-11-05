@@ -66,6 +66,7 @@ import {
 } from '#/infra/db/schema'
 import type {
   ArticleBlocksDoc,
+  ArticleBlockType,
   ArticleBlockTextPath,
   ArticleBlockTextUpdate,
   TranslationEntityType,
@@ -78,10 +79,12 @@ import {
   blocksToPlainText,
   fillMissingArticleBlocksTranslation,
   getArticleBlockTextFields,
+  isArticleBlockTextPath,
   mergeArticleBlocksTranslation,
   normalizeArticleBlocksTranslation,
   readArticleBlockText,
   setArticleBlockTexts,
+  setArticleBlockTranslations,
 } from '@sinshin/shared'
 
 export const TRANSLATION_ENTITY_TYPES: readonly TranslationEntityType[] = [
@@ -152,6 +155,36 @@ export class TranslationService {
     return this.translateTexts(cleaned)
   }
 
+  /** A field preview sends exactly the selected source value, including its whitespace. */
+  async previewBlockField(input: {
+    blockId: string
+    blockType: ArticleBlockType
+    fieldPath: ArticleBlockTextPath
+    text: string
+  }): Promise<{
+    blockId: string
+    blockType: ArticleBlockType
+    fieldPath: ArticleBlockTextPath
+    sourceText: string
+    translation: string
+  }> {
+    if (typeof input.blockId !== 'string' || !input.blockId.trim() || input.blockId.length > 64
+      || !isArticleBlockTextPath(input.blockType, input.fieldPath)) {
+      throw Err.validation('مسیر فیلد متنی بلوک معتبر نیست.')
+    }
+    if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > PREVIEW_MAX_CHARS) {
+      throw Err.validation('متن فیلد بلوک خالی یا خیلی طولانی است.')
+    }
+    const [translation] = await this.client.translate([input.text])
+    return {
+      blockId: input.blockId,
+      blockType: input.blockType,
+      fieldPath: [...input.fieldPath],
+      sourceText: input.text,
+      translation: translation?.trim() ?? '',
+    }
+  }
+
   /** Translate only text into a separate review document; URLs and coordinates never enter the translator. */
   async previewBlocks(input: { blocks: unknown; blocksAr?: unknown; blockId?: string }): Promise<ArticleBlocksDoc> {
     const source = input.blocks as ArticleBlocksDoc | null
@@ -164,7 +197,8 @@ export class TranslationService {
     if (input.blockId !== undefined && !source.blocks.some(block => block?.id === input.blockId)) {
       throw Err.validation('بلوک انتخاب‌شده پیدا نشد.')
     }
-    let out = normalizeArticleBlocksTranslation(source, input.blocksAr)!
+    let out = normalizeArticleBlocksTranslation(source, input.blocksAr)
+    if (!out) throw Err.validation('سند بلوکی مقاله معتبر نیست.')
     const queue: { blockId: string; path: ArticleBlockTextPath; text: string }[] = []
     for (const block of source.blocks) {
       if (input.blockId !== undefined && block?.id !== input.blockId) continue
@@ -177,10 +211,15 @@ export class TranslationService {
     }
     if (queue.length > 0) {
       const translations = await this.translateTexts(queue.map(field => field.text))
-      out = setArticleBlockTexts(out, queue.map((field, index) => ({ ...field, text: translations[index]?.trim() ?? '' })))
+      out = setArticleBlockTranslations(source, out, queue.map((field, index) => ({
+        ...field, text: translations[index]?.trim() ?? '',
+      }))) ?? out
     }
-    if (Buffer.byteLength(JSON.stringify(out), 'utf8') > 262_144) {
+    if (Buffer.byteLength(JSON.stringify({ version: out.version, blocks: out.blocks }), 'utf8') > 262_144) {
       throw Err.validation('حجم ترجمه‌ی بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
+    }
+    if (Buffer.byteLength(JSON.stringify(out), 'utf8') > 2_097_152) {
+      throw Err.validation('حجم سند ترجمه و وضعیت فیلدهای آن نباید بیشتر از ۲ مگابایت باشد.')
     }
     return out
   }
@@ -468,8 +507,8 @@ export class TranslationService {
     const out: { titleAr?: string; excerptAr?: string; contentAr?: string } = {}
 
     const submit = (fa: string | null | undefined, ar: unknown, apply: (t: string) => void): void => {
-      if (isFilled(ar) && a.arAuto === false) {
-        skippedManual = true
+      if (isFilled(ar)) {
+        if (a.arAuto === false) skippedManual = true
         return
       }
       const src = (fa ?? '').trim()
@@ -504,8 +543,8 @@ export class TranslationService {
       (pr) => pr.title.trim() !== '' || pr.items.length > 0,
     )
     if (processes.length > 0) {
-      if (isFilled(a.processesAr) && a.arAuto === false) {
-        skippedManual = true
+      if (isFilled(a.processesAr)) {
+        if (a.arAuto === false) skippedManual = true
       } else {
         const flat: string[] = []
         for (const pr of processes) {
@@ -550,7 +589,8 @@ export class TranslationService {
       }
       if (current.blocks && blocksAr) {
         // Discard stale source text and values that already existed before this request.
-        let suggestions = normalizeArticleBlocksTranslation(current.blocks, blocksAr)!
+        let suggestions = normalizeArticleBlocksTranslation(current.blocks, blocksAr)
+        if (!suggestions) return false
         const discarded: ArticleBlockTextUpdate[] = []
         for (const block of current.blocks.blocks) {
           const previous = a.blocks?.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
@@ -563,8 +603,22 @@ export class TranslationService {
           }
         }
         suggestions = setArticleBlockTexts(suggestions, discarded)
-        const merged = fillMissingArticleBlocksTranslation(current.blocks, current.blocksAr, suggestions)!
+        let merged = fillMissingArticleBlocksTranslation(current.blocks, current.blocksAr, suggestions)
+        if (!merged) return false
         const baseline = normalizeArticleBlocksTranslation(current.blocks, current.blocksAr)
+        // Bind only this job's accepted suggestions; keep every existing manual value intact.
+        const acceptedUpdates: ArticleBlockTextUpdate[] = []
+        for (const block of current.blocks.blocks) {
+          const before = baseline?.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
+          const accepted = merged.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
+          for (const field of getArticleBlockTextFields(block)) {
+            const value = readArticleBlockText(accepted, field.path)
+            if (!readArticleBlockText(before, field.path).trim() && value.trim()) {
+              acceptedUpdates.push({ blockId: block.id, path: field.path, text: value })
+            }
+          }
+        }
+        if (acceptedUpdates.length > 0) merged = setArticleBlockTranslations(current.blocks, merged, acceptedUpdates) ?? merged
         if (JSON.stringify(merged) !== JSON.stringify(baseline)) {
           patch.blocksAr = merged
         }

@@ -7,7 +7,8 @@ let fetchError: Error | null = null
 mock.module('#/lib/api-fetch', () => ({
   authJson: async (path: string, method: string, body?: Record<string, unknown>) => {
     requests.push({ path, method, body })
-    return { success: true, ...(path === '/admin/translate/blocks' ? { blocksAr: body?.blocksAr } : {}) }
+    return { success: true, ...(path === '/admin/translate/blocks' ? { blocksAr: body?.blocksAr } : {}),
+      ...(path === '/admin/translate/block-field' ? { blockId: body?.blockId, blockType: body?.blockType, fieldPath: body?.fieldPath, sourceText: body?.text, translation: 'عنوان جديد' } : {}) }
   },
   getJson: async (path: string) => {
     requests.push({ path, method: 'GET' })
@@ -16,7 +17,7 @@ mock.module('#/lib/api-fetch', () => ({
   },
 }))
 const { updateArticle, updateArticleCategory, getArticleById, getAdminArticleCategories } = await import('../src/server/articles')
-const { translateArticleBlocksPreview } = await import('../src/server/translation')
+const { translateArticleBlocksPreview, translateArticleBlockField } = await import('../src/server/translation')
 const id = '01234567-89ab-cdef-0123-456789abcdef'
 const input = { id, title: 'Title', excerpt: 'Excerpt', content: 'Body', categoryId: id }
 await updateArticle(input)
@@ -46,6 +47,13 @@ assert(!('blocks' in requests.at(-1)!.body!), 'clearing Arabic translations neve
 assert.deepEqual(await translateArticleBlocksPreview({ blocks, blocksAr, blockId: 'pin' }), blocksAr)
 assert.deepEqual(requests.at(-1), { path: '/admin/translate/blocks', method: 'POST', body: { blocks, blocksAr, blockId: 'pin' } },
   'block translation uses the read-only review endpoint and the selected stable ID')
+const fieldInput = { blockId: 'pin', blockType: 'location' as const, fieldPath: ['title'], text: 'عنوان تازه', blocksAr, blocks }
+const fieldPreview = await translateArticleBlockField(fieldInput)
+assert.deepEqual(requests.at(-1), { path: '/admin/translate/block-field', method: 'POST', body: {
+  blockId: 'pin', blockType: 'location', fieldPath: ['title'], text: 'عنوان تازه',
+} }, 'field client transmits only one source value and strips documents, existing Arabic and extra input properties')
+assert.equal(fieldPreview.sourceText, 'عنوان تازه')
+assert.equal(fieldPreview.translation, 'عنوان جديد')
 
 await updateArticleCategory({ id, name: 'Category', hasSubCategories: true, subCategories: ['Sub'] })
 assert.deepEqual(requests.at(-1)?.body, { name: 'Category', hasSubCategories: true, subCategories: ['Sub'] })

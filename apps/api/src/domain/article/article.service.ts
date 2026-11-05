@@ -28,7 +28,7 @@ import type { RedisService } from '#/infra/redis/redis'
 import { VersionedCache } from '#/domain/shared/versioned-cache'
 import { UUID_RE } from '#/domain/shared/ids'
 import { normalizeBlocksDoc } from './blocks-normalize'
-import { blocksToPlainText, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, type ArticleBlocksDoc } from '@sinshin/shared'
+import { blocksToPlainText, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, reconcileArticleBlocksTranslation, type ArticleBlocksDoc } from '@sinshin/shared'
 
 
 /** قرارداد ArticleDto از @sinshin/shared */
@@ -350,9 +350,11 @@ export class ArticleService {
             // A translation-only save must retain older documents exactly as stored.
             const blocks = input.blocks === undefined || isDeepStrictEqual(input.blocks, current.blocks)
                 ? current.blocks : normalizeBlocksDoc(input.blocks)
-            const blocksAr = input.blocksAr !== undefined
-                ? this.normalizeBlocksAr(blocks, input.blocksAr)
-                : blocks !== current.blocks ? this.normalizeBlocksAr(blocks, current.blocksAr) : current.blocksAr
+            const blocksAr = input.blocksAr !== undefined || blocks !== current.blocks
+                ? this.normalizeBlocksAr(blocks, input.blocksAr === null ? null : reconcileArticleBlocksTranslation(
+                    current.blocks, blocks, current.blocksAr, input.blocksAr,
+                ))
+                : current.blocksAr
             const content = blocks ? blocksToPlainText(blocks) || input.content : input.content
             this.assertArticleText(input, content)
 
@@ -549,8 +551,13 @@ export class ArticleService {
     private normalizeBlocksAr(blocks: ArticleBlocksDoc | null | undefined, input: unknown): ArticleBlocksDoc | null {
         if (input == null) return null
         const translation = normalizeArticleBlocksTranslation(blocks, input)
-        if (translation && Buffer.byteLength(JSON.stringify(translation), 'utf8') > 262_144) {
-            throw Err.validation('حجم ترجمه بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
+        if (translation) {
+            if (Buffer.byteLength(JSON.stringify({ version: translation.version, blocks: translation.blocks }), 'utf8') > 262_144) {
+                throw Err.validation('حجم ترجمه بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
+            }
+            if (Buffer.byteLength(JSON.stringify(translation), 'utf8') > 2_097_152) {
+                throw Err.validation('حجم سند ترجمه و وضعیت فیلدهای آن نباید بیشتر از ۲ مگابایت باشد.')
+            }
         }
         return translation
     }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
-import type { ArticleBlocksDoc } from '@sinshin/shared'
+import { getArticleBlockTextFields, getArticleBlockTranslationStatus, readArticleBlockText, setArticleBlockText, setArticleBlockTranslation, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockTextPath } from '@sinshin/shared'
 import { ArticleService, type ArticleInput } from '../src/domain/article/article.service'
 import { AppError } from '../src/domain/shared/errors'
 import { Database } from '../src/infra/db/client'
@@ -32,6 +32,8 @@ const check = (condition: unknown, message: string) => {
   console.log(`  ✓ ${message}`)
 }
 const errorCode = (code: string) => (error: unknown) => error instanceof AppError && error.code === code
+const blockText = (doc: ArticleBlocksDoc | null | undefined, id: string, path: ArticleBlockTextPath) =>
+  readArticleBlockText(doc?.blocks.find(block => block.id === id), path)
 
 try {
   await boot.unsafe(`create database "${scratch}"`)
@@ -207,6 +209,124 @@ try {
   check(reorderedArabic.blocks.map((block) => block.id).join('|') === reorderedBlocks.blocks.map((block) => block.id).join('|')
     && reorderedLocation.props.title === 'الفرع الأول' && reorderedLocation.props.lat === locationOne.props.lat,
     'Persian block reorder rebases Arabic text by stable block IDs while retaining coordinate precision')
+
+  const fieldSource: ArticleBlocksDoc = { version: 1, blocks: [
+    { id: 'branch', type: 'location', props: { lat: 37.48220561234, lng: 49.44182739876, title: 'نام شعبه', address: 'آدرس شعبه' } },
+    { id: 'note', type: 'callout', props: { title: 'عنوان نکته', text: 'متن نکته' } },
+    { id: 'items', type: 'list', props: { items: ['اول', 'دوم', 'سوم'], ordered: true } },
+    { id: 'images', type: 'gallery', props: { images: [{ src: '/uploads/a.webp', alt: 'تصویر اول' }, { src: '/uploads/b.webp', alt: 'تصویر دوم' }], layout: 'grid' } },
+    { id: 'body-field', type: 'paragraph', props: { text: 'متن ثابت' } },
+    { id: 'menu-link', type: 'link', props: { title: 'عنوان پیوند', text: 'متن پیوند', label: 'منو', href: '/products', variant: 'button' } },
+  ] }
+  const fieldArabic = setArticleBlockTranslations(fieldSource, null, fieldSource.blocks.flatMap(block =>
+    getArticleBlockTextFields(block).map(field => ({ blockId: block.id, path: field.path, text: `عربي ${field.text}` }))))!
+  const fieldInput = { ...input, blocks: fieldSource, blocksAr: fieldArabic }
+  const legacyFieldArabic = structuredClone(fieldArabic)
+  delete legacyFieldArabic.translation
+  const { id: legacyFieldId } = await articlesService.create({ ...fieldInput, blocksAr: legacyFieldArabic })
+  assert.ok(legacyFieldId)
+  const legacyChangedTitle = setArticleBlockText(fieldSource, 'branch', ['title'], 'نام جدید شعبه قدیمی')
+  const legacyStaleArabic = setArticleBlockText(legacyFieldArabic, 'branch', ['address'], '')
+  await articlesService.update(legacyFieldId, { ...fieldInput, blocks: legacyChangedTitle, blocksAr: legacyStaleArabic })
+  const legacyFieldSaved = (await articlesService.adminDetail(legacyFieldId))!
+  check(blockText(legacyFieldSaved.blocksAr, 'branch', ['title']) === ''
+    && blockText(legacyFieldSaved.blocksAr, 'branch', ['address']) === 'عربي آدرس شعبه'
+    && blockText(legacyFieldSaved.blocksAr, 'items', ['items', 1]) === 'عربي دوم',
+    'older Arabic documents without provenance retain every unaffected manual field despite outdated incoming values')
+  const { id: fieldId } = await articlesService.create(fieldInput)
+  assert.ok(fieldId)
+  const beforeFieldEdit = (await articlesService.adminDetail(fieldId))!
+  const changedTitle = setArticleBlockText(beforeFieldEdit.blocks!, 'branch', ['title'], 'نام جدید شعبه')
+  await articlesService.update(fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: beforeFieldEdit.blocksAr })
+  const afterTitleEdit = (await articlesService.adminDetail(fieldId))!
+  assert.deepEqual(afterTitleEdit.blocks, changedTitle)
+  check(blockText(afterTitleEdit.blocksAr, 'branch', ['title']) === ''
+    && getArticleBlockTranslationStatus(afterTitleEdit.blocks, afterTitleEdit.blocksAr, 'branch', ['title']) === 'needs-retranslation'
+    && changedTitle.blocks.every(block => getArticleBlockTextFields(block).every(field =>
+      block.id === 'branch' && field.path[0] === 'title'
+        || blockText(afterTitleEdit.blocksAr, block.id, field.path) === blockText(beforeFieldEdit.blocksAr, block.id, field.path))),
+    'a Persian title change clears exactly its Arabic field and preserves every adjacent or unrelated manual translation')
+  const staleWithoutProof = structuredClone(beforeFieldEdit.blocksAr!)
+  delete staleWithoutProof.translation
+  const staleBranch = staleWithoutProof.blocks.find(block => block.id === 'branch')!
+  assert.equal(staleBranch.type, 'location')
+  staleBranch.props.address = ''
+  await articlesService.update(fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: staleWithoutProof })
+  const afterUnprovedSave = (await articlesService.adminDetail(fieldId))!
+  check(blockText(afterUnprovedSave.blocksAr, 'branch', ['title']) === ''
+    && blockText(afterUnprovedSave.blocksAr, 'branch', ['address']) === 'عربي آدرس شعبه',
+    'an outdated Arabic document without proof cannot restore changed text or erase a completed sibling')
+  const freshArabic = setArticleBlockTranslation(changedTitle, afterUnprovedSave.blocksAr, 'branch', ['title'], 'اسم الفرع الجديد')!
+  await articlesService.update(fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: freshArabic })
+  const freshlyTranslated = (await articlesService.adminDetail(fieldId))!
+  check(blockText(freshlyTranslated.blocksAr, 'branch', ['title']) === 'اسم الفرع الجديد'
+    && getArticleBlockTranslationStatus(freshlyTranslated.blocks, freshlyTranslated.blocksAr, 'branch', ['title']) === 'translated'
+    && freshlyTranslated.blocksAr?.translation?.fields.some(field => field.blockId === 'branch' && field.fieldPath[0] === 'title'
+      && field.sourceText === 'نام جدید شعبه'),
+    'matching fresh source proof permits the updated Arabic field and survives database roundtrip')
+  const structuralEdit = structuredClone(freshlyTranslated.blocks!)
+  structuralEdit.blocks.reverse()
+  const structuralBranch = structuralEdit.blocks.find(block => block.id === 'branch')!
+  assert.equal(structuralBranch.type, 'location')
+  structuralBranch.props.lat = 33.98765432109
+  structuralBranch.props.lng = 48.12345678901
+  structuralBranch.width = 'full'
+  structuralBranch.anim = 'zoom'
+  structuralBranch.style = { bg: '#123456', align: 'center', pad: 'lg' }
+  const structuralImages = structuralEdit.blocks.find(block => block.id === 'images')!
+  assert.equal(structuralImages.type, 'gallery')
+  structuralImages.props.images[0]!.src = '/uploads/replaced.webp'
+  const structuralLink = structuralEdit.blocks.find(block => block.id === 'menu-link')!
+  assert.equal(structuralLink.type, 'link')
+  structuralLink.props.href = '/articles'
+  structuralLink.props.variant = 'card'
+  await articlesService.update(fieldId, { ...fieldInput, blocks: structuralEdit, blocksAr: freshlyTranslated.blocksAr })
+  const afterStructuralEdit = (await articlesService.adminDetail(fieldId))!
+  assert.deepEqual(afterStructuralEdit.blocks, structuralEdit)
+  check(structuralEdit.blocks.every(block => getArticleBlockTextFields(block).every(field =>
+    blockText(afterStructuralEdit.blocksAr, block.id, field.path) === blockText(freshlyTranslated.blocksAr, block.id, field.path))),
+    'reorders, coordinates, width, animation, colors, media URLs and link variants preserve all Arabic text')
+  const identityEdit = setArticleBlockText(structuralEdit, 'items', ['items', 1], 'مورد دوم جدید')
+  const pathEdit = setArticleBlockText(identityEdit, 'images', ['images', 1, 'alt'], 'تصویر دوم جدید')
+  const replacedBody = pathEdit.blocks.find(block => block.id === 'body-field')!
+  replacedBody.id = 'replacement-body'
+  const replacedType = pathEdit.blocks.find(block => block.id === 'note')!
+  Object.assign(replacedType, { type: 'quote', props: { text: 'متن نکته', author: 'نویسنده جدید' } })
+  await articlesService.update(fieldId, { ...fieldInput, blocks: pathEdit, blocksAr: afterStructuralEdit.blocksAr })
+  const afterIdentityEdit = (await articlesService.adminDetail(fieldId))!
+  check(blockText(afterIdentityEdit.blocksAr, 'items', ['items', 1]) === ''
+    && blockText(afterIdentityEdit.blocksAr, 'images', ['images', 1, 'alt']) === ''
+    && blockText(afterIdentityEdit.blocksAr, 'replacement-body', ['text']) === ''
+    && blockText(afterIdentityEdit.blocksAr, 'note', ['text']) === ''
+    && blockText(afterIdentityEdit.blocksAr, 'items', ['items', 0]) === 'عربي اول'
+    && blockText(afterIdentityEdit.blocksAr, 'items', ['items', 2]) === 'عربي سوم'
+    && blockText(afterIdentityEdit.blocksAr, 'images', ['images', 0, 'alt']) === 'عربي تصویر اول'
+    && blockText(afterIdentityEdit.blocksAr, 'branch', ['title']) === 'اسم الفرع الجديد',
+    'nested field paths, new block IDs and changed block types invalidate only the affected translation identities')
+  const publicIdentity = (await articlesService.byId(fieldId, 'ar'))!.blocks!
+  check(!publicIdentity.translation && blockText(publicIdentity, 'items', ['items', 1]) === 'مورد دوم جدید'
+    && blockText(publicIdentity, 'images', ['images', 1, 'alt']) === 'تصویر دوم جدید'
+    && blockText(publicIdentity, 'note', ['text']) === 'متن نکته',
+    'public documents omit provenance and fall back independently to the current Persian fields')
+  const removedSource = structuredClone(afterIdentityEdit.blocks!)
+  removedSource.blocks = removedSource.blocks.filter(block => block.id !== 'replacement-body')
+  await articlesService.update(fieldId, { ...fieldInput, blocks: removedSource, blocksAr: afterIdentityEdit.blocksAr })
+  const afterRemoval = (await articlesService.adminDetail(fieldId))!
+  check(afterRemoval.blocksAr?.blocks.length === removedSource.blocks.length
+    && !afterRemoval.blocksAr.blocks.some(block => block.id === 'body-field' || block.id === 'replacement-body')
+    && !afterRemoval.blocksAr.translation?.fields.some(field => field.blockId === 'body-field' || field.blockId === 'replacement-body'),
+    'removed blocks leave no orphan Arabic text or translation metadata')
+  const largeSource: ArticleBlocksDoc = { version: 1, blocks: Array.from({ length: 200 }, (_, index) => ({
+    id: `large-${index}`, type: 'paragraph', props: { text: 'م'.repeat(500) },
+  })) }
+  const largeArabic = setArticleBlockTranslations(largeSource, null, largeSource.blocks.map(block => ({
+    blockId: block.id, path: ['text'], text: 'ع'.repeat(400),
+  })))!
+  assert.ok(Buffer.byteLength(JSON.stringify(largeArabic), 'utf8') > 262_144)
+  const { id: largeId } = await articlesService.create({ ...input, blocks: largeSource, blocksAr: largeArabic })
+  check(!!largeId && (await articlesService.adminDetail(largeId!))?.blocksAr?.translation?.fields.length === 200,
+    'source proof metadata has its own allowance without lowering the existing translated block content limit')
+
   await articlesService.update(translatedId, {
     title: 'بدون ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocksAr: null,
   })
@@ -288,6 +408,17 @@ try {
     body: JSON.stringify(body),
   })
   check((await app.handle(request('admin'))).status === 200, 'HTTP article creation accepts aligned blank Arabic process and block translations')
+  const httpArabic = setArticleBlockTranslation(input.blocks as ArticleBlocksDoc, null, 'body', ['text'], 'محتوى عربي')!
+  const proofResponse = await app.handle(new Request('http://localhost/admin/articles', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer admin' },
+    body: JSON.stringify({ ...body, blocksAr: httpArabic }),
+  }))
+  assert.equal(proofResponse.status, 200)
+  const proofResult = await proofResponse.json() as { id: string }
+  const proofArticle = (await articlesService.adminDetail(proofResult.id))!
+  check(proofArticle.blocksAr?.translation?.fields[0]?.sourceText === 'متن بلوکی'
+    && proofArticle.blocksAr.translation.fields[0].status === 'translated' && !proofArticle.blocks?.translation,
+    'article HTTP schema preserves validated Arabic provenance while keeping Persian source documents metadata-free')
   check((await app.handle(request())).status === 401 && (await app.handle(request('reader'))).status === 403,
     'article writes reject unauthenticated users and administrators without write permission')
   check((await app.handle(new Request('http://localhost/articles'))).status === 200,

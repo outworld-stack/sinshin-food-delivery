@@ -10,6 +10,8 @@
 // همه‌ی اندپوینت‌ها گارد requireAdmin2 پایه دارند (ترجمه فقط ستون ar را می‌نویسد).
 import type {
 	ArticleBlocksDoc,
+	ArticleBlockType,
+	ArticleBlockTextPath,
 	TranslationEntityType,
 	TranslationJobDto,
 	TranslationPreviewResult,
@@ -37,9 +39,40 @@ export async function translateArticleBlocksPreview(input: {
 	blockId?: string
 }): Promise<ArticleBlocksDoc> {
 	const result = await authJson<{ blocksAr: ArticleBlocksDoc }>(
-		'/admin/translate/blocks', 'POST', input, { timeoutMs: 180_000 },
+		'/admin/translate/blocks',
+		'POST',
+		input,
+		{ timeoutMs: 180_000 },
 	)
 	return result.blocksAr
+}
+
+export interface ArticleBlockFieldPreview {
+	blockId: string
+	blockType: ArticleBlockType
+	fieldPath: ArticleBlockTextPath
+	sourceText: string
+	translation: string
+}
+
+/** One source field only; no Arabic document or unrelated article text is transmitted. */
+export async function translateArticleBlockField(input: {
+	blockId: string
+	blockType: ArticleBlockType
+	fieldPath: ArticleBlockTextPath
+	text: string
+}): Promise<ArticleBlockFieldPreview> {
+	return authJson<ArticleBlockFieldPreview>(
+		'/admin/translate/block-field',
+		'POST',
+		{
+			blockId: input.blockId,
+			blockType: input.blockType,
+			fieldPath: [...input.fieldPath],
+			text: input.text,
+		},
+		{ timeoutMs: 180_000 },
+	)
 }
 
 /** وضعیت صف + شمار رکوردهای فاقد ترجمه + سلامت مترجم */

@@ -774,10 +774,11 @@ export function ArticlePageBuilder({
 	const commitDoc = useCallback(
 		(next: ArticleBlocksDoc) => {
 			if (!mountedRef.current) return
+			if (onArabicChange) arabic.sourceChanged(next)
 			docRef.current = next
 			onChange(next)
 		},
-		[onChange],
+		[onChange, onArabicChange, arabic.sourceChanged],
 	)
 
 	const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1054,6 +1055,19 @@ export function ArticlePageBuilder({
 							? 'در حال ترجمه...'
 							: 'ترجمه خودکار همه بلوک‌ها به عربی'}
 					</button>
+					<button
+						type="button"
+						disabled={arabic.busy || arabic.changedCount === 0}
+						onClick={() => void arabic.translateChanged()}
+						className="px-3 py-2 rounded-lg border text-xs cursor-pointer disabled:opacity-50"
+					>
+						ترجمه فقط فیلدهای تغییرکرده
+					</button>
+					{arabic.changedCount > 0 && (
+						<span className="text-xs text-amber-600">
+							{arabic.changedCount} فیلد نیازمند ترجمه مجدد
+						</span>
+					)}
 					<p className="text-xs text-gray-500">
 						ترجمه‌های عربی را در هر بلوک بازبینی و ویرایش کنید. فیلد خالی از
 						فارسی استفاده می‌کند.
@@ -1232,12 +1246,47 @@ export function ArticlePageBuilder({
 											const translated = arabic.draft?.blocks.find(
 												(b) => b.id === block.id && b.type === block.type,
 											)
+											const status = arabic.status(block.id, field.path)
+											const fieldId = `ar-${encodeURIComponent(block.id)}-${field.path.join('-')}`
 											return (
-												<label
+												<div
 													key={JSON.stringify(field.path)}
+													data-arabic-field={JSON.stringify(field.path)}
+													data-arabic-status={status}
 													className="block my-3 text-xs text-gray-600 dark:text-gray-300"
 												>
-													{field.label} (عربی)
+													<div className="flex flex-wrap items-center gap-2 mb-2">
+														<label htmlFor={fieldId}>
+															{field.label} (عربی)
+														</label>
+														<span
+															className={
+																status === 'needs-retranslation'
+																	? 'text-amber-600'
+																	: 'text-gray-400'
+															}
+														>
+															{status === 'translated'
+																? 'ترجمه‌شده'
+																: status === 'needs-retranslation'
+																	? 'نیازمند ترجمه مجدد'
+																	: 'ترجمه نشده'}
+														</span>
+														<button
+															type="button"
+															disabled={
+																arabic.busy ||
+																status === 'translated' ||
+																!field.text.trim()
+															}
+															onClick={() =>
+																void arabic.translate(block.id, field.path)
+															}
+															className="px-2 py-1 rounded-md border cursor-pointer disabled:opacity-50"
+														>
+															ترجمه این فیلد
+														</button>
+													</div>
 													{field.text && (
 														<span
 															className="block my-1 whitespace-pre-line text-gray-400"
@@ -1247,6 +1296,7 @@ export function ArticlePageBuilder({
 														</span>
 													)}
 													<textarea
+														id={fieldId}
 														lang="ar"
 														dir="rtl"
 														rows={field.maxLength > 500 ? 3 : 2}
@@ -1258,7 +1308,7 @@ export function ArticlePageBuilder({
 														}
 														placeholder="خالی = نمایش متن فارسی"
 													/>
-												</label>
+												</div>
 											)
 										})}
 										{getArticleBlockTextFields(block).length === 0 && (

@@ -5,7 +5,11 @@
 // کامیت پیشنهادی: stage thirty one
 // ═══════════════════════════════════════════════════════════════
 
-import { type ArticleBlocksDoc, isArticleBlockUrl } from '@sinshin/shared'
+import {
+	type ArticleBlocksDoc,
+	isArticleBlockUrl,
+	reconcileArticleBlocksTranslation,
+} from '@sinshin/shared'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 // src/components/admin/ArticleForm.tsx
@@ -128,7 +132,15 @@ export function ArticleForm({
 	)
 
 	const setBlocks = (blocks: ArticleBlocksDoc) => {
-		setFormData((prev) => ({ ...prev, blocks }))
+		setFormData((prev) => ({
+			...prev,
+			blocks,
+			blocksAr: reconcileArticleBlocksTranslation(
+				prev.blocks,
+				blocks,
+				prev.blocksAr,
+			),
+		}))
 	}
 
 	const addProcess = () => {
@@ -334,10 +346,14 @@ export function ArticleForm({
 			<fieldset disabled={isSubmitting} className="space-y-6 min-w-0">
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 					<div>
-						<label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+						<label
+							htmlFor="article-title"
+							className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
+						>
 							عنوان مقاله
 						</label>
 						<input
+							id="article-title"
 							type="text"
 							name="title"
 							value={formData.title}
@@ -349,10 +365,14 @@ export function ArticleForm({
 					</div>
 					{/* فیلد نام نویسنده */}
 					<div>
-						<label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+						<label
+							htmlFor="article-author"
+							className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
+						>
 							نام نویسنده (اختیاری)
 						</label>
 						<input
+							id="article-author"
 							type="text"
 							name="author"
 							value={formData.author}
@@ -363,10 +383,14 @@ export function ArticleForm({
 						/>
 					</div>
 					<div className="md:col-span-2">
-						<label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+						<label
+							htmlFor="article-category"
+							className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
+						>
 							دسته‌بندی
 						</label>
 						<select
+							id="article-category"
 							name="categoryId"
 							value={formData.categoryId}
 							onChange={handleChange}
@@ -402,10 +426,14 @@ export function ArticleForm({
 
 				{selectedCat?.hasSubCategories && (
 					<div>
-						<label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+						<label
+							htmlFor="article-subcategory"
+							className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
+						>
 							ساب‌کتگوری
 						</label>
 						<select
+							id="article-subcategory"
 							name="subCategoryId"
 							value={formData.subCategoryId || ''}
 							onChange={(e) =>
@@ -456,10 +484,14 @@ export function ArticleForm({
 				</div>
 
 				<div>
-					<label className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">
+					<label
+						htmlFor="article-excerpt"
+						className="block text-sm font-DanaMedium text-gray-700 dark:text-gray-300 mb-2"
+					>
 						خلاصه مقاله (Excerpt)
 					</label>
 					<textarea
+						id="article-excerpt"
 						name="excerpt"
 						value={formData.excerpt}
 						onChange={handleChange}
@@ -639,6 +671,7 @@ export function ArticleForm({
 							}
 							return (
 								<div
+									// biome-ignore lint/suspicious/noArrayIndexKey: Legacy processes have no IDs and may contain duplicate titles.
 									key={i}
 									className="p-3 rounded-lg bg-gray-50 dark:bg-[#1a0a0e]"
 								>
@@ -657,6 +690,7 @@ export function ArticleForm({
 									<ul className="list-disc pr-5 space-y-1">
 										{proc.items.map((item, idx) => (
 											<li
+												// biome-ignore lint/suspicious/noArrayIndexKey: Legacy steps have no IDs and may contain duplicate text.
 												key={idx}
 												className="text-xs text-gray-600 dark:text-gray-400"
 											>

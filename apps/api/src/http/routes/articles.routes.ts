@@ -49,22 +49,36 @@ const blockStyleSchema = t.Object({
   align: t.Optional(t.Union([t.Literal('start'), t.Literal('center')])),
   pad: t.Optional(t.Union([t.Literal('sm'), t.Literal('md'), t.Literal('lg')])),
 })
+export const articleBlockTypeSchema = t.Union([
+  t.Literal('hero'),
+  t.Literal('heading'),
+  t.Literal('paragraph'),
+  t.Literal('image'),
+  t.Literal('gallery'),
+  t.Literal('quote'),
+  t.Literal('callout'),
+  t.Literal('list'),
+  t.Literal('cta'),
+  t.Literal('link'),
+  t.Literal('location'),
+  t.Literal('divider'),
+])
+export const articleBlockFieldPathSchema = t.Array(
+  t.Union([t.String({ minLength: 1, maxLength: 32 }), t.Integer({ minimum: 0, maximum: 29 })]),
+  { minItems: 1, maxItems: 3 },
+)
+const articleBlockTranslationSchema = t.Object({
+  fields: t.Array(t.Object({
+    blockId: t.String({ minLength: 1, maxLength: 64 }),
+    blockType: articleBlockTypeSchema,
+    fieldPath: articleBlockFieldPathSchema,
+    sourceText: t.String({ maxLength: 30000 }),
+    status: t.Union([t.Literal('translated'), t.Literal('missing'), t.Literal('needs-retranslation')]),
+  }), { maxItems: 6000 }),
+})
 const blockSchema = t.Object({
   id: t.Optional(t.String({ maxLength: 64 })),
-  type: t.Union([
-    t.Literal('hero'),
-    t.Literal('heading'),
-    t.Literal('paragraph'),
-    t.Literal('image'),
-    t.Literal('gallery'),
-    t.Literal('quote'),
-    t.Literal('callout'),
-    t.Literal('list'),
-    t.Literal('cta'),
-    t.Literal('link'),
-    t.Literal('location'),
-    t.Literal('divider'),
-  ]),
+  type: articleBlockTypeSchema,
   width: t.Optional(t.Union([t.Literal('sm'), t.Literal('md'), t.Literal('lg'), t.Literal('full')])),
   anim: t.Optional(
     t.Union([
@@ -83,6 +97,13 @@ export const blocksDocSchema = t.Nullable(
   t.Object({
     version: t.Literal(1),
     blocks: t.Array(blockSchema, { maxItems: 200 }),
+  }),
+)
+export const blocksArDocSchema = t.Nullable(
+  t.Object({
+    version: t.Literal(1),
+    blocks: t.Array(blockSchema, { maxItems: 200 }),
+    translation: t.Optional(articleBlockTranslationSchema),
   }),
 )
 
@@ -106,7 +127,7 @@ const articleBody = t.Object({
   // stage-82 — سندِ بلوکیِ صفحه‌ساز (null = پاک‌کردن → مقاله‌ی متنی)
   blocks: t.Optional(blocksDocSchema),
   // Arabic text is rebased onto Persian structure by the service, never normalized as Persian.
-  blocksAr: t.Optional(blocksDocSchema),
+  blocksAr: t.Optional(blocksArDocSchema),
 })
 
 const categoryBody = t.Object({

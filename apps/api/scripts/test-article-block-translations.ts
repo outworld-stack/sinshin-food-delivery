@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
-import { normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, type ArticleBlockTextPath, type ArticleBlocksDoc } from '@sinshin/shared'
+import { getArticleBlockTranslationStatus, normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, setArticleBlockTranslation, type ArticleBlockTextPath, type ArticleBlockType, type ArticleBlocksDoc } from '@sinshin/shared'
 import { ArticleService } from '../src/domain/article/article.service'
 import { TranslationService } from '../src/domain/translation/translation.service'
 import { AppError } from '../src/domain/shared/errors'
@@ -81,6 +81,7 @@ const expected: Array<[string, ArticleBlockTextPath, string]> = [
   ['location-one', ['title'], 'عنوان شعبه اول'], ['location-one', ['address'], 'آدرس شعبه اول'], ['location-two', ['title'], 'عنوان شعبه دوم'], ['location-two', ['address'], 'آدرس شعبه دوم'],
 ]
 const text = (doc: ArticleBlocksDoc, id: string, path: ArticleBlockTextPath) => readArticleBlockText(doc.blocks.find((block) => block.id === id), path)
+const plainDoc = (doc: ArticleBlocksDoc) => ({ version: doc.version, blocks: doc.blocks })
 
 try {
   await boot.unsafe(`create database "${scratch}"`)
@@ -110,7 +111,11 @@ try {
   check(expected.every(([blockId, path, original]) => text(preview, blockId, path) === `عربي ${original}`), 'all twelve types translate every textual field, including list entries, gallery alt text and two locations')
   let expectedDocument = structuredClone(source)
   for (const [blockId, path, original] of expected) expectedDocument = setArticleBlockText(expectedDocument, blockId, path, `عربي ${original}`)
-  assert.deepEqual(preview, expectedDocument)
+  assert.deepEqual(plainDoc(preview), expectedDocument)
+  check(preview.translation?.fields.length === expected.length && expected.every(([blockId, path, original]) =>
+    preview.translation?.fields.some(field => field.blockId === blockId && JSON.stringify(field.fieldPath) === JSON.stringify(path)
+      && field.sourceText === original && field.status === 'translated')),
+    'first-time full preview binds every translated field to its exact Persian source')
   assert.deepEqual(source, beforeSource)
   assert.deepEqual((await service.adminDetail(id))!.blocks, beforePreview.blocks)
   check((await service.adminDetail(id))!.blocksAr === null && (await db.select().from(translationJobs)).length === 0, 'preview preserves exact source structures and coordinates without writing articles or queue jobs')
@@ -136,14 +141,98 @@ try {
   const response = await app.handle(new Request('http://localhost/admin/translate/blocks', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer admin' }, body: JSON.stringify({ blocks: source, blocksAr: manual, blockId: 'location-one' }) }))
   const body = await response.json() as { blocksAr: ArticleBlocksDoc }
   check(response.status === 200 && text(body.blocksAr, 'location-one', ['title']) === 'عربي عنوان شعبه اول' && (await service.adminDetail(id))!.blocksAr === null, 'admin HTTP preview returns reviewable Arabic documents without saving them')
+
+  const postField = (value: unknown) => app.handle(new Request('http://localhost/admin/translate/block-field', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer admin' }, body: JSON.stringify(value),
+  }))
+  const selected = { blockId: 'location-two', blockType: 'location' as const, fieldPath: ['title'], text: '  عنوان [پیوند](https://example.com)\nخط دوم  ' }
+  payloads.length = 0
+  const selectedResponse = await postField(selected)
+  assert.equal(selectedResponse.status, 200)
+  assert.deepEqual(await selectedResponse.json(), { blockId: selected.blockId, blockType: selected.blockType,
+    fieldPath: selected.fieldPath, sourceText: selected.text, translation: `${prefix}${selected.text}`.trim() })
+  assert.deepEqual(payloads, [[selected.text]])
+  check(true, 'field HTTP preview sends exactly one unchanged source string without adjacent Persian, Arabic or document content')
+  const invalidPaths: Array<[ArticleBlockType, ArticleBlockTextPath]> = [
+    ['location', ['lat']], ['location', ['lng']], ['hero', ['src']], ['link', ['href']], ['heading', ['level']],
+    ['list', ['ordered']], ['paragraph', ['style']], ['paragraph', ['__proto__']], ['paragraph', ['constructor']],
+    ['paragraph', ['text', 'extra']], ['divider', ['text']], ['hero', ['images', 0, 'alt']],
+    ['list', ['items', -1]], ['list', ['items', 30]], ['list', ['items', 0.5]], ['list', ['items', '1']], ['list', ['items', 0, 'text']],
+    ['gallery', ['images', -1, 'alt']], ['gallery', ['images', 12, 'alt']], ['gallery', ['images', 0.5, 'alt']],
+    ['gallery', ['images', '0', 'alt']], ['gallery', ['images', 0, 'src']],
+  ]
+  payloads.length = 0
+  for (const [blockType, fieldPath] of invalidPaths) {
+    await assert.rejects(translator.previewBlockField({ ...selected, blockType, fieldPath }),
+      error => error instanceof AppError && error.code === 'VALIDATION_ERROR')
+    const rejected = await postField({ ...selected, blockType, fieldPath })
+    assert.ok(rejected.status >= 400 && rejected.status < 500, `Rejected ${blockType} ${JSON.stringify(fieldPath)}`)
+  }
+  for (const invalid of [{ ...selected, blockType: 'unknown' }, { ...selected, blockType: '__proto__' },
+    { ...selected, text: '   ' }, { ...selected, text: 'x'.repeat(30001) }, { ...selected, blockId: '' }]) {
+    const rejected = await postField(invalid)
+    assert.ok(rejected.status >= 400 && rejected.status < 500)
+  }
+  assert.deepEqual(payloads, [])
+  check(true, 'field service and HTTP reject structural keys, invalid types, nested paths, and list/gallery bounds before translation')
+  for (const [blockType, fieldPath] of [['list', ['items', 29]], ['gallery', ['images', 11, 'alt']]] as Array<[ArticleBlockType, ArticleBlockTextPath]>) {
+    const accepted = await postField({ ...selected, blockType, fieldPath, text: 'آخرین مورد' })
+    assert.equal(accepted.status, 200)
+  }
+  check(true, 'last valid list and gallery field indexes remain translatable')
+
+  const fieldSource: ArticleBlocksDoc = { version: 1, blocks: [
+    { id: 'branch', type: 'location', props: { lat: 37.48220561234, lng: 49.44182739876, title: 'نام شعبه', address: 'آدرس شعبه' } },
+  ] }
+  let fieldArabic = setArticleBlockTranslation(fieldSource, null, 'branch', ['title'], 'اسم الفرع')!
+  fieldArabic = setArticleBlockTranslation(fieldSource, fieldArabic, 'branch', ['address'], 'عنوان يدوي')!
+  const fieldInput = { ...input, blocks: fieldSource, blocksAr: fieldArabic, titleAr: 'عنوان', excerptAr: 'ملخص', contentAr: 'محتوى' }
+  const { id: fieldId } = await service.create(fieldInput)
+  assert.ok(fieldId)
+  const fieldHold = { entered: deferred(), release: deferred() }
+  gate = fieldHold
+  const latePreview = translator.previewBlockField({ blockId: 'branch', blockType: 'location', fieldPath: ['title'], text: 'نام شعبه' })
+  await fieldHold.entered.promise
+  const editedFieldSource = setArticleBlockText(fieldSource, 'branch', ['title'], 'نام جدید شعبه')
+  await service.update(fieldId, { ...fieldInput, blocks: editedFieldSource })
+  fieldHold.release.resolve()
+  const staleField = await latePreview
+  const lateArabic = setArticleBlockTranslation(fieldSource, fieldArabic, staleField.blockId, staleField.fieldPath, staleField.translation)!
+  await service.update(fieldId, { ...fieldInput, blocks: editedFieldSource, blocksAr: lateArabic })
+  const afterLate = (await service.adminDetail(fieldId))!
+  check(text(afterLate.blocksAr!, 'branch', ['title']) === '' && text(afterLate.blocksAr!, 'branch', ['address']) === 'عنوان يدوي'
+    && getArticleBlockTranslationStatus(afterLate.blocks, afterLate.blocksAr, 'branch', ['title']) === 'needs-retranslation'
+    && text((await service.byId(fieldId, 'ar'))!.blocks!, 'branch', ['title']) === 'نام جدید شعبه',
+    'late field responses and stale source proofs cannot restore outdated Arabic or disturb an adjacent manual address')
+  payloads.length = 0
+  const changedPreview = await translator.previewBlocks({ blocks: afterLate.blocks, blocksAr: afterLate.blocksAr })
+  assert.deepEqual(payloads, [['نام جدید شعبه']])
+  check(text(changedPreview, 'branch', ['address']) === 'عنوان يدوي', 'changed-field preview excludes every completed sibling from translator payloads')
+  await service.update(fieldId, { ...fieldInput, blocks: editedFieldSource, blocksAr: changedPreview })
+  const freshSaved = (await service.adminDetail(fieldId))!
+  check(getArticleBlockTranslationStatus(freshSaved.blocks, freshSaved.blocksAr, 'branch', ['title']) === 'translated'
+    && freshSaved.blocksAr?.translation?.fields.some(field => field.blockId === 'branch' && field.fieldPath[0] === 'title' && field.sourceText === 'نام جدید شعبه')
+    && text(freshSaved.blocksAr!, 'branch', ['address']) === 'عنوان يدوي',
+    'fresh source-bound preview metadata survives a save and clears only the changed field status')
+
   check((await translator.enqueue('article', id)).queued && !(await translator.enqueue('article', id)).queued, 'article jobs deduplicate pending work')
   check(await translator.processNext() === 'done', 'queue worker translates and persists builder documents')
   const queued = (await service.adminDetail(id))!
   assert.deepEqual(queued.blocks, beforePreview.blocks)
-  assert.deepEqual(queued.blocksAr, expectedDocument)
+  assert.deepEqual(queued.blocksAr, preview)
   check(queued.arAuto === true && queued.contentAr?.includes('عربي متن پاراگراف'), 'queue derives Arabic article text while preserving the original Persian document')
   assert.deepEqual((await service.byId(id, 'ar'))!.blocks, expectedDocument)
   check(true, 'Arabic public detail receives translated documents with exact independent location coordinates')
+  const { id: machineId } = await service.create({ ...input, blocksAr: queued.blocksAr, titleAr: 'عنوان مكتمل', excerptAr: 'ملخص مكتمل', contentAr: 'محتوى مكتمل' })
+  assert.ok(machineId)
+  await db.update(articles).set({ arAuto: true }).where(eq(articles.id, machineId))
+  const machineSource = setArticleBlockText(source, 'heading', ['text'], 'فقط تیتر جدید برای صف')
+  await service.update(machineId, { ...input, blocks: machineSource })
+  await translator.enqueue('article', machineId)
+  const beforeMachineField = payloads.length
+  check(await translator.processNext() === 'done', 'queue fills a changed field in an otherwise completed machine document')
+  check(JSON.stringify(payloads.slice(beforeMachineField).flat()) === JSON.stringify(['فقط تیتر جدید برای صف']),
+    'queue sends only the changed block field and does not retranslate completed article titles, excerpts or siblings')
   let savedManual = setArticleBlockText(queued.blocksAr!, 'hero', ['title'], 'عنوان نهائي يدوي')
   savedManual = setArticleBlockText(savedManual, 'image', ['caption'], '')
   await service.update(id, { ...input, blocksAr: savedManual })
@@ -168,8 +257,8 @@ try {
   assert.equal(movedLocation.type, 'location')
   movedLocation.props.lat = 33.98765432109
   movedLocation.props.lng = 48.12345678901
-  let concurrentArabic = setArticleBlockText(normalizeArticleBlocksTranslation(newSource, oldArabic)!, 'heading', ['text'], 'تحرير أثناء الطلب')
-  concurrentArabic = setArticleBlockText(concurrentArabic, 'hero', ['title'], '')
+  let concurrentArabic = setArticleBlockTranslation(newSource, oldArabic, 'heading', ['text'], 'تحرير أثناء الطلب')!
+  concurrentArabic = setArticleBlockTranslation(newSource, concurrentArabic, 'hero', ['title'], '')!
   await service.update(raceId, { ...input, title: 'عنوان جدید بعد از درخواست', blocks: newSource, blocksAr: concurrentArabic })
   hold.release.resolve()
   check(await working === 'done', 'in-flight translation completes after a concurrent save')

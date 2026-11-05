@@ -152,6 +152,20 @@ export type ArticleBlock =
 export interface ArticleBlocksDoc {
         version: 1
         blocks: ArticleBlock[]
+        /** Optional Arabic field provenance; older documents need no conversion. */
+        translation?: { fields: ArticleBlockTranslationState[] }
+}
+
+export type ArticleBlockTranslationStatus =
+	| 'translated'
+	| 'missing'
+	| 'needs-retranslation'
+export interface ArticleBlockTranslationState {
+	blockId: string
+	blockType: ArticleBlockType
+	fieldPath: (string | number)[]
+	sourceText: string
+	status: ArticleBlockTranslationStatus
 }
 
 // ═══════════════════ توابع خالص (فرانت + بک) ═══════════════════

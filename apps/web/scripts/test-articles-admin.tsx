@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
-import { normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, type ArticleBlocksDoc } from '@sinshin/shared'
+import { getArticleBlockTextFields, normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockType, type ArticleBlockTextPath } from '@sinshin/shared'
 import type { ArticleFormData } from '../src/types/forms'
 
 // Exercise the real component handlers with a small hook host. Network and
@@ -49,10 +49,18 @@ mock.module('#/components/shared/Toggle', () => ({ Toggle: () => null }))
 mock.module('#/components/admin/ArField', () => ({ ArField: () => null }))
 let previewInput: { blocks: ArticleBlocksDoc; blocksAr?: ArticleBlocksDoc | null; blockId?: string } | undefined
 let resolveTranslation: ((doc: ArticleBlocksDoc) => void) | undefined
+let previewCalls = 0
+const fieldRequests: { blockId: string; blockType: ArticleBlockType; fieldPath: ArticleBlockTextPath; text: string }[] = []
+let resolveField: ((result: { blockId: string; blockType: ArticleBlockType; fieldPath: ArticleBlockTextPath; sourceText: string; translation: string }) => void) | undefined
 mock.module('#/server/translation', () => ({
   translateArticleBlocksPreview: (input: typeof previewInput) => {
+    previewCalls++
     previewInput = input
     return new Promise<ArticleBlocksDoc>(resolve => { resolveTranslation = resolve })
+  },
+  translateArticleBlockField: (input: (typeof fieldRequests)[number]) => {
+    fieldRequests.push(input)
+    return new Promise(resolve => { resolveField = resolve })
   },
 }))
 
@@ -347,6 +355,110 @@ assert.equal(find(legacyTree, node => node.type === ArticlePageBuilder).props.do
 find(legacyTree, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
 assert.deepEqual(savedLegacy?.blocks, bilingualSource)
 assert.deepEqual(savedLegacy?.blocksAr, arabicDoc, 'reviewed Arabic document is included separately on save')
+
+// Exact source-field changes invalidate only that field and require an explicit targeted action.
+let fieldSource = structuredClone(bilingualSource)
+let fieldArabic = setArticleBlockTranslations(fieldSource, null, fieldSource.blocks.flatMap(block =>
+  getArticleBlockTextFields(block).filter(field => field.text.trim()).map(field => ({ blockId: block.id, path: field.path, text: `عربي ${field.text}` }))))!
+const fieldHost: Host = { cells: [], cursor: 0 }
+function renderFields() {
+  return render(fieldHost, ArticlePageBuilder, { doc: fieldSource, docAr: fieldArabic,
+    onChange(next) { fieldSource = next }, onArabicChange(next) { fieldArabic = next } })
+}
+function arabicField(value: unknown, id: string, path: ArticleBlockTextPath) {
+  return find(find(value, node => node.props['data-arabic-block'] === id), node => node.props['data-arabic-field'] === JSON.stringify(path))
+}
+function resolveFieldRequest(translation: string) {
+  const input = fieldRequests.at(-1)!
+  resolveField!({ blockId: input.blockId, blockType: input.blockType, fieldPath: [...input.fieldPath], sourceText: input.text, translation })
+}
+let fieldTree = renderFields()
+assert.equal(arabicField(fieldTree, 'heading', ['text']).props['data-arabic-status'], 'translated')
+assert.equal(arabicField(fieldTree, 'image', ['alt']).props['data-arabic-status'], 'missing')
+const beforeSourceEdit = structuredClone(fieldArabic)
+const beforeFieldRequests = fieldRequests.length
+const beforeBulkPreviews = previewCalls
+fieldsFor(fieldTree, 'heading').props.patchProps({ text: 'عنوان فارسی تغییرکرده' })
+fieldTree = renderFields()
+assert.equal(fieldRequests.length, beforeFieldRequests)
+assert.equal(previewCalls, beforeBulkPreviews, 'typing Persian text never requests automatic translation')
+assert.equal(arabicField(fieldTree, 'heading', ['text']).props['data-arabic-status'], 'needs-retranslation')
+assert.equal(find(arabicField(fieldTree, 'heading', ['text']), node => node.type === 'textarea').props.value, '')
+for (const block of fieldArabic.blocks.filter(b => b.id !== 'heading')) {
+  assert.deepEqual(block.props, beforeSourceEdit.blocks.find(b => b.id === block.id)!.props, `heading edit preserves other manual ${block.type} translations`)
+}
+assert.equal(arabicField(fieldTree, 'pin-one', ['address']).props['data-arabic-status'], 'translated')
+find(arabicField(fieldTree, 'heading', ['text']), node => node.type === 'button').props.onClick()
+assert.deepEqual(fieldRequests.at(-1), { blockId: 'heading', blockType: 'heading', fieldPath: ['text'], text: 'عنوان فارسی تغییرکرده' }, 'a field action sends exactly its current Persian text and identity')
+assert.equal(fieldRequests.length, beforeFieldRequests + 1)
+assert.equal(previewCalls, beforeBulkPreviews, 'field action never invokes whole-block or whole-article translation')
+assert(!('blocksAr' in fieldRequests.at(-1)!) && !('blocks' in fieldRequests.at(-1)!))
+fieldTree = renderFields()
+assert.equal(find(arabicField(fieldTree, 'heading', ['text']), node => node.type === 'textarea').props.disabled, undefined, 'manual editing remains available during translation')
+resolveFieldRequest('العنوان الجديد فقط')
+await new Promise(resolve => setTimeout(resolve, 0))
+fieldTree = renderFields()
+assert.equal(arabicField(fieldTree, 'heading', ['text']).props['data-arabic-status'], 'translated')
+assert.equal(readArticleBlockText(fieldArabic.blocks.find(b => b.id === 'heading'), ['text']), 'العنوان الجديد فقط')
+for (const block of fieldArabic.blocks.filter(b => b.id !== 'heading')) assert.deepEqual(block.props, beforeSourceEdit.blocks.find(b => b.id === block.id)!.props)
+fieldsFor(fieldTree, 'pin-one').props.patchProps({ address: 'آدرس جدید فقط برای یک شعبه' })
+fieldTree = renderFields()
+assert.equal(arabicField(fieldTree, 'pin-one', ['address']).props['data-arabic-status'], 'needs-retranslation')
+assert.equal(arabicField(fieldTree, 'pin-one', ['title']).props['data-arabic-status'], 'translated')
+assert.equal(arabicField(fieldTree, 'pin-two', ['address']).props['data-arabic-status'], 'translated')
+const selectedPin = fieldSource.blocks.find(b => b.id === 'pin-one')!
+assert.equal(selectedPin.type, 'location')
+assert.equal(selectedPin.props.lat, 37.4822056789)
+assert.equal(selectedPin.props.lng, 49.4418273456)
+fieldsFor(fieldTree, 'pin-one').props.patchProps({ lat: 37.98765432109, lng: 49.12345678901 })
+fieldSource = { ...fieldSource, blocks: fieldSource.blocks.map(b => ({ ...b, width: 'sm', anim: 'blur', style: { bg: '#010203', fg: '#abcdef' } })) }
+fieldTree = renderFields()
+assert.equal(arabicField(fieldTree, 'heading', ['text']).props['data-arabic-status'], 'translated')
+assert.equal(arabicField(fieldTree, 'pin-one', ['title']).props['data-arabic-status'], 'translated', 'coordinate and style changes do not invalidate translated titles')
+const beforeChangedOnly = fieldRequests.length
+find(fieldTree, node => node.type === 'button' && node.props.children === 'ترجمه فقط فیلدهای تغییرکرده').props.onClick()
+assert.equal(fieldRequests.length, beforeChangedOnly + 1)
+assert.deepEqual(fieldRequests.at(-1), { blockId: 'pin-one', blockType: 'location', fieldPath: ['address'], text: 'آدرس جدید فقط برای یک شعبه' })
+assert.equal(previewCalls, beforeBulkPreviews)
+resolveFieldRequest('العنوان الجديد للفرع')
+await new Promise(resolve => setTimeout(resolve, 0))
+fieldTree = renderFields()
+assert.equal(arabicField(fieldTree, 'pin-one', ['address']).props['data-arabic-status'], 'translated')
+assert.equal(readArticleBlockText(fieldArabic.blocks.find(b => b.id === 'pin-two'), ['address']), 'عربي آدرس دوم')
+assert.deepEqual(fieldArabic.blocks.find(b => b.id === 'pin-one')?.props, { lat: 37.98765432109, lng: 49.12345678901, title: 'عربي اول', address: 'العنوان الجديد للفرع' })
+const duplicateHeading = { ...structuredClone(fieldSource.blocks.find(b => b.id === 'heading')!), id: 'new-heading-copy' }
+fieldSource = { ...fieldSource, blocks: [duplicateHeading, ...[...fieldSource.blocks].reverse()] }
+fieldTree = renderFields()
+assert.equal(arabicField(fieldTree, 'heading', ['text']).props['data-arabic-status'], 'translated', 'block order does not invalidate reviewed fields')
+assert.equal(arabicField(fieldTree, 'new-heading-copy', ['text']).props['data-arabic-status'], 'missing', 'a duplicate with a fresh ID never inherits the original translation')
+const repeatedFieldTree = renderFields()
+assert.equal(arabicField(repeatedFieldTree, 'new-heading-copy', ['text']).props['data-arabic-status'], 'missing', 'invalidation survives rerenders when parent Arabic props have not updated yet')
+find(fieldTree, node => node.type === 'button' && node.props.children === 'ترجمه خودکار همه بلوک‌ها به عربی').props.onClick()
+assert.equal(previewCalls, beforeBulkPreviews + 1)
+assert(!('blocksAr' in previewInput!), 'initial all/block previews do not retransmit existing Arabic')
+assert.deepEqual(previewInput!.blocks.blocks.flatMap(b => getArticleBlockTextFields(b).filter(f => f.text.trim()).map(f => [b.id, f.path, f.text])),
+  [['new-heading-copy', ['text'], 'عنوان فارسی تغییرکرده']], 'Translate All omits every completed Persian sibling and sends only untranslated source fields')
+resolveTranslation!(setArticleBlockText(normalizeArticleBlocksTranslation(previewInput!.blocks, null)!, 'new-heading-copy', ['text'], 'عنوان النسخة الجديدة'))
+await new Promise(resolve => setTimeout(resolve, 0))
+fieldTree = renderFields()
+assert.equal(readArticleBlockText(fieldArabic.blocks.find(b => b.id === 'heading'), ['text']), 'العنوان الجديد فقط')
+assert.equal(readArticleBlockText(fieldArabic.blocks.find(b => b.id === 'new-heading-copy'), ['text']), 'عنوان النسخة الجديدة')
+fieldsFor(fieldTree, 'heading').props.patchProps({ text: 'المصدر الفارسي الأول' })
+fieldTree = renderFields()
+find(arabicField(fieldTree, 'heading', ['text']), node => node.type === 'button').props.onClick()
+const pendingSourceFields = fieldsFor(fieldTree, 'heading').props.patchProps
+pendingSourceFields({ text: 'المصدر الفارسي الثاني' })
+pendingSourceFields({ text: 'المصدر الفارسي الأول' })
+resolveFieldRequest('اقتراح قديم رغم الرجوع')
+await new Promise(resolve => setTimeout(resolve, 0))
+fieldTree = renderFields()
+assert.equal(readArticleBlockText(fieldArabic.blocks.find(b => b.id === 'heading'), ['text']), '', 'A -> B -> A before rerender still discards a pending stale field response')
+assert.equal(arabicField(fieldTree, 'heading', ['text']).props['data-arabic-status'], 'needs-retranslation')
+find(arabicField(fieldTree, 'heading', ['text']), node => node.type === 'button').props.onClick()
+find(arabicField(fieldTree, 'heading', ['text']), node => node.type === 'textarea').props.onChange({ target: { value: 'تصحيح يدوي أثناء الطلب' } })
+resolveFieldRequest('اقتراح آلي متأخر')
+await new Promise(resolve => setTimeout(resolve, 0))
+assert.equal(readArticleBlockText(fieldArabic.blocks.find(b => b.id === 'heading'), ['text']), 'تصحيح يدوي أثناء الطلب', 'a pending one-field response never overwrites manual review')
 
 const client = new QueryClient()
 const affectedKeys = [qk.articleCategories, qk.adminArticleCategories, qk.adminArticles,
