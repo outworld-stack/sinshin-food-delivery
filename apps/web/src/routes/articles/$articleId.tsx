@@ -161,7 +161,7 @@ function ArticleDetailPage() {
 
         {/* ═══ stage-82 — بدنه‌ی مقاله: سندِ بلوکی (صفحه‌ساز) یا مسیرِ متنیِ قبل ═══ */}
         {article.blocks?.version === 1 && Array.isArray(article.blocks.blocks) && article.blocks.blocks.length > 0 ? (
-                <ArticleBlocksRenderer doc={article.blocks} />
+                <ArticleBlocksRenderer doc={article.blocks} docAr={article.blocksAr} lang={lang} />
         ) : (
                 <div className="max-w-none text-gray-700 dark:text-gray-300 leading-loose font-DanaRegular space-y-6 mb-8">
                         {article.content.split('\n\n').map((p, i) => (

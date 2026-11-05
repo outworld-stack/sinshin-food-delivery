@@ -185,7 +185,7 @@ ok(
   (linkVariantDefault?.blocks[0] as { props: { variant?: string } } | undefined)?.props.variant === undefined,
 )
 
-console.log('\n══ N12: location — مختصات محدوده‌دار + گرد ۶ رقم ══')
+console.log('\n══ N12: location — مختصات محدوده‌دار با حفظ دقت ══')
 ok(
   'N12: بدون مختصات → حذف',
   normalizeBlocksDoc({ version: 1, blocks: [B('location', { title: 'شعبه' })] }) === null,
@@ -206,17 +206,18 @@ ok(
   'N12: NaN → حذف',
   normalizeBlocksDoc({ version: 1, blocks: [B('location', { lat: Number.NaN, lng: 49 })] }) === null,
 )
-const locRounded = normalizeBlocksDoc({
+const locPrecise = normalizeBlocksDoc({
   version: 1,
   blocks: [B('location', { lat: 37.48220561234, lng: 49.44182739876, address: 'بندرانزلی' })],
 })
 ok(
-  'N12: گرد به ۶ رقم',
-  (locRounded?.blocks[0] as { props: { lat?: number } } | undefined)?.props.lat === 37.482206,
+  'N12: حفظ دقت مختصات',
+  (locPrecise?.blocks[0] as { props: { lat?: number; lng?: number } } | undefined)?.props.lat === 37.48220561234
+    && (locPrecise?.blocks[0] as { props: { lng?: number } } | undefined)?.props.lng === 49.44182739876,
 )
 ok(
   'N12: آدرس ذخیره شد',
-  (locRounded?.blocks[0] as { props: { address?: string } } | undefined)?.props.address === 'بندرانزلی',
+  (locPrecise?.blocks[0] as { props: { address?: string } } | undefined)?.props.address === 'بندرانزلی',
 )
 const locEdge = normalizeBlocksDoc({
   version: 1,

@@ -33,6 +33,7 @@ export interface ArticleFormData {
 	 * (در فرم: content از بلوک‌ها مشتق می‌شود — منبع واحد)
 	 */
 	blocks: ArticleBlocksDoc | null
+	blocksAr?: ArticleBlocksDoc | null
 	// ═══ round-34 — محتوای عربی (خالی = حذف ترجمه = بازگشت به فارسی) ═══
 	titleAr: string
 	excerptAr: string

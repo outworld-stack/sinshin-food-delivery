@@ -79,7 +79,7 @@ const blockSchema = t.Object({
   style: t.Optional(blockStyleSchema),
   props: t.Optional(t.Record(t.String(), t.Unknown())),
 })
-const blocksDocSchema = t.Nullable(
+export const blocksDocSchema = t.Nullable(
   t.Object({
     version: t.Literal(1),
     blocks: t.Array(blockSchema, { maxItems: 200 }),
@@ -105,6 +105,8 @@ const articleBody = t.Object({
   isFeatured: t.Optional(t.Boolean()),
   // stage-82 — سندِ بلوکیِ صفحه‌ساز (null = پاک‌کردن → مقاله‌ی متنی)
   blocks: t.Optional(blocksDocSchema),
+  // Arabic text is rebased onto Persian structure by the service, never normalized as Persian.
+  blocksAr: t.Optional(blocksDocSchema),
 })
 
 const categoryBody = t.Object({

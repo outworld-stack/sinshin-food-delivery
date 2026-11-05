@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
-import type { ArticleBlocksDoc } from '@sinshin/shared'
+import { normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, type ArticleBlocksDoc } from '@sinshin/shared'
 import type { ArticleFormData } from '../src/types/forms'
 
 // Exercise the real component handlers with a small hook host. Network and
@@ -47,9 +47,18 @@ mock.module('#/components/shared/ImageField', () => ({ ImageField: () => null })
 mock.module('#/components/shared/MapPicker', () => ({ MapPicker: () => null }))
 mock.module('#/components/shared/Toggle', () => ({ Toggle: () => null }))
 mock.module('#/components/admin/ArField', () => ({ ArField: () => null }))
+let previewInput: { blocks: ArticleBlocksDoc; blocksAr?: ArticleBlocksDoc | null; blockId?: string } | undefined
+let resolveTranslation: ((doc: ArticleBlocksDoc) => void) | undefined
+mock.module('#/server/translation', () => ({
+  translateArticleBlocksPreview: (input: typeof previewInput) => {
+    previewInput = input
+    return new Promise<ArticleBlocksDoc>(resolve => { resolveTranslation = resolve })
+  },
+}))
 
 const { ArticleForm } = await import('../src/components/admin/ArticleForm')
 const { ArticlePageBuilder } = await import('../src/components/admin/articles/builder/ArticlePageBuilder')
+const { useArabicBlockTranslations } = await import('../src/components/admin/articles/builder/useArabicBlockTranslations')
 const { plainTextToDoc, blocksToPlainText } = await import('../src/components/admin/articles/builder/blockModel')
 const { invalidateArticleQueries } = await import('../src/components/admin/articles/invalidateArticleQueries')
 const { qk } = await import('../src/utils/queryKeys')
@@ -65,7 +74,7 @@ function find(tree: unknown, predicate: (node: Element) => boolean): Element {
   assert(node, 'Expected control is present')
   return node
 }
-function render<T>(instance: Host, component: (props: T) => unknown, props: T) {
+function render<T, R>(instance: Host, component: (props: T) => R, props: T): R {
   host = instance
   host.cursor = 0
   return component(props)
@@ -240,6 +249,104 @@ assert.equal(find(pickerTree, node => node.type === 'button' && node.props['aria
 mapPickerElement.props.onValidityChange(true)
 pickerTree = render(pickerHost, Picker, pickerProps as never)
 assert.equal(find(pickerTree, node => node.type === 'button' && node.props['aria-expanded'] === true).props.disabled, false)
+
+const bilingualSource: ArticleBlocksDoc = { version: 1, blocks: [
+  { id: 'hero', type: 'hero', props: { title: 'هیرو', text: 'متن' } },
+  { id: 'heading', type: 'heading', props: { text: 'عنوان', level: 3 } },
+  { id: 'paragraph', type: 'paragraph', props: { text: 'متن اصلی' } },
+  { id: 'image', type: 'image', props: { src: '/original.webp' } },
+  { id: 'gallery', type: 'gallery', props: { layout: 'slider', images: [{ src: '/one.webp' }, { src: '/two.webp' }] } },
+  { id: 'quote', type: 'quote', props: { text: 'نقل قول' } },
+  { id: 'callout', type: 'callout', props: { text: 'نکته' } },
+  { id: 'list', type: 'list', props: { items: ['اول', 'دوم'], ordered: true } },
+  { id: 'cta', type: 'cta', props: { label: 'اقدام', to: 'menu' } },
+  { id: 'link', type: 'link', props: { label: 'پیوند', href: '/articles/test', variant: 'card' } },
+  { id: 'pin-one', type: 'location', props: { lat: 37.4822056789, lng: 49.4418273456, title: 'اول', address: 'آدرس اول' } },
+  { id: 'pin-two', type: 'location', props: { lat: -12.987654321, lng: 0, title: 'دوم', address: 'آدرس دوم' } },
+  { id: 'divider', type: 'divider', props: { variant: 'space' } },
+] }
+const originalSource = structuredClone(bilingualSource)
+let arabicDoc: ArticleBlocksDoc | null = null
+const currentArabicDoc = (): ArticleBlocksDoc | null => arabicDoc
+const bilingualHost: Host = { cells: [], cursor: 0 }
+function renderBilingualBuilder() {
+  return render(bilingualHost, ArticlePageBuilder, {
+    doc: bilingualSource, docAr: arabicDoc, onChange() {}, onArabicChange(next) { arabicDoc = next },
+  })
+}
+let bilingualTree = renderBilingualBuilder()
+const counts: Record<string, number> = { hero: 2, heading: 1, paragraph: 1, image: 2, gallery: 2, quote: 2, callout: 2, list: 2, cta: 3, link: 3, 'pin-one': 2, 'pin-two': 2, divider: 0 }
+for (const block of bilingualSource.blocks) {
+  const panel = find(bilingualTree, node => node.props['data-arabic-block'] === block.id)
+  assert.equal(nodes(panel).filter(node => node.type === 'textarea').length, counts[block.id], `Arabic text inputs support ${block.type}`)
+  assert(!nodes(panel).some(node => node.type === 'input'), 'Arabic panels never expose structure/coordinate inputs')
+  assert(find(panel, node => node.type === 'button' && node.props.children === 'ترجمه خودکار به عربی'), 'every block offers its translation action')
+}
+find(bilingualTree, node => node.type === 'button' && node.props.children === 'ترجمه خودکار همه بلوک‌ها به عربی').props.onClick()
+assert.equal(previewInput?.blockId, undefined, 'translate-all sends the complete document')
+assert.equal(previewInput?.blocks, bilingualSource)
+bilingualTree = renderBilingualBuilder()
+assert(nodes(bilingualTree).filter(node => node.type === 'button' && node.props.children === 'ترجمه خودکار به عربی').every(node => node.props.disabled), 'concurrent translation actions are disabled')
+resolveTranslation!(normalizeArticleBlocksTranslation(bilingualSource, null)!)
+await new Promise(resolve => setTimeout(resolve, 0))
+bilingualTree = renderBilingualBuilder()
+const firstPinPanel = find(bilingualTree, node => node.props['data-arabic-block'] === 'pin-one')
+find(firstPinPanel, node => node.type === 'textarea').props.onChange({ target: { value: 'عنوان يدوي' } })
+assert.deepEqual(bilingualSource, originalSource, 'manual Arabic editing leaves the Persian article intact')
+assert.equal(readArticleBlockText(currentArabicDoc()?.blocks.find(b => b.id === 'pin-one'), ['title']), 'عنوان يدوي')
+bilingualTree = renderBilingualBuilder()
+find(find(bilingualTree, node => node.props['data-arabic-block'] === 'pin-two'), node => node.type === 'button').props.onClick()
+assert.equal(previewInput?.blockId, 'pin-two', 'individual action identifies the exact location block')
+resolveTranslation!(setArticleBlockText(normalizeArticleBlocksTranslation(bilingualSource, null)!, 'pin-two', ['title'], 'المكان الثاني'))
+await new Promise(resolve => setTimeout(resolve, 0))
+assert.equal(readArticleBlockText(currentArabicDoc()?.blocks.find(b => b.id === 'pin-one'), ['title']), 'عنوان يدوي')
+assert.equal(readArticleBlockText(currentArabicDoc()?.blocks.find(b => b.id === 'pin-two'), ['title']), 'المكان الثاني')
+
+// Exercise delayed replies directly, including a manual clear and source changes.
+const hookHost: Host = { cells: [], cursor: 0 }
+const sourceRef = { current: bilingualSource }
+const mounted = { current: true }
+function renderTranslationHook() {
+  return render(hookHost, useArabicBlockTranslations, {
+    doc: sourceRef, docAr: arabicDoc, mounted, onChange(next) { arabicDoc = next }, showToast() {},
+  })
+}
+let translationHook = renderTranslationHook()
+const pending = translationHook.translate()
+translationHook.edit('pin-one', ['title'], '')
+translationHook.edit('paragraph', ['text'], 'تحرير يدوي أثناء الترجمة')
+sourceRef.current = { ...bilingualSource, blocks: [...bilingualSource.blocks].reverse().filter(b => b.id !== 'pin-two') }
+sourceRef.current = setArticleBlockText(sourceRef.current, 'heading', ['text'], 'عنوان فارسي جديد')
+translationHook = renderTranslationHook()
+let suggestions = normalizeArticleBlocksTranslation(bilingualSource, null)!
+for (const [id, path, value] of [
+  ['pin-one', ['title'], 'اقتراح قديم'], ['pin-one', ['address'], 'عنوان جديد'],
+  ['pin-two', ['title'], 'عنوان محذوف'], ['paragraph', ['text'], 'اقتراح تلقائي'], ['heading', ['text'], 'ترجمة قديمة'],
+] as const) suggestions = setArticleBlockText(suggestions, id, [...path], value)
+resolveTranslation!(suggestions)
+await pending
+assert.equal(readArticleBlockText(currentArabicDoc()?.blocks.find(b => b.id === 'pin-one'), ['title']), '', 'manual clears are protected from pending suggestions')
+assert.equal(readArticleBlockText(currentArabicDoc()?.blocks.find(b => b.id === 'paragraph'), ['text']), 'تحرير يدوي أثناء الترجمة')
+assert.equal(readArticleBlockText(currentArabicDoc()?.blocks.find(b => b.id === 'heading'), ['text']), '', 'changed Persian text rejects stale Arabic suggestions')
+assert.equal(readArticleBlockText(currentArabicDoc()?.blocks.find(b => b.id === 'pin-one'), ['address']), 'عنوان جديد')
+assert.deepEqual(currentArabicDoc()?.blocks.map(b => b.id), sourceRef.current.blocks.map(b => b.id), 'pending suggestions follow current source order and cannot restore deleted blocks')
+assert.equal((currentArabicDoc()?.blocks.find(b => b.id === 'pin-one')?.props as { lat: number }).lat, 37.4822056789)
+const afterEdits = structuredClone(arabicDoc)
+translationHook = renderTranslationHook()
+const cancelled = translationHook.translate()
+mounted.current = false
+resolveTranslation!(suggestions)
+await cancelled
+assert.deepEqual(arabicDoc, afterEdits, 'unmounted editor discards delayed suggestions')
+
+const legacyHost: Host = { cells: [], cursor: 0 }
+const legacyDraft = { ...draft, blocks: bilingualSource, blocksAr: arabicDoc }
+let savedLegacy: ArticleFormData | undefined
+const legacyTree = render(legacyHost, ArticleForm, { initialData: legacyDraft, isSubmitting: false, onSubmit(next) { savedLegacy = next } })
+assert.equal(find(legacyTree, node => node.type === ArticlePageBuilder).props.doc, bilingualSource, 'existing articles load their original builder document without reconstruction')
+find(legacyTree, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+assert.deepEqual(savedLegacy?.blocks, bilingualSource)
+assert.deepEqual(savedLegacy?.blocksAr, arabicDoc, 'reviewed Arabic document is included separately on save')
 
 const client = new QueryClient()
 const affectedKeys = [qk.articleCategories, qk.adminArticleCategories, qk.adminArticles,

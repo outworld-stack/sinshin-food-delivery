@@ -63,6 +63,7 @@ export async function createArticle(input: {
   isFeatured?: boolean
   /** stage-82 — سند بلوکی (null = مقاله‌ی متنی ساده) */
   blocks?: ArticleBlocksDoc | null
+  blocksAr?: ArticleBlocksDoc | null
   /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null
@@ -93,6 +94,7 @@ export async function updateArticle(input: {
   isFeatured?: boolean
   /** stage-82 — سند بلوکی (null = پاک‌کردن → مقاله‌ی متنی) */
   blocks?: ArticleBlocksDoc | null
+  blocksAr?: ArticleBlocksDoc | null
   /** round-34 — محتوای عربی ('' → null = بازگشت به فارسی) */
   titleAr?: string | null
   excerptAr?: string | null

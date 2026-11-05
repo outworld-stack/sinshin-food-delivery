@@ -14,6 +14,7 @@ import type { Admin2Service, Admin2Permissions } from '#/domain/admin2/admin2.se
 import type { TranslationService } from '#/domain/translation/translation.service'
 import { Err } from '#/domain/shared/errors'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
+import { blocksDocSchema } from './articles.routes'
 
 /**
  * round-35 — صف و پیش‌نمایش ترجمه‌ی خودکار (مترجم آفلاین NLLB).
@@ -80,6 +81,19 @@ export const adminTranslateRoutes = (deps: AdminTranslateRoutesDeps) =>
         detail: {
           summary: 'پیشنهاد ترجمه‌ی ماشینی (Markdown-aware؛ بدون نوشتن DB)',
         },
+      },
+    )
+
+    .post(
+      '/blocks',
+      async ({ body }) => ({ blocksAr: await deps.translation.previewBlocks(body) }),
+      {
+        body: t.Object({
+          blocks: blocksDocSchema,
+          blocksAr: t.Optional(blocksDocSchema),
+          blockId: t.Optional(t.String({ minLength: 1, maxLength: 64 })),
+        }),
+        detail: { summary: 'پیشنهاد ترجمه‌ی بلوک‌های مقاله به عربی برای بازبینی، بدون نوشتن DB' },
       },
     )
 

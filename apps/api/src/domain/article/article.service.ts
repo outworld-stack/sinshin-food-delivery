@@ -14,6 +14,7 @@
 
 // src/domain/article/article.service.ts
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { isDeepStrictEqual } from 'node:util'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import {
@@ -27,7 +28,7 @@ import type { RedisService } from '#/infra/redis/redis'
 import { VersionedCache } from '#/domain/shared/versioned-cache'
 import { UUID_RE } from '#/domain/shared/ids'
 import { normalizeBlocksDoc } from './blocks-normalize'
-import { blocksToPlainText, type ArticleBlocksDoc } from '@sinshin/shared'
+import { blocksToPlainText, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, type ArticleBlocksDoc } from '@sinshin/shared'
 
 
 /** قرارداد ArticleDto از @sinshin/shared */
@@ -58,11 +59,10 @@ export interface ArticleView {
     arAuto?: boolean
     /** stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول لیست + Aurora در فرانت) */
     isFeatured?: boolean
-    /**
-     * stage-82 — سندِ بلوکی صفحه‌ساز. نمایِ عمومی فقط برای زبان فارسی
-     * می‌فرستد (ادیتور فارسی‌زبان است)؛ عربی همان مسیر متنی را می‌گیرد.
-     */
+    /** Localized block document, with Persian text fallback for Arabic fields. */
     blocks?: ArticleBlocksDoc | null
+    /** Raw Arabic block text for the admin editor. */
+    blocksAr?: ArticleBlocksDoc | null
 }
 
 /**
@@ -71,7 +71,7 @@ export interface ArticleView {
  */
 export type ArticleSummaryView = Omit<
     ArticleView,
-    'content' | 'processes' | 'galleryImages' | 'blocks'
+    'content' | 'processes' | 'galleryImages' | 'blocks' | 'blocksAr'
 >
 
 export interface ArticleCategoryView {
@@ -103,6 +103,7 @@ export interface ArticleInput {
     isFeatured?: boolean
     /** stage-82 — سند بلوکی خام (پیش از نرمال‌سازی سرویس)؛ null = پاک‌کردن */
     blocks?: unknown
+    blocksAr?: unknown
 }
 
 interface ArticleCategoryInput {
@@ -299,6 +300,7 @@ export class ArticleService {
         // stage-82 — بلوک‌ها: نرمال‌سازی سخت‌گیر + مشتق‌سازیِ content از متنِ
         // بلوک‌ها (لیست/سئو/ترجمه روی content سوارند — درسِ تحقیق: ول نکن)
         const blocks = normalizeBlocksDoc(input.blocks)
+        const blocksAr = this.normalizeBlocksAr(blocks, input.blocksAr)
         const content = blocks ? blocksToPlainText(blocks) || input.content : input.content
         this.assertArticleText(input, content)
 
@@ -310,6 +312,7 @@ export class ArticleService {
                 content,
                 // stage-82 — سندِ بلوکی نرمال‌شده (null = مقاله‌ی متنی ساده)
                 blocks,
+                blocksAr,
                 // round-34 — محتوای عربی: '' → NULL (پشتیبان فارسی)؛ ذخیره‌ی دستی = «دستی»
                 titleAr: nullIfEmpty(input.titleAr),
                 excerptAr: nullIfEmpty(input.excerptAr),
@@ -344,7 +347,12 @@ export class ArticleService {
                 ? input.subCategoryId
                 : current.categoryId === input.categoryId ? current.subCategoryId : null
             await this.assertCategory(input.categoryId, subCategoryId, tx)
-            const blocks = input.blocks === undefined ? current.blocks : normalizeBlocksDoc(input.blocks)
+            // A translation-only save must retain older documents exactly as stored.
+            const blocks = input.blocks === undefined || isDeepStrictEqual(input.blocks, current.blocks)
+                ? current.blocks : normalizeBlocksDoc(input.blocks)
+            const blocksAr = input.blocksAr !== undefined
+                ? this.normalizeBlocksAr(blocks, input.blocksAr)
+                : blocks !== current.blocks ? this.normalizeBlocksAr(blocks, current.blocksAr) : current.blocksAr
             const content = blocks ? blocksToPlainText(blocks) || input.content : input.content
             this.assertArticleText(input, content)
 
@@ -353,20 +361,22 @@ export class ArticleService {
                 excerpt: input.excerpt.trim(),
                 content,
                 ...(input.blocks !== undefined ? { blocks } : {}),
+                ...(input.blocksAr !== undefined || blocks !== current.blocks ? { blocksAr } : {}),
                 ...(input.titleAr !== undefined ? { titleAr: nullIfEmpty(input.titleAr) } : {}),
                 ...(input.excerptAr !== undefined ? { excerptAr: nullIfEmpty(input.excerptAr) } : {}),
                 ...(input.contentAr !== undefined ? { contentAr: nullIfEmpty(input.contentAr) } : {}),
                 ...(input.processesAr !== undefined ? {
                     processesAr: this.normalizeProcessesAr(input.processesAr),
                 } : {}),
-                ...([input.titleAr, input.excerptAr, input.contentAr, input.processesAr].some((v) => v !== undefined)
+                ...([input.titleAr, input.excerptAr, input.contentAr, input.processesAr, input.blocksAr].some((v) => v !== undefined)
                     ? { arAuto: false } : {}),
                 categoryId: input.categoryId,
                 subCategoryId,
                 ...(input.profileImage !== undefined ? { profileImage: input.profileImage || null } : {}),
                 ...(input.galleryImages !== undefined ? { galleryImages: input.galleryImages } : {}),
                 ...(input.processes !== undefined ? { processes: input.processes } : {}),
-                updatedAt: new Date(),
+                // Keep manual save revisions distinct even within the same millisecond.
+                updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)),
                 ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
                 ...(input.author !== undefined ? { author: input.author.trim() || 'سین شین' } : {}),
             }).where(eq(articles.id, id))
@@ -536,6 +546,15 @@ export class ArticleService {
         if (!content.trim()) throw Err.validation('متن مقاله الزامی است.')
     }
 
+    private normalizeBlocksAr(blocks: ArticleBlocksDoc | null | undefined, input: unknown): ArticleBlocksDoc | null {
+        if (input == null) return null
+        const translation = normalizeArticleBlocksTranslation(blocks, input)
+        if (translation && Buffer.byteLength(JSON.stringify(translation), 'utf8') > 262_144) {
+            throw Err.validation('حجم ترجمه بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
+        }
+        return translation
+    }
+
     private normalizeProcessesAr(processes: ArticleInput['processesAr']): NonNullable<ArticleInput['processesAr']> | null {
         if (!processes?.some((p) => p.title.trim() || p.items.some((item) => item.trim()))) return null
         return processes.map((p) => ({ title: p.title.trim(), items: p.items.map((item) => item.trim()) }))
@@ -629,14 +648,13 @@ export class ArticleService {
                     excerptAr: a.excerptAr ?? null,
                     contentAr: a.contentAr ?? null,
                     processesAr: a.processesAr ?? null,
+                    blocksAr: a.blocksAr ?? null,
                     arAuto: a.arAuto,
                 }
                 : {}),
             // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora)
             isFeatured: a.isFeatured ?? false,
-            // stage-82 — سندِ بلوکی فقط در زبانِ فارسی (ادیتور فارسی‌زبان است؛
-            // عربی همان مسیرِ متنیِ content/contentAr را می‌گیرد)
-            blocks: lang === 'ar' ? null : (a.blocks ?? null),
+            blocks: lang === 'ar' ? mergeArticleBlocksTranslation(a.blocks, a.blocksAr) : (a.blocks ?? null),
         }
     }
 

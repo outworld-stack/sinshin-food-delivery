@@ -65,10 +65,23 @@ import {
   translationJobs,
 } from '#/infra/db/schema'
 import type {
+  ArticleBlocksDoc,
+  ArticleBlockTextPath,
+  ArticleBlockTextUpdate,
   TranslationEntityType,
   TranslationJobDto,
   TranslationJobStatus,
   TranslationStatusDto,
+} from '@sinshin/shared'
+import {
+  ARTICLE_BLOCK_TEXT_KEYS,
+  blocksToPlainText,
+  fillMissingArticleBlocksTranslation,
+  getArticleBlockTextFields,
+  mergeArticleBlocksTranslation,
+  normalizeArticleBlocksTranslation,
+  readArticleBlockText,
+  setArticleBlockTexts,
 } from '@sinshin/shared'
 
 export const TRANSLATION_ENTITY_TYPES: readonly TranslationEntityType[] = [
@@ -137,6 +150,39 @@ export class TranslationService {
       throw Err.validation('متن خیلی طولانی است (سقف: ۳۰٬۰۰۰ کاراکتر).')
     }
     return this.translateTexts(cleaned)
+  }
+
+  /** Translate only text into a separate review document; URLs and coordinates never enter the translator. */
+  async previewBlocks(input: { blocks: unknown; blocksAr?: unknown; blockId?: string }): Promise<ArticleBlocksDoc> {
+    const source = input.blocks as ArticleBlocksDoc | null
+    if (!source || source.version !== 1 || !Array.isArray(source.blocks) || source.blocks.length > 200) {
+      throw Err.validation('سند بلوکی مقاله معتبر نیست.')
+    }
+    if (Buffer.byteLength(JSON.stringify(source), 'utf8') > 262_144) {
+      throw Err.validation('حجم محتوای بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
+    }
+    if (input.blockId !== undefined && !source.blocks.some(block => block?.id === input.blockId)) {
+      throw Err.validation('بلوک انتخاب‌شده پیدا نشد.')
+    }
+    let out = normalizeArticleBlocksTranslation(source, input.blocksAr)!
+    const queue: { blockId: string; path: ArticleBlockTextPath; text: string }[] = []
+    for (const block of source.blocks) {
+      if (input.blockId !== undefined && block?.id !== input.blockId) continue
+      const current = out.blocks.find(candidate => candidate?.id === block?.id && candidate?.type === block?.type)
+      for (const field of getArticleBlockTextFields(block)) {
+        if (!field.text.trim() || readArticleBlockText(current, field.path).trim()) continue
+        if (field.text.length > PREVIEW_MAX_CHARS) throw Err.validation('متن بلوک خیلی طولانی است.')
+        queue.push({ blockId: block.id, path: field.path, text: field.text })
+      }
+    }
+    if (queue.length > 0) {
+      const translations = await this.translateTexts(queue.map(field => field.text))
+      out = setArticleBlockTexts(out, queue.map((field, index) => ({ ...field, text: translations[index]?.trim() ?? '' })))
+    }
+    if (Buffer.byteLength(JSON.stringify(out), 'utf8') > 262_144) {
+      throw Err.validation('حجم ترجمه‌ی بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
+    }
+    return out
   }
 
   /** چند متن → چند متن؛ هرکدام plan خودش را دارد و همه در دسته‌ای واحد می‌روند */
@@ -439,11 +485,18 @@ export class TranslationService {
       const v = t.trim()
       if (v !== '') out.excerptAr = v
     })
-    // بدنه — Markdown؛ تکه‌تکه در planText
-    submit(a.content, a.contentAr, (t) => {
-      const v = t.trim()
-      if (v !== '') out.contentAr = v
-    })
+    // Builder documents are translated field by field; text-only legacy articles keep Markdown translation.
+    if (!a.blocks) {
+      submit(a.content, a.contentAr, (t) => {
+        const v = t.trim()
+        if (v !== '') out.contentAr = v
+      })
+    } else if (isFilled(a.contentAr) && a.arAuto === false) skippedManual = true
+
+    const blocksAr = a.blocks ? await this.previewBlocks({ blocks: a.blocks, blocksAr: a.blocksAr }) : null
+    if (a.arAuto === false && a.blocksAr?.blocks.some(block =>
+      getArticleBlockTextFields(block).some(field => field.text.trim()),
+    )) skippedManual = true
 
     // روند تهیه — ساختار [{title, items[]}] با هم‌ایندکس
     let processesAr: { title: string; items: string[] }[] | undefined
@@ -470,14 +523,65 @@ export class TranslationService {
 
     await this.flushQueues(queue, [])
 
-    const patch: Record<string, unknown> = {}
-    if (out.titleAr !== undefined) patch.titleAr = out.titleAr
-    if (out.excerptAr !== undefined) patch.excerptAr = out.excerptAr
-    if (out.contentAr !== undefined) patch.contentAr = out.contentAr
-    if (processesAr !== undefined) patch.processesAr = processesAr
-    if (Object.keys(patch).length > 0) {
+    // Translation is slow. Re-read under the same row lock used by the editor so in-flight saves win.
+    const wrote = await db.transaction(async tx => {
+      const [current] = await tx.select().from(articles).where(eq(articles.id, entityId)).for('update')
+      if (!current) return false
+      if (current.arAuto === false && current.updatedAt.getTime() !== a.updatedAt.getTime()) {
+        // A manual save may intentionally clear even a previously empty field.
+        // Defer this job's suggestions rather than repopulating that saved fallback.
+        skippedManual = true
+        return false
+      }
+      const patch: Record<string, unknown> = {}
+      for (const [arKey, sourceKey] of [
+        ['titleAr', 'title'], ['excerptAr', 'excerpt'], ['contentAr', 'content'],
+      ] as const) {
+        if (out[arKey] === undefined || current[sourceKey] !== a[sourceKey]) continue
+        if (current.arAuto === false && isFilled(current[arKey])) {
+          skippedManual = true
+          continue
+        }
+        patch[arKey] = out[arKey]
+      }
+      if (processesAr !== undefined && JSON.stringify(current.processes) === JSON.stringify(a.processes)) {
+        if (current.arAuto === false && isFilled(current.processesAr)) skippedManual = true
+        else patch.processesAr = processesAr
+      }
+      if (current.blocks && blocksAr) {
+        // Discard stale source text and values that already existed before this request.
+        let suggestions = normalizeArticleBlocksTranslation(current.blocks, blocksAr)!
+        const discarded: ArticleBlockTextUpdate[] = []
+        for (const block of current.blocks.blocks) {
+          const previous = a.blocks?.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
+          const previousAr = a.blocksAr?.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
+          for (const field of getArticleBlockTextFields(block)) {
+            if (!previous || readArticleBlockText(previous, field.path) !== field.text
+              || readArticleBlockText(previousAr, field.path).trim()) {
+              discarded.push({ blockId: block.id, path: field.path, text: '' })
+            }
+          }
+        }
+        suggestions = setArticleBlockTexts(suggestions, discarded)
+        const merged = fillMissingArticleBlocksTranslation(current.blocks, current.blocksAr, suggestions)!
+        const baseline = normalizeArticleBlocksTranslation(current.blocks, current.blocksAr)
+        if (JSON.stringify(merged) !== JSON.stringify(baseline)) {
+          patch.blocksAr = merged
+        }
+        if (!isFilled(current.contentAr) || current.arAuto !== false) {
+          const contentAr = blocksToPlainText(mergeArticleBlocksTranslation(current.blocks, merged))
+          if (contentAr && contentAr !== current.contentAr) patch.contentAr = contentAr
+        }
+        if (current.arAuto === false && current.blocksAr?.blocks.some(block =>
+          getArticleBlockTextFields(block).some(field => field.text.trim()),
+        )) skippedManual = true
+      }
+      if (Object.keys(patch).length === 0) return false
       if (!skippedManual) patch.arAuto = true
-      await db.update(articles).set({ ...patch, updatedAt: new Date() }).where(eq(articles.id, entityId))
+      await tx.update(articles).set({ ...patch, updatedAt: new Date() }).where(eq(articles.id, entityId))
+      return true
+    })
+    if (wrote) {
       await this.deps.articles.bustCache()
       return null
     }
@@ -793,7 +897,54 @@ export class TranslationService {
         sql`jsonb_array_length(${TranslationService.jsonArray(articles.processes)}) > 0`,
         isNull(articles.processesAr),
       ),
+      this.articleBlocksMissingWhere(),
     )
+  }
+
+  /** SQL uses the shared textual whitelist and stable IDs, including individual list/gallery entries. */
+  private articleBlocksMissingWhere(): SQL {
+    const textKeys = sql`CASE source.block ->> 'type' ${sql.join(
+      Object.entries(ARTICLE_BLOCK_TEXT_KEYS).map(([type, keys]) =>
+        sql`WHEN ${type} THEN ${JSON.stringify(keys)}::text::jsonb`,
+      ), sql` `,
+    )} ELSE '[]'::jsonb END`
+    const sourceBlocks = sql`CASE WHEN jsonb_typeof(${articles.blocks} -> 'blocks') = 'array'
+      THEN ${articles.blocks} -> 'blocks' ELSE '[]'::jsonb END`
+    const translatedBlocks = sql`CASE WHEN jsonb_typeof(${articles.blocksAr} -> 'blocks') = 'array'
+      THEN ${articles.blocksAr} -> 'blocks' ELSE '[]'::jsonb END`
+    return sql`EXISTS (
+      SELECT 1 FROM jsonb_array_elements(${sourceBlocks}) AS source(block)
+      LEFT JOIN LATERAL (
+        SELECT candidate.block FROM jsonb_array_elements(${translatedBlocks}) AS candidate(block)
+        WHERE candidate.block ->> 'id' = source.block ->> 'id'
+          AND candidate.block ->> 'type' = source.block ->> 'type'
+        LIMIT 1
+      ) AS translated ON true
+      WHERE EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(${textKeys}) AS field(key)
+        WHERE jsonb_typeof(source.block -> 'props' -> field.key) = 'string'
+          AND btrim(source.block -> 'props' ->> field.key) <> ''
+          AND COALESCE(btrim(translated.block -> 'props' ->> field.key), '') = ''
+      ) OR (
+        source.block ->> 'type' = 'list' AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(CASE
+            WHEN jsonb_typeof(source.block -> 'props' -> 'items') = 'array'
+              THEN source.block -> 'props' -> 'items' ELSE '[]'::jsonb END)
+            WITH ORDINALITY AS item(value, position)
+          WHERE jsonb_typeof(item.value) = 'string' AND btrim(item.value #>> '{}') <> ''
+            AND COALESCE(btrim(translated.block -> 'props' -> 'items' ->> (item.position - 1)::int), '') = ''
+        )
+      ) OR (
+        source.block ->> 'type' = 'gallery' AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(CASE
+            WHEN jsonb_typeof(source.block -> 'props' -> 'images') = 'array'
+              THEN source.block -> 'props' -> 'images' ELSE '[]'::jsonb END)
+            WITH ORDINALITY AS image(value, position)
+          WHERE jsonb_typeof(image.value -> 'alt') = 'string' AND btrim(image.value ->> 'alt') <> ''
+            AND COALESCE(btrim(translated.block -> 'props' -> 'images' -> (image.position - 1)::int ->> 'alt'), '') = ''
+        )
+      )
+    )`
   }
 
   /** شناسه‌ی رکوردهایی که «حداقل یک» فیلد عربی‌شان خالی است */

@@ -86,6 +86,7 @@ function EditArticlePage() {
         isFeatured: article.isFeatured ?? false,
         // stage-82 — سند بلوکی (null = مقاله‌ی متنی قدیمی — فرم از متن ساده شروع می‌کند)
         blocks: article.blocks ?? null,
+        blocksAr: article.blocksAr ?? null,
         titleAr: article.titleAr ?? '',
         excerptAr: article.excerptAr ?? '',
         contentAr: article.contentAr ?? '',

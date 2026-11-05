@@ -89,6 +89,53 @@ const multipleLocations = render([
 ])
 const markers = [...multipleLocations.matchAll(/<iframe[^>]*src="([^"]+)"/g)].map(match => new URL(match[1]!.replaceAll('&amp;', '&')).searchParams.get('marker'))
 assert.deepEqual(markers, ['37.4822056,49.4418273', '38,50'], 'each location block keeps its own saved pin and coordinate precision')
+const bilingualDoc: ArticleBlocksDoc = { version: 1, blocks: [
+        { id: 'hero-ar', type: 'hero', props: { title: 'سرآغاز', text: 'متن هیرو', src: '/hero.webp' } },
+        { id: 'heading-ar', type: 'heading', props: { text: 'تیتر فارسی', level: 3 } },
+        { id: 'paragraph-ar', type: 'paragraph', props: { text: 'پاراگراف فارسی' } },
+        { id: 'image-ar', type: 'image', props: { src: '/image.webp', alt: 'تصویر فارسی', caption: 'شرح فارسی' } },
+        { id: 'gallery-ar', type: 'gallery', props: { layout: 'grid', images: [{ src: '/gallery.webp', alt: 'گالری فارسی' }] } },
+        { id: 'quote-ar', type: 'quote', props: { text: 'نقل فارسی', author: 'نویسنده فارسی' } },
+        { id: 'callout-ar', type: 'callout', props: { title: 'نکته فارسی', text: 'توضیح فارسی' } },
+        { id: 'list-ar', type: 'list', props: { ordered: true, items: ['مورد اول فارسی', 'مورد دوم فارسی'] } },
+        { id: 'cta-ar', type: 'cta', props: { title: 'عنوان فارسی', text: 'دعوت فارسی', label: 'دکمه فارسی', to: 'url', href: '/articles/test?x=fa#cta' } },
+        { id: 'link-ar', type: 'link', props: { label: 'پیوند فارسی', href: 'https://example.com/path', variant: 'card', text: 'مقاله فارسی' } },
+        { id: 'location-ar-one', type: 'location', props: { lat: 37.4822056789, lng: 49.4418273456, title: 'محل اول', address: 'آدرس اول فارسی' } },
+        { id: 'location-ar-two', type: 'location', props: { lat: -12.987654321, lng: 0, title: 'محل دوم', address: 'آدرس دوم فارسی' } },
+        { id: 'divider-ar', type: 'divider', props: { variant: 'dots' } },
+] }
+const bilingualAr: ArticleBlocksDoc = { version: 1, blocks: [
+        { id: 'hero-ar', type: 'hero', props: { title: 'البداية', text: 'نص البداية' } },
+        { id: 'heading-ar', type: 'heading', props: { text: 'العنوان العربي', level: 2 } },
+        { id: 'paragraph-ar', type: 'paragraph', props: { text: 'الفقرة العربية <script>' } },
+        { id: 'image-ar', type: 'image', props: { src: '/changed.webp', alt: 'الصورة العربية', caption: 'الوصف العربي' } },
+        { id: 'gallery-ar', type: 'gallery', props: { layout: 'slider', images: [{ src: '/changed.webp', alt: 'المعرض العربي' }] } },
+        { id: 'quote-ar', type: 'quote', props: { text: 'الاقتباس العربي', author: 'الكاتب العربي' } },
+        { id: 'callout-ar', type: 'callout', props: { title: 'الملاحظة العربية', text: 'التوضيح العربي' } },
+        { id: 'list-ar', type: 'list', props: { items: ['العنصر العربي', ''] } },
+        { id: 'cta-ar', type: 'cta', props: { title: 'اطلب الآن', text: 'دعوة عربية', label: 'الزر العربي', to: 'menu' } },
+        { id: 'link-ar', type: 'link', props: { label: 'الرابط العربي', href: '/changed', text: 'المقال العربي' } },
+        { id: 'location-ar-two', type: 'location', props: { lat: 90, lng: 180, title: 'المكان الثاني' } },
+        { id: 'location-ar-one', type: 'location', props: { lat: 0, lng: 0, title: 'المكان الأول', address: 'العنوان الأول' } },
+] }
+const translatedHtml = renderToStaticMarkup(createElement(ArticleBlocksRenderer, { doc: bilingualDoc, docAr: bilingualAr, lang: 'ar' }))
+for (const expected of ['البداية', 'نص البداية', 'العنوان العربي', 'الفقرة العربية &lt;script&gt;', 'الصورة العربية', 'الوصف العربي',
+        'المعرض العربي', 'الاقتباس العربي', 'الكاتب العربي', 'الملاحظة العربية', 'التوضيح العربي', 'العنصر العربي',
+        'مورد دوم فارسی', 'الزر العربي', 'الرابط العربي', 'المكان الأول', 'العنوان الأول', 'المكان الثاني', 'آدرس دوم فارسی']) {
+        assert(translatedHtml.includes(expected), `Arabic renderer includes ${expected}`)
+}
+assert(translatedHtml.includes('lang="ar" dir="rtl"'))
+assert(translatedHtml.includes('<h3') && translatedHtml.includes('<ol'), 'heading levels and ordered lists retain Persian structure')
+for (const target of ['/hero.webp', '/image.webp', '/gallery.webp', '/articles/test?x=fa#cta', 'https://example.com/path']) {
+        assert(translatedHtml.includes(target), `Arabic renderer preserves ${target}`)
+}
+assert(!translatedHtml.includes('/changed') && !translatedHtml.includes('<script>'))
+const arabicMarkers = [...translatedHtml.matchAll(/<iframe[^>]*src="([^"]+)"/g)].map(match => new URL(match[1]!.replaceAll('&amp;', '&')).searchParams.get('marker'))
+assert.deepEqual(arabicMarkers, ['37.4822056789,49.4418273456', '-12.987654321,0'], 'Arabic rendering preserves both coordinates and full precision despite changed translation coordinates/order')
+const persianHtml = renderToStaticMarkup(createElement(ArticleBlocksRenderer, { doc: bilingualDoc, docAr: bilingualAr, lang: 'fa' }))
+assert(persianHtml.includes('پاراگراف فارسی') && !persianHtml.includes('الفقرة العربية'), 'Persian renderer ignores Arabic document')
+const untranslatedHtml = renderToStaticMarkup(createElement(ArticleBlocksRenderer, { doc: bilingualDoc, lang: 'ar' }))
+assert(untranslatedHtml.includes('پاراگراف فارسی') && untranslatedHtml.includes('آدرس اول فارسی'), 'older articles render all Persian blocks in Arabic until translated')
 // stage-98 — «مشاهده روی نقشه» حذف شد؛ «مسیریابی از موقعیت من» دکمه‌ی واقعی
 // با GPS شد (SSR: <button> بدون href — لینک در لحظه‌ی کلیک ساخته می‌شود؛
 // رفتارِ GPS موفق/ردشده در test-article-route.tsx تستِ رفتاری تست می‌شود)

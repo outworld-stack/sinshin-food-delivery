@@ -81,6 +81,8 @@ export const articles = pgTable(
      * بلوک ناشناخته/خراب در نرمال‌سازی سرویس حذف می‌شود، نه کل سند.
      */
     blocks: jsonb('blocks').$type<ArticleBlocksDoc>(),
+    /** Arabic text in the same block structure; NULL uses the Persian document. */
+    blocksAr: jsonb('blocks_ar').$type<ArticleBlocksDoc>(),
     views: integer('views').notNull().default(0),
     status: varchar('status', { length: 20 }).notNull().default('ACTIVE'), // ACTIVE | INACTIVE
     /**

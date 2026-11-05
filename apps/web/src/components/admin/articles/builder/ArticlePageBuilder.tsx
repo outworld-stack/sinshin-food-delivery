@@ -17,7 +17,12 @@ import type {
 	ArticleBlockStyle,
 	ArticleBlocksDoc,
 } from '@sinshin/shared'
-import { contrastRatio, pickContrastText } from '@sinshin/shared'
+import {
+	contrastRatio,
+	getArticleBlockTextFields,
+	readArticleBlockText,
+	pickContrastText,
+} from '@sinshin/shared'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
 	ArrowDown,
@@ -56,6 +61,7 @@ import {
 	WIDTH_OPTIONS,
 } from './blockModel'
 import { LocationPickerField } from './LocationPickerField'
+import { useArabicBlockTranslations } from './useArabicBlockTranslations'
 
 const PALETTE_ICONS: Record<
 	ArticleBlock['type'],
@@ -103,6 +109,8 @@ interface BuilderProps {
 	doc: ArticleBlocksDoc
 	onChange: (doc: ArticleBlocksDoc) => void
 	requireText?: boolean
+	docAr?: ArticleBlocksDoc | null
+	onArabicChange?: (doc: ArticleBlocksDoc) => void
 }
 
 /** یک دکمه‌ی پله‌ای (عرض/انیمیشن/پد/چینش) */
@@ -740,6 +748,8 @@ export function ArticlePageBuilder({
 	doc,
 	onChange,
 	requireText = true,
+	docAr,
+	onArabicChange,
 }: BuilderProps) {
 	const showToast = useToastStore((s) => s.showToast)
 	// Upload callbacks can resolve after other edits or a block reorder.
@@ -754,6 +764,13 @@ export function ArticlePageBuilder({
 			mountedRef.current = false
 		}
 	}, [])
+	const arabic = useArabicBlockTranslations({
+		doc: docRef,
+		docAr,
+		onChange: onArabicChange,
+		mounted: mountedRef,
+		showToast,
+	})
 	const commitDoc = useCallback(
 		(next: ArticleBlocksDoc) => {
 			if (!mountedRef.current) return
@@ -1025,6 +1042,24 @@ export function ArticlePageBuilder({
 				</span>
 			</div>
 
+			{onArabicChange && (
+				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 dark:border-[#3a151c] p-3">
+					<button
+						type="button"
+						disabled={arabic.busy}
+						onClick={() => void arabic.translate()}
+						className="px-3 py-2 rounded-lg bg-primary text-white text-xs cursor-pointer disabled:opacity-50"
+					>
+						{arabic.busy
+							? 'در حال ترجمه...'
+							: 'ترجمه خودکار همه بلوک‌ها به عربی'}
+					</button>
+					<p className="text-xs text-gray-500">
+						ترجمه‌های عربی را در هر بلوک بازبینی و ویرایش کنید. فیلد خالی از
+						فارسی استفاده می‌کند.
+					</p>
+				</div>
+			)}
 			{/* ── پالت ── */}
 			{paletteOpen && (
 				<div className="p-3 rounded-xl border border-dashed border-primary/40 dark:border-dark-primary/40 bg-primary/3 dark:bg-dark-primary/3">
@@ -1177,6 +1212,62 @@ export function ArticlePageBuilder({
 									block={block}
 									patchProps={(patch) => patchProps(block.id, patch)}
 								/>
+								{onArabicChange && (
+									<details
+										className="mt-4 border-t border-gray-200 dark:border-[#3a151c] pt-3"
+										data-arabic-block={block.id}
+									>
+										<summary className="cursor-pointer text-sm font-DanaMedium">
+											ترجمه عربی · {BLOCK_LABELS[block.type]}
+										</summary>
+										<button
+											type="button"
+											disabled={arabic.busy}
+											onClick={() => void arabic.translate(block.id)}
+											className="my-3 px-3 py-2 rounded-lg border text-xs cursor-pointer disabled:opacity-50"
+										>
+											ترجمه خودکار به عربی
+										</button>
+										{getArticleBlockTextFields(block).map((field) => {
+											const translated = arabic.draft?.blocks.find(
+												(b) => b.id === block.id && b.type === block.type,
+											)
+											return (
+												<label
+													key={JSON.stringify(field.path)}
+													className="block my-3 text-xs text-gray-600 dark:text-gray-300"
+												>
+													{field.label} (عربی)
+													{field.text && (
+														<span
+															className="block my-1 whitespace-pre-line text-gray-400"
+															lang="fa"
+														>
+															{field.text}
+														</span>
+													)}
+													<textarea
+														lang="ar"
+														dir="rtl"
+														rows={field.maxLength > 500 ? 3 : 2}
+														maxLength={field.maxLength}
+														value={readArticleBlockText(translated, field.path)}
+														className={inputCls}
+														onChange={(e) =>
+															arabic.edit(block.id, field.path, e.target.value)
+														}
+														placeholder="خالی = نمایش متن فارسی"
+													/>
+												</label>
+											)
+										})}
+										{getArticleBlockTextFields(block).length === 0 && (
+											<p className="text-xs text-gray-400">
+												این بلوک متن قابل ترجمه ندارد.
+											</p>
+										)}
+									</details>
+								)}
 
 								{/* تنظیماتِ نمایش */}
 								{settingsId === block.id && (

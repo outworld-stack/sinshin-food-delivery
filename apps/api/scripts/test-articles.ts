@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
+import type { ArticleBlocksDoc } from '@sinshin/shared'
 import { ArticleService, type ArticleInput } from '../src/domain/article/article.service'
 import { AppError } from '../src/domain/shared/errors'
 import { Database } from '../src/infra/db/client'
@@ -111,7 +112,107 @@ try {
   const arabic = (await articlesService.byId(id, 'ar'))!
   check(arabic.processes[0]?.title === 'مرحله اول' && arabic.processes[0]?.items.join('|') === 'یک|اثنان'
     && arabic.processes[1]?.items[0] === 'سه', 'Arabic process placeholders fall back to the corresponding Persian fields')
-  check(arabic.blocks === null && arabic.content === 'محتوى', 'Arabic detail serves translated text without Persian blocks')
+  check(arabic.blocks?.blocks[0]?.id === 'body' && arabic.content === 'محتوى'
+    && arabic.blocks.blocks[0]?.type === 'paragraph' && arabic.blocks.blocks[0].props.text === 'متن بلوکی',
+  'Arabic detail retains the Persian block document when no block translation exists')
+
+  // Simulate a document stored before Arabic block support, including exact coordinates
+  // and explicit defaults that ordinary normalization used to round or omit.
+  const legacyBlocks: ArticleBlocksDoc = {
+    version: 1,
+    blocks: [
+      { id: 'branch-one', type: 'location', width: 'md', anim: 'fade-up',
+        style: { bg: '#123456', fg: '#FFFFFF', align: 'center', pad: 'lg' },
+        props: { lat: 37.48220561234, lng: 49.44182739876, title: 'شعبه اول', address: 'آدرس اول' } },
+      { id: 'branch-two', type: 'location', width: 'sm', anim: 'zoom',
+        props: { lat: 35.12345678901, lng: 51.98765432109, title: 'شعبه دوم', address: 'آدرس دوم' } },
+      { id: 'link-old', type: 'link', props: { label: 'منو', href: '/products?branch=one', variant: 'button' } },
+      { id: 'items-old', type: 'list', props: { items: ['اول', 'دوم'], ordered: false } },
+      { id: 'gallery-old', type: 'gallery', props: { images: [{ src: '/uploads/one.webp', alt: 'تصویر اول' },
+        { src: '/uploads/two.webp', alt: 'تصویر دوم' }], layout: 'slider' } },
+    ],
+  }
+  const { id: translatedId } = await articlesService.create({ ...input, title: 'مقاله قدیمی' })
+  assert.ok(translatedId)
+  await db.update(articles).set({ blocks: legacyBlocks, blocksAr: null }).where(eq(articles.id, translatedId))
+  const blockTranslations = structuredClone(legacyBlocks)
+  const firstLocation = blockTranslations.blocks[0]!
+  assert.equal(firstLocation.type, 'location')
+  firstLocation.props = { lat: 0, lng: 0, title: 'الفرع الأول', address: '' }
+  firstLocation.width = 'full'
+  firstLocation.anim = 'none'
+  firstLocation.style = { bg: '#000000' }
+  const secondLocation = blockTranslations.blocks[1]!
+  assert.equal(secondLocation.type, 'location')
+  secondLocation.props = { lat: 1, lng: 1, title: '', address: 'عنوان الفرع الثاني' }
+  const translatedLink = blockTranslations.blocks[2]!
+  assert.equal(translatedLink.type, 'link')
+  translatedLink.props = { label: 'القائمة', href: 'https://changed.example', variant: 'card' }
+  const translatedList = blockTranslations.blocks[3]!
+  assert.equal(translatedList.type, 'list')
+  translatedList.props.items = ['', 'الثاني']
+  const translatedGallery = blockTranslations.blocks[4]!
+  assert.equal(translatedGallery.type, 'gallery')
+  translatedGallery.props.images = [{ src: '/changed.webp', alt: 'الصورة الأولى' }, { src: '/changed-two.webp', alt: '' }]
+  await articlesService.update(translatedId, {
+    title: 'مقاله قدیمی', excerpt: input.excerpt, content: input.content, categoryId: category.id,
+    blocks: legacyBlocks, blocksAr: blockTranslations,
+  })
+  const oldEdited = (await articlesService.adminDetail(translatedId))!
+  assert.deepEqual(oldEdited.blocks, legacyBlocks)
+  check(oldEdited.arAuto === false && oldEdited.blocksAr?.blocks.length === legacyBlocks.blocks.length,
+    'Arabic saves mark manual translations and preserve older Persian documents exactly without rebuilding')
+  const localized = (await articlesService.byId(translatedId, 'ar'))!.blocks!
+  const locationOne = localized.blocks[0]!
+  const locationTwo = localized.blocks[1]!
+  assert.equal(locationOne.type, 'location')
+  assert.equal(locationTwo.type, 'location')
+  const originalLocationOne = legacyBlocks.blocks[0]!
+  const originalLocationTwo = legacyBlocks.blocks[1]!
+  assert.equal(originalLocationOne.type, 'location')
+  assert.equal(originalLocationTwo.type, 'location')
+  check(locationOne.props.lat === originalLocationOne.props.lat
+    && locationOne.props.lng === originalLocationOne.props.lng
+    && locationTwo.props.lat === originalLocationTwo.props.lat
+    && locationTwo.props.lng === originalLocationTwo.props.lng
+    && locationOne.width === 'md' && locationOne.anim === 'fade-up' && locationOne.style?.bg === '#123456',
+    'multiple translated location blocks preserve their own exact coordinates, styles, widths and animations')
+  const publicLink = localized.blocks[2]!
+  const publicList = localized.blocks[3]!
+  const publicGallery = localized.blocks[4]!
+  assert.equal(publicLink.type, 'link')
+  assert.equal(publicList.type, 'list')
+  assert.equal(publicGallery.type, 'gallery')
+  check(locationOne.props.title === 'الفرع الأول' && locationOne.props.address === 'آدرس اول'
+    && locationTwo.props.title === 'شعبه دوم' && locationTwo.props.address === 'عنوان الفرع الثاني'
+    && publicList.props.items.join('|') === 'اول|الثاني'
+    && publicGallery.props.images[0]?.alt === 'الصورة الأولى' && publicGallery.props.images[1]?.alt === 'تصویر دوم',
+    'partial Arabic translations fall back independently for locations, list entries and gallery descriptions')
+  check(publicLink.props.href === '/products?branch=one' && publicLink.props.variant === 'button'
+    && publicGallery.props.images[0]?.src === '/uploads/one.webp' && publicGallery.props.images[1]?.src === '/uploads/two.webp',
+    'translation payloads cannot alter links, image URLs or display variants')
+  await articlesService.update(translatedId, {
+    title: 'حفظ ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id,
+  })
+  assert.deepEqual((await articlesService.adminDetail(translatedId))!.blocksAr, oldEdited.blocksAr)
+  check(true, 'omitting Arabic blocks preserves all saved manual block translations')
+  const reorderedBlocks = structuredClone(legacyBlocks)
+  reorderedBlocks.blocks.reverse()
+  await articlesService.update(translatedId, {
+    title: 'تغییر ترتیب', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocks: reorderedBlocks,
+  })
+  const reorderedArabic = (await articlesService.byId(translatedId, 'ar'))!.blocks!
+  const reorderedLocation = reorderedArabic.blocks.find((block) => block.id === 'branch-one')!
+  assert.equal(reorderedLocation.type, 'location')
+  check(reorderedArabic.blocks.map((block) => block.id).join('|') === reorderedBlocks.blocks.map((block) => block.id).join('|')
+    && reorderedLocation.props.title === 'الفرع الأول' && reorderedLocation.props.lat === locationOne.props.lat,
+    'Persian block reorder rebases Arabic text by stable block IDs while retaining coordinate precision')
+  await articlesService.update(translatedId, {
+    title: 'بدون ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocksAr: null,
+  })
+  check((await articlesService.adminDetail(translatedId))!.blocksAr === null
+    && (await articlesService.byId(translatedId, 'ar'))!.blocks?.blocks.length === legacyBlocks.blocks.length,
+    'explicitly clearing Arabic blocks keeps the Persian document available to Arabic readers')
   await articlesService.close()
   check((await articlesService.adminDetail(id))?.updatedAt === edited.updatedAt,
     'counting article views does not advertise a content change to search engines')
@@ -180,12 +281,13 @@ try {
     if (error instanceof AppError) { set.status = error.status; return error.toJSON() }
   }).use(articlesRoutes({ sessions, admin2, articles: articlesService })).compile()
   const body = { ...input, categoryId: category.id, subCategoryId: sub.id,
-    processesAr: [{ title: '', items: ['', 'اثنان'] }, { title: '', items: [] }] }
+    processesAr: [{ title: '', items: ['', 'اثنان'] }, { title: '', items: [] }],
+    blocksAr: { version: 1, blocks: [{ id: 'body', type: 'paragraph', props: { text: '' } }] } }
   const request = (token?: string) => new Request('http://localhost/admin/articles', {
     method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
   })
-  check((await app.handle(request('admin'))).status === 200, 'HTTP article creation accepts aligned blank Arabic process translations')
+  check((await app.handle(request('admin'))).status === 200, 'HTTP article creation accepts aligned blank Arabic process and block translations')
   check((await app.handle(request())).status === 401 && (await app.handle(request('reader'))).status === 403,
     'article writes reject unauthenticated users and administrators without write permission')
   check((await app.handle(new Request('http://localhost/articles'))).status === 200,

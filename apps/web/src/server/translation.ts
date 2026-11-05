@@ -9,6 +9,7 @@
 // round-35 — صف ترجمه‌ی خودکار (مترجم آفلاین NLLB)؛
 // همه‌ی اندپوینت‌ها گارد requireAdmin2 پایه دارند (ترجمه فقط ستون ar را می‌نویسد).
 import type {
+	ArticleBlocksDoc,
 	TranslationEntityType,
 	TranslationJobDto,
 	TranslationPreviewResult,
@@ -27,6 +28,18 @@ export async function translatePreview(texts: string[]): Promise<string[]> {
 		{ texts },
 	)
 	return res.translations
+}
+
+/** Separate Arabic block document for admin review; does not save the article. */
+export async function translateArticleBlocksPreview(input: {
+	blocks: ArticleBlocksDoc
+	blocksAr?: ArticleBlocksDoc | null
+	blockId?: string
+}): Promise<ArticleBlocksDoc> {
+	const result = await authJson<{ blocksAr: ArticleBlocksDoc }>(
+		'/admin/translate/blocks', 'POST', input, { timeoutMs: 180_000 },
+	)
+	return result.blocksAr
 }
 
 /** وضعیت صف + شمار رکوردهای فاقد ترجمه + سلامت مترجم */

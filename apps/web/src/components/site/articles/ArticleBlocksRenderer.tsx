@@ -18,6 +18,7 @@ import {
 	type ArticleBlocksDoc,
 	isArticleBlockUrl,
 	isHexColor,
+	mergeArticleBlocksTranslation,
 	pickContrastText,
 } from '@sinshin/shared'
 
@@ -527,8 +528,12 @@ function BlockContent({ block }: { block: ArticleBlock }) {
 
 export function ArticleBlocksRenderer({
 	doc,
+	docAr,
+	lang,
 }: {
 	doc: ArticleBlocksDoc | null | undefined
+	docAr?: ArticleBlocksDoc | null
+	lang?: 'fa' | 'ar'
 }) {
 	const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -542,10 +547,18 @@ export function ArticleBlocksRenderer({
 
 	const blocks =
 		doc?.version === 1 && Array.isArray(doc.blocks)
-			? doc.blocks.filter(isRenderableBlock)
+			? (lang === 'ar'
+					? (mergeArticleBlocksTranslation(doc, docAr)?.blocks ?? doc.blocks)
+					: doc.blocks
+				).filter(isRenderableBlock)
 			: []
 	return (
-		<div ref={rootRef} className="ab-viewport my-8 space-y-6">
+		<div
+			ref={rootRef}
+			className="ab-viewport my-8 space-y-6"
+			lang={lang}
+			dir={lang ? 'rtl' : undefined}
+		>
 			{blocks.map((block, index) => {
 				const width = block.width ?? 'lg'
 				const style = block.style ?? {}

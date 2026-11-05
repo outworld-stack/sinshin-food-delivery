@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
+import type { ArticleBlocksDoc } from '@sinshin/shared'
 
 const requests: Array<{ path: string; method: string; body?: Record<string, unknown> }> = []
 let fetchError: Error | null = null
 mock.module('#/lib/api-fetch', () => ({
   authJson: async (path: string, method: string, body?: Record<string, unknown>) => {
     requests.push({ path, method, body })
-    return { success: true }
+    return { success: true, ...(path === '/admin/translate/blocks' ? { blocksAr: body?.blocksAr } : {}) }
   },
   getJson: async (path: string) => {
     requests.push({ path, method: 'GET' })
@@ -15,6 +16,7 @@ mock.module('#/lib/api-fetch', () => ({
   },
 }))
 const { updateArticle, updateArticleCategory, getArticleById, getAdminArticleCategories } = await import('../src/server/articles')
+const { translateArticleBlocksPreview } = await import('../src/server/translation')
 const id = '01234567-89ab-cdef-0123-456789abcdef'
 const input = { id, title: 'Title', excerpt: 'Excerpt', content: 'Body', categoryId: id }
 await updateArticle(input)
@@ -28,6 +30,22 @@ assert.equal(body.contentAr, 'translated')
 assert.equal(body.processesAr, null)
 assert.equal(body.profileImage, null)
 assert.equal(body.blocks, null)
+
+const blocks: ArticleBlocksDoc = { version: 1, blocks: [
+  { id: 'pin', type: 'location', props: { lat: 37.4822056789, lng: 49.4418273456, title: 'فارسی' } },
+] }
+const blocksAr: ArticleBlocksDoc = { version: 1, blocks: [
+  { id: 'pin', type: 'location', props: { lat: 37.4822056789, lng: 49.4418273456, title: 'عربي' } },
+] }
+await updateArticle({ ...input, blocks, blocksAr })
+assert.deepEqual(requests.at(-1)?.body?.blocks, blocks)
+assert.deepEqual(requests.at(-1)?.body?.blocksAr, blocksAr, 'Arabic documents travel separately with coordinate precision intact')
+await updateArticle({ ...input, blocksAr: null })
+assert.equal(requests.at(-1)?.body?.blocksAr, null)
+assert(!('blocks' in requests.at(-1)!.body!), 'clearing Arabic translations never clears Persian blocks')
+assert.deepEqual(await translateArticleBlocksPreview({ blocks, blocksAr, blockId: 'pin' }), blocksAr)
+assert.deepEqual(requests.at(-1), { path: '/admin/translate/blocks', method: 'POST', body: { blocks, blocksAr, blockId: 'pin' } },
+  'block translation uses the read-only review endpoint and the selected stable ID')
 
 await updateArticleCategory({ id, name: 'Category', hasSubCategories: true, subCategories: ['Sub'] })
 assert.deepEqual(requests.at(-1)?.body, { name: 'Category', hasSubCategories: true, subCategories: ['Sub'] })

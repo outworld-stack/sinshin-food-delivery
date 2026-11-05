@@ -53,6 +53,7 @@ export function ArticleForm({
 		isFeatured: false,
 		// stage-82 — سند بلوکی صفحه‌ساز (null = حالت متن ساده)
 		blocks: initialData ? (initialData.blocks ?? null) : emptyDoc(),
+		blocksAr: initialData?.blocksAr ?? null,
 		// round-34 — فیلدهای عربی (خالی = پشتیبان فارسی)
 		titleAr: '',
 		excerptAr: '',
@@ -304,6 +305,7 @@ export function ArticleForm({
 			...formData,
 			content,
 			blocks,
+			blocksAr: blocks ? formData.blocksAr : null,
 			title: formData.title.trim(),
 			excerpt: formData.excerpt.trim(),
 			subCategoryId: selectedSub?.id ?? null,
@@ -535,6 +537,10 @@ export function ArticleForm({
 								<ArticlePageBuilder
 									doc={formData.blocks ?? emptyDoc()}
 									onChange={setBlocks}
+									docAr={formData.blocksAr}
+									onArabicChange={(blocksAr) =>
+										setFormData((prev) => ({ ...prev, blocksAr }))
+									}
 								/>
 							</>
 						) : (
@@ -561,19 +567,21 @@ export function ArticleForm({
 				</div>
 
 				{/* round-34 — متن کامل عربی (پشتیبان: خالی = همان فارسی در حالت عربی) */}
-				<ArField
-					label="متن کامل مقاله"
-					value={formData.contentAr}
-					onChange={(v) => setFormData((prev) => ({ ...prev, contentAr: v }))}
-					arAuto={initialData?.arAuto}
-					faReference={
-						liveContent.slice(0, 160) + (liveContent.length > 160 ? '…' : '')
-					}
-					faSource={liveContent}
-					multiline
-					rows={6}
-					maxLength={100000}
-				/>
+				{builderMode === 'plain' && (
+					<ArField
+						label="متن کامل مقاله"
+						value={formData.contentAr}
+						onChange={(v) => setFormData((prev) => ({ ...prev, contentAr: v }))}
+						arAuto={initialData?.arAuto}
+						faReference={
+							liveContent.slice(0, 160) + (liveContent.length > 160 ? '…' : '')
+						}
+						faSource={liveContent}
+						multiline
+						rows={6}
+						maxLength={100000}
+					/>
+				)}
 
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 					{/* بخش عکس پروفایل */}

@@ -78,11 +78,11 @@ const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : 
 const oneOf = <T extends string>(v: unknown, set: Set<T>): T | undefined =>
         typeof v === 'string' && set.has(v as T) ? (v as T) : undefined
 
-/** stage-84 — عدد جغرافیایی محدوده‌دار (±limit؛ گرد به ۶ رقم؛ نامعتبر = undefined) */
+/** Validate geographic range without changing the selected coordinate precision. */
 const num01 = (v: unknown, limit: number): number | undefined => {
         if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
         if (v < -limit || v > limit) return undefined
-        return Math.round(v * 1e6) / 1e6
+        return v
 }
 
 function normalizeStyle(raw: unknown): ArticleBlock['style'] {
@@ -208,8 +208,7 @@ function normalizeProps(type: string, raw: unknown): Record<string, unknown> | u
                         return out
                 }
                 case 'location': {
-                        // stage-84 — بلوک موقعیت: مختصات عددی محدوده‌دار (گرد تا ۶
-                        // رقم)؛ نامعتبر = حذف بلوک. عنوان/آدرس اختیاری.
+                        // Keep valid coordinates exactly; title/address are optional text.
                         const lat = num01(raw.lat, 90)
                         const lng = num01(raw.lng, 180)
                         if (lat === undefined || lng === undefined) return undefined

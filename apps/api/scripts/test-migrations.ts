@@ -62,7 +62,7 @@ const { admin, target, targetDb } = parseUrl()
 /** تعداد ورودی‌های زنجیره‌ی روی دیسک — داینامیک (قبل/بعد از db:generate کار می‌کند) */
 const DRIZZLE_DIR = join(import.meta.dir, '..', 'drizzle')
 const DISK_JOURNAL = JSON.parse(readFileSync(join(DRIZZLE_DIR, 'meta', '_journal.json'), 'utf8')) as {
-  entries: Array<{ tag: string }>
+  entries: Array<{ tag: string; when: number }>
 }
 const CHAIN_COUNT = DISK_JOURNAL.entries.length
 /** stage-81 — آیا زنجیره‌ی روی دیسک ورودیِ ۰۰۰۸ را دارد؟ (کارفرما فایل‌های drizzle این‌جا کپی نمی‌کند و خودش db:generate می‌زند؛ این پرچم فقط پیامِ خطای بندِ A2 را راهنمایی می‌کند) */
@@ -225,7 +225,9 @@ async function buildLegacyAt0004(url: string): Promise<void> {
     drop index if exists "devices_fonts_hash_idx";
     -- stage-82 — اشیاءِ ۰۰۰۹: ستونِ blocks مقاله + مجوزهای articlesRead/Write
     -- ادمین۲ (درسِ استیج-۸۱: هر شیءِ تازه باید همین‌جا برگردد)
-    alter table "articles" drop column if exists "blocks";
+    alter table "articles"
+      drop column if exists "blocks",
+      drop column if exists "blocks_ar";
     alter table "admin2_profiles"
       drop column if exists "articles_read",
       drop column if exists "articles_write";
@@ -734,6 +736,33 @@ await withScratch('e4', async (url) => {
 })
 
 // ── جمع‌بندی ──────────────────────────────────────────────────────
+
+await withScratch('article-ar', async (url) => {
+  const res = await runRealMigrate(url)
+  if (res.code !== 0) throw new Error('Initial Arabic article migration setup failed')
+  const migration = DISK_JOURNAL.entries.find((entry) => entry.tag.startsWith('0026'))
+  if (!migration) throw new Error('Arabic article migration is missing from the journal')
+  // Restore the schema immediately before the additive Arabic column migration.
+  await q(url, `alter table "articles" drop column "blocks_ar";
+    delete from "drizzle"."__drizzle_migrations" where created_at = ${migration.when};
+    insert into "article_categories" ("id", "name", "slug")
+      values ('30000000-0000-0000-0000-000000000001', 'مقالات', 'article-ar-upgrade');
+    insert into "articles" ("id", "title", "excerpt", "content", "title_ar", "category_id", "blocks")
+      values ('30000000-0000-0000-0000-000000000002', 'عنوان قدیمی', 'خلاصه', 'متن', 'عنوان يدوي',
+        '30000000-0000-0000-0000-000000000001',
+        '{"version":1,"blocks":[{"id":"old-location-a","type":"location","width":"md","anim":"zoom","props":{"lat":37.48220561234,"lng":49.44182739876,"title":"شعبه اول"}},
+        {"id":"old-location-b","type":"location","props":{"lat":35.12345678901,"lng":51.98765432109,"title":"شعبه دوم"}}]}');`)
+  const before = await scalar(url, `select blocks::text from "articles" where "id" = '30000000-0000-0000-0000-000000000002'`)
+  const upgraded = await runRealMigrate(url)
+  ok('Arabic article migration upgrades existing articles successfully', upgraded.code === 0)
+  const after = await scalar(url, `select blocks::text from "articles" where "id" = '30000000-0000-0000-0000-000000000002'`)
+  ok('Arabic migration preserves original block IDs, structures and exact multiple-location coordinates', before === after)
+  const preserved = await scalar(url, `select count(*)::int from "articles"
+    where "id" = '30000000-0000-0000-0000-000000000002' and blocks_ar is null and title_ar = 'عنوان يدوي'`)
+  ok('Existing articles start with null Arabic blocks while retaining manual Arabic fields', preserved === 1)
+  const repeated = await runRealMigrate(url)
+  ok('Arabic article migration reruns safely through the migration journal', repeated.code === 0)
+})
 
 console.log(`\n══ نتیجه: ${pass} پاس / ${fail} خطا ══`)
 if (fail > 0) {

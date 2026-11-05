@@ -742,11 +742,11 @@ export interface ArticleDto {
   /** stage-60 — پرچم «ویژه/سنجاق» مقاله (۴ آیتم اول لیست + Aurora) */
   isFeatured?: boolean
   /**
-   * stage-82 — سندِ بلوکیِ صفحه‌ساز (ستون jsonb). فقط «جزئیات» پر می‌کند؛
-   * در نمای عمومی فقط برای زبان فارسی (زبانِ صفحه‌ساز) می‌آید — عربی
-   * همان مسیرِ متنی contentAr را نگه می‌دارد (پشتیبانِ فارسی).
+   * Detail document localized for the requested language with Persian fallback.
    */
   blocks?: ArticleBlocksDoc | null
+  /** Raw Arabic document for admin review; separate from the Persian source. */
+  blocksAr?: ArticleBlocksDoc | null
 }
 
 /**
@@ -756,7 +756,7 @@ export interface ArticleDto {
  */
 export type ArticleSummaryDto = Omit<
   ArticleDto,
-  'content' | 'processes' | 'galleryImages' | 'blocks'
+  'content' | 'processes' | 'galleryImages' | 'blocks' | 'blocksAr'
 >
 
 // ═══════════ تنظیمات / رستوران ═══════════
