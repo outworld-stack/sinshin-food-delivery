@@ -13,6 +13,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useState } from 'react'
 import { Bag, Bicycle, Chair, Pen, Trash2 } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
+import { ContentTranslationTools } from '#/components/admin/ContentTranslationTools'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
+import type { TranslationEdit } from '@sinshin/shared'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Toggle } from '#/components/shared/Toggle'
 import {
@@ -32,6 +35,8 @@ interface CategoryFormState {
 	name: string
 	/** round-34 — نام عربی دسته */
 	nameAr: string
+	sizeNames: string[]
+	sizeNamesAr: string[]
 	/** stage-60 — همه‌ی والدهای دسته (اولین = والد اصلی؛ تا ۸ عدد) */
 	mainCategoryIds: string[]
 	/** stage-48 — حالت‌های سفارش پایه (پیش‌فرض هر سه روشن = ارث کامل) */
@@ -46,6 +51,8 @@ const EMPTY_FORM: CategoryFormState = {
 	editingId: null,
 	name: '',
 	nameAr: '',
+	sizeNames: [],
+	sizeNamesAr: [],
 	mainCategoryIds: [],
 	courierEnabled: true,
 	takeawayEnabled: true,
@@ -86,6 +93,9 @@ export const CategoryManager = memo(function CategoryManager({
 	const showToast = useToastStore((s) => s.showToast)
 
 	const [form, setForm] = useState<CategoryFormState>(EMPTY_FORM)
+	const initialCategory = categories.find(category => category.id === form.editingId)
+	const translation = useContentTranslationDraft({ entityType: 'category', entityId: form.editingId,
+		initialRow: initialCategory ? { ...initialCategory } : null, row: { ...form, name: form.name.trim() } })
 	const set = useCallback((partial: Partial<CategoryFormState>) => {
 		setForm((f) => ({ ...f, ...partial }))
 	}, [])
@@ -97,6 +107,10 @@ export const CategoryManager = memo(function CategoryManager({
 		mutationFn: (data: {
 			name: string
 			nameAr?: string | null
+			translationEdits?: TranslationEdit[]
+			sourceRevision?: string
+			sizeNames?: string[]
+			sizeNamesAr?: string[]
 			mainCategoryIds: string[]
 			courierEnabled: boolean
 			takeawayEnabled: boolean
@@ -118,6 +132,10 @@ export const CategoryManager = memo(function CategoryManager({
 			id: string
 			name: string
 			nameAr?: string | null
+			translationEdits?: TranslationEdit[]
+			sourceRevision?: string
+			sizeNames?: string[]
+			sizeNamesAr?: string[]
 			mainCategoryIds: string[]
 			courierEnabled: boolean
 			takeawayEnabled: boolean
@@ -150,12 +168,15 @@ export const CategoryManager = memo(function CategoryManager({
 	// باز کردن مودال — ساخت یا ویرایش (والد هم هیدرات می‌شه — رفع F-58)
 	const openModal = useCallback(
 		(cat?: Category) => {
+			translation.reset()
 			if (cat) {
 				set({
 					isModalOpen: true,
 					editingId: cat.id,
 					name: cat.name,
 					nameAr: cat.nameAr ?? '',
+					sizeNames: [...(cat.sizeNames ?? [])],
+					sizeNamesAr: [...(cat.sizeNamesAr ?? [])],
 					// stage-60 — همه‌ی والدها از سرور (fallback: والد قدیمی)
 					mainCategoryIds: cat.mainCategoryIds?.length
 						? [...cat.mainCategoryIds]
@@ -171,6 +192,8 @@ export const CategoryManager = memo(function CategoryManager({
 					editingId: null,
 					name: '',
 					nameAr: '',
+					sizeNames: [],
+					sizeNamesAr: [],
 					mainCategoryIds: [],
 					courierEnabled: true,
 					takeawayEnabled: true,
@@ -178,7 +201,7 @@ export const CategoryManager = memo(function CategoryManager({
 				})
 			}
 		},
-		[set],
+		[set, translation],
 	)
 
 	const closeModal = useCallback(() => set({ isModalOpen: false }), [set])
@@ -195,6 +218,10 @@ export const CategoryManager = memo(function CategoryManager({
 			return
 		}
 		const payload = {
+			sourceRevision: translation.sourceRevision,
+			translationEdits: translation.getEdits(),
+			sizeNames: form.sizeNames,
+			sizeNamesAr: form.sizeNames.map((_, index) => form.sizeNamesAr[index] ?? ''),
 			name: form.name.trim(),
 			nameAr: form.nameAr.trim() || null,
 			// stage-60 — آرایه‌ی والدها (اولین = والد اصلی)
@@ -205,7 +232,7 @@ export const CategoryManager = memo(function CategoryManager({
 		}
 		if (form.editingId) updateMut.mutate({ id: form.editingId, ...payload })
 		else createMut.mutate(payload)
-	}, [form, showToast, updateMut, createMut])
+	}, [form, showToast, updateMut, createMut, translation])
 
 	// stage-48 — بج‌های حالت سفارش در ردیف لیست
 	const ModeBadges = useCallback(({ cat }: { cat: Category }) => {
@@ -359,12 +386,25 @@ export const CategoryManager = memo(function CategoryManager({
 
 						{/* round-34 — نام عربی دسته (خالی = پشتیبان فارسی) */}
 						<ArField
+							translation={translation.field(['name'])}
 							label="نام دسته"
 							value={form.nameAr}
 							onChange={(v) => set({ nameAr: v })}
 							faReference={form.name}
 							maxLength={60}
 						/>
+						<ContentTranslationTools translation={translation} disabled={createMut.isPending || updateMut.isPending} />
+						{form.sizeNames.length > 0 && <div className="space-y-3">
+							<p className="text-sm">قالب نام سایزها</p>
+							{form.sizeNames.map((name, index) => <div key={translation.field(['sizeNames', index])?.field.fieldId ?? index} className="space-y-2">
+								<input value={name} maxLength={60} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#3a151c]"
+									onChange={event => set({ sizeNames: form.sizeNames.map((value, item) => item === index ? event.target.value : value) })} />
+								<ArField label={`قالب سایز ${index + 1}`} faReference={name} value={form.sizeNamesAr[index] ?? ''}
+									translation={translation.field(['sizeNames', index])} maxLength={60}
+									onChange={value => setForm(previous => ({ ...previous,
+										sizeNamesAr: previous.sizeNames.map((_, item) => item === index ? value : previous.sizeNamesAr[item] ?? '') }))} />
+							</div>)}
+						</div>}
 
 						{/* stage-48 — حالت‌های سفارش (به‌جای سوئیچ سایز بندی) */}
 						<div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c]">

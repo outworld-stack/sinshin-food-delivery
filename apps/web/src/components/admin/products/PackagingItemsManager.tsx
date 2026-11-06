@@ -12,10 +12,10 @@
 //  · فرم‌های ادمین فارسی hardcode (الگوی پروژه) + ConfirmModal برای حذف.
 // ═══════════════════════════════════════════════════════════════
 
-import type { PackagingItemDto } from '@sinshin/shared'
+import type { PackagingItemDto, TranslationEdit } from '@sinshin/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 // src/components/admin/products/PackagingItemsManager.tsx
-import { memo, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Box, Plus, Trash2 } from 'reicon-react'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Toggle } from '#/components/shared/Toggle'
@@ -28,6 +28,8 @@ import { useToastStore } from '#/stores/toastStore'
 import { formatPrice } from '#/utils/format'
 import { invalidatePackagingQueries } from '#/utils/productCache'
 import { packagingItemsOptions } from '#/utils/queryOptions'
+import { ArField } from '#/components/admin/ArField'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
 
 interface PackagingItemsManagerProps {
 	/** ادمین۲ بدون canEditPackagingFee فقط می‌بیند (فرم اصلی کاربرد دارد) */
@@ -37,6 +39,34 @@ interface PackagingItemsManagerProps {
 const inputCls =
 	'w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary dark:focus:border-dark-primary transition'
 
+function PackagingTitleEditor({ item, disabled }: { item: PackagingItemDto; disabled: boolean }) {
+	const queryClient = useQueryClient()
+	const showToast = useToastStore(state => state.showToast)
+	const [title, setTitle] = useState(item.title)
+	const [titleAr, setTitleAr] = useState(item.titleAr ?? '')
+	const [dirty, setDirty] = useState(false)
+	const translation = useContentTranslationDraft({ entityType: 'packagingItem', entityId: item.id,
+		initialRow: { ...item }, row: { title: title.trim(), titleAr } })
+	const save = useMutation({ mutationFn: () => updatePackagingItem({ id: item.id,
+		data: { title: title.trim(), titleAr, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision } }),
+		onSuccess: async () => { await invalidatePackagingQueries(queryClient); setDirty(false); showToast('نام قلم ذخیره شد') },
+		onError: error => showToast(error.message, 'error') })
+	const resetTranslation = translation.reset
+	useEffect(() => {
+		if (dirty || save.isPending) return
+		setTitle(item.title); setTitleAr(item.titleAr ?? '')
+		resetTranslation({ ...item })
+	}, [item, dirty, save.isPending, resetTranslation])
+	return <details className="w-full"><summary className="cursor-pointer text-xs text-primary">ویرایش نام و ترجمه عربی</summary>
+		<div className="mt-3 space-y-3"><input value={title} onChange={event => { setDirty(true); setTitle(event.target.value) }} aria-label="نام فارسی قلم"
+			className={inputCls} maxLength={60} disabled={disabled || save.isPending} />
+			<ArField label="نام قلم" value={titleAr} onChange={value => { setDirty(true); setTitleAr(value) }} faReference={title.trim()}
+				translation={translation.field(['title'])} maxLength={60} disabled={disabled || save.isPending} />
+			<button type="button" disabled={disabled || save.isPending || !dirty || !title.trim()} className="text-xs text-primary underline cursor-pointer"
+				onClick={() => save.mutate()}>ذخیره نام</button></div>
+	</details>
+}
+
 export const PackagingItemsManager = memo(function PackagingItemsManager({
 	canWrite,
 }: PackagingItemsManagerProps) {
@@ -45,6 +75,8 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 	const { data: items } = useQuery(packagingItemsOptions)
 
 	const [titleDraft, setTitleDraft] = useState('')
+	const [titleArDraft, setTitleArDraft] = useState('')
+	const draftTranslation = useContentTranslationDraft({ entityType: 'packagingItem', row: { title: titleDraft.trim(), titleAr: titleArDraft } })
 	const [priceDraft, setPriceDraft] = useState('')
 	const [confirmRemove, setConfirmRemove] = useState<PackagingItemDto | null>(
 		null,
@@ -54,11 +86,13 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 	const invalidate = () => invalidatePackagingQueries(queryClient)
 
 	const addMutation = useMutation({
-		mutationFn: (data: { title: string; price: number }) =>
+		mutationFn: (data: { title: string; titleAr?: string; translationEdits?: TranslationEdit[]; price: number }) =>
 			addPackagingItem({ data }),
 		onSuccess: async () => {
 			await invalidate()
 			setTitleDraft('')
+			setTitleArDraft('')
+			draftTranslation.reset()
 			setPriceDraft('')
 			showToast('قلم بسته‌بندی افزوده شد')
 		},
@@ -103,7 +137,7 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 			showToast('قیمت معتبر وارد کنید', 'error')
 			return
 		}
-		addMutation.mutate({ title, price: Math.round(price) })
+		addMutation.mutate({ title, titleAr: titleArDraft, translationEdits: draftTranslation.getEdits(), price: Math.round(price) })
 	}
 
 	const commitPrice = (item: PackagingItemDto) => {
@@ -172,6 +206,8 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 						value={priceDraft}
 						onChange={(e) => setPriceDraft(e.target.value)}
 					/>
+					<ArField label="نام قلم" value={titleArDraft} onChange={setTitleArDraft} faReference={titleDraft.trim()}
+						translation={draftTranslation.field(['title'])} maxLength={60} disabled={addMutation.isPending} />
 					<button
 						type="button"
 						onClick={handleAdd}
@@ -209,6 +245,7 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 										</span>
 									)}
 								</span>
+								{canWrite && <PackagingTitleEditor item={item} disabled={updateMutation.isPending || removeMutation.isPending} />}
 								{canWrite ? (
 									<input
 										className="w-32 px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-left font-DanaMedium outline-none focus:border-primary transition"

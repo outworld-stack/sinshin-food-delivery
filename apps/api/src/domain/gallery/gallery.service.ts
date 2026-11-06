@@ -10,6 +10,8 @@ import type { Db } from '#/infra/db/client'
 import { galleryImages } from '#/infra/db/schema'
 import { asGalleryImageId } from '#/domain/shared/brand'
 import { nullIfEmpty, pickAr, type Lang } from '#/domain/shared/lang'
+import { assertContentSourceRevision, localizeContentRecord, reconcileContentTranslation, type TranslationEdit } from '@sinshin/shared'
+import { Err } from '#/domain/shared/errors'
 
 export class GalleryService {
   constructor(private readonly deps: { db: Db }) { }
@@ -20,7 +22,10 @@ export class GalleryService {
       .select().from(galleryImages)
       .where(eq(galleryImages.isActive, true))
       .orderBy(asc(galleryImages.sortOrder))
-    return rows.map((g) => ({ ...g, alt: pickAr(lang, g.altAr, g.alt) }))
+    return rows.map((row) => {
+      const { translationState: _state, ...g } = lang === 'ar' ? localizeContentRecord('gallery', row) : row
+      return { ...g, alt: pickAr(lang, g.altAr, g.alt) }
+    })
   }
 
   async listAdmin() {
@@ -33,14 +38,17 @@ export class GalleryService {
     span: 'wide' | 'normal'
     /** round-34 — متن جایگزین عربی (خالی = NULL = پشتیبان فارسی) */
     altAr?: string | null
+    translationEdits?: TranslationEdit[]
   }): Promise<{ success: boolean }> {
     const max = await this.deps.db
       .select({ max: sql<number>`coalesce(max(${galleryImages.sortOrder}), 0)::int` })
       .from(galleryImages)
       .then((r) => r[0]?.max ?? 0)
-    await this.deps.db.insert(galleryImages).values({
-      src: input.src, alt: input.alt, altAr: nullIfEmpty(input.altAr), span: input.span, sortOrder: max + 1,
-    })
+    const id = asGalleryImageId(crypto.randomUUID())
+    const next = reconcileContentTranslation('gallery', id, null, {
+      id, src: input.src, alt: input.alt, altAr: nullIfEmpty(input.altAr), span: input.span, sortOrder: max + 1,
+    }, input.translationEdits)
+    await this.deps.db.insert(galleryImages).values(next)
     return { success: true }
   }
 
@@ -53,16 +61,28 @@ export class GalleryService {
       isActive?: boolean
       /** round-34 — متن جایگزین عربی (خالی = NULL = پشتیبان فارسی) */
       altAr?: string | null
+      translationEdits?: TranslationEdit[]
+      sourceRevision?: string
     },
   ): Promise<void> {
     // round-34 — altAr فقط وقتی فرستاده شده دست می‌خورد (PATCH سمانتیک)؛
     // ذخیره‌ی دستی پرچم «خودکار» را برمی‌گرداند
-    const set: Record<string, unknown> = { ...patch }
-    if (patch.altAr !== undefined) {
-      set.altAr = nullIfEmpty(patch.altAr)
-      set.arAuto = false
-    }
-    await this.deps.db.update(galleryImages).set(set).where(eq(galleryImages.id, asGalleryImageId(id)))
+    await this.deps.db.transaction(async (tx) => {
+      const [current] = await tx.select().from(galleryImages)
+        .where(eq(galleryImages.id, asGalleryImageId(id))).for('update')
+      if (!current) return
+      if (!assertContentSourceRevision('gallery', current, patch.sourceRevision)) throw Err.validation('متن تصویر تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+      const { translationEdits, sourceRevision: _sourceRevision, ...changes } = patch
+      const next = reconcileContentTranslation('gallery', id, current, {
+        ...current, ...changes,
+        altAr: patch.altAr === undefined ? current.altAr : nullIfEmpty(patch.altAr),
+      }, translationEdits)
+      await tx.update(galleryImages).set({
+        src: next.src, alt: next.alt, altAr: next.altAr, span: next.span, isActive: next.isActive,
+        translationState: next.translationState,
+        arAuto: next.translationState.fields.some((field) => field.origin === 'automatic' && field.status === 'translated'),
+      }).where(eq(galleryImages.id, current.id))
+    })
   }
 
   async remove(id: string): Promise<void> {

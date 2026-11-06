@@ -1,6 +1,6 @@
 /** About content CRUD, authorization and localization against disposable local PostgreSQL. */
 import assert from 'node:assert/strict'
-import type { AboutContentDto, ArticleBlocksDoc } from '@sinshin/shared'
+import { contentSourceRevision, contentTranslationFields, mergeArticleBlocksTranslation, readArticleBlockText, setArticleBlockTranslation, type AboutContentDto, type ArticleBlocksDoc } from '@sinshin/shared'
 import { SQL } from 'bun'
 import { eq, sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
@@ -73,9 +73,7 @@ try {
     { id: 'text', type: 'paragraph', props: { text: 'متن تازه' } },
     { id: 'photo', type: 'image', props: { src: '/uploads/restaurant.webp', alt: 'رستوران' } },
   ] }
-  const blocksAr: ArticleBlocksDoc = { version: 1, blocks: [
-    { id: 'ar-text', type: 'paragraph', props: { text: 'قصتنا' } },
-  ] }
+  const blocksAr = setArticleBlockTranslation(blocks, null, 'heading', ['text'], 'قصتنا')!
   const destination = { lat: 37.501234, lng: 49.401234, address: 'نشانی رستوران', addressAr: 'عنوان المطعم' }
 
   const initial = await get()
@@ -106,7 +104,9 @@ try {
   const arabic = await get('ar')
   assert.equal(arabic.heroTitle, 'عن سين شين')
   assert.equal(arabic.heroText, legacy.heroText)
-  assert.deepEqual(arabic.blocks, blocksAr)
+  assert.deepEqual(arabic.blocks, mergeArticleBlocksTranslation(blocks, blocksAr))
+  assert.equal(arabic.translationState, undefined, 'public responses omit internal provenance')
+  assert.equal(arabic.blocksAr, undefined, 'public clients receive only the safely merged document')
   assert.equal(arabic.location?.address, destination.addressAr)
   const raw = await get('ar', true)
   assert.equal(raw.heroTitle, legacy.heroTitle)
@@ -124,7 +124,7 @@ try {
   assert.equal((await save({ ...legacy, heroText: 'تغییر متن' })).status, 200)
   const preserved = await get('fa', true)
   assert.deepEqual(preserved.blocks, blocks)
-  assert.deepEqual(preserved.blocksAr, blocksAr)
+  assert.deepEqual(preserved.blocksAr, raw.blocksAr)
   assert.deepEqual(preserved.location, destination)
   assert.equal(preserved.heroTitleAr, 'عن سين شين')
   passed('older clients omitting new fields and Arabic translations cannot erase them')
@@ -134,7 +134,11 @@ try {
     { id: 'text', type: 'paragraph', props: { text: 'متن ویرایش شده' } },
     { id: 'new', type: 'quote', props: { text: 'محتوای جدید' } },
   ] }
-  assert.equal((await save({ ...legacy, blocks: edited, blocksAr: null, heroTitleAr: '  ', location: { ...destination, address: ' نشانی جدید ', addressAr: ' ' } })).status, 200)
+  const titleField = contentTranslationFields('about', preserved).find(field => field.fieldId === 'heroTitle')!
+  assert.equal((await save({ ...legacy, blocks: edited, blocksAr: null, heroTitleAr: '  ',
+    sourceRevision: contentSourceRevision('about', preserved),
+    translationEdits: [{ ...titleField, value: '', origin: 'manual' }],
+    location: { ...destination, address: ' نشانی جدید ', addressAr: ' ' } })).status, 200)
   const changed = await get('ar')
   assert.deepEqual(changed.blocks, edited)
   assert.equal(changed.heroTitle, legacy.heroTitle)
@@ -170,7 +174,7 @@ try {
   assert.equal((await save({ ...legacy, heroText: '', heroGradient: '', teamTitle: '', teamGradient: '', teamAlt: '', blocks: { version: 1, blocks: [] }, blocksAr: null, location: null })).status, 200)
   const cleared = await get()
   assert.equal(cleared.blocks, null)
-  assert.equal(cleared.blocksAr, null)
+  assert.equal(cleared.blocksAr, undefined)
   assert.equal(cleared.heroGradient, '')
   assert.equal(cleared.teamTitle, '')
   assert.deepEqual(cleared.location, initial.location)
@@ -179,6 +183,72 @@ try {
   assert.equal((await db.select().from(contentAbout))[0]?.location, null, 'unrelated edits keep following the restaurant destination')
   assert.equal((await db.select().from(contentAbout)).length, 1)
   passed('empty documents and optional fixed sections can be removed; resetting the map restores the restaurant destination')
+
+  const lifecycleBlocks: ArticleBlocksDoc = { version: 1, blocks: [
+    { id: 'list', type: 'list', props: { items: ['اول', 'دوم'], ordered: true }, style: { bg: '#ffffff' }, width: 'md', anim: 'fade' },
+    { id: 'branch-one', type: 'location', props: { title: 'شعبه اول', address: 'نشانی اول', lat: 37.4822056789, lng: 49.4418273456 } },
+    { id: 'branch-two', type: 'location', props: { title: 'شعبه دوم', address: 'نشانی دوم', lat: 35.123456789, lng: 51.987654321 } },
+  ] }
+  let lifecycleArabic = setArticleBlockTranslation(lifecycleBlocks, null, 'list', ['items', 0], 'الأول')!
+  lifecycleArabic = setArticleBlockTranslation(lifecycleBlocks, lifecycleArabic, 'list', ['items', 1], 'الثاني')!
+  lifecycleArabic = setArticleBlockTranslation(lifecycleBlocks, lifecycleArabic, 'branch-one', ['address'], 'العنوان الأول')!
+  lifecycleArabic = setArticleBlockTranslation(lifecycleBlocks, lifecycleArabic, 'branch-two', ['address'], 'العنوان الثاني')!
+  const lifecycleInput = { ...legacy, location: destination, blocks: lifecycleBlocks, blocksAr: lifecycleArabic }
+  const beforeLifecycle = await get('fa', true)
+  const scalarValues: Record<string, string> = { heroTitle: 'قصتنا', heroText: 'أهلا', teamTitle: 'فريقنا', teamAlt: 'الفريق', 'location.address': 'عنوان المطعم' }
+  const scalarEdits = contentTranslationFields('about', { ...beforeLifecycle, ...lifecycleInput })
+    .map(field => ({ fieldId: field.fieldId, fieldPath: field.fieldPath, sourceText: field.sourceText, revision: field.revision, value: scalarValues[field.fieldId]!, origin: 'manual' as const }))
+  assert.equal((await save({ ...lifecycleInput, translationEdits: scalarEdits })).status, 200)
+  const reviewed = await get('fa', true)
+  assert.equal((await save({ ...lifecycleInput, blocksAr: null })).status, 422)
+  assert.deepEqual((await get('fa', true)).blocksAr, reviewed.blocksAr, 'unproved nulls cannot erase reviewed block translations')
+  assert.equal((await save({ ...lifecycleInput, heroTitle: 'عنوان تازه', heroTitleAr: reviewed.heroTitleAr })).status, 200)
+  const titleChanged = await get('fa', true)
+  assert.equal(titleChanged.heroTitleAr, null)
+  assert.equal(titleChanged.heroTextAr, reviewed.heroTextAr)
+  assert.equal(titleChanged.teamTitleAr, reviewed.teamTitleAr)
+  assert.equal(titleChanged.teamAltAr, reviewed.teamAltAr)
+  assert.deepEqual(titleChanged.blocksAr, reviewed.blocksAr)
+  assert.equal(titleChanged.translationState?.fields.find(field => field.fieldId === 'heroTitle')?.status, 'needs-review')
+  assert.equal((await get('ar')).heroTitle, 'عنوان تازه')
+  passed('one About scalar change invalidates only its manual field, preserves all other translations, and falls back publicly')
+  const structureOnly = structuredClone(lifecycleBlocks)
+  structureOnly.blocks.reverse()
+  const movedLocation = structureOnly.blocks.find(block => block.id === 'branch-one')!
+  if (movedLocation.type === 'location') movedLocation.props.lat = 36.987654321
+  structureOnly.blocks.find(block => block.id === 'list')!.style = { bg: '#123456', fg: '#654321' }
+  assert.equal((await save({ ...lifecycleInput, heroTitle: titleChanged.heroTitle, blocks: structureOnly,
+    location: { ...destination, lat: 38.111111111, lng: 50.222222222 } })).status, 200)
+  const moved = await get('fa', true)
+  assert.equal(moved.location?.addressAr, reviewed.location?.addressAr)
+  assert.equal(readArticleBlockText(moved.blocksAr?.blocks.find(block => block.id === 'branch-one'), ['address']), 'العنوان الأول')
+  assert.equal(readArticleBlockText(moved.blocksAr?.blocks.find(block => block.id === 'list'), ['items', 0]), 'الأول')
+  assert.deepEqual((await get('ar')).blocks?.blocks.map(block => [block.id, block.type, block.width, block.anim, block.style]),
+    structureOnly.blocks.map(block => [block.id, block.type, block.width, block.anim, block.style]))
+  passed('About ordering, styles and exact coordinate edits preserve valid address and list translations')
+  const changedNested = structuredClone(structureOnly)
+  const list = changedNested.blocks.find(block => block.id === 'list')!
+  if (list.type === 'list') list.props.items[1] = 'مورد تازه'
+  assert.equal((await save({ ...lifecycleInput, heroTitle: titleChanged.heroTitle, blocks: changedNested, blocksAr: moved.blocksAr,
+    location: { ...moved.location!, address: 'نشانی تازه', addressAr: moved.location?.addressAr } })).status, 200)
+  const nestedChanged = await get('fa', true)
+  assert.equal(nestedChanged.location?.addressAr, null)
+  assert.equal(nestedChanged.location?.lat, 38.111111111)
+  assert.equal(nestedChanged.location?.lng, 50.222222222)
+  assert.equal(readArticleBlockText(nestedChanged.blocksAr?.blocks.find(block => block.id === 'list'), ['items', 0]), 'الأول')
+  assert.equal(readArticleBlockText(nestedChanged.blocksAr?.blocks.find(block => block.id === 'list'), ['items', 1]), '')
+  assert.equal(nestedChanged.blocksAr?.translation?.fields.find(field => field.blockId === 'list' && field.fieldPath[1] === 1)?.staleValue, 'الثاني')
+  const publicNested = await get('ar')
+  assert.deepEqual(publicNested.blocks?.blocks.filter(block => block.type === 'location').map(block => block.props),
+    mergeArticleBlocksTranslation(changedNested, nestedChanged.blocksAr)?.blocks.filter(block => block.type === 'location').map(block => block.props))
+  assert.equal(readArticleBlockText(publicNested.blocks?.blocks.find(block => block.id === 'list'), ['items', 1]), 'مورد تازه')
+  const approvedList = setArticleBlockTranslation(changedNested, nestedChanged.blocksAr, 'list', ['items', 1], 'المورد الجديد')!
+  assert.equal((await save({ ...lifecycleInput, heroTitle: titleChanged.heroTitle, blocks: changedNested, blocksAr: approvedList,
+    location: nestedChanged.location, sourceRevision: contentSourceRevision('about', nestedChanged) })).status, 200)
+  assert.equal(readArticleBlockText((await get('ar')).blocks?.blocks.find(block => block.id === 'list'), ['items', 1]), 'المورد الجديد')
+  assert.equal((await save({ ...lifecycleInput, sourceRevision: contentSourceRevision('about', reviewed) })).status, 422)
+  assert.equal((await get('fa', true)).heroTitle, titleChanged.heroTitle)
+  passed('one nested About list field and location address invalidate separately; manual review fills only the field and stale full forms are rejected')
 
   await db.delete(contentAbout)
   const concurrent = await Promise.all([save(legacy), save(legacy)])

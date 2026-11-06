@@ -20,7 +20,7 @@ import type { Db } from '#/infra/db/client'
 import { packagingItems, productPackagingItems } from '#/infra/db/schema'
 import type { ProductId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
-import type { PackagingItemDto } from '@sinshin/shared'
+import { assertContentSourceRevision, reconcileContentTranslation, type PackagingItemDto, type TranslationEdit } from '@sinshin/shared'
 
 /** TTL کش لیست — آینه‌ی SettingsService */
 const LIST_CACHE_TTL_MS = 30_000
@@ -32,6 +32,11 @@ export class PackagingService {
 
   private invalidate(): void {
     this.cache = null
+  }
+
+  /** Translation persistence uses the same local list cache invalidation. */
+  bustCache(): void {
+    this.invalidate()
   }
 
   /** لیست کامل برای پنل ادمین (شامل غیرفعال‌ها) */
@@ -57,6 +62,7 @@ export class PackagingService {
     title: string
     price: number
     titleAr?: string | null
+    translationEdits?: TranslationEdit[]
     sortOrder?: number
   }): Promise<PackagingItemDto> {
     const title = input.title.trim().slice(0, 60)
@@ -64,14 +70,16 @@ export class PackagingService {
     if (!Number.isSafeInteger(input.price) || input.price < 0 || input.price > 100_000_000) {
       throw Err.validation('قیمت قلم بسته‌بندی نامعتبر است (۰ تا ۱۰۰ میلیون تومان).')
     }
+    const id = crypto.randomUUID()
     const [row] = await this.deps.db
       .insert(packagingItems)
-      .values({
+      .values(reconcileContentTranslation('packagingItem', id, null, {
+        id,
         title,
         titleAr: input.titleAr?.trim().slice(0, 60) || null,
         price: input.price,
         sortOrder: Number.isSafeInteger(input.sortOrder) ? (input.sortOrder as number) : 0,
-      })
+      }, input.translationEdits))
       .returning()
     if (!row) throw Err.internal('ذخیره‌ی قلم بسته‌بندی ناموفق بود.')
     this.invalidate()
@@ -84,6 +92,8 @@ export class PackagingService {
       title?: string
       price?: number
       titleAr?: string | null
+      translationEdits?: TranslationEdit[]
+      sourceRevision?: string
       isActive?: boolean
       sortOrder?: number
     },
@@ -107,11 +117,20 @@ export class PackagingService {
     if (patch.sortOrder !== undefined && Number.isSafeInteger(patch.sortOrder)) {
       values.sortOrder = patch.sortOrder
     }
-    const [row] = await this.deps.db
-      .update(packagingItems)
-      .set(values)
-      .where(eq(packagingItems.id, id))
-      .returning()
+    const row = await this.deps.db.transaction(async (tx) => {
+      const [previous] = await tx.select().from(packagingItems).where(eq(packagingItems.id, id)).for('update')
+      if (!previous) throw Err.notFound('قلم بسته‌بندی پیدا نشد.')
+      if (!assertContentSourceRevision('packagingItem', previous, patch.sourceRevision)) {
+        throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      }
+      const next = reconcileContentTranslation('packagingItem', id, previous, { ...previous, ...values }, patch.translationEdits)
+      const [updated] = await tx.update(packagingItems).set({
+        ...values,
+        titleAr: next.titleAr,
+        translationState: next.translationState,
+      }).where(eq(packagingItems.id, id)).returning()
+      return updated
+    })
     if (!row) throw Err.notFound('قلم بسته‌بندی پیدا نشد.')
     this.invalidate()
     return this.toDto(row)
@@ -166,6 +185,7 @@ export class PackagingService {
       id: r.id,
       title: r.title,
       titleAr: r.titleAr,
+      translationState: r.translationState,
       price: r.price,
       isActive: r.isActive,
       sortOrder: r.sortOrder,

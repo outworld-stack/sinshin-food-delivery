@@ -1,6 +1,8 @@
-import { type ArticleBlocksDoc, isArticleBlockUrl } from '@sinshin/shared'
+import { type ArticleBlocksDoc, contentTranslationFields, isArticleBlockUrl, mergeArticleBlocksTranslation } from '@sinshin/shared'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { ArField } from '#/components/admin/ArField'
+import { ContentTranslationTools } from '#/components/admin/ContentTranslationTools'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
 import { ArticlePageBuilder } from '#/components/admin/articles/builder/ArticlePageBuilder'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { ImageField } from '#/components/shared/ImageField'
@@ -52,6 +54,7 @@ function blocksError(doc: ArticleBlocksDoc | null | undefined): string | null {
 
 function fieldsFromContent(content: AboutContent): AboutContentInput {
 	return {
+		translationState: content.translationState,
 		heroTitle: content.heroTitle,
 		heroText: content.heroText,
 		heroGradient: content.heroGradient,
@@ -81,13 +84,17 @@ export const AboutContentForm = memo(function AboutContentForm({
 	const [saveError, setSaveError] = useState<string | null>(null)
 	const [validMapDraft, setValidMapDraft] = useState(true)
 	const [mapRevision, setMapRevision] = useState(0)
-	const [blockLanguage, setBlockLanguage] = useState<BlockLanguage>('fa')
 	const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
 	const savingRef = useRef(false)
 	const revisionRef = useRef(0)
 	const appliedVersionRef = useRef(new Date(initialData.updatedAt).getTime())
 	const busy = isSaving || saving
 	const location = form.location ?? initialData.defaultLocation ?? null
+	const translation = useContentTranslationDraft({ entityType: 'about', entityId: '1',
+		initialRow: { ...initialData }, row: { ...form, location } })
+	const translationRef = useRef(translation)
+	translationRef.current = translation
+	const savedSource = useRef<{ row: AboutContentInput; version: number } | null>(null)
 	const defaultLocationRef = useRef(initialData.defaultLocation)
 	defaultLocationRef.current = initialData.defaultLocation
 	const validLocation =
@@ -98,10 +105,15 @@ export const AboutContentForm = memo(function AboutContentForm({
 	// pre-save response could overwrite the saved draft if the next refetch fails.
 	useEffect(() => {
 		const version = new Date(initialData.updatedAt).getTime()
-		if (version === appliedVersionRef.current) return
+		const saved = savedSource.current
+		const sources = (value: AboutContentInput) => JSON.stringify([contentTranslationFields('about', value).map(field => [field.fieldPath, field.sourceText]), value.blocks])
+		const savedRefetch = !!saved && version > saved.version && sources(initialData) === sources(saved.row)
+		if (version === appliedVersionRef.current && !savedRefetch) return
 		appliedVersionRef.current = version
 		if (isDirty || savingRef.current) return
 		setForm(fieldsFromContent(initialData))
+		translationRef.current.reset({ ...initialData })
+		savedSource.current = null
 		setValidMapDraft(true)
 	}, [initialData, isDirty])
 
@@ -156,9 +168,8 @@ export const AboutContentForm = memo(function AboutContentForm({
 		event.preventDefault()
 		if (!canSave || savingRef.current) return
 		for (const language of ['fa', 'ar'] as const) {
-			const error = blocksError(language === 'fa' ? form.blocks : form.blocksAr)
+			const error = blocksError(language === 'fa' ? form.blocks : mergeArticleBlocksTranslation(form.blocks, form.blocksAr))
 			if (error) {
-				setBlockLanguage(language)
 				setSaveError(
 					`${language === 'fa' ? 'محتوای فارسی' : 'محتوای عربی'}: ${error}`,
 				)
@@ -170,8 +181,11 @@ export const AboutContentForm = memo(function AboutContentForm({
 		setSaveError(null)
 		const revision = revisionRef.current
 		try {
-			await onSave(form)
-			if (revision === revisionRef.current) setIsDirty(false)
+			await onSave({ ...form, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
+			if (revision === revisionRef.current) {
+				savedSource.current = { row: form, version: new Date(initialData.updatedAt).getTime() }
+				setIsDirty(false)
+			}
 		} catch (error) {
 			setSaveError(
 				error instanceof Error && error.message
@@ -194,11 +208,10 @@ export const AboutContentForm = memo(function AboutContentForm({
 				teamGradient: '',
 			})
 		} else if (deleteTarget) {
-			edit(deleteTarget === 'fa' ? { blocks: null } : { blocksAr: null })
+			edit(deleteTarget === 'fa' ? { blocks: null, blocksAr: null } : { blocksAr: null })
 		}
 		setDeleteTarget(null)
 	}
-	const activeBlocks = blockLanguage === 'fa' ? form.blocks : form.blocksAr
 	const hasTeam = !!(
 		form.teamTitle ||
 		form.teamTitleAr ||
@@ -233,6 +246,7 @@ export const AboutContentForm = memo(function AboutContentForm({
 			</div>
 
 			<fieldset disabled={busy} className="min-w-0 space-y-9 p-5 sm:p-7">
+				<ContentTranslationTools translation={translation} disabled={busy} />
 				<section aria-label="معرفی رستوران" className="space-y-5">
 					<div>
 						<h4 className="font-DanaDemiBold text-lg text-gray-800 dark:text-white">
@@ -283,6 +297,7 @@ export const AboutContentForm = memo(function AboutContentForm({
 								</summary>
 								<div className="mt-4 space-y-4">
 									<ArField
+										translation={translation.field(['heroTitle'])}
 										label="عنوان اصلی"
 										value={form.heroTitleAr}
 										onChange={(value) => edit({ heroTitleAr: value })}
@@ -291,6 +306,7 @@ export const AboutContentForm = memo(function AboutContentForm({
 										maxLength={120}
 									/>
 									<ArField
+										translation={translation.field(['heroText'])}
 										label="داستان برند"
 										value={form.heroTextAr}
 										onChange={(value) => edit({ heroTextAr: value })}
@@ -357,6 +373,7 @@ export const AboutContentForm = memo(function AboutContentForm({
 								</summary>
 								<div className="mt-4 space-y-4">
 									<ArField
+										translation={translation.field(['teamTitle'])}
 										label="عنوان بخش تیم"
 										value={form.teamTitleAr}
 										onChange={(value) => edit({ teamTitleAr: value })}
@@ -365,6 +382,7 @@ export const AboutContentForm = memo(function AboutContentForm({
 										maxLength={120}
 									/>
 									<ArField
+										translation={translation.field(['teamAlt'])}
 										label="توضیح تصویر تیم"
 										value={form.teamAltAr}
 										onChange={(value) => edit({ teamAltAr: value })}
@@ -400,40 +418,24 @@ export const AboutContentForm = memo(function AboutContentForm({
 								قابل تغییر است. محتوای عربیِ خالی از نسخه فارسی استفاده می‌کند.
 							</p>
 						</div>
-						<fieldset className="flex gap-2">
-							<legend className="sr-only">زبان محتوای تکمیلی</legend>
-							{(['fa', 'ar'] as const).map((language) => (
-								<button
-									key={language}
-									type="button"
-									aria-pressed={blockLanguage === language}
-									onClick={() => setBlockLanguage(language)}
-									className={`${secondaryCls} ${blockLanguage === language ? 'border-primary bg-primary/10 text-primary dark:text-dark-primary' : ''}`}
-								>
-									{language === 'fa' ? 'فارسی' : 'عربی'}
-								</button>
-							))}
-						</fieldset>
 					</div>
 					<ArticlePageBuilder
-						key={blockLanguage}
+						translationEntityType="about"
+						translationEntityId="1"
+						initialDoc={initialData.blocks}
+						initialDocAr={initialData.blocksAr}
 						requireText={false}
-						doc={activeBlocks ?? emptyBlocks}
-						onChange={(doc) =>
-							edit(blockLanguage === 'fa' ? { blocks: doc } : { blocksAr: doc })
-						}
+						doc={form.blocks ?? emptyBlocks}
+						docAr={form.blocksAr}
+						onChange={blocks => edit({ blocks })}
+						onArabicChange={blocksAr => edit({ blocksAr })}
 					/>
-					{!!activeBlocks?.blocks.length && (
-						<button
-							type="button"
-							onClick={() => setDeleteTarget(blockLanguage)}
-							className={`${secondaryCls} text-red-600 dark:text-red-400`}
-						>
-							{blockLanguage === 'fa'
-								? 'حذف همه بخش‌های فارسی'
-								: 'حذف محتوای عربی و استفاده از فارسی'}
-						</button>
-					)}
+					<div className="flex flex-wrap gap-2">
+						{!!form.blocks?.blocks.length && <button type="button" onClick={() => setDeleteTarget('fa')}
+							className={`${secondaryCls} text-red-600 dark:text-red-400`}>حذف همه بخش‌های فارسی</button>}
+						{!!form.blocksAr?.blocks.length && <button type="button" onClick={() => setDeleteTarget('ar')}
+							className={`${secondaryCls} text-red-600 dark:text-red-400`}>حذف محتوای عربی و استفاده از فارسی</button>}
+					</div>
 				</section>
 
 				<section
@@ -472,6 +474,7 @@ export const AboutContentForm = memo(function AboutContentForm({
 								/>
 							</label>
 							<ArField
+								translation={translation.field(['location', 'address'])}
 								label="آدرس رستوران"
 								disabled={!location}
 								value={location?.addressAr ?? ''}

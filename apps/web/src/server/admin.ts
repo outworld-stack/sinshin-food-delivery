@@ -570,6 +570,8 @@ export async function getRestaurantStatusFull(): Promise<AdminRestaurantStatusDt
 
 export async function setTemporaryClose(input: {
 	data: {
+		translationEdits?: import('@sinshin/shared').TranslationEdit[]
+		sourceRevision?: string
 		closed: boolean
 		disablePayments?: boolean
 		reason: string

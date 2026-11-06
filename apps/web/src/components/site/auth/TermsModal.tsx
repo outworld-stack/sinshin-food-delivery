@@ -18,7 +18,7 @@ interface TermsModalProps {
 // مدال قوانین — متن از سرور (نسخه‌دار و قابل ویرایش)
 // رارد ۳۲ — متن‌های مدال از دیکشنری؛ محتوای قوانین از سرور (داده = رارد ۳۴)
 export const TermsModal = memo(function TermsModal({ isOpen, onClose }: TermsModalProps) {
-  const { t, fmt, lang } = useI18n()
+  const { t, fmt } = useI18n()
 
   // متن قوانین — از فکتوری مشترک؛ همون کش ادیتور ادمین (کلید terms-content)
   const { data: terms, isLoading } = useQuery(termsContentOptions)
@@ -26,10 +26,7 @@ export const TermsModal = memo(function TermsModal({ isOpen, onClose }: TermsMod
   if (!isOpen) return null
 
   // stage-59 — انتخاب زبان محتوا: عربی فقط وقتی موجود باشد (وگرنه فارسی)
-  const faSections: TermsSection[] = terms?.sections ?? []
-  const arSections: TermsSection[] | null | undefined = terms?.sectionsAr
-  const sections: TermsSection[] =
-    lang === 'ar' && arSections && arSections.length > 0 ? arSections : faSections
+  const sections: TermsSection[] = terms?.sections ?? []
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-4">

@@ -35,6 +35,9 @@ import { faNum, formatRelative } from '#/utils/format'
 /** برچسب فارسی انواع موجودیت — ترتیب رسمی رارد ۳۵ */
 const ENTITY_LABELS: Record<TranslationEntityType, string> = {
 	product: 'محصولات',
+	productSize: 'نام سایزهای محصول',
+	packagingItem: 'اقلام بسته‌بندی',
+	temporaryClose: 'علت تعطیلی موقت',
 	mainCategory: 'دسته‌های اصلی',
 	category: 'دسته‌های محصولات',
 	article: 'مقالات',

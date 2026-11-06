@@ -7,7 +7,7 @@
 
 //src/infra/db/schema/settings.ts
 import { boolean, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core'
-import type { AboutLocationDto, ArticleBlocksDoc } from '@sinshin/shared'
+import type { AboutLocationDto, ArticleBlocksDoc, ContentTranslationState } from '@sinshin/shared'
 
 /**
  * تنظیمات کلید-مقدار.
@@ -20,6 +20,7 @@ import type { AboutLocationDto, ArticleBlocksDoc } from '@sinshin/shared'
 export const settings = pgTable('settings', {
   key: varchar('key', { length: 60 }).primaryKey(),
   value: jsonb('value').notNull(),
+  translationState: jsonb('translation_state').$type<ContentTranslationState>(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -92,6 +93,7 @@ export const contentAbout = pgTable('content_about', {
   teamAlt: text('team_alt').notNull(),
   /** round-34 — محتوای عربی (NULL = پشتیبان فارسی؛ گرادیانت‌ها ترجمه نمی‌شوند) */
   heroTitleAr: text('hero_title_ar'),
+  translationState: jsonb('translation_state').$type<ContentTranslationState>(),
   heroTextAr: text('hero_text_ar'),
   teamTitleAr: text('team_title_ar'),
   teamAltAr: text('team_alt_ar'),
@@ -112,6 +114,7 @@ export const terms = pgTable(
     sections: jsonb('sections').$type<{ title: string; items: string[] }[]>().notNull(),
     /** round-34 — بندهای عربی (NULL = پشتیبان فارسی؛ ساختار موازی sections) */
     sectionsAr: jsonb('sections_ar').$type<{ title: string; items: string[] }[]>(),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
     arAuto: boolean('ar_auto').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

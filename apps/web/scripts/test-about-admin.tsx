@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
-import type { ArticleBlocksDoc } from '@sinshin/shared'
+import { contentSourceRevision, reconcileContentTranslation, setArticleBlockTranslations, type ArticleBlocksDoc } from '@sinshin/shared'
 import type { AboutContent, AboutContentInput } from '../src/types/site/about'
 
 // Run the real editor and builder handlers with a deterministic hook host.
@@ -184,22 +184,17 @@ doc = find(tree, (node) => node.type === ArticlePageBuilder).props.doc
 assert.deepEqual(doc.blocks.map((block) => block.id), ['a', 'b'], 'reorder and removal preserve remaining content identities')
 assert.equal((doc.blocks[0]!.props as { text: string }).text, 'Edited section')
 
-button('عربی').props.onClick()
+const arDoc = setArticleBlockTranslations(doc, null, [{ blockId: 'a', path: ['text'], text: 'قصتنا' }])
+find(tree, (node) => node.type === ArticlePageBuilder).props.onArabicChange(arDoc)
 renderForm()
-const arDoc: ArticleBlocksDoc = { version: 1, blocks: [{ id: 'ar-a', type: 'paragraph', props: { text: 'قصتنا' } }] }
-find(tree, (node) => node.type === ArticlePageBuilder).props.onChange(arDoc)
-renderForm()
-assert.deepEqual(find(tree, (node) => node.type === ArticlePageBuilder).props.doc, arDoc)
-button('فارسی').props.onClick()
-renderForm()
-assert.deepEqual(find(tree, (node) => node.type === ArticlePageBuilder).props.doc, doc, 'language switching preserves independent drafts')
-button('عربی').props.onClick()
-renderForm()
+assert.deepEqual(find(tree, (node) => node.type === ArticlePageBuilder).props.docAr, arDoc)
+assert.deepEqual(find(tree, (node) => node.type === ArticlePageBuilder).props.doc, doc, 'Arabic editing preserves the complete Persian source document')
 button('حذف محتوای عربی و استفاده از فارسی').props.onClick()
 renderForm()
 find(tree, (node) => node.type === ConfirmModal).props.onConfirm()
 renderForm()
-assert.equal(find(tree, (node) => node.type === ArticlePageBuilder).props.doc.blocks.length, 0)
+assert.equal(find(tree, (node) => node.type === ArticlePageBuilder).props.docAr, null)
+assert.deepEqual(find(tree, (node) => node.type === ArticlePageBuilder).props.doc, doc, 'removing Arabic never removes source blocks')
 const emptyAboutBuilder = find(tree, (node) => node.type === ArticlePageBuilder)
 const emptyBuilderTree = render(freshHost(), ArticlePageBuilder, emptyAboutBuilder.props as Parameters<typeof ArticlePageBuilder>[0])
 assert.equal(nodes(emptyBuilderTree).some((node) => node.props.children?.includes?.('— حداقل یک بلوکِ متنی لازم است')), false, 'optional About sections must not claim that a text block is required')
@@ -334,10 +329,7 @@ const oldBuilderHost = freshHost()
 const oldBuilderProps = find(languageTree, (node) => node.type === ArticlePageBuilder).props
 const oldBuilderTree = render(oldBuilderHost, ArticlePageBuilder, oldBuilderProps as Parameters<typeof ArticlePageBuilder>[0])
 const completeOldUpload = find(oldBuilderTree, (node) => node.props.block?.id === 'photo' && typeof node.props.patchProps === 'function').props.patchProps
-find(languageTree, (node) => node.type === 'button' && node.props.children === 'عربی').props.onClick()
 for (const cleanup of oldBuilderHost.cleanups.values()) cleanup()
-languageTree = renderLanguages()
-find(languageTree, (node) => node.type === 'button' && node.props.children === 'فارسی').props.onClick()
 languageTree = renderLanguages()
 const newBuilderProps = find(languageTree, (node) => node.type === ArticlePageBuilder).props
 const newBuilderTree = render(freshHost(), ArticlePageBuilder, newBuilderProps as Parameters<typeof ArticlePageBuilder>[0])
@@ -348,8 +340,8 @@ completeOldUpload({ src: '/uploads/late.png' })
 languageTree = renderLanguages()
 assert.deepEqual(find(languageTree, (node) => node.type === ArticlePageBuilder).props.doc, beforeLateUpload, 'uploads from an unmounted language editor cannot overwrite newer content')
 
-// Catch blocks that the normalizer would silently drop or change. Validate
-// the inactive language too, so a bad Arabic pin cannot disappear on save.
+// Source structure drives both languages. Validate malformed Persian blocks;
+// malformed Arabic structure never replaces Persian links or coordinates.
 for (const [language, block] of [
 	['fa', { id: 'bad-link', type: 'link', props: { label: 'More', href: 'javascript:alert(1)' } }],
 	['ar', { id: 'bad-pin', type: 'location', props: { lat: 91, lng: 49 } }],
@@ -371,9 +363,46 @@ for (const [language, block] of [
 	invalidTree = renderInvalid()
 	await find(invalidTree, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} })
 	invalidTree = renderInvalid()
-	assert.equal(saves, 0, `${language} ${block.type} validation blocks data loss`)
-	assert.equal(find(invalidTree, (node) => node.type === ArticlePageBuilder).props.doc.blocks[0].id, block.id, 'invalid language is selected for correction')
-	assert.match(find(invalidTree, (node) => node.props.role === 'alert').props.children, language === 'fa' ? /محتوای فارسی/ : /محتوای عربی/)
+	if (language === 'fa') {
+		assert.equal(saves, 0, `${block.type} source validation blocks data loss`)
+		assert.equal(find(invalidTree, (node) => node.type === ArticlePageBuilder).props.doc.blocks[0].id, block.id)
+		assert.match(find(invalidTree, (node) => node.props.role === 'alert').props.children, /محتوای فارسی/)
+	} else {
+		assert.equal(saves, 1, 'untrusted Arabic structure cannot change the valid Persian source')
+		assert.deepEqual(find(invalidTree, (node) => node.type === ArticlePageBuilder).props.doc, initial.blocks)
+	}
 }
 
-console.log('PASS About editor: draft retention, save retries, bilingual block validation, location defaults/reset, translation races and map validity')
+// A refetch received while the save is pending is adopted only after the save
+// succeeds. Subsequent edits must use its newer field revisions, not old proof.
+const lifecycleHost = freshHost()
+let serverContent = { ...reconcileContentTranslation('about', '1', null, initial), updatedAt: initial.updatedAt } as AboutContent
+const lifecycleSaves: AboutContentInput[] = []
+const renderLifecycle = () => render(lifecycleHost, AboutContentForm, {
+	initialData: serverContent, isSaving: false,
+	onSave: async (input) => {
+		assert.equal(input.sourceRevision, contentSourceRevision('about', serverContent))
+		lifecycleSaves.push(input)
+		serverContent = { ...reconcileContentTranslation('about', '1', serverContent,
+			{ ...serverContent, ...input }, input.translationEdits), updatedAt: new Date(serverContent.updatedAt.getTime() + 60_000) }
+	},
+})
+let lifecycleTree = renderLifecycle()
+find(lifecycleTree, node => node.props.name === 'heroText').props.onChange({ target: { value: 'Saved current source' } })
+lifecycleTree = renderLifecycle()
+const lifecycleArabic = find(lifecycleTree, node => node.type === ArField && node.props.label === 'داستان برند')
+lifecycleArabic.props.translation.edit('قصة يدوية', 'manual')
+lifecycleArabic.props.onChange('قصة يدوية')
+lifecycleTree = renderLifecycle()
+await find(lifecycleTree, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+lifecycleTree = renderLifecycle()
+find(lifecycleTree, node => node.props.name === 'heroText').props.onChange({ target: { value: 'Second saved source' } })
+lifecycleTree = renderLifecycle()
+assert.equal(find(lifecycleTree, node => node.type === ArField && node.props.label === 'داستان برند').props.translation.status, 'needs-review')
+await find(lifecycleTree, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+lifecycleTree = renderLifecycle()
+assert.deepEqual(lifecycleSaves[1].translationEdits, [], 'completed save proof is not replayed against a later source revision')
+assert.equal(serverContent.heroTextAr, null)
+assert.equal(serverContent.translationState?.fields.find(field => field.fieldId === 'heroText')?.staleValue, 'قصة يدوية')
+
+console.log('PASS About editor: draft retention, save retries, bilingual block validation, location defaults/reset, translation races, fresh source revisions and map validity')

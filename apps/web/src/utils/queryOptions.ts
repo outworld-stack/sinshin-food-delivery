@@ -87,7 +87,7 @@ import {
         getAdminProducts,
         getAdminPurchaseState,
         getCartDetails,
-        getCategories,
+        getAdminCategories,
         getCategoriesByMain,
         // stage-100 — انیمیشن پس‌زمینه‌ی صفحه‌ی محصول ویژه (عمومی)
         getFeaturedAnimation,
@@ -374,7 +374,7 @@ export const systemMetricsOptions = queryOptions({
 // (قبلاً staleTime نداشت؛ ۶۰s کافیه چون کتگوری ندرتاً عوض می‌شه)
 export const adminCategoriesOptions = queryOptions({
         queryKey: qk.categories,
-        queryFn: () => getCategories(),
+        queryFn: () => getAdminCategories(),
         staleTime: 60_000,
 })
 

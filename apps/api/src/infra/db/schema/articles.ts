@@ -14,7 +14,7 @@
 
 //src/infra/db/schema/articles.ts
 import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar, integer } from 'drizzle-orm/pg-core'
-import type { ArticleBlocksDoc } from '@sinshin/shared'
+import type { ArticleBlocksDoc, ContentTranslationState } from '@sinshin/shared'
 
 /** دسته‌ی مقاله — با/بدون ساب‌دسته */
 export const articleCategories = pgTable(
@@ -24,6 +24,7 @@ export const articleCategories = pgTable(
     name: varchar('name', { length: 60 }).notNull(),
     /** round-34 — نام عربی (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     slug: varchar('slug', { length: 60 }).notNull(),
     hasSubCategories: boolean('has_sub_categories').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -41,6 +42,7 @@ export const articleSubCategories = pgTable(
     name: varchar('name', { length: 60 }).notNull(),
     /** round-34 — نام عربی ساب‌دسته (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     slug: varchar('slug', { length: 60 }).notNull(),
   },
   (t) => [
@@ -58,6 +60,7 @@ export const articles = pgTable(
     content: text('content').notNull(),
     /** round-34 — محتوای عربی (NULL = پشتیبان فارسی؛ excerpt/title مانند name) */
     titleAr: varchar('title_ar', { length: 160 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     excerptAr: text('excerpt_ar'),
     contentAr: text('content_ar'),
     /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */

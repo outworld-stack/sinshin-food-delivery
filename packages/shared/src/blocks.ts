@@ -166,6 +166,11 @@ export interface ArticleBlockTranslationState {
 	fieldPath: (string | number)[]
 	sourceText: string
 	status: ArticleBlockTranslationStatus
+	/** Optional for older documents; unknown populated translations remain legacy content. */
+	origin?: 'manual' | 'automatic' | 'legacy'
+	staleValue?: string
+	revision?: number
+	error?: string
 }
 
 // ═══════════════════ توابع خالص (فرانت + بک) ═══════════════════

@@ -8,7 +8,7 @@
 // src/types/site/gallery.ts
 // رارد ۴۶ — GallerySpan و GalleryImage از قرارداد مشترک (@sinshin/shared)
 // می‌آیند (قبلاً کپی موازی بودند)؛ ورودی‌های فرم ادمین این‌جا می‌مانند.
-import type { GalleryImageDto, GallerySpan } from '@sinshin/shared'
+import type { GalleryImageDto, GallerySpan, TranslationEdit } from '@sinshin/shared'
 
 export type { GallerySpan }
 
@@ -17,6 +17,7 @@ export type GalleryImage = GalleryImageDto
 
 // ورودی‌های ادمین — جدا از مدل تا قرارداد API شفاف بماند
 export interface AddGalleryImageInput {
+  translationEdits?: TranslationEdit[]
   src: string
   alt: string
   /** round-34 — متن جایگزین عربی */
@@ -25,6 +26,8 @@ export interface AddGalleryImageInput {
 }
 
 export interface UpdateGalleryImageInput {
+  sourceRevision?: string
+  translationEdits?: TranslationEdit[]
   id: string
   src?: string
   alt?: string

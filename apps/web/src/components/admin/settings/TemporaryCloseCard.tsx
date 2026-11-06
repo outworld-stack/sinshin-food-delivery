@@ -20,6 +20,8 @@ import { qk } from '#/utils/queryKeys'
 import { useToastStore } from '#/stores/toastStore'
 import { Toggle } from '#/components/shared/Toggle'
 import { ArField } from '#/components/admin/ArField'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
+import type { TranslationEdit } from '@sinshin/shared'
 import { StopwatchOff, StopwatchPlay, Discover2, Clock } from 'reicon-react'
 
 interface TemporaryCloseCardProps {
@@ -47,9 +49,12 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
   const submitting = useRef(false)
   const modalSession = useRef(0)
   const session = modalSession.current
+  const translation = useContentTranslationDraft({ entityType: 'temporaryClose', entityId: status ? 'temporaryCloseReason' : undefined,
+    initialRow: status ? { reason: status.temporaryCloseReason ?? '', reasonAr: status.temporaryCloseReasonAr,
+      translationState: status.translationState } : null, row: { reason: reason.trim(), reasonAr } })
 
   const mutation = useMutation({
-    mutationFn: (input: { closed: boolean; disablePayments?: boolean; reason: string; reopenTime?: string; reasonAr?: string | null }) =>
+    mutationFn: (input: { closed: boolean; disablePayments?: boolean; reason: string; reopenTime?: string; reasonAr?: string | null; translationEdits?: TranslationEdit[]; sourceRevision?: string }) =>
       setTemporaryClose({ data: input }),
     onSuccess: () => {
       submitting.current = false
@@ -72,6 +77,7 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
 
   const handleToggle = useCallback(() => {
     if (!status || submitting.current || mutation.isPending) return
+    translation.reset()
     modalSession.current++
     // جهت مخالف فعلی — با کادر علت
     setPendingClosed(!status.temporarilyClosed)
@@ -80,17 +86,18 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
     setDisablePayments(false)
     // round-29 — پیش‌پرکردن زمان باز شدن با مقدار ثبت‌شده‌ی فعلی (ویرایش راحت)
     setReopenTime(!status.temporarilyClosed ? (status.temporaryReopenTime ?? '') : '')
-  }, [status, mutation.isPending])
+  }, [status, mutation.isPending, translation])
 
   const handleEdit = useCallback(() => {
     if (!status?.temporarilyClosed || submitting.current || mutation.isPending) return
+    translation.reset()
     modalSession.current++
     setPendingClosed(true)
     setReason(status.temporaryCloseReason ?? '')
     setReasonAr(status.temporaryCloseReasonAr ?? '')
     setReopenTime(status.temporaryReopenTime ?? '')
     setDisablePayments(status.paymentsDisabled)
-  }, [status, mutation.isPending])
+  }, [status, mutation.isPending, translation])
 
   const handleCancel = useCallback(() => {
     if (submitting.current || mutation.isPending) return
@@ -122,6 +129,8 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
     }
     submitting.current = true
     mutation.mutate({
+      translationEdits: translation.getEdits(),
+      sourceRevision: translation.sourceRevision,
       closed: pendingClosed,
       disablePayments: pendingClosed && disablePayments,
       reason: trimmed,
@@ -130,7 +139,7 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
       // فقط هنگام بستن معنا دارد؛ هنگام باز شدن پاک می‌شود
       reopenTime: pendingClosed && trimmedTime ? trimmedTime : undefined,
     })
-  }, [pendingClosed, reason, reasonAr, reopenTime, disablePayments, mutation, showToast])
+  }, [pendingClosed, reason, reasonAr, reopenTime, disablePayments, mutation, showToast, translation])
 
   if (!visible) return null
 
@@ -261,6 +270,7 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
             {pendingClosed && (
               <div className="mt-4">
                 <ArField
+                  translation={translation.field(['reason'])}
                   key={session}
                   label="علت بسته بودن"
                   value={reasonAr}

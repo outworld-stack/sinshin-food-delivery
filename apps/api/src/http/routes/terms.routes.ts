@@ -12,6 +12,7 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { TermsService } from '#/domain/terms/terms.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { langFromHeaders } from '#/domain/shared/lang'
+import { translationEditsSchema } from './content-translation.schemas'
 
 export interface TermsRoutesDeps {
   sessions: SessionService
@@ -39,26 +40,30 @@ export const termsRoutes = (deps: TermsRoutesDeps) => {
   // ── ادمین اصلی — ویرایش ──
   const adminRoutes = new Elysia({ prefix: '/admin/terms', tags: ['Admin / Terms'] })
     .use(requireAdmin(deps.sessions))
-    .get('/', () => deps.termsService.latest(), {
+    .get('/', () => deps.termsService.latest('fa', true), {
       detail: { summary: 'Latest terms (admin editor) — includes raw sectionsAr for the bilingual form' },
     })
     .post(
       '/',
-      ({ body }) => deps.termsService.update(body.sections, body.sectionsAr),
+      ({ body }) => deps.termsService.update(body.sections, body.sectionsAr, body.translationEdits, body.sourceRevision),
       {
         body: t.Object({
+        sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+        translationEdits: t.Optional(translationEditsSchema),
         sections: t.Array(
           t.Object({
             title: t.String({ minLength: 1, maxLength: 200 }),
-            items: t.Array(t.String({ maxLength: 1000 })),
+            items: t.Array(t.String({ maxLength: 1000 }), { minItems: 1, maxItems: 100 }),
           }),
+          { minItems: 1, maxItems: 100 },
         ),
         // round-34 — بندهای عربی (اختیاری؛ ساختار موازی؛ خالی = پشتیبان فارسی)
         sectionsAr: t.Optional(t.Nullable(t.Array(
           t.Object({
             title: t.String({ maxLength: 200 }),
-            items: t.Array(t.String({ maxLength: 1000 })),
+            items: t.Array(t.String({ maxLength: 1000 }), { maxItems: 100 }),
           }),
+          { maxItems: 100 },
         ))),
         }),
         detail: {

@@ -64,7 +64,7 @@ await db.transaction(async (tx) => {
     .onConflictDoUpdate({
       target: mainCategories.slug,
       set: {
-        nameAr: sql`coalesce(${mainCategories.nameAr}, excluded.name_ar)`,
+        nameAr: sql`case when ${mainCategories.translationState} is null and ${mainCategories.name} = excluded.name then coalesce(${mainCategories.nameAr}, excluded.name_ar) else ${mainCategories.nameAr} end`,
       },
     })
 
@@ -97,8 +97,8 @@ await db.transaction(async (tx) => {
       .onConflictDoUpdate({
         target: categories.slug,
         set: {
-          nameAr: sql`coalesce(${categories.nameAr}, excluded.name_ar)`,
-          sizeNamesAr: sql`coalesce(${categories.sizeNamesAr}, excluded.size_names_ar)`,
+          nameAr: sql`case when ${categories.translationState} is null and ${categories.name} = excluded.name then coalesce(${categories.nameAr}, excluded.name_ar) else ${categories.nameAr} end`,
+          sizeNamesAr: sql`case when ${categories.translationState} is null and ${categories.sizeNames} = excluded.size_names then coalesce(${categories.sizeNamesAr}, excluded.size_names_ar) else ${categories.sizeNamesAr} end`,
         },
       })
   }
@@ -163,10 +163,10 @@ await db.transaction(async (tx) => {
     .onConflictDoUpdate({
       target: contentAbout.id,
       set: {
-        heroTitleAr: sql`coalesce(${contentAbout.heroTitleAr}, excluded.hero_title_ar)`,
-        heroTextAr: sql`coalesce(${contentAbout.heroTextAr}, excluded.hero_text_ar)`,
-        teamTitleAr: sql`coalesce(${contentAbout.teamTitleAr}, excluded.team_title_ar)`,
-        teamAltAr: sql`coalesce(${contentAbout.teamAltAr}, excluded.team_alt_ar)`,
+        heroTitleAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.heroTitle} = excluded.hero_title then coalesce(${contentAbout.heroTitleAr}, excluded.hero_title_ar) else ${contentAbout.heroTitleAr} end`,
+        heroTextAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.heroText} = excluded.hero_text then coalesce(${contentAbout.heroTextAr}, excluded.hero_text_ar) else ${contentAbout.heroTextAr} end`,
+        teamTitleAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.teamTitle} = excluded.team_title then coalesce(${contentAbout.teamTitleAr}, excluded.team_title_ar) else ${contentAbout.teamTitleAr} end`,
+        teamAltAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.teamAlt} = excluded.team_alt then coalesce(${contentAbout.teamAltAr}, excluded.team_alt_ar) else ${contentAbout.teamAltAr} end`,
       },
     })
 
@@ -196,7 +196,7 @@ await db.transaction(async (tx) => {
       await tx
         .update(galleryImages)
         .set({ altAr: g.altAr })
-        .where(and(eq(galleryImages.src, g.src), isNull(galleryImages.altAr)))
+        .where(and(eq(galleryImages.src, g.src), eq(galleryImages.alt, g.alt), isNull(galleryImages.altAr), isNull(galleryImages.translationState)))
     }
     console.log('[seed] gallery arabic backfill checked')
   }
@@ -328,7 +328,7 @@ await db.transaction(async (tx) => {
     .onConflictDoUpdate({
       target: terms.version,
       set: {
-        sectionsAr: sql`coalesce(${terms.sectionsAr}, excluded.sections_ar)`,
+        sectionsAr: sql`case when ${terms.translationState} is null and ${terms.sections} = excluded.sections then coalesce(${terms.sectionsAr}, excluded.sections_ar) else ${terms.sectionsAr} end`,
       },
     })
 
@@ -498,6 +498,8 @@ await db.transaction(async (tx) => {
     // محصولات دستی/ادمین‌ساخته و ردیف‌های ترجمه‌شده دست‌نخورده می‌مانند.
     const BACKFILL: Array<{
       faName: string
+      faDescription: string
+      faIngredients: string[]
       nameAr: string
       descriptionAr: string
       ingredientsAr: string[]
@@ -505,6 +507,8 @@ await db.transaction(async (tx) => {
     }> = [
         {
           faName: 'پیتزا پپرونی',
+          faDescription: 'پنیر موزارلا و پپرونی با خمیر تازه و سس مخصوص',
+          faIngredients: ['پنیر موزارلا', 'پپرونی', 'خمیر تازه', 'سس مخصوص'],
           nameAr: 'بيتزا بيبروني',
           descriptionAr: 'جبن موزاريلا وبيبروني مع عجينة طازجة وصلصة خاصة',
           ingredientsAr: ['جبن موزاريلا', 'بيبروني', 'عجينة طازجة', 'صلصة خاصة'],
@@ -516,6 +520,8 @@ await db.transaction(async (tx) => {
         },
         {
           faName: 'پیتزا قارچ',
+          faDescription: 'پنیر و قارچ تازه با سس گوجه خانگی',
+          faIngredients: ['پنیر', 'قارچ تازه'],
           nameAr: 'بيتزا بالفطر',
           descriptionAr: 'جبن وفطر طازج مع صلصة طماطم منزلية',
           ingredientsAr: ['جبن', 'فطر طازج'],
@@ -526,24 +532,32 @@ await db.transaction(async (tx) => {
         },
         {
           faName: 'برگر کلاسیک',
+          faDescription: 'گوشت قرمز ۱۵۰ گرم با سیب‌زمینی و سس مخصوص',
+          faIngredients: ['گوشت قرمز', 'نان بریوش', 'سیب‌زمینی'],
           nameAr: 'برجر كلاسيكي',
           descriptionAr: 'لحم بقري ١٥٠ غراماً مع بطاطا وصلصة خاصة',
           ingredientsAr: ['لحم بقري', 'خبز بريوش', 'بطاطا'],
         },
         {
           faName: 'نوشیدنی کوکاکولا',
+          faDescription: 'قوطی ۳۳۰ سی‌سی خنک',
+          faIngredients: [],
           nameAr: 'مشروب كوكاكولا',
           descriptionAr: 'علبة ٣٣٠ مل باردة',
           ingredientsAr: [],
         },
         {
           faName: 'کباب کوبیده',
+          faDescription: 'دو سیخ کباب کوبیده با برنج زعفرانی و گوجه کبابی',
+          faIngredients: ['گوشت گوسفندی', 'برنج زعفرانی', 'گوجه کبابی', 'کره'],
           nameAr: 'كباب كوبيدة',
           descriptionAr: 'سيخان كباب كوبيدة مع أرز بالزعفران وطماطم مشوية',
           ingredientsAr: ['لحم غنم', 'أرز بالزعفران', 'طماطم مشوية', 'زبدة'],
         },
         {
           faName: 'سالاد سزار',
+          faDescription: 'سالاد سزار با مرغ گریل، نان برشته و سس مخصوص',
+          faIngredients: ['کاهو رومی', 'مرغ گریل', 'نان برشته', 'پنیر پارمزان'],
           nameAr: 'سلطة سيزر',
           descriptionAr: 'سلطة سيزر مع دجاج مشوي وخبز محمص وصلصة خاصة',
           ingredientsAr: ['خس روماني', 'دجاج مشوي', 'خبز محمص', 'جبن بارميزان'],
@@ -554,10 +568,20 @@ await db.transaction(async (tx) => {
     for (const b of BACKFILL) {
       const res = await tx
         .update(products)
-        .set({ nameAr: b.nameAr, descriptionAr: b.descriptionAr, ingredientsAr: b.ingredientsAr, arAuto: false })
-        .where(and(eq(products.name, b.faName), isNull(products.nameAr)))
+        .set({ nameAr: b.nameAr })
+        .where(and(eq(products.name, b.faName), isNull(products.nameAr), isNull(products.translationState)))
         .returning({ id: products.id })
       patched += res.length
+      // Seed Arabic is applicable only to the exact original source field.
+      // A missing name must never authorize overwriting another manual Arabic field.
+      await tx.update(products).set({ descriptionAr: b.descriptionAr }).where(and(
+        eq(products.name, b.faName), eq(products.description, b.faDescription),
+        isNull(products.descriptionAr), isNull(products.translationState),
+      ))
+      await tx.update(products).set({ ingredientsAr: b.ingredientsAr }).where(and(
+        eq(products.name, b.faName), sql`${products.ingredients} = ${JSON.stringify(b.faIngredients)}::jsonb`,
+        isNull(products.ingredientsAr), isNull(products.translationState),
+      ))
 
       // سایزهای همان محصول (unique: product_id + name) — فقط جایی که عربی خالی است
       for (const s of b.sizes ?? []) {
@@ -568,6 +592,7 @@ await db.transaction(async (tx) => {
             and(
               eq(productSizes.name, s.name),
               isNull(productSizes.nameAr),
+              isNull(productSizes.translationState),
               inArray(
                 productSizes.productId,
                 tx.select({ id: products.id }).from(products).where(eq(products.name, b.faName)),
@@ -595,7 +620,7 @@ await db.transaction(async (tx) => {
       ])
       .onConflictDoUpdate({
         target: articleCategories.slug,
-        set: { nameAr: sql`coalesce(${articleCategories.nameAr}, excluded.name_ar)` },
+        set: { nameAr: sql`case when ${articleCategories.translationState} is null and ${articleCategories.name} = excluded.name then coalesce(${articleCategories.nameAr}, excluded.name_ar) else ${articleCategories.nameAr} end` },
       })
 
     const catArticle = async (slug: string) =>
@@ -612,7 +637,7 @@ await db.transaction(async (tx) => {
         ])
         .onConflictDoUpdate({
           target: articleSubCategories.slug,
-          set: { nameAr: sql`coalesce(${articleSubCategories.nameAr}, excluded.name_ar)` },
+          set: { nameAr: sql`case when ${articleSubCategories.translationState} is null and ${articleSubCategories.name} = excluded.name then coalesce(${articleSubCategories.nameAr}, excluded.name_ar) else ${articleSubCategories.nameAr} end` },
         })
     }
 
@@ -676,10 +701,17 @@ await db.transaction(async (tx) => {
 
     console.log('[seed] sample articles inserted (fa+ar)')
   } else {
-    // ── backfill عربی مقالات seed-شکل (فقط جایی که title_ar خالی است) ──
+    // ── backfill عربی مقالات قدیمی با منبع دقیق؛ هر فیلد پرشده مستقل حفظ می‌شود ──
     const ARTICLE_BACKFILL = [
       {
         faTitle: 'راز خمیر ایتالیایی: چطور پیتزا خانگی رستورانی کنیم',
+        faExcerpt: 'پنج نکته‌ی کلیدی که خمیر پیتزای شما را از سطح به عمق می‌برد.',
+        faContent: 'خمیر ایتالیایی فقط آرد و آب و نمک و مخمر است — ولی نسبت‌ها و زمان است که همه‌چیز را می‌سازد.\n\nاول: آرد ۰۰ یا ۰ را با مخمر خشک مخلوط کنید و ده دقیقه بگذارید بماند. آب ولرم اضافه کنید — نه داغ، نه سرد. نمک را همیشه آخر بریزید چون مستقیم روی مخمر اثر می‌گذارد.\n\nبعد از ورز دادن، خمیر را در ظرفی روغن‌مالی شده بگذارید و اجازه بدهید در دمای اتاق دو ساعت بماند. اگر عجله ندارید، یک شب در یخچال بگذارید — طعم عمیق‌تر می‌شود.\n\nمهم‌ترین راز: فر را نیم ساعت قبل با دمای ۲۵۰ درجه گرم کنید و سنگ پیتزا یا تابه چدنی بگذارید داخل فر. خمیر را روی سنگ داغ بیندازید — پایه‌ی خمیر نرم و پوپ می‌شود، بالا کش می‌آید و می‌پزد.',
+        faProcesses: [
+          { title: 'مرحله ۱ — خمیر', items: ['آرد ۰۰: ۵۰۰ گرم', 'آب ولرم: ۳۲۵ میلی‌لیتر', 'مخمر خشک: ۵ گرم', 'نمک: ۱۰ گرم (آخر)'] },
+          { title: 'مرحله ۲ — استراحت', items: ['دمای اتاق: ۲ ساعت', 'یا یخچال: یک شب', 'ظرف روغن‌مالی شده'] },
+          { title: 'مرحله ۳ — پخت', items: ['فر: ۲۵۰ درجه، ۳۰ دقیقه گرم', 'سنگ پیتزا یا تابه چدنی', '۸ تا ۱۰ دقیقه پخت'] },
+        ],
         titleAr: 'سر العجينة الإيطالية: كيف تصنع بيتزا منزلية بمستوى المطاعم',
         excerptAr: 'خمس نصائح أساسية تنقل عجينة البيتزا الخاصة بك من السطح إلى العمق.',
         contentAr: 'العجينة الإيطالية هي فقط دقيق وماء وملح وخميرة — لكن النِّسَب والوقت هما ما يصنعان كل الفرق.\n\nأولاً: اخلط الدقيق ٠٠ أو ٠ مع الخميرة الجافة واتركه عشر دقائق. أضف الماء الفاتر — ليس ساخناً ولا بارداً. أضف الملح دائماً في النهاية لأنه يؤثر مباشرة على الخميرة.\n\nبعد العجن، ضع العجينة في وعاء مدهون بالزيت واتركها ساعتين في حرارة الغرفة. إذا لم تكن مستعجلاً، اتركها ليلة كاملة في الثلاجة — يصبح الطعم أعمق.\n\nأهم سر: سخّن الفرن نصف ساعة قبل ذلك على حرارة ٢٥٠ درجة وضع حجر البيتزا أو مقلاة حديدية داخل الفرن. ضع العجينة على الحجر الساخن — يصبح قاع العجينة طرياً ومنتفخاً، وترتفع الحواف وتنضج.',
@@ -691,6 +723,9 @@ await db.transaction(async (tx) => {
       },
       {
         faTitle: 'برگر ذغالی یا پخته؟ راهنمای انتخاب گوشت برگر',
+        faExcerpt: 'سایز، چربی و روش پخت — سه فاکتوری که برگر شما را می‌سازند.',
+        faContent: 'برگر خوب از گوشت خوب شروع می‌شود. نسبت استاندارد: ۸۰٪ گوشت قرمز، ۲۰٪ چربی. اگر چربی کمتر باشد برگر خشک می‌شود، بیشتر باشد بریز.\n\nسایز هم مهم است: ۱۵۰ گرم برای برگر کلاسیک، ۲۵۰ گرم برای دوبل. گوشت را زیاده ورز ندهید — فقط شکل بدهید و بگذارید بماند.\n\nدر سین‌شین ما برگر را روی ذغال می‌پزیم چون دمای بالاتر کرم برگر را سریع می‌سازد و رطوبت داخل گوشت می‌ماند. اگر در خانه هستید، تابه چدنی داغ بهترین جایگزین است.\n\nسس مخصوص ما ساده است: سس گوجه، کمی خردل، سیر له‌شده و یک قاشق مربا. ساده ولی همه‌چیز.',
+        faProcesses: [],
         titleAr: 'برجر على الفحم أم مطبوخ؟ دليل اختيار لحم البرجر',
         excerptAr: 'الحجم والدسم وطريقة الطهي — ثلاثة عوامل تصنع برجرك.',
         contentAr: 'البرجر الجيد يبدأ من اللحم الجيد. النسبة القياسية: ٨٠٪ لحم بقري و٢٠٪ دسم. إذا قلّ الدسم جفّ البرجر، وإذا زاد تهرّأ.\n\nالحجم مهم أيضاً: ١٥٠ غراماً للبرجر الكلاسيكي و٢٥٠ غراماً للدوبل. لا تعجن اللحم كثيراً — فقط شكّله واتركه.\n\nفي سين شين نطهو البرجر على الفحم لأن الحرارة العالية تصنع قشرة البرجر بسرعة وتبقي الرطوبة داخل اللحم. إذا كنت في المنزل، فالمقلاة الحديدية الساخنة هي أفضل بديل.\n\nصلصتنا الخاصة بسيطة: صلصة طماطم وقليل من الخردل وثوم مهروس وملعقة مربى. بسيطة لكنها كل شيء.',
@@ -702,8 +737,13 @@ await db.transaction(async (tx) => {
     for (const a of ARTICLE_BACKFILL) {
       const res = await tx
         .update(articles)
-        .set({ titleAr: a.titleAr, excerptAr: a.excerptAr, contentAr: a.contentAr, processesAr: a.processesAr, arAuto: false })
-        .where(and(eq(articles.title, a.faTitle), isNull(articles.titleAr)))
+        .set({
+          titleAr: sql`coalesce(${articles.titleAr}, ${a.titleAr})`,
+          excerptAr: sql`case when ${articles.excerpt} = ${a.faExcerpt} then coalesce(${articles.excerptAr}, ${a.excerptAr}) else ${articles.excerptAr} end`,
+          contentAr: sql`case when ${articles.content} = ${a.faContent} then coalesce(${articles.contentAr}, ${a.contentAr}) else ${articles.contentAr} end`,
+          processesAr: sql`case when ${articles.processes} = ${JSON.stringify(a.faProcesses)}::jsonb then coalesce(${articles.processesAr}, ${JSON.stringify(a.processesAr)}::jsonb) else ${articles.processesAr} end`,
+        })
+        .where(and(eq(articles.title, a.faTitle), isNull(articles.translationState), isNull(articles.blocks)))
         .returning({ id: articles.id })
       patchedArticles += res.length
     }
@@ -719,7 +759,7 @@ await db.transaction(async (tx) => {
       ])
       .onConflictDoUpdate({
         target: articleCategories.slug,
-        set: { nameAr: sql`coalesce(${articleCategories.nameAr}, excluded.name_ar)` },
+        set: { nameAr: sql`case when ${articleCategories.translationState} is null and ${articleCategories.name} = excluded.name then coalesce(${articleCategories.nameAr}, excluded.name_ar) else ${articleCategories.nameAr} end` },
       })
 
     const foodGuidesBackfill = (
@@ -738,7 +778,7 @@ await db.transaction(async (tx) => {
         ])
         .onConflictDoUpdate({
           target: articleSubCategories.slug,
-          set: { nameAr: sql`coalesce(${articleSubCategories.nameAr}, excluded.name_ar)` },
+          set: { nameAr: sql`case when ${articleSubCategories.translationState} is null and ${articleSubCategories.name} = excluded.name then coalesce(${articleSubCategories.nameAr}, excluded.name_ar) else ${articleSubCategories.nameAr} end` },
         })
     }
   }

@@ -46,6 +46,7 @@ import type {
   AddressId, CampaignId, CategoryId, ConditionId, CourierId, DeviceId,
   MainCategoryId, OrderId, ProductId, SizeId, UserId,
 } from './brand'
+import type { ContentTranslationState } from './content-translations'
 
 // ═══════════ زبان ═══════════
 
@@ -94,6 +95,7 @@ export interface VerifyOtpResponse {
 // ═══════════ منو ═══════════
 
 export interface MainCategory {
+  translationState?: ContentTranslationState | null
   id: MainCategoryId
   name: string
   /** round-34 — نام عربی (NULL = پشتیبان فارسی)؛ فقط ادمین پر می‌کند */
@@ -111,6 +113,7 @@ export interface MainCategory {
 }
 
 export interface Category {
+  translationState?: ContentTranslationState | null
   id: CategoryId
   mainCategoryId: MainCategoryId
   /**
@@ -142,6 +145,7 @@ export interface Category {
 }
 
 export interface ProductSize {
+  translationState?: ContentTranslationState | null
   id: SizeId
   name: string
   price: number
@@ -168,6 +172,7 @@ export interface ProductSize {
 }
 
 export interface Product {
+  translationState?: ContentTranslationState | null
   id: ProductId
   name: string
   /**
@@ -299,6 +304,7 @@ export interface SimilarProductsDto {
  * مؤثر = جمعِ قیمتِ اقلامِ فعال. مشتری فقط جمعِ کل را می‌بیند.
  */
 export interface PackagingItemDto {
+  translationState?: ContentTranslationState | null
   id: string
   title: string
   /** round-34 — عنوان عربی (NULL = پشتیبان فارسی؛ فقط پنل ادمین) */
@@ -693,6 +699,7 @@ export interface CouponRule {
 import type { ArticleBlocksDoc } from './blocks'
 
 export interface ArticleSubCategoryDto {
+  translationState?: ContentTranslationState | null
   id: string
   name: string
   /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = پشتیبان فارسی) */
@@ -701,6 +708,7 @@ export interface ArticleSubCategoryDto {
 }
 
 export interface ArticleCategoryDto {
+  translationState?: ContentTranslationState | null
   id: string
   name: string
   /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = پشتیبان فارسی) */
@@ -712,6 +720,7 @@ export interface ArticleCategoryDto {
 }
 
 export interface ArticleDto {
+  translationState?: ContentTranslationState | null
   id: string
   title: string
   excerpt: string
@@ -788,6 +797,7 @@ export interface RestaurantStatusDto {
 
 /** Untranslated editing fields are exposed only to restaurant administrators. */
 export interface AdminRestaurantStatusDto extends RestaurantStatusDto {
+  translationState?: ContentTranslationState | null
   temporaryCloseReasonAr: string | null
 }
 
@@ -889,6 +899,7 @@ export type CheckoutResponse = CheckoutResult
 export type GallerySpan = 'wide' | 'normal'
 
 export interface GalleryImageDto {
+  translationState?: ContentTranslationState | null
   id: string
   src: string
   alt: string
@@ -909,6 +920,8 @@ export interface TermsSection {
 }
 
 export interface TermsContentDto {
+  id?: string
+  translationState?: ContentTranslationState | null
   sections: TermsSection[]
   /** round-34 — بندهای عربی (NULL = پشتیبان فارسی)؛ ساختار موازی sections */
   sectionsAr?: TermsSection[] | null
@@ -928,6 +941,7 @@ export interface AboutLocationDto {
 }
 
 export interface AboutContentDto {
+  translationState?: ContentTranslationState | null
   id: number
   heroTitle: string
   heroText: string
@@ -1550,6 +1564,9 @@ export interface SystemMetricsDto {
 
 /** نوع موجودیت قابل‌ترجمه — کلید صف translation_jobs */
 export type TranslationEntityType =
+  | 'productSize'
+  | 'packagingItem'
+  | 'temporaryClose'
   | 'product'
   | 'mainCategory'
   | 'category'

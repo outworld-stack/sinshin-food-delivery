@@ -8,14 +8,16 @@
 // src/components/admin/settings/TermsEditor.tsx
 import { memo, useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { updateTerms } from '#/server/terms'
-import { termsContentOptions } from '#/utils/queryOptions'
+import { getAdminTerms, updateTerms } from '#/server/terms'
+import { ArField } from '#/components/admin/ArField'
+import { ContentTranslationTools } from '#/components/admin/ContentTranslationTools'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
 import { qk } from '#/utils/queryKeys'
 import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { Plus, Trash2, File } from 'reicon-react'
 import { formatDate, faNum } from '#/utils/format'
-import type { Role } from '@sinshin/shared'
+import type { Role, TranslationEdit } from '@sinshin/shared'
 
 // فرم — هر بخش: عنوان + متن چندخطی (هر خط = یک بند)
 interface TermsFormSection {
@@ -23,7 +25,7 @@ interface TermsFormSection {
     itemsText: string
     /** round-34 — عنوان عربی + بندهای عربی (هر خط = یک بند؛ خالی = پشتیبان فارسی) */
     titleAr: string
-    itemsTextAr: string
+    itemsAr: string[]
 }
 
 // ادیتور قوانین — فقط ادمین اصلی (تنظیمات) — هر ذخیره = نسخه جدید
@@ -33,10 +35,14 @@ export const TermsEditor = memo(function TermsEditor() {
     const role = useAuthStore((s) => s.role)
 
     // قوانین از فکتوری مشترک — همون کش مودال ثبت‌نام (کلید terms-content)
-    const { data: terms, isLoading } = useQuery(termsContentOptions)
+    const { data: terms, isLoading } = useQuery({ queryKey: ['admin', 'terms-content'], queryFn: getAdminTerms })
 
     const [sections, setSections] = useState<TermsFormSection[]>([])
     const [isDirty, setIsDirty] = useState(false)
+    const sourceSections = sections.map(s => ({ title: s.title.trim(), items: s.itemsText.split('\n').map(item => item.trim()).filter(Boolean) }))
+    const translation = useContentTranslationDraft({ entityType: 'terms', entityId: terms?.id,
+        initialRow: terms ? { ...terms } : null, row: { sections: sourceSections,
+            sectionsAr: sections.map((s, index) => ({ title: s.titleAr, items: sourceSections[index].items.map((_, item) => s.itemsAr[item] ?? '') })) } })
 
     // هیدرات — فقط تا وقتی ادمین دست نزده (الگوی isDirty — ویرایش‌ها پاک نمی‌شوند)
     useEffect(() => {
@@ -47,7 +53,7 @@ export const TermsEditor = memo(function TermsEditor() {
                 title: s.title,
                 itemsText: s.items.join('\n'),
                 titleAr: ar[i]?.title ?? '',
-                itemsTextAr: (ar[i]?.items ?? []).join('\n'),
+                itemsAr: [...(ar[i]?.items ?? [])],
             })))
         }
     }, [terms, isDirty])
@@ -63,14 +69,14 @@ export const TermsEditor = memo(function TermsEditor() {
     }, [])
 
     // round-34 — ویرایش قسمت عربی بخش n
-    const handleArChange = useCallback((index: number, patch: Partial<{ titleAr: string; itemsTextAr: string }>) => {
+    const handleArChange = useCallback((index: number, patch: Partial<{ titleAr: string; itemsAr: string[] }>) => {
         setIsDirty(true)
         setSections(prev => prev.map((s, i) => i === index ? { ...s, ...patch } : s))
     }, [])
 
     const addSection = useCallback(() => {
         setIsDirty(true)
-        setSections(prev => [...prev, { title: '', itemsText: '', titleAr: '', itemsTextAr: '' }])
+        setSections(prev => [...prev, { title: '', itemsText: '', titleAr: '', itemsAr: [] }])
     }, [])
 
     const removeSection = useCallback((index: number) => {
@@ -83,9 +89,12 @@ export const TermsEditor = memo(function TermsEditor() {
             role: Role
             sections: { title: string; items: string[] }[]
             sectionsAr?: { title: string; items: string[] }[] | null
+            translationEdits?: TranslationEdit[]
+            sourceRevision?: string
         }) => updateTerms(data),
         onSuccess: (res) => {
             queryClient.invalidateQueries({ queryKey: qk.termsContent })
+            queryClient.invalidateQueries({ queryKey: ['admin', 'terms-content'] })
             setIsDirty(false)   // اجازه‌ی سینک مجدد با داده‌ی تازه
             showToast(`قوانین ذخیره شد — نسخه ${faNum(res.version)} برای ثبت‌نام‌های بعدی`)
         },
@@ -106,14 +115,14 @@ export const TermsEditor = memo(function TermsEditor() {
 
         // round-34 — بندهای عربی موازی با ایندکس (بدون filter — هم‌ترازی با sections
         // حیاتی است؛ بخش بدون ترجمه سمت سرور per-section به فارسی برمی‌گردد)
-        const parsedAr = sections.map(s => ({
+        const parsedAr = sections.map((s, index) => ({
             title: s.titleAr.trim(),
-            items: s.itemsTextAr.split('\n').map(l => l.trim()).filter(Boolean),
+            items: parsed[index].items.map((_, item) => s.itemsAr[item]?.trim() ?? ''),
         }))
         const hasAnyAr = parsedAr.some(s => s.title !== '' || s.items.length > 0)
 
-        saveMut.mutate({ role, sections: parsed, sectionsAr: hasAnyAr ? parsedAr : null })
-    }, [sections, role, saveMut, showToast])
+        saveMut.mutate({ role, sections: parsed, sectionsAr: hasAnyAr ? parsedAr : null, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
+    }, [sections, role, saveMut, showToast, translation])
 
     const inputCls = 'px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary'
 
@@ -137,15 +146,16 @@ export const TermsEditor = memo(function TermsEditor() {
 
             {isLoading ? (
                 <div className="space-y-4">
-                    {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="h-32 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] animate-pulse" />
+                    {['terms-loading-1', 'terms-loading-2', 'terms-loading-3'].map(key => (
+                        <div key={key} className="h-32 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] animate-pulse" />
                     ))}
                 </div>
             ) : (
                 <>
+                    <ContentTranslationTools translation={translation} disabled={saveMut.isPending} />
                     <div className="space-y-4">
                         {sections.map((section, index) => (
-                            <div key={index} className="p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5 space-y-3">
+                            <div key={translation.field(['sections', index, 'title'])?.field.fieldId ?? index} className="p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5 space-y-3">
                                 <div className="flex items-center gap-2">
                                     <input
                                         value={section.title}
@@ -174,22 +184,22 @@ export const TermsEditor = memo(function TermsEditor() {
                                     <p className="text-[11px] text-gray-400 font-DanaMedium">
                                         عربی این بخش <span className="text-gray-300">(خالی = همان فارسی)</span>
                                     </p>
-                                    <input
-                                        value={section.titleAr}
-                                        onChange={(e) => handleArChange(index, { titleAr: e.target.value })}
-                                        dir="rtl"
-                                        maxLength={200}
-                                        placeholder={`عنوان عربی (فارسی: ${section.title || '—'})`}
-                                        className={`w-full ${inputCls}`}
-                                    />
-                                    <textarea
-                                        value={section.itemsTextAr}
-                                        onChange={(e) => handleArChange(index, { itemsTextAr: e.target.value })}
-                                        dir="rtl"
-                                        rows={5}
-                                        placeholder="هر خط = معرب همان بند فارسی بالا..."
-                                        className={`w-full ${inputCls} resize-y font-DanaMedium`}
-                                    />
+                                    <ArField label="عنوان بخش" value={section.titleAr} faReference={sourceSections[index].title}
+                                        translation={translation.field(['sections', index, 'title'])}
+                                        onChange={titleAr => handleArChange(index, { titleAr })} maxLength={200} />
+                                    {sourceSections[index].items.map((item, itemIndex) => <ArField
+                                        key={translation.field(['sections', index, 'items', itemIndex])?.field.fieldId ?? itemIndex}
+                                        label={`بند ${itemIndex + 1}`} faReference={item} value={section.itemsAr[itemIndex] ?? ''}
+                                        translation={translation.field(['sections', index, 'items', itemIndex])}
+                                        onChange={value => {
+                                            setIsDirty(true)
+                                            setSections(previous => previous.map((entry, position) => {
+                                                if (position !== index) return entry
+                                                const arabic = entry.itemsText.split('\n').map(item => item.trim()).filter(Boolean)
+                                                    .map((_, item) => item === itemIndex ? value : entry.itemsAr[item] ?? '')
+                                                return { ...entry, itemsAr: arabic }
+                                            }))
+                                        }} multiline />)}
                                 </div>
                             </div>
                         ))}

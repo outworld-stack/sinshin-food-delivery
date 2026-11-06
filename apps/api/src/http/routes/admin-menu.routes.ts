@@ -45,6 +45,7 @@ import type { PackagingService } from '#/domain/menu/packaging.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { UUID_PATTERN } from '#/domain/shared/ids'
+import { translationEditsSchema } from './content-translation.schemas'
 
 
 /**
@@ -52,9 +53,12 @@ import { UUID_PATTERN } from '#/domain/shared/ids'
  * discountStartsAt/EndsAt: null یا خالی = بدون محدودیت زمانی.
  */
 const sizeInput = t.Object({
+  id: t.Optional(t.String({ pattern: UUID_PATTERN })),
   name: t.String({ minLength: 1, maxLength: 60 }),
   // round-34 — نام عربی سایز (اختیاری؛ خالی = پشتیبان فارسی)
   nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+  translationEdits: t.Optional(translationEditsSchema),
+  sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
   price: t.Number({ minimum: 0 }),
   // stage-47 — تخفیف مستقِ این سایز
   discountPercentage: t.Optional(t.Numeric({ minimum: 0, maximum: 100 })),
@@ -100,23 +104,37 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .get('/mains', () => deps.menu.adminMainCategories(), {
       detail: { summary: 'All main categories (incl. inactive)' },
     })
+    .get('/categories', () => deps.menu.adminCategories(), {
+      detail: { summary: 'Categories with editable Arabic drafts and field provenance' },
+    })
 
   const structureWrite = new Elysia({ prefix: '/admin/menu', tags: ['Admin / Menu'] })
     .use(requireAdmin2Permission(admin2, 'mainCategoriesWrite'))
 
     .post(
       '/mains',
-      ({ body }) => deps.menu.createMainCategory(body.name, body.slug, body.nameAr),
+      ({ body }) => deps.menu.createMainCategory(body.name, body.slug, body.nameAr, body.translationEdits),
       {
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 60 }),
           slug: t.String({ minLength: 1, maxLength: 60 }),
           // round-34 — نام عربی (اختیاری؛ خالی = پشتیبان فارسی)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+          translationEdits: t.Optional(translationEditsSchema),
         }),
         detail: { summary: 'Create main category (inactive by default)' },
       },
     )
+    .patch('/mains/:id', ({ params, body }) => deps.menu.updateMainCategory({ id: params.id, ...body }), {
+      params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+      body: t.Object({
+        name: t.String({ minLength: 1, maxLength: 60 }),
+        nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+        translationEdits: t.Optional(translationEditsSchema),
+        sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
+      }),
+      detail: { summary: 'Update main category name and its Arabic field' },
+    })
     .post('/mains/:id/toggle', ({ params }) => deps.menu.toggleMainCategory(params.id), {
       params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
       detail: { summary: 'Toggle main category visibility' },
@@ -158,6 +176,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           sizeNames: body.sizeNames ?? [],
           nameAr: body.nameAr,
           sizeNamesAr: body.sizeNamesAr ?? null,
+          translationEdits: body.translationEdits,
           // stage-48 — حالت‌های سفارش پایه (پیش‌فرض روشن)
           courierEnabled: body.courierEnabled ?? true,
           takeawayEnabled: body.takeawayEnabled ?? true,
@@ -177,6 +196,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
           sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
+          translationEdits: t.Optional(translationEditsSchema),
           // stage-48 — حالت‌های سفارش محصولاتِ این دسته
           courierEnabled: t.Optional(t.Boolean()),
           takeawayEnabled: t.Optional(t.Boolean()),
@@ -194,10 +214,12 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           // stage-60 — چند-والدی: آرایه مبناست (نیامد = دست‌نخورده)
           mainCategoryIds: body.mainCategoryIds,
           mainCategoryId: body.mainCategoryId,
-          hasSizes: body.hasSizes ?? false,
-          sizeNames: body.sizeNames ?? [],
+          hasSizes: body.hasSizes,
+          sizeNames: body.sizeNames,
           nameAr: body.nameAr,
-          sizeNamesAr: body.sizeNamesAr ?? null,
+          sizeNamesAr: body.sizeNamesAr,
+          translationEdits: body.translationEdits,
+          sourceRevision: body.sourceRevision,
           // stage-48 — حالت‌های سفارش (undefined = دست‌نخورده)
           courierEnabled: body.courierEnabled,
           takeawayEnabled: body.takeawayEnabled,
@@ -218,6 +240,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           // round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames)
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
           sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
+          translationEdits: t.Optional(translationEditsSchema),
+          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
           // stage-48 — حالت‌های سفارش (اختیاری — نیامد = دست‌نخورده)
           courierEnabled: t.Optional(t.Boolean()),
           takeawayEnabled: t.Optional(t.Boolean()),
@@ -327,6 +351,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
           descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
+          translationEdits: t.Optional(translationEditsSchema),
+          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           // stage-47 — پنجره‌ی زمانی تخفیف محصول (ISO | null = بدون محدودیت)
@@ -408,6 +434,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
           descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
+          translationEdits: t.Optional(translationEditsSchema),
+          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           // stage-47 — پنجره‌ی زمانی تخفیف محصول (ISO | null = بدون محدودیت)
@@ -515,6 +543,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         body: t.Object({
           title: t.String({ minLength: 1, maxLength: 60 }),
           titleAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+          translationEdits: t.Optional(translationEditsSchema),
           price: t.Number({ minimum: 0, maximum: 100000000 }),
           sortOrder: t.Optional(t.Numeric({ minimum: 0, maximum: 999 })),
         }),
@@ -527,6 +556,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         const item = await deps.packaging.update(params.id, {
           title: body.title,
           titleAr: body.titleAr,
+          translationEdits: body.translationEdits,
+          sourceRevision: body.sourceRevision,
           price: body.price,
           isActive: body.isActive,
           sortOrder: body.sortOrder === undefined ? undefined : Number(body.sortOrder),
@@ -548,6 +579,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         body: t.Object({
           title: t.Optional(t.String({ minLength: 1, maxLength: 60 })),
           titleAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+          translationEdits: t.Optional(translationEditsSchema),
+          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
           price: t.Optional(t.Number({ minimum: 0, maximum: 100000000 })),
           isActive: t.Optional(t.Boolean()),
           sortOrder: t.Optional(t.Numeric({ minimum: 0, maximum: 999 })),

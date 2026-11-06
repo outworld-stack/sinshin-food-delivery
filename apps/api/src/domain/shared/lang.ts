@@ -42,7 +42,11 @@ export function pickAr(lang: Lang, ar: string | null | undefined, fa: string): s
 
 /** COALESCE(ar, fa) — آرایه (مواد اولیه، قالب سایزها، ...) */
 export function pickArArr<T>(lang: Lang, ar: T[] | null | undefined, fa: T[]): T[] {
-  return lang === 'ar' && ar != null && ar.length > 0 ? ar : fa
+  if (lang !== 'ar' || !ar) return fa
+  return fa.map((value, index) => {
+    const translated = ar[index]
+    return translated != null && (typeof translated !== 'string' || translated.trim() !== '') ? translated : value
+  })
 }
 
 /** مسیر نوشتن ادمین: '' یا فاصله → NULL (یعنی «ترجمه‌ ندارد، پشتیبان فارسی») */

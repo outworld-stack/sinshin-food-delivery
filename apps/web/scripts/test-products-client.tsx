@@ -208,6 +208,30 @@ const restrictedForm = render(instance(), ProductForm, { ...featuredProps, canTo
 assert(!nodes(restrictedForm).some(node => node.props.name === 'product-featured-animation'),
 	'admin2 cannot choose a featured animation')
 
+const sizesHost = instance()
+const sizesProps = { ...props(), initialData: product(), onSubmit: (data: unknown) => { submitted = data } }
+render(sizesHost, ProductForm, sizesProps)
+let sizesForm = render(sizesHost, ProductForm, sizesProps)
+const addSizeButton = () => find(sizesForm, node => node.type === 'button'
+	&& Array.isArray(node.props.children)
+	&& node.props.children.some((child: unknown) => typeof child === 'string' && child.includes('افزودن سایز')))
+addSizeButton().props.onClick()
+sizesForm = render(sizesHost, ProductForm, sizesProps)
+addSizeButton().props.onClick()
+sizesForm = render(sizesHost, ProductForm, sizesProps)
+const sizeFields = () => nodes(sizesForm).filter(node => node.type?.name === 'ProductSizeArabicField')
+const draftFields = sizeFields().filter(node => !node.props.size.id)
+assert.equal(draftFields.length, 2)
+assert(draftFields.every(node => node.props.size.draftId), 'each unsaved size has a local identity')
+assert.notEqual(draftFields[0].key, draftFields[1].key, 'new size editors have distinct stable keys')
+draftFields[0].props.onChange({ ...draftFields[0].props.size, nameAr: 'سایز اول عربي' })
+sizesForm = render(sizesHost, ProductForm, sizesProps)
+const updatedDrafts = sizeFields().filter(node => !node.props.size.id)
+assert.equal(updatedDrafts[0].props.size.nameAr, 'سایز اول عربي')
+assert.equal(updatedDrafts[1].props.size.nameAr, '', 'editing one unsaved size never edits its unsaved sibling')
+assert.equal(sizeFields()[0].props.size.id, 'old-size', 'existing size identity remains intact')
+assert.deepEqual(updatedDrafts.map(node => node.key), draftFields.map(node => node.key), 'Arabic edits preserve new size identities')
+
 const client = new QueryClient()
 const derivedKeys = [qk.adminProducts({ page: 1, limit: 10, search: '', status: '', categoryId: '' }),
 	qk.adminProductDetails('a'), qk.adminProductDetails('b'), qk.productsByMain('food'), qk.productById('a'),

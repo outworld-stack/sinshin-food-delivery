@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
-import { getArticleBlockTextFields, getArticleBlockTranslationStatus, readArticleBlockText, setArticleBlockText, setArticleBlockTranslation, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockTextPath } from '@sinshin/shared'
+import { contentSourceRevision, contentTranslationFields, getArticleBlockTextFields, getArticleBlockTranslationStatus, readArticleBlockText, setArticleBlockText, setArticleBlockTranslation, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockTextPath } from '@sinshin/shared'
 import { ArticleService, type ArticleInput } from '../src/domain/article/article.service'
 import { AppError } from '../src/domain/shared/errors'
 import { Database } from '../src/infra/db/client'
@@ -107,10 +107,10 @@ try {
     && summary.updatedAt === edited.updatedAt && summary.publishedAt === edited.publishedAt,
   'article detail and sitemap summaries expose actual edit time without changing publication time')
   check(edited.content === 'متن بلوکی' && edited.blocks?.blocks.length === 1, 'omitting blocks preserves the layout and its derived content')
-  check(edited.titleAr === input.titleAr && edited.arAuto === true && edited.author === input.author
+  check(edited.titleAr === null && edited.excerptAr === null && edited.arAuto === true && edited.author === input.author
     && edited.profileImage === input.profileImage && edited.galleryImages.length === 1
     && edited.processes.length === 2 && edited.subCategoryId === sub.id && edited.isFeatured,
-  'PATCH preserves omitted translations, media, processes, author, sub-category and flags')
+  'PATCH invalidates only changed title/excerpt translations and preserves media, processes, author, sub-category and flags')
   const arabic = (await articlesService.byId(id, 'ar'))!
   check(arabic.processes[0]?.title === 'مرحله اول' && arabic.processes[0]?.items.join('|') === 'یک|اثنان'
     && arabic.processes[1]?.items[0] === 'سه', 'Arabic process placeholders fall back to the corresponding Persian fields')
@@ -327,10 +327,16 @@ try {
   check(!!largeId && (await articlesService.adminDetail(largeId!))?.blocksAr?.translation?.fields.length === 200,
     'source proof metadata has its own allowance without lowering the existing translated block content limit')
 
+  const beforeDocumentClear = (await articlesService.adminDetail(translatedId))!
+  await assert.rejects(articlesService.update(translatedId, {
+    title: 'بدون ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocksAr: null,
+  }), errorCode('VALIDATION_ERROR'))
+  check((await articlesService.adminDetail(translatedId))!.blocksAr !== null, 'an unproved null clear cannot erase existing block translations')
   await articlesService.update(translatedId, {
     title: 'بدون ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocksAr: null,
+    sourceRevision: contentSourceRevision('article', beforeDocumentClear),
   })
-  check((await articlesService.adminDetail(translatedId))!.blocksAr === null
+  check((await articlesService.adminDetail(translatedId))!.blocksAr?.translation?.fields.every(field => field.origin === 'manual' && field.status !== 'translated')
     && (await articlesService.byId(translatedId, 'ar'))!.blocks?.blocks.length === legacyBlocks.blocks.length,
     'explicitly clearing Arabic blocks keeps the Persian document available to Arabic readers')
   await articlesService.close()
@@ -361,14 +367,22 @@ try {
   await articlesService.listPublic()
   await articlesService.updateCategory(category.id, { name: 'تغییر نام', hasSubCategories: false })
   const disabled = await findCategory('تغییر نام')
-  check(disabled.subCategories.length === 2 && disabled.nameAr === 'رئيسية', 'disabling sub-categories preserves their names and omitted translations')
+  check(disabled.subCategories.length === 2 && disabled.nameAr === null && disabled.subCategories.every(sub => sub.nameAr),
+    'renaming a category invalidates only its name while disabling sub-categories preserves their names and translations')
   check((await articlesService.listPublic()).find((a) => a.id === id)?.categoryName === 'تغییر نام', 'disabling a category invalidates cached article category names')
   await articlesService.updateCategory(category.id, { name: 'تغییر نام', hasSubCategories: true })
   check((await findCategory('تغییر نام')).subCategories.length === 2, 'omitting sub-categories during a rename does not delete them')
   await articlesService.updateCategory(category.id, {
     name: 'تغییر نام', hasSubCategories: true, subCategories: ['بخش', 'دوم'], subCategoriesAr: null,
   })
-  check((await findCategory('تغییر نام')).subCategories.every((s) => s.nameAr === null), 'explicit null clears sub-category translations')
+  check((await findCategory('تغییر نام')).subCategories.every((s) => s.nameAr), 'unproved stale nulls cannot erase manual sub-category translations')
+  const beforeClearSubs = (await articlesService.categories('fa', true)).find(row => row.id === category.id)!
+  await articlesService.updateCategory(category.id, { name: 'تغییر نام', hasSubCategories: true,
+    subCategoryEntries: beforeClearSubs.subCategories.map(sub => ({ id: sub.id, name: sub.name, nameAr: null,
+      translationEdits: contentTranslationFields('articleSubCategory', sub).map(field => ({ fieldId: field.fieldId, fieldPath: field.fieldPath,
+        sourceText: field.sourceText, revision: field.revision, value: '', origin: 'manual' as const })) })),
+  })
+  check((await findCategory('تغییر نام')).subCategories.every((s) => s.nameAr === null), 'explicit source-bound manual clears remove only selected sub-category translations')
 
   await Promise.all(Array.from({ length: 10 }, () => articlesService.toggle(id)))
   check((await articlesService.adminDetail(id))?.status === 'ACTIVE', 'concurrent status toggles each apply exactly once')
@@ -428,7 +442,7 @@ try {
   }))
   const categoriesForEdit = await adminCategories.json() as Array<{ id: string; name: string; nameAr: string | null }>
   check(adminCategories.status === 200 && categoriesForEdit.find((c) => c.id === category.id)?.name === 'تغییر نام'
-    && categoriesForEdit.find((c) => c.id === category.id)?.nameAr === 'رئيسية',
+    && categoriesForEdit.find((c) => c.id === category.id)?.nameAr === null,
   'administrator category data stays in Persian when the public language cookie is Arabic')
 
   await articlesService.toggle(id)

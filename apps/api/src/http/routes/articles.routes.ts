@@ -24,6 +24,7 @@ import type { ArticleService } from '#/domain/article/article.service'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { UUID_PATTERN } from '#/domain/shared/ids'
+import { translationEditsSchema } from './content-translation.schemas'
 
 const HEX_COLOR = '^#[0-9a-fA-F]{6}$'
 
@@ -74,6 +75,10 @@ const articleBlockTranslationSchema = t.Object({
     fieldPath: articleBlockFieldPathSchema,
     sourceText: t.String({ maxLength: 30000 }),
     status: t.Union([t.Literal('translated'), t.Literal('missing'), t.Literal('needs-retranslation')]),
+    origin: t.Optional(t.Union([t.Literal('manual'), t.Literal('automatic'), t.Literal('legacy')])),
+    staleValue: t.Optional(t.String({ maxLength: 30000 })),
+    revision: t.Optional(t.Integer({ minimum: 0 })),
+    error: t.Optional(t.String({ maxLength: 500 })),
   }), { maxItems: 6000 }),
 })
 const blockSchema = t.Object({
@@ -108,6 +113,7 @@ export const blocksArDocSchema = t.Nullable(
 )
 
 const articleBody = t.Object({
+  sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
   title: t.String({ minLength: 1, maxLength: 160 }),
   excerpt: t.String({ minLength: 1, maxLength: 1000 }),
   content: t.String({ minLength: 1 }),
@@ -128,15 +134,25 @@ const articleBody = t.Object({
   blocks: t.Optional(blocksDocSchema),
   // Arabic text is rebased onto Persian structure by the service, never normalized as Persian.
   blocksAr: t.Optional(blocksArDocSchema),
+  translationEdits: t.Optional(translationEditsSchema),
 })
 
 const categoryBody = t.Object({
+  sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
   name: t.String({ minLength: 1, maxLength: 60 }),
   hasSubCategories: t.Boolean(),
   subCategories: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 60 }), { maxItems: 12 })),
   // round-34 — نام عربی دسته + ساب‌دسته‌ها (موازی با subCategories)
   nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
   subCategoriesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 12 }))),
+  translationEdits: t.Optional(translationEditsSchema),
+  subCategoryEntries: t.Optional(t.Array(t.Object({
+    sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+    id: t.Optional(t.String({ pattern: UUID_PATTERN })),
+    name: t.String({ minLength: 1, maxLength: 60 }),
+    nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+    translationEdits: t.Optional(translationEditsSchema),
+  }), { maxItems: 12 })),
 })
 
 export interface ArticlesRoutesDeps {
@@ -183,7 +199,7 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
     .get('/', () => deps.articles.listAdmin(), {
       detail: { summary: 'All articles incl. INACTIVE' },
     })
-    .get('/categories', () => deps.articles.categories('fa'), {
+    .get('/categories', () => deps.articles.categories('fa', true), {
       detail: { summary: 'Article categories in the editing language, with raw Arabic translations' },
     })
     .get(

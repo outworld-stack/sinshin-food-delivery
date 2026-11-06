@@ -68,7 +68,7 @@ await db.transaction(async (tx) => {
     .onConflictDoUpdate({
       target: mainCategories.slug,
       set: {
-        nameAr: sql`coalesce(${mainCategories.nameAr}, excluded.name_ar)`,
+        nameAr: sql`case when ${mainCategories.translationState} is null and ${mainCategories.name} = excluded.name then coalesce(${mainCategories.nameAr}, excluded.name_ar) else ${mainCategories.nameAr} end`,
       },
     })
 
@@ -101,8 +101,8 @@ await db.transaction(async (tx) => {
       .onConflictDoUpdate({
         target: categories.slug,
         set: {
-          nameAr: sql`coalesce(${categories.nameAr}, excluded.name_ar)`,
-          sizeNamesAr: sql`coalesce(${categories.sizeNamesAr}, excluded.size_names_ar)`,
+          nameAr: sql`case when ${categories.translationState} is null and ${categories.name} = excluded.name then coalesce(${categories.nameAr}, excluded.name_ar) else ${categories.nameAr} end`,
+          sizeNamesAr: sql`case when ${categories.translationState} is null and ${categories.sizeNames} = excluded.size_names then coalesce(${categories.sizeNamesAr}, excluded.size_names_ar) else ${categories.sizeNamesAr} end`,
         },
       })
   }
@@ -167,10 +167,10 @@ await db.transaction(async (tx) => {
     .onConflictDoUpdate({
       target: contentAbout.id,
       set: {
-        heroTitleAr: sql`coalesce(${contentAbout.heroTitleAr}, excluded.hero_title_ar)`,
-        heroTextAr: sql`coalesce(${contentAbout.heroTextAr}, excluded.hero_text_ar)`,
-        teamTitleAr: sql`coalesce(${contentAbout.teamTitleAr}, excluded.team_title_ar)`,
-        teamAltAr: sql`coalesce(${contentAbout.teamAltAr}, excluded.team_alt_ar)`,
+        heroTitleAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.heroTitle} = excluded.hero_title then coalesce(${contentAbout.heroTitleAr}, excluded.hero_title_ar) else ${contentAbout.heroTitleAr} end`,
+        heroTextAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.heroText} = excluded.hero_text then coalesce(${contentAbout.heroTextAr}, excluded.hero_text_ar) else ${contentAbout.heroTextAr} end`,
+        teamTitleAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.teamTitle} = excluded.team_title then coalesce(${contentAbout.teamTitleAr}, excluded.team_title_ar) else ${contentAbout.teamTitleAr} end`,
+        teamAltAr: sql`case when ${contentAbout.translationState} is null and ${contentAbout.teamAlt} = excluded.team_alt then coalesce(${contentAbout.teamAltAr}, excluded.team_alt_ar) else ${contentAbout.teamAltAr} end`,
       },
     })
 
@@ -615,7 +615,7 @@ await db.transaction(async (tx) => {
       ])
       .onConflictDoUpdate({
         target: articleCategories.slug,
-        set: { nameAr: sql`coalesce(${articleCategories.nameAr}, excluded.name_ar)` },
+        set: { nameAr: sql`case when ${articleCategories.translationState} is null and ${articleCategories.name} = excluded.name then coalesce(${articleCategories.nameAr}, excluded.name_ar) else ${articleCategories.nameAr} end` },
       })
 
     const catArticle = async (slug: string) =>
@@ -632,7 +632,7 @@ await db.transaction(async (tx) => {
         ])
         .onConflictDoUpdate({
           target: articleSubCategories.slug,
-          set: { nameAr: sql`coalesce(${articleSubCategories.nameAr}, excluded.name_ar)` },
+          set: { nameAr: sql`case when ${articleSubCategories.translationState} is null and ${articleSubCategories.name} = excluded.name then coalesce(${articleSubCategories.nameAr}, excluded.name_ar) else ${articleSubCategories.nameAr} end` },
         })
     }
 

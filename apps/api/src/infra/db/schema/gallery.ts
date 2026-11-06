@@ -6,7 +6,8 @@
 // ═══════════════════════════════════════════════════════════════
 
 //src/infra/db/schema/gallery.ts
-import { boolean, index, integer, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core'
+import type { ContentTranslationState } from '@sinshin/shared'
 import type { GalleryImageId } from '#/domain/shared/brand'
 
 export const galleryImages = pgTable(
@@ -17,6 +18,7 @@ export const galleryImages = pgTable(
     alt: text('alt').notNull(),
     /** round-34 — متن جایگزین عربی (NULL = پشتیبان فارسی) */
     altAr: text('alt_ar'),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
     arAuto: boolean('ar_auto').notNull().default(false),
     span: varchar('span', { length: 10 }).notNull().default('normal'),

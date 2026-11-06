@@ -21,7 +21,6 @@ import {
     admin2Sessions,
     orders,
     users,
-    SETTING_KEYS,
     type UserRow,
 } from '#/infra/db/schema'
 import type { AppConfig } from '#/infra/config/env'
@@ -30,7 +29,7 @@ import { ensureUserReferralCode } from '#/domain/shared/referral-code'
 import { asUserId } from '#/domain/shared/brand'
 import type { SettingsService } from '#/domain/settings/settings.service'
 import type { SseHub } from '#/infra/realtime/sse-hub'
-import { TEMPORARY_CLOSE_REASON_MIN_LENGTH, type AdminSessionDto, type SubAdminPermissionsDto, type SubAdminPermissionsPatch, type SubAdminRecordDto } from '@sinshin/shared'
+import { TEMPORARY_CLOSE_REASON_MIN_LENGTH, type AdminSessionDto, type SubAdminPermissionsDto, type SubAdminPermissionsPatch, type SubAdminRecordDto, type TranslationEdit } from '@sinshin/shared'
 
 /** ساختار حوزه — از دو ستون boolean */
 export interface Admin2Scope {
@@ -441,6 +440,8 @@ export class Admin2Service {
         /** round-34 — علت عربی (اختیاری؛ خالی = حذف ترجمه = پشتیبان فارسی) */
         reasonAr?: string | null,
         disablePayments = false,
+        translationEdits?: TranslationEdit[],
+        sourceRevision?: string,
     ): Promise<void> {
         const p = actorRole === 'admin2' ? await this.profile(actorUserId) : null
         if (actorRole !== 'admin' && (actorRole !== 'admin2' || !p?.isActive || !p.canToggleTemporaryClose)) {
@@ -457,27 +458,18 @@ export class Admin2Service {
         )) {
             throw Err.validation(`علت عربی باید بین ${TEMPORARY_CLOSE_REASON_MIN_LENGTH} تا ۱۲۰ نویسه باشد.`)
         }
+        for (const edit of translationEdits ?? []) {
+            if (closed && edit.fieldId === 'reason' && edit.value.trim() &&
+                (edit.value.trim().length < TEMPORARY_CLOSE_REASON_MIN_LENGTH || edit.value.trim().length > 120)) {
+                throw Err.validation(`علت عربی باید بین ${TEMPORARY_CLOSE_REASON_MIN_LENGTH} تا ۱۲۰ نویسه باشد.`)
+            }
+        }
         if (typeof disablePayments !== 'boolean') {
             throw Err.validation('وضعیت غیرفعال‌سازی پرداخت نامعتبر است.')
         }
-        // Publish a new closure only after its message and payment policy are ready.
-        // Reopening immediately removes the effective payment block, then clears metadata.
-        if (!closed) await this.deps.settings.set(SETTING_KEYS.temporarilyClosed, false)
-        await this.deps.settings.set(
-            SETTING_KEYS.temporaryCloseReason,
-            closed ? normalizedReason : '',
-        )
-        // round-34 — کلید موازی عربی؛ فقط موقع بسته‌بودن معنا دارد و با باز شدن پاک می‌شود
-        await this.deps.settings.set(
-            SETTING_KEYS.temporaryCloseReasonAr,
-            closed ? normalizedReasonAr : '',
-        )
-        await this.deps.settings.set(
-            SETTING_KEYS.temporaryReopenTime,
-            closed ? (reopenTime ?? '').trim().slice(0, 40) : '',
-        )
-        await this.deps.settings.set(SETTING_KEYS.temporaryPaymentsDisabled, closed && disablePayments)
-        if (closed) await this.deps.settings.set(SETTING_KEYS.temporarilyClosed, true)
+        await this.deps.settings.setTemporaryCloseContent({ closed, reason: normalizedReason,
+            reasonAr: reasonAr === undefined ? undefined : normalizedReasonAr, reopenTime, disablePayments,
+            translationEdits, sourceRevision })
         if (actorRole === 'admin2') {
             await this.log(
                 actorUserId,

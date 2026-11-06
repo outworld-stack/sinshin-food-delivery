@@ -132,6 +132,10 @@ function fieldStates(
 				fieldPath: [...path],
 				sourceText: raw.sourceText,
 				status: raw.status as ArticleBlockTranslationStatus,
+				...(['manual', 'automatic', 'legacy'].includes(String(raw.origin)) ? { origin: raw.origin as 'manual' | 'automatic' | 'legacy' } : {}),
+				...(typeof raw.staleValue === 'string' && raw.staleValue.length <= 30000 ? { staleValue: raw.staleValue } : {}),
+				...(Number.isSafeInteger(raw.revision) && Number(raw.revision) >= 0 ? { revision: Number(raw.revision) } : {}),
+				...(typeof raw.error === 'string' && raw.error.length <= 500 ? { error: raw.error } : {}),
 			})
 	}
 	return result
@@ -310,6 +314,7 @@ function rebase(
 					state.sourceText !== field.text ||
 					state.status === 'needs-retranslation'
 				) {
+					if (value.trim() && state.staleValue === undefined) state.staleValue = value
 					value = ''
 					state.status = 'needs-retranslation'
 				} else state.status = value.trim() ? 'translated' : 'missing'
@@ -356,6 +361,8 @@ export function fillMissingArticleBlocksTranslation(
 		for (const field of getArticleBlockTextFields(block)) {
 			if (field.text.trim()) continue
 			const key = fieldKey(block.id, block.type, field.path)
+			const saved = states.get(key)
+			if (saved?.origin === 'manual' || saved?.origin === 'legacy') continue
 			const proof = incomingStates.get(key)
 			const sourceBlock = source?.blocks.find(
 				(item) => item?.id === block.id && item.type === block.type,
@@ -423,6 +430,7 @@ export function setArticleBlockTranslations(
 	source: ArticleBlocksDoc | null | undefined,
 	translation: unknown,
 	updates: ArticleBlockTextUpdate[],
+	origin: 'manual' | 'automatic' = 'manual',
 ): ArticleBlocksDoc | null {
 	const out = normalizeArticleBlocksTranslation(source, translation)
 	if (!out || !source) return out
@@ -447,6 +455,9 @@ export function setArticleBlockTranslations(
 			blockType: block.type,
 			fieldPath: [...field.path],
 			sourceText: field.text,
+			origin,
+			revision: (states.get(key)?.revision ?? 0) + 1,
+			...(states.get(key)?.staleValue !== undefined ? { staleValue: states.get(key)?.staleValue } : {}),
 			status: update.text.trim()
 				? 'translated'
 				: states.get(key)?.status === 'needs-retranslation'
@@ -464,10 +475,11 @@ export function setArticleBlockTranslation(
 	blockId: string,
 	path: ArticleBlockTextPath,
 	text: string,
+	origin: 'manual' | 'automatic' = 'manual',
 ): ArticleBlocksDoc | null {
 	return setArticleBlockTranslations(source, translation, [
 		{ blockId, path, text },
-	])
+	], origin)
 }
 
 /** Build once for editor render/bulk actions, instead of rescanning all proof for each field. */
@@ -543,6 +555,8 @@ export function reconcileArticleBlocksTranslation(
 		]),
 	)
 	const states = fieldStates(next, out)
+	const savedTranslations = translationsById(current)
+	const previousBlocks = new Map((previous?.blocks ?? []).filter(Boolean).map((block) => [block.id, block]))
 	const candidates = translationsById(incoming)
 	const proofs = fieldStates(next, incoming)
 	for (const block of next.blocks.filter(Boolean)) {
@@ -555,10 +569,21 @@ export function reconcileArticleBlocksTranslation(
 			const key = fieldKey(block.id, block.type, field.path)
 			const change = changed.get(key)
 			const proof = proofs.get(key)
+			const saved = states.get(key)
+			const priorBlock = previousBlocks.get(block.id)
+			const previousBlock = priorBlock?.type === block.type ? priorBlock : undefined
+			const priorTranslation = savedTranslations.get(block.id)
+			const priorValue = priorTranslation?.type === block.type ? readArticleBlockText(priorTranslation, field.path) : ''
 			const validProof =
 				proof &&
 				proof.sourceText === field.text &&
-				proof.status !== 'needs-retranslation'
+				proof.status !== 'needs-retranslation' &&
+				(proof.origin !== 'automatic' ||
+					(saved?.origin !== 'manual' && saved?.origin !== 'legacy' &&
+						(saved?.origin === 'automatic' || !priorValue.trim()) &&
+						(!priorValue.trim() || change || saved?.status === 'needs-retranslation'))) &&
+				(saved?.revision === undefined ||
+					proof.revision === saved.revision + 1 + (change && previousBlock ? 1 : 0))
 			const value =
 				candidate?.type === block.type
 					? readArticleBlockText(candidate, field.path)
@@ -566,18 +591,24 @@ export function reconcileArticleBlocksTranslation(
 			if (change) {
 				writeText(target, field.path, '')
 				states.set(key, {
+					...saved,
 					blockId: block.id,
 					blockType: block.type,
 					fieldPath: [...field.path],
 					sourceText: change.previousText ?? field.text,
+					origin: saved?.origin ?? (priorValue.trim() ? 'legacy' : 'automatic'),
+					revision: (saved?.revision ?? 0) + 1,
+					...(priorValue.trim() ? { staleValue: priorValue } : {}),
 					status:
 						change.previousText === undefined
 							? 'missing'
 							: 'needs-retranslation',
 				})
-				if (validProof && value.trim()) {
+				const invalidatedState = states.get(key)
+				if (invalidatedState) delete invalidatedState.error
+				if (validProof && (value.trim() || proof.origin === 'manual' && proof.status === 'missing')) {
 					writeText(target, field.path, value.slice(0, field.maxLength))
-					states.set(key, { ...proof, status: 'translated' })
+					states.set(key, { ...proof, status: value.trim() ? 'translated' : 'missing' })
 				}
 				continue
 			}

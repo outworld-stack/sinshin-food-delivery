@@ -1,4 +1,6 @@
-import type { AboutLocationDto, ArticleBlocksDoc } from '@sinshin/shared'
+import { assertContentSourceRevision, getArticleBlockTextFields, localizeContentRecord, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, reconcileArticleBlocksTranslation, reconcileContentTranslation, setArticleBlockTranslations, type AboutLocationDto, type ArticleBlocksDoc } from '@sinshin/shared'
+import { isDeepStrictEqual } from 'node:util'
+import { eq, sql } from 'drizzle-orm'
 import { Elysia, t } from 'elysia'
 import { normalizeBlocksDoc } from '#/domain/article/blocks-normalize'
 import type { SessionService } from '#/domain/auth/session.service'
@@ -8,6 +10,8 @@ import { langFromHeaders, nullIfEmpty, pickAr } from '#/domain/shared/lang'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import type { Db } from '#/infra/db/client'
 import { contentAbout } from '#/infra/db/schema'
+import { blocksArDocSchema } from './articles.routes'
+import { translationEditsSchema } from './content-translation.schemas'
 
 export interface AboutRoutesDeps {
   db: Db
@@ -36,6 +40,16 @@ function normalizeAboutBlocks(input: unknown): ArticleBlocksDoc | null {
   return normalizeBlocksDoc(input)
 }
 
+function normalizeAboutArabicBlocks(source: ArticleBlocksDoc | null, input: unknown): ArticleBlocksDoc | null {
+  if (input == null) return null
+  if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 2_097_152) throw Err.validation('حجم سند ترجمه درباره ما بیش از حد مجاز است.')
+  const out = normalizeArticleBlocksTranslation(source, input)
+  if (out && Buffer.byteLength(JSON.stringify({ version: out.version, blocks: out.blocks }), 'utf8') > 262_144) {
+    throw Err.validation('حجم ترجمه بلوکی درباره ما نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
+  }
+  return out
+}
+
 function validCoordinates(value: unknown): value is { lat: number; lng: number } {
   if (!value || typeof value !== 'object') return false
   const point = value as { lat?: unknown; lng?: unknown }
@@ -62,6 +76,7 @@ const emptyContent: typeof contentAbout.$inferSelect = {
   location: null,
   arAuto: false,
   updatedAt: new Date(0),
+  translationState: null,
 }
 
 export const aboutRoutes = (deps: AboutRoutesDeps) => {
@@ -81,14 +96,16 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
     .get('/', async ({ headers }) => {
       const lang = langFromHeaders(headers)
       const row = await readContent()
-      const location = row.location ?? await readDefaultLocation()
+      const valid = lang === 'ar' ? localizeContentRecord('about', row) : row
+      const { translationState: _state, blocksAr: _arabicDocument, ...publicRow } = valid
+      const location = valid.location ?? await readDefaultLocation()
       return {
-        ...row,
-        heroTitle: pickAr(lang, row.heroTitleAr, row.heroTitle),
-        heroText: pickAr(lang, row.heroTextAr, row.heroText),
-        teamTitle: pickAr(lang, row.teamTitleAr, row.teamTitle),
-        teamAlt: pickAr(lang, row.teamAltAr, row.teamAlt),
-        blocks: lang === 'ar' ? row.blocksAr ?? row.blocks : row.blocks,
+        ...publicRow,
+        heroTitle: pickAr(lang, valid.heroTitleAr, valid.heroTitle),
+        heroText: pickAr(lang, valid.heroTextAr, valid.heroText),
+        teamTitle: pickAr(lang, valid.teamTitleAr, valid.teamTitle),
+        teamAlt: pickAr(lang, valid.teamAltAr, valid.teamAlt),
+        blocks: lang === 'ar' ? mergeArticleBlocksTranslation(row.blocks, row.blocksAr) : row.blocks,
         location: location ? {
           ...location,
           address: pickAr(lang, location.addressAr, location.address),
@@ -107,7 +124,25 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
     .patch('/', async ({ body }) => {
       const heroTitle = body.heroTitle.trim()
       if (!heroTitle) throw Err.validation('عنوان اصلی درباره ما را وارد کنید.')
-      const patch = {
+      await deps.db.transaction(async tx => {
+        // Serialize singleton creation as well as later saves; worker writes lock this row.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('content:about'))`)
+        const [existing] = await tx.select().from(contentAbout).limit(1).for('update')
+        const current = existing ?? emptyContent
+        if (!assertContentSourceRevision('about', current, body.sourceRevision)) throw Err.validation('محتوای درباره ما تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+        const blocks = body.blocks === undefined || isDeepStrictEqual(body.blocks, current.blocks)
+          ? current.blocks : normalizeAboutBlocks(body.blocks)
+        if (blocks && body.blocksAr === null && body.sourceRevision === undefined
+          && current.blocksAr?.blocks.some(block => getArticleBlockTextFields(block).some(field => field.text.trim()))) {
+          throw Err.validation('برای حذف ترجمه‌های عربی، فرم درباره ما را دوباره بارگذاری کنید.')
+        }
+        const blocksAr = body.blocksAr !== undefined || blocks !== current.blocks
+          ? normalizeAboutArabicBlocks(blocks, body.blocksAr === null ? setArticleBlockTranslations(blocks, current.blocksAr,
+            (blocks?.blocks ?? []).flatMap(block => getArticleBlockTextFields(block).map(field => ({ blockId: block.id, path: field.path, text: '' }))), 'manual') : reconcileArticleBlocksTranslation(
+            current.blocks, blocks, current.blocksAr, body.blocksAr,
+          )) : current.blocksAr
+        const next = reconcileContentTranslation('about', String(current.id), existing ?? null, {
+        ...current,
         heroTitle,
         heroText: body.heroText.trim(),
         heroGradient: body.heroGradient.trim(),
@@ -118,23 +153,24 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
         ...(body.heroTextAr !== undefined ? { heroTextAr: nullIfEmpty(body.heroTextAr) } : {}),
         ...(body.teamTitleAr !== undefined ? { teamTitleAr: nullIfEmpty(body.teamTitleAr) } : {}),
         ...(body.teamAltAr !== undefined ? { teamAltAr: nullIfEmpty(body.teamAltAr) } : {}),
-        ...(body.blocks !== undefined ? { blocks: normalizeAboutBlocks(body.blocks) } : {}),
-        ...(body.blocksAr !== undefined ? { blocksAr: normalizeAboutBlocks(body.blocksAr) } : {}),
+        blocks,
+        blocksAr,
         ...(body.location !== undefined ? { location: body.location === null ? null : {
           lat: body.location.lat,
           lng: body.location.lng,
           address: body.location.address.trim(),
-          addressAr: nullIfEmpty(body.location.addressAr),
+          addressAr: body.location.addressAr === undefined ? current.location?.addressAr ?? null : nullIfEmpty(body.location.addressAr),
         } } : {}),
         arAuto: false,
-        updatedAt: new Date(),
-      }
-      const existing = (await deps.db.select({ id: contentAbout.id }).from(contentAbout).limit(1))[0]
-      await deps.db.insert(contentAbout).values({ id: existing?.id ?? 1, ...patch })
-        .onConflictDoUpdate({ target: contentAbout.id, set: patch })
+        updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)),
+      }, body.translationEdits)
+      if (existing) await tx.update(contentAbout).set(next).where(eq(contentAbout.id, existing.id))
+      else await tx.insert(contentAbout).values(next)
+      })
       return { success: true }
     }, {
       body: t.Object({
+        sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
         heroTitle: t.String({ minLength: 1, maxLength: 120 }),
         heroText: t.String({ maxLength: 2000 }),
         heroGradient: t.String({ maxLength: 2048 }),
@@ -146,7 +182,8 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
         teamTitleAr: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
         teamAltAr: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
         blocks: t.Optional(blocksDocSchema),
-        blocksAr: t.Optional(blocksDocSchema),
+        blocksAr: t.Optional(blocksArDocSchema),
+        translationEdits: t.Optional(translationEditsSchema),
         location: t.Optional(t.Nullable(t.Object({
           lat: t.Number({ minimum: -90, maximum: 90 }),
           lng: t.Number({ minimum: -180, maximum: 180 }),

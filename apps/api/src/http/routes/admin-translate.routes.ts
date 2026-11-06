@@ -15,6 +15,7 @@ import type { TranslationService } from '#/domain/translation/translation.servic
 import { Err } from '#/domain/shared/errors'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
 import { articleBlockFieldPathSchema, articleBlockTypeSchema, blocksArDocSchema, blocksDocSchema } from './articles.routes'
+import { contentFieldPathSchema } from './content-translation.schemas'
 
 /**
  * round-35 — صف و پیش‌نمایش ترجمه‌ی خودکار (مترجم آفلاین NLLB).
@@ -26,6 +27,7 @@ import { articleBlockFieldPathSchema, articleBlockTypeSchema, blocksArDocSchema,
 
 const ENTITY_WRITE_PERMISSION: Record<TranslationEntityType, keyof Admin2Permissions | null> = {
   product: 'productsWrite',
+  productSize: 'productsWrite',
   mainCategory: 'mainCategoriesWrite',
   category: 'mainCategoriesWrite',
   article: 'articlesWrite',
@@ -34,6 +36,8 @@ const ENTITY_WRITE_PERMISSION: Record<TranslationEntityType, keyof Admin2Permiss
   gallery: null,
   terms: null,
   about: null,
+  packagingItem: null,
+  temporaryClose: 'canToggleTemporaryClose',
 }
 
 function assertCanEnqueue(role: string, permissions: Admin2Permissions | null, entityType?: TranslationEntityType): void {
@@ -46,6 +50,7 @@ function assertCanEnqueue(role: string, permissions: Admin2Permissions | null, e
 
 const EntityTypeSchema = t.Union([
   t.Literal('product'),
+  t.Literal('productSize'),
   t.Literal('mainCategory'),
   t.Literal('category'),
   t.Literal('article'),
@@ -54,6 +59,8 @@ const EntityTypeSchema = t.Union([
   t.Literal('gallery'),
   t.Literal('terms'),
   t.Literal('about'),
+  t.Literal('packagingItem'),
+  t.Literal('temporaryClose'),
 ])
 
 export interface AdminTranslateRoutesDeps {
@@ -66,14 +73,29 @@ export const adminTranslateRoutes = (deps: AdminTranslateRoutesDeps) =>
   new Elysia({ prefix: '/admin/translate', tags: ['Admin / Translation'] })
     .use(requireAdmin2({ sessions: deps.sessions, admin2: deps.admin2 }))
 
+    .post('/field', async ({ body, user, admin2 }) => {
+      assertCanEnqueue(user.role, admin2, body.entityType)
+      return deps.translation.previewField(body)
+    }, {
+      body: t.Object({
+        entityType: EntityTypeSchema,
+        entityId: t.String({ minLength: 1, maxLength: 64 }),
+        fieldId: t.String({ minLength: 1, maxLength: 200 }),
+        fieldPath: contentFieldPathSchema,
+        sourceText: t.String({ minLength: 1, maxLength: 1000000 }),
+        revision: t.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+      }, { additionalProperties: false }),
+      detail: { summary: 'Translate one validated current source field for administrator review' },
+    })
+
     // ── پیشنهاد ترجمه — فرم را پر می‌کند؛ هیچ نوشتنی در DB نیست ──
     .post(
       '/preview',
       async ({ body }) => ({ translations: await deps.translation.preview(body.texts) }),
       {
         body: t.Object({
-          // سقف ۸ متن × ۳۰k — کافی برای همه‌ی فیلدهای فرم + بدنه‌ی Markdown
-          texts: t.Array(t.String({ minLength: 1, maxLength: 30000 }), {
+          // Individual fields and legacy Markdown drafts; service also caps the total text payload.
+          texts: t.Array(t.String({ minLength: 1, maxLength: 1000000 }), {
             minItems: 1,
             maxItems: 8,
           }),
@@ -86,13 +108,19 @@ export const adminTranslateRoutes = (deps: AdminTranslateRoutesDeps) =>
 
     .post(
       '/block-field',
-      async ({ body }) => deps.translation.previewBlockField(body),
+      async ({ body, user, admin2 }) => {
+        if (body.entityType) assertCanEnqueue(user.role, admin2, body.entityType)
+        return deps.translation.previewBlockField(body)
+      },
       {
         body: t.Object({
           blockId: t.String({ minLength: 1, maxLength: 64 }),
           blockType: articleBlockTypeSchema,
           fieldPath: articleBlockFieldPathSchema,
           text: t.String({ minLength: 1, maxLength: 30000 }),
+          entityType: t.Optional(t.Union([t.Literal('article'), t.Literal('about')])),
+          entityId: t.Optional(t.String({ minLength: 1, maxLength: 64 })),
+          revision: t.Optional(t.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
         }, { additionalProperties: false }),
         detail: { summary: 'Translate one Persian article block field for review without saving it' },
       },

@@ -100,6 +100,14 @@ try {
   passed('concurrent saves keep product and packaging in one version; omitted selections remain intact')
 
   const [buyer] = await db.insert(users).values({ phone: '09150000087' }).returning()
+  // This suite exercises packaging/payment validation for an existing customer.
+  // First-purchase reservation concurrency has its own coupon/payment suites.
+  await db.insert(orders).values({
+    userId: buyer!.id, displayId: 'MENU-PRIOR-PAID', status: 'PAID', paymentStatus: 'SUCCESS',
+    deliveryType: 'PICKUP', totalAmount: 100000,
+    breakdown: { foodTotal: 100000, discount: 0, walletDeduction: 0, deliveryFee: 0,
+      packagingFee: 0, totalAmount: 100000, amountPaidOnline: 100000 },
+  })
   let busy = false
   let enabled = true
   const config = new AppConfig({ NODE_ENV: 'development', DATABASE_URL: scratchUrl.toString(), GATEWAY_MODE: 'direct',

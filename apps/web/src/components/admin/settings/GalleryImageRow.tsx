@@ -9,11 +9,15 @@
 import { memo, useCallback, useState } from 'react'
 import { FileUploader } from '#/components/FileUploader'
 import { Toggle } from '#/components/shared/Toggle'
-import { arBadgeOf } from '#/components/admin/ArField'
+import { ArField, arBadgeOf } from '#/components/admin/ArField'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
+import type { TranslationEdit } from '@sinshin/shared'
 import type { GalleryImage, GallerySpan } from '#/types/site/gallery'
 import { isRealImageUrl } from '#/utils/image'
 
 export interface GalleryImageEditFields {
+        sourceRevision?: string
+        translationEdits?: TranslationEdit[]
         alt: string
         /** round-34 — متن جایگزین عربی ('' = حذف ترجمه = پشتیبان فارسی) */
         altAr: string
@@ -69,21 +73,24 @@ export const GalleryImageRow = memo(function GalleryImageRow({
         const [altAr, setAltAr] = useState(image.altAr ?? '')
         const [span, setSpan] = useState<GallerySpan>(image.span)
         const [src, setSrc] = useState(image.src)
+        const translation = useContentTranslationDraft({ entityType: 'gallery', entityId: image.id,
+                initialRow: { ...image }, row: { ...image, alt: alt.trim(), altAr } })
 
         const startEdit = useCallback(() => {
+                translation.reset({ ...image })
                 setAlt(image.alt)
                 setAltAr(image.altAr ?? '')
                 setSpan(image.span)
                 setSrc(image.src)
                 setIsEditing(true)
-        }, [image.alt, image.altAr, image.span, image.src])
+        }, [image, translation])
 
         const cancelEdit = useCallback(() => setIsEditing(false), [])
 
         const handleSave = useCallback(() => {
-                onSave(image.id, { alt: alt.trim(), altAr: altAr.trim(), span, src })
+                onSave(image.id, { alt: alt.trim(), altAr: altAr.trim(), span, src, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
                 setIsEditing(false)
-        }, [image.id, alt, altAr, span, src, onSave])
+        }, [image.id, alt, altAr, span, src, onSave, translation])
 
         return (
                 <li className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
@@ -135,15 +142,8 @@ export const GalleryImageRow = memo(function GalleryImageRow({
                                                 </div>
                                                 {/* round-34 — متن جایگزین عربی + بج وضعیت */}
                                                 <div className="flex items-center gap-2">
-                                                        <input
-                                                                value={altAr}
-                                                                onChange={(e) => setAltAr(e.target.value)}
-                                                                dir="rtl"
-                                                                maxLength={200}
-                                                                className="flex-1 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary"
-                                                                placeholder="متن جایگزین عربی (خالی = همان فارسی)"
-                                                        />
-                                                        <ArRowBadge value={altAr} arAuto={image.arAuto} />
+                                                        <ArField label="متن جایگزین" value={altAr} onChange={setAltAr}
+                                                                faReference={alt.trim()} translation={translation.field(['alt'])} maxLength={200} disabled={isBusy} />
                                                 </div>
                                         </div>
                                 ) : (

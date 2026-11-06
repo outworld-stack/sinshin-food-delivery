@@ -10,6 +10,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { memo, useCallback, useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Star, Trash2, X } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
+import type { MainCategory, TranslationEdit } from '@sinshin/shared'
+import { updateMainCategory } from '#/server/products'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Can } from '#/components/shared/PermissionGate'
 import { Toggle } from '#/components/shared/Toggle'
@@ -27,30 +30,36 @@ import { adminMainCategoriesOptions } from '#/utils/queryOptions'
 // --- مودال ساخت ---
 const AddMainModal = memo(function AddMainModal({
 	onClose,
+	initialMain,
 }: {
 	onClose: () => void
+	initialMain?: MainCategory | null
 }) {
 	const queryClient = useQueryClient()
 	const showToast = useToastStore((s) => s.showToast)
-	const [name, setName] = useState('')
+	const [name, setName] = useState(initialMain?.name ?? '')
 	// round-34 — نام عربی (اختیاری؛ خالی = پشتیبان فارسی)
-	const [nameAr, setNameAr] = useState('')
-	const [slug, setSlug] = useState('')
+	const [nameAr, setNameAr] = useState(initialMain?.nameAr ?? '')
+	const [slug, setSlug] = useState(initialMain?.slug ?? '')
 	const [error, setError] = useState('')
+	const translation = useContentTranslationDraft({ entityType: 'mainCategory', entityId: initialMain?.id,
+		initialRow: initialMain ? { ...initialMain } : null, row: { name: name.trim(), nameAr } })
 
 	const mutation = useMutation({
 		mutationFn: (data: {
 			name: string
 			nameAr?: string | null
 			slug: string
-		}) => createMainCategory({ data }),
+			translationEdits?: TranslationEdit[]
+			sourceRevision?: string
+		}) => initialMain ? updateMainCategory({ data: { ...data, id: initialMain.id } }) : createMainCategory({ data }),
 		onSuccess: async (res) => {
 			if (!res.success) {
 				setError(res.message ?? 'خطا')
 				return
 			}
 			await invalidateCategoryQueries(queryClient)
-			showToast('دسته اصلی ساخته شد — برای نمایش فعالش کنید')
+			showToast(initialMain ? 'دسته اصلی ویرایش شد' : 'دسته اصلی ساخته شد — برای نمایش فعالش کنید')
 			onClose()
 		},
 	})
@@ -68,12 +77,14 @@ const AddMainModal = memo(function AddMainModal({
 			}
 			setError('')
 			mutation.mutate({
+				translationEdits: translation.getEdits(),
+				sourceRevision: translation.sourceRevision,
 				name: name.trim(),
 				nameAr: nameAr.trim() || null,
 				slug: slug.trim(),
 			})
 		},
-		[name, nameAr, slug, mutation],
+		[name, nameAr, slug, mutation, translation],
 	)
 
 	const handleSlug = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -89,7 +100,7 @@ const AddMainModal = memo(function AddMainModal({
 			<div className="relative bg-white dark:bg-[#2a1015] p-6 rounded-2xl shadow-xl w-full max-w-md">
 				<div className="flex items-center justify-between mb-6">
 					<h3 className="font-DanaDemiBold text-xl text-gray-800 dark:text-white">
-						دسته اصلی جدید
+						{initialMain ? 'ویرایش دسته اصلی' : 'دسته اصلی جدید'}
 					</h3>
 					<button
 						type="button"
@@ -114,6 +125,7 @@ const AddMainModal = memo(function AddMainModal({
 					</div>
 					{/* round-34 — نام عربی (خالی = پشتیبان فارسی) */}
 					<ArField
+						translation={translation.field(['name'])}
 						label="نام"
 						value={nameAr}
 						onChange={setNameAr}
@@ -127,6 +139,7 @@ const AddMainModal = memo(function AddMainModal({
 						<input
 							type="text"
 							value={slug}
+							disabled={!!initialMain}
 							onChange={handleSlug}
 							dir="ltr"
 							className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white text-center"
@@ -172,6 +185,7 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 	const showToast = useToastStore((s) => s.showToast)
 
 	const [isAddOpen, setIsAddOpen] = useState(false)
+	const [editingMain, setEditingMain] = useState<MainCategory | null>(null)
 	const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
 	// دسته‌های اصلی از فکتوری مشترک — همون کش فرم دسته‌بندی
@@ -221,8 +235,8 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 		},
 	})
 
-	const handleOpenAdd = useCallback(() => setIsAddOpen(true), [])
-	const handleCloseAdd = useCallback(() => setIsAddOpen(false), [])
+	const handleOpenAdd = useCallback(() => { setEditingMain(null); setIsAddOpen(true) }, [])
+	const handleCloseAdd = useCallback(() => { setIsAddOpen(false); setEditingMain(null) }, [])
 	const handleToggle = useCallback(
 		(id: string) => toggleMutation.mutate(id),
 		[toggleMutation],
@@ -281,6 +295,8 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 							<div className="flex items-center gap-3">
 								{/* ترتیب — فقط write */}
 								<Can allowed={canWrite}>
+									<button type="button" onClick={() => { setEditingMain(mc); setIsAddOpen(true) }}
+										className="text-xs text-primary underline cursor-pointer">ویرایش نام</button>
 									<div className="flex flex-col gap-0.5">
 										<button
 											type="button"
@@ -388,7 +404,7 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 			)}
 
 			{/* مودال ساخت — فقط write */}
-			{canWrite && isAddOpen && <AddMainModal onClose={handleCloseAdd} />}
+			{canWrite && isAddOpen && <AddMainModal key={editingMain?.id ?? 'new'} initialMain={editingMain} onClose={handleCloseAdd} />}
 
 			<ConfirmModal
 				isOpen={!!confirmDelete}

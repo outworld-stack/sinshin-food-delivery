@@ -214,6 +214,7 @@ insert into "devices" ("id","fingerprint_hash","canvas_hash","webgl_hash","audio
 async function buildLegacyAt0004(url: string): Promise<void> {
   const res = await runRealMigrate(url)
   if (res.code !== 0) throw new Error('migrate اولیه برای ساخت legacy ناموفق بود')
+  await removeContentProvenanceColumns(url)
   await q(url, `
     drop table if exists "registration_permits";
     drop table if exists "backfill_runs";
@@ -306,6 +307,13 @@ async function buildLegacyAt0004(url: string): Promise<void> {
   await q(url, `insert into "content_about"
     ("id", "hero_title", "hero_text", "hero_gradient", "team_title", "team_gradient", "team_alt")
     values (1, 'Existing restaurant story', 'Original copy', '', 'Our team', '', '')`)
+}
+
+/** Only used to reconstruct older schemas in the named disposable test databases. */
+async function removeContentProvenanceColumns(url: string): Promise<void> {
+  for (const table of ['article_categories', 'article_sub_categories', 'articles', 'gallery_images', 'categories', 'main_categories', 'packaging_items', 'product_sizes', 'products', 'content_about', 'settings', 'terms']) {
+    await q(url, `alter table "${table}" drop column if exists "translation_state"`)
+  }
 }
 
 /** مقادیر (device_type, device_brand) یک ردیف */
@@ -743,8 +751,9 @@ await withScratch('article-ar', async (url) => {
   const migration = DISK_JOURNAL.entries.find((entry) => entry.tag.startsWith('0026'))
   if (!migration) throw new Error('Arabic article migration is missing from the journal')
   // Restore the schema immediately before the additive Arabic column migration.
+  await removeContentProvenanceColumns(url)
   await q(url, `alter table "articles" drop column "blocks_ar";
-    delete from "drizzle"."__drizzle_migrations" where created_at = ${migration.when};
+    delete from "drizzle"."__drizzle_migrations" where created_at >= ${migration.when};
     insert into "article_categories" ("id", "name", "slug")
       values ('30000000-0000-0000-0000-000000000001', 'مقالات', 'article-ar-upgrade');
     insert into "articles" ("id", "title", "excerpt", "content", "title_ar", "category_id", "blocks")

@@ -20,7 +20,7 @@ import {
   sizeFinalPriceOf,
 } from '#/domain/menu/menu.service'
 import { pickAr, type Lang } from '#/domain/shared/lang'
-import type { CartDetails, CartItemInput } from '@sinshin/shared'
+import { contentTranslationValue, type CartDetails, type CartItemInput } from '@sinshin/shared'
 
 // رارد ۴۷ — تایپ‌های سبد از قرارداد مشترک می‌آیند (کپی‌های محلی حذف شدند):
 // ورودی شکل خام سیم است (بدون برند) و خروجی در مرز ساخت، برند می‌گیرد.
@@ -89,7 +89,7 @@ export class CartService {
             (item.sizeId ? sizes.find((s) => s.id === item.sizeId) : undefined) ?? sizes[0]!
           basePrice = size.price
           effectivePrice = sizeFinalPriceOf(size)
-          sizeName = pickAr(lang, size.nameAr, size.name)
+          sizeName = pickAr(lang, contentTranslationValue('productSize', size, ['name']), size.name)
         } else {
           basePrice = product.originalPrice
           effectivePrice = finalPriceOf(product)
@@ -106,7 +106,7 @@ export class CartService {
         id: product.id as ProductId,
         sizeId: item.sizeId ? asSizeId(item.sizeId) : null,
         sizeName,
-        name: pickAr(lang, product.nameAr, product.name),
+        name: pickAr(lang, contentTranslationValue('product', product, ['name']), product.name),
         profileImage: product.profileImage,
         originalPrice: basePrice,
         finalPrice: effectivePrice,

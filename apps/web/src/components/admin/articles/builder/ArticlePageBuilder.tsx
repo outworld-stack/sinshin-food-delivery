@@ -111,6 +111,10 @@ interface BuilderProps {
 	requireText?: boolean
 	docAr?: ArticleBlocksDoc | null
 	onArabicChange?: (doc: ArticleBlocksDoc) => void
+	translationEntityType?: 'article' | 'about'
+	translationEntityId?: string
+	initialDoc?: ArticleBlocksDoc | null
+	initialDocAr?: ArticleBlocksDoc | null
 }
 
 /** یک دکمه‌ی پله‌ای (عرض/انیمیشن/پد/چینش) */
@@ -750,6 +754,10 @@ export function ArticlePageBuilder({
 	requireText = true,
 	docAr,
 	onArabicChange,
+	translationEntityType,
+	translationEntityId,
+	initialDoc,
+	initialDocAr,
 }: BuilderProps) {
 	const showToast = useToastStore((s) => s.showToast)
 	// Upload callbacks can resolve after other edits or a block reorder.
@@ -770,6 +778,10 @@ export function ArticlePageBuilder({
 		onChange: onArabicChange,
 		mounted: mountedRef,
 		showToast,
+		translationEntityType,
+		translationEntityId,
+		initialDoc,
+		initialDocAr,
 	})
 	const commitDoc = useCallback(
 		(next: ArticleBlocksDoc) => {
@@ -1247,6 +1259,10 @@ export function ArticlePageBuilder({
 												(b) => b.id === block.id && b.type === block.type,
 											)
 											const status = arabic.status(block.id, field.path)
+											const proof = arabic.draft?.translation?.fields.find(state => state.blockId === block.id && state.blockType === block.type
+												&& JSON.stringify(state.fieldPath) === JSON.stringify(field.path))
+											const progress = arabic.fieldState(block.id, field.path)
+											const fieldError = progress.error ?? proof?.error
 											const fieldId = `ar-${encodeURIComponent(block.id)}-${field.path.join('-')}`
 											return (
 												<div
@@ -1266,12 +1282,14 @@ export function ArticlePageBuilder({
 																	: 'text-gray-400'
 															}
 														>
-															{status === 'translated'
+															{progress.busy ? 'در حال ترجمه...'
+																: status === 'translated'
 																? 'ترجمه‌شده'
 																: status === 'needs-retranslation'
-																	? 'نیازمند ترجمه مجدد'
+																	? proof?.origin === 'manual' || proof?.origin === 'legacy' ? 'نیازمند بازبینی' : 'نیازمند ترجمه مجدد'
 																	: 'ترجمه نشده'}
 														</span>
+													{fieldError && !progress.busy && <span className="text-red-500" title={fieldError}>ترجمه ناموفق؛ دوباره تلاش کنید</span>}
 														<button
 															type="button"
 															disabled={
@@ -1284,7 +1302,7 @@ export function ArticlePageBuilder({
 															}
 															className="px-2 py-1 rounded-md border cursor-pointer disabled:opacity-50"
 														>
-															ترجمه این فیلد
+															{progress.busy ? 'در حال ترجمه...' : fieldError ? 'تلاش مجدد این فیلد' : 'ترجمه این فیلد'}
 														</button>
 													</div>
 													{field.text && (
@@ -1308,6 +1326,14 @@ export function ArticlePageBuilder({
 														}
 														placeholder="خالی = نمایش متن فارسی"
 													/>
+													{status === 'needs-retranslation' && proof?.staleValue && (
+														<div className="mt-2 text-amber-600 whitespace-pre-line">
+															<p>پیش‌نویس ترجمه قبلی: {proof.staleValue}</p>
+															<button type="button" className="underline cursor-pointer" onClick={() => arabic.edit(block.id, field.path, proof.staleValue ?? '')}>
+																بازبینی و استفاده از این پیش‌نویس
+															</button>
+														</div>
+													)}
 												</div>
 											)
 										})}

@@ -71,6 +71,7 @@ import {
   asCategoryId,
   asMainCategoryId,
   asProductId,
+  asSizeId,
   type CategoryId,
   type MainCategoryId,
   type ProductId,
@@ -82,7 +83,16 @@ import { UUID_RE } from '#/domain/shared/ids'
 // stage-69 (F4) — رقم فارسی متن اعلان (قرارداد واحد domain/report/format)
 import { faNum } from '#/domain/report/format'
 // stage-86 — DTO وضعیت خرید دسته‌ها (پاسخ GET /admin/menu/purchase-state)
-import type { Product, PurchaseStateDto, SimilarProductsDto } from '@sinshin/shared'
+import {
+  contentTranslationValue,
+  assertContentSourceRevision,
+  localizeContentRecord,
+  reconcileContentTranslation,
+  type TranslationEdit,
+  type Product,
+  type PurchaseStateDto,
+  type SimilarProductsDto,
+} from '@sinshin/shared'
 
 const CACHE_TTL_SECONDS = 30
 const VERSION_KEY = 'menu:ver'
@@ -177,8 +187,12 @@ export function asDiscountDate(v: unknown): Date | null {
  * تایپ مستقل تا create/update/insertSizes/upsert همه یک قرارداد داشته باشند.
  */
 export interface SizeInput {
+  /** Existing variants are matched by their immutable database ID. */
+  id?: string
   name: string
   nameAr?: string | null
+  translationEdits?: TranslationEdit[]
+  sourceRevision?: string
   price: number
   discountPercentage?: number
   discountStartsAt?: Date | string | null
@@ -328,18 +342,20 @@ export async function loadCategoryPurchaseStates(
  * عمومی نادیده‌شان می‌گیرد، ادمین برای ویرایش می‌خواندش).
  */
 function categoryView(c: CategoryRow, lang: Lang, mainIds?: MainCategoryId[]) {
+  const localized = localizeContentRecord('category', c)
   return {
-    ...c,
+    ...localized,
     // stage-60 — همه‌ی والدهای دسته (والدِ اولیه اول؛ برای فرم چند-والدی ادمین)
     mainCategoryIds: mainIds ?? [c.mainCategoryId],
-    name: pickAr(lang, c.nameAr, c.name),
-    sizeNames: pickArArr(lang, c.sizeNamesAr, c.sizeNames ?? []),
+    name: pickAr(lang, localized.nameAr, c.name),
+    sizeNames: pickArArr(lang, localized.sizeNamesAr, c.sizeNames ?? []),
   }
 }
 
 /** round-34 — نمای عمومی main: مثل categoryView فقط برای تب‌های منو */
 function mainCategoryView(m: MainCategoryRow, lang: Lang) {
-  return { ...m, name: pickAr(lang, m.nameAr, m.name) }
+  const localized = localizeContentRecord('mainCategory', m)
+  return { ...localized, name: pickAr(lang, localized.nameAr, m.name) }
 }
 
 /** پایه‌های قیمت‌گذاری دسته‌ای — خروجی loadPricingBases */
@@ -605,7 +621,7 @@ export class MenuService {
 
       // round-34 — نام دسته هم COALESCE: categoryName در حالت عربی عربی می‌شود
       const catMap = new Map(
-        catRows.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)] as const),
+        catRows.map((c) => [c.id, pickAr(lang, contentTranslationValue('category', c, ['name']), c.name)] as const),
       )
       // stage-48 — نقشه‌ی حالت‌های دسته برای محاسبه‌ی حالت مؤثر هر محصول
       const catModes = new Map(
@@ -653,7 +669,7 @@ export class MenuService {
       ])
       const list = await this.withSizes(
         [row],
-        new Map([[row.categoryId, pickAr(lang, cat?.nameAr, cat?.name ?? '')]]),
+        new Map([[row.categoryId, pickAr(lang, cat ? contentTranslationValue('category', cat, ['name']) : null, cat?.name ?? '')]]),
         lang,
         // stage-48 — حالت مؤثر = دسته AND محصول
         {
@@ -790,7 +806,7 @@ export class MenuService {
       const categoryIdsMap = new Map<ProductId, CategoryId[]>(
         picked.map((r) => [r.id, [r.categoryId, ...(extraByProduct.get(r.id) ?? [])]]),
       )
-      const list = await this.withSizes(picked, new Map(catRows.map((c) => [c.id, pickAr(lang, c.nameAr, c.name)])), lang, {
+      const list = await this.withSizes(picked, new Map(catRows.map((c) => [c.id, pickAr(lang, contentTranslationValue('category', c, ['name']), c.name)])), lang, {
         catModes: new Map(catRows.map((c) => [c.id, categoryModesOf(c)] as const)),
         categoryIdsMap,
         catPurchase,
@@ -828,10 +844,20 @@ export class MenuService {
     return this.deps.db.select().from(mainCategories).orderBy(asc(mainCategories.sortOrder))
   }
 
+  async adminCategories() {
+    const rows = await this.deps.db.select().from(categories).orderBy(asc(categories.name))
+    const links = await this.deps.db.select().from(categoryMains)
+    return rows.map((row) => ({
+      ...row,
+      mainCategoryIds: [row.mainCategoryId, ...links.filter((link) => link.categoryId === row.id).map((link) => link.mainId)],
+    }))
+  }
+
   async createMainCategory(
     name: string,
     slug: string,
     nameAr?: string | null,
+    translationEdits?: TranslationEdit[],
   ): Promise<{ success: boolean; message?: string }> {
     const clean = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
     if (!clean) return { success: false, message: 'slug معتبر نیست (مثلا: cafe)' }
@@ -841,15 +867,50 @@ export class MenuService {
     if (clash) return { success: false, message: 'این slug قبلاً ثبت شده' }
 
     const all = await this.adminMainCategories()
-    await this.deps.db.insert(mainCategories).values({
+    const id = asMainCategoryId(crypto.randomUUID())
+    const values = reconcileContentTranslation('mainCategory', id, null, {
+      id,
       name: name.trim(),
       nameAr: nullIfEmpty(nameAr),
       slug: clean,
       isActive: false,
       isDefault: false,
       sortOrder: all.length + 1,
-    } as typeof mainCategories.$inferInsert)
+    }, translationEdits)
+    await this.deps.db.insert(mainCategories).values(values as typeof mainCategories.$inferInsert)
     await this.cache.invalidate()
+    return { success: true }
+  }
+
+  async updateMainCategory(input: {
+    id: string
+    name: string
+    nameAr?: string | null
+    translationEdits?: TranslationEdit[]
+    sourceRevision?: string
+  }): Promise<{ success: boolean; message?: string }> {
+    const id = asMainCategoryId(input.id)
+    const saved = await this.deps.db.transaction(async (tx) => {
+      const [previous] = await tx.select().from(mainCategories).where(eq(mainCategories.id, id)).for('update')
+      if (!previous) return false
+      if (!assertContentSourceRevision('mainCategory', previous, input.sourceRevision)) {
+        throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      }
+      const next = reconcileContentTranslation('mainCategory', id, previous, {
+        ...previous,
+        name: input.name.trim(),
+        ...(input.nameAr !== undefined ? { nameAr: nullIfEmpty(input.nameAr) } : {}),
+      }, input.translationEdits)
+      await tx.update(mainCategories).set({
+        name: next.name,
+        nameAr: next.nameAr,
+        translationState: next.translationState,
+      }).where(eq(mainCategories.id, id))
+      return true
+    })
+    if (!saved) return { success: false, message: 'دسته اصلی پیدا نشد' }
+    await this.cache.invalidate()
+    await this.publishMenuLive({ productId: null, reason: 'translation' })
     return { success: true }
   }
 
@@ -1004,6 +1065,7 @@ export class MenuService {
     /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
     nameAr?: string | null
     sizeNamesAr?: string[] | null
+    translationEdits?: TranslationEdit[]
     /** stage-48 — حالت‌های سفارش پایه (پیش‌فرض هر سه روشن) */
     courierEnabled?: boolean
     takeawayEnabled?: boolean
@@ -1024,21 +1086,23 @@ export class MenuService {
       (m) => m !== primaryMain,
     )
     const slug = await this.uniqueCategorySlug(input.name.trim())
+    const id = asCategoryId(crypto.randomUUID())
+    const values = reconcileContentTranslation('category', id, null, {
+      id,
+      name: input.name.trim(),
+      nameAr: nullIfEmpty(input.nameAr),
+      slug,
+      mainCategoryId: primaryMain,
+      hasSizes: input.hasSizes,
+      sizeNames: input.hasSizes ? input.sizeNames : [],
+      sizeNamesAr: input.hasSizes ? input.sizeNamesAr ?? null : null,
+      courierEnabled: input.courierEnabled ?? true,
+      takeawayEnabled: input.takeawayEnabled ?? true,
+      dineInEnabled: input.dineInEnabled ?? true,
+    }, input.translationEdits)
     const [created] = await this.deps.db
       .insert(categories)
-      .values({
-        name: input.name.trim(),
-        nameAr: nullIfEmpty(input.nameAr),
-        slug,
-        mainCategoryId: primaryMain,
-        hasSizes: input.hasSizes,
-        sizeNames: input.hasSizes ? input.sizeNames : [],
-        sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
-        // stage-48 — حالت‌های سفارش (undefined = پیش‌فرض روشن)
-        courierEnabled: input.courierEnabled ?? true,
-        takeawayEnabled: input.takeawayEnabled ?? true,
-        dineInEnabled: input.dineInEnabled ?? true,
-      } as typeof categories.$inferInsert)
+      .values(values as typeof categories.$inferInsert)
       .returning({ id: categories.id })
     // stage-60 — لینک والدهای اضافه (دسته‌ی مشترک بین چند تب منو)
     if (created && extraMains.length > 0) {
@@ -1056,21 +1120,19 @@ export class MenuService {
     /** stage-60 — چند-والدی: همه‌ی والدها (اول = والدِ اولیه). نیامد = دست‌نخورده */
     mainCategoryIds?: string[]
     mainCategoryId?: string
-    hasSizes: boolean
-    sizeNames: string[]
+    hasSizes?: boolean
+    sizeNames?: string[]
     /** round-34 — نام عربی + قالب سایزهای عربی (موازی با sizeNames) */
     nameAr?: string | null
     sizeNamesAr?: string[] | null
+    translationEdits?: TranslationEdit[]
+    sourceRevision?: string
     /** stage-48 — حالت‌های سفارش پایه (undefined = دست‌نخورده) */
     courierEnabled?: boolean
     takeawayEnabled?: boolean
     dineInEnabled?: boolean
   }): Promise<void> {
     const catId = asCategoryId(input.id)
-    // stage-48 — ردیف قبلی برای تشخیص تغییر حالت‌ها (SSE + قید ارث‌بری)
-    const before = await this.deps.db.query.categories.findFirst({
-      where: eq(categories.id, catId),
-    })
     // stage-60 — والدها: آرایه مبناست (اول = والدِ اولیه)؛ نیامد = دست‌نخورده
     const mainList =
       input.mainCategoryIds !== undefined
@@ -1079,47 +1141,69 @@ export class MenuService {
           ? [input.mainCategoryId]
           : undefined
     const primaryMain = mainList?.length ? asMainCategoryId(mainList[0]!) : undefined
-    await this.deps.db
-      .update(categories)
-      .set({
+    let contentChanged = false
+    const before = await this.deps.db.transaction(async (tx) => {
+      const [previous] = await tx.select().from(categories).where(eq(categories.id, catId)).for('update')
+      if (!previous) throw Err.notFound('دسته‌بندی پیدا نشد')
+      if (!assertContentSourceRevision('category', previous, input.sourceRevision)) {
+        throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      }
+      const hasSizes = input.hasSizes ?? previous.hasSizes
+      const next = reconcileContentTranslation('category', catId, previous, {
+        ...previous,
         name: input.name.trim(),
-        nameAr: nullIfEmpty(input.nameAr),
-        ...(primaryMain !== undefined ? { mainCategoryId: primaryMain } : {}),
-        hasSizes: input.hasSizes,
-        sizeNames: input.hasSizes ? input.sizeNames : [],
-        sizeNamesAr: input.hasSizes && input.sizeNamesAr && input.sizeNamesAr.length > 0 ? input.sizeNamesAr : null,
-        ...(input.courierEnabled !== undefined ? { courierEnabled: input.courierEnabled } : {}),
-        ...(input.takeawayEnabled !== undefined ? { takeawayEnabled: input.takeawayEnabled } : {}),
-        ...(input.dineInEnabled !== undefined ? { dineInEnabled: input.dineInEnabled } : {}),
-      })
-      .where(eq(categories.id, catId))
+        ...(input.nameAr !== undefined ? { nameAr: nullIfEmpty(input.nameAr) } : {}),
+        hasSizes,
+        sizeNames: hasSizes ? input.sizeNames ?? previous.sizeNames ?? [] : [],
+        ...(input.sizeNamesAr !== undefined ? { sizeNamesAr: input.sizeNamesAr } : {}),
+      }, input.translationEdits)
+      contentChanged = JSON.stringify([previous.name, previous.nameAr, previous.sizeNames, previous.sizeNamesAr])
+        !== JSON.stringify([next.name, next.nameAr, next.sizeNames, next.sizeNamesAr])
+      await tx
+        .update(categories)
+        .set({
+          name: next.name,
+          nameAr: next.nameAr,
+          translationState: next.translationState,
+          ...(primaryMain !== undefined ? { mainCategoryId: primaryMain } : {}),
+          hasSizes,
+          sizeNames: next.sizeNames,
+          sizeNamesAr: next.sizeNamesAr,
+          ...(input.courierEnabled !== undefined ? { courierEnabled: input.courierEnabled } : {}),
+          ...(input.takeawayEnabled !== undefined ? { takeawayEnabled: input.takeawayEnabled } : {}),
+          ...(input.dineInEnabled !== undefined ? { dineInEnabled: input.dineInEnabled } : {}),
+        })
+        .where(eq(categories.id, catId))
 
-    // stage-60 — همگام‌سازی والدهای اضافه (حذفِ خارج از لیست + درجِ جدید).
-    // جدول فقط لینک‌های اضافه را دارد؛ والدِ اولیه هرگز اینجا نمی‌نشیند.
-    if (mainList && mainList.length > 0 && primaryMain !== undefined) {
-      const extraMains = [...new Set(mainList.slice(1).map((m) => asMainCategoryId(m)))].filter(
-        (m) => m !== primaryMain,
-      )
-      const existing = await this.deps.db
-        .select()
-        .from(categoryMains)
-        .where(eq(categoryMains.categoryId, catId))
-      const keep = new Set(extraMains)
-      const staleMains = existing.filter((l) => !keep.has(l.mainId)).map((l) => l.mainId)
-      if (staleMains.length > 0) {
-        await this.deps.db
-          .delete(categoryMains)
-          .where(and(eq(categoryMains.categoryId, catId), inArray(categoryMains.mainId, staleMains)))
+      // stage-60 — همگام‌سازی والدهای اضافه (حذفِ خارج از لیست + درجِ جدید).
+      // جدول فقط لینک‌های اضافه را دارد؛ والدِ اولیه هرگز اینجا نمی‌نشیند.
+      if (mainList && mainList.length > 0 && primaryMain !== undefined) {
+        const extraMains = [...new Set(mainList.slice(1).map((m) => asMainCategoryId(m)))].filter(
+          (m) => m !== primaryMain,
+        )
+        const existing = await tx
+          .select()
+          .from(categoryMains)
+          .where(eq(categoryMains.categoryId, catId))
+        const keep = new Set(extraMains)
+        const staleMains = existing.filter((l) => !keep.has(l.mainId)).map((l) => l.mainId)
+        if (staleMains.length > 0) {
+          await tx
+            .delete(categoryMains)
+            .where(and(eq(categoryMains.categoryId, catId), inArray(categoryMains.mainId, staleMains)))
+        }
+        const have = new Set(existing.map((l) => l.mainId))
+        const missing = extraMains.filter((m) => !have.has(m))
+        if (missing.length > 0) {
+          await tx
+            .insert(categoryMains)
+            .values(missing.map((mainId) => ({ categoryId: catId, mainId })))
+        }
       }
-      const have = new Set(existing.map((l) => l.mainId))
-      const missing = extraMains.filter((m) => !have.has(m))
-      if (missing.length > 0) {
-        await this.deps.db
-          .insert(categoryMains)
-          .values(missing.map((mainId) => ({ categoryId: catId, mainId })))
-      }
-    }
+      return previous
+    })
     await this.cache.invalidate()
+    if (contentChanged) await this.publishMenuLive({ productId: null, reason: 'translation' })
 
     // stage-48 — تغییر حالت‌های دسته ⇒ همه‌ی محصولات ذیلش مؤثراً عوض می‌شوند →
     // سبد/چک‌اوتِ باز باید فوراً رفرش شوند (رویداد عمومی بدون productId).
@@ -1328,6 +1412,7 @@ export class MenuService {
     nameAr?: string | null
     descriptionAr?: string | null
     ingredientsAr?: string[] | null
+    translationEdits?: TranslationEdit[]
     /** stage-48 — موجودی فروش (پیش‌فرض true) */
     isAvailable?: boolean
     /** stage-48 — پرچم‌های حالت سفارش (پیش‌فرض true = ارث کامل از دسته) */
@@ -1376,12 +1461,14 @@ export class MenuService {
       (c) => c !== primaryCat,
     )
     let created: typeof products.$inferSelect | undefined
+    const productId = asProductId(crypto.randomUUID())
     try {
       await this.deps.db.transaction(async (tx) => {
         await this.validatePackagingItems(tx, input.packagingItemIds)
         ;[created] = await tx
           .insert(products)
-          .values({
+          .values(reconcileContentTranslation('product', productId, null, {
+            id: productId,
             name: input.name,
             description: input.description,
             // round-34 — ذخیره‌ی دستی ادمین: arAuto=false (بج «دستی»)
@@ -1413,7 +1500,7 @@ export class MenuService {
             // stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
             // (نامعتبر/غایب ⇒ NULL = ارث از تنظیم سراسری)
             featuredAnimation: normalizeFeaturedAnimation(input.featuredAnimation),
-          } as typeof products.$inferInsert)
+          }, input.translationEdits) as typeof products.$inferInsert)
           .returning()
 
         if (!created) return
@@ -1479,6 +1566,8 @@ export class MenuService {
     nameAr?: string | null
     descriptionAr?: string | null
     ingredientsAr?: string[] | null
+    translationEdits?: TranslationEdit[]
+    sourceRevision?: string
     /** stage-48 — موجودی فروش (undefined = دست‌نخورده) */
     isAvailable?: boolean
     /** stage-48 — پرچم‌های حالت سفارش (undefined = دست‌نخورده) */
@@ -1518,11 +1607,6 @@ export class MenuService {
     //   • سایز تکی/یکی از چند سایز تخفیف گرفت ⇒ یک اطلاعیه‌ی صحیح (نه تکراری)
     //   • ویرایش بی‌ربط (نام/توضیح) با تخفیف ثابت ⇒ بدون اطلاعیه‌ی جدید
     const beforeBestPct = before ? await this.bestActiveDiscountPct(before) : undefined
-    // round-34 — نرمال‌سازی: '' → NULL؛ مواد اولیه‌ی خالی → NULL
-    const nameAr = nullIfEmpty(input.nameAr)
-    const descriptionAr = nullIfEmpty(input.descriptionAr)
-    const ingredientsAr =
-      input.ingredientsAr && input.ingredientsAr.length > 0 ? input.ingredientsAr : null
     // stage-47 — درصد نرمال + پنجره (درصد ۰ ⇒ پنجره null).
     // «نیامدن هر دو فیلد زمانی» = کلاینت قدیمی → مقدار موجود حفظ می‌شود
     // (همان قاعده‌ی packagingCost؛ drizzle مقدار undefined را از SET حذف می‌کند).
@@ -1556,20 +1640,36 @@ export class MenuService {
         )
       : undefined
     let saved = false
+    let contentChanged = false
     try {
       saved = await this.deps.db.transaction(async (tx) => {
+        const [previous] = await tx.select().from(products).where(eq(products.id, pid)).for('update')
+        if (!previous) return false
+        if (!assertContentSourceRevision('product', previous, input.sourceRevision)) {
+          throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+        }
         await this.validatePackagingItems(tx, input.packagingItemIds)
+        const translated = reconcileContentTranslation('product', pid, previous, {
+          ...previous,
+          name: input.name,
+          description: input.description,
+          ingredients: input.ingredients ?? previous.ingredients ?? [],
+          ...(input.nameAr !== undefined ? { nameAr: nullIfEmpty(input.nameAr) } : {}),
+          ...(input.descriptionAr !== undefined ? { descriptionAr: nullIfEmpty(input.descriptionAr) } : {}),
+          ...(input.ingredientsAr !== undefined ? { ingredientsAr: input.ingredientsAr } : {}),
+        }, input.translationEdits)
+        contentChanged = JSON.stringify([previous.name, previous.description, previous.ingredients, previous.nameAr, previous.descriptionAr, previous.ingredientsAr])
+          !== JSON.stringify([translated.name, translated.description, translated.ingredients, translated.nameAr, translated.descriptionAr, translated.ingredientsAr])
         const [updated] = await tx
           .update(products)
           .set({
             name: input.name,
             description: input.description,
-            // round-34 — ذخیره‌ی دستی ادمین همیشه پرچم «خودکار» را برمی‌گرداند:
-            // مقدار عربی دارد → «دستی»؛ همه خالی → بدون ترجمه (NULL ها بالا مشخص شدند)
-            nameAr,
-            descriptionAr,
-            ingredientsAr,
-            arAuto: false,
+            // Field provenance independently preserves manual Arabic and invalidates changed sources.
+            nameAr: translated.nameAr,
+            descriptionAr: translated.descriptionAr,
+            ingredientsAr: translated.ingredientsAr,
+            translationState: translated.translationState,
             originalPrice: input.originalPrice,
             discountPercentage: pct,
             ...windowFields,
@@ -1590,7 +1690,7 @@ export class MenuService {
             profileImage: input.profileImage ?? null,
             galleryImages: input.galleryImages ?? [],
             sizesEnabled: input.sizesEnabled ?? false,
-            ingredients: input.ingredients ?? [],
+            ingredients: translated.ingredients,
             // stage-48 — موجودی/حالت‌ها: undefined = حفظ مقدار قبلی (دراپ Removes undefined از SET)
             ...(input.isAvailable !== undefined ? { isAvailable: input.isAvailable } : {}),
             ...(input.courierAllowed !== undefined ? { courierAllowed: input.courierAllowed } : {}),
@@ -1659,12 +1759,8 @@ export class MenuService {
           }
         }
 
-        // ── phase-2: آیدی پایدار سایزها ──
-        // قبلاً: حذف همه + اینسرت با UUID جدید → سبدِ مشتری که sizeId قدیمی
-        // داشت یا خطا می‌خورد یا بی‌سروصدا اولین سایز قیمت می‌شد. الان:
-        //   • نام موجود → همان ردیف، فقط price/sortOrder/nameAr آپدیت (id ثابت)
-        //   • نام جدید → insert | نام حذف‌شده → delete
-        //   • sizesEnabled=false → دست نمی‌زنیم (برای فعال‌سازی مجدد حفظ می‌شوند)
+        // Stable IDs survive renames/reordering. Legacy clients may match an exact unique name.
+        // Disabled sizes remain stored for later reactivation.
         if (input.sizesEnabled && input.sizes) {
           const sizes = input.sizes // ← رفع خطای TS: narrowing برای داخل callback
           this.validateSizeNames(sizes)
@@ -1672,11 +1768,35 @@ export class MenuService {
             .select()
             .from(productSizes)
             .where(eq(productSizes.productId, pid))
+            .for('update')
           const byName = new Map(existing.map((s) => [s.name, s]))
-
+          const byId = new Map(existing.map((s) => [s.id as string, s]))
           const keepIds = new Set<string>()
+          const resolved = sizes.map((s) => {
+            const match = s.id !== undefined ? byId.get(s.id) : byName.get(s.name)
+            if (s.id !== undefined && !match) throw Err.validation('سایز انتخاب‌شده متعلق به این محصول نیست یا حذف شده است.')
+            if (match && keepIds.has(match.id)) throw Err.validation('شناسه سایز تکراری است.')
+            if (match) {
+              if (!assertContentSourceRevision('productSize', match, s.sourceRevision)) {
+                throw Err.validation('سایز محصول تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+              }
+            }
+            if (match) keepIds.add(match.id)
+            return { s, match }
+          })
+          const stale = existing.filter((s) => !keepIds.has(s.id)).map((s) => s.id)
+          if (stale.length > 0) {
+            contentChanged = true
+            await tx.delete(productSizes).where(inArray(productSizes.id, stale))
+          }
+          // The unique (product_id, name) constraint also permits exchanging names safely.
+          for (const { s, match } of resolved) {
+            if (match && match.name !== s.name) {
+              await tx.update(productSizes).set({ name: `__rename_${crypto.randomUUID()}` }).where(eq(productSizes.id, match.id))
+            }
+          }
           let order = 0
-          for (const s of sizes) {
+          for (const { s, match } of resolved) {
             // stage-47 — تخفیف مستقل هر سایز (نرمال + قیچی)
             const sizePct = clampPercent(s.discountPercentage ?? 0)
             const sizeWindow =
@@ -1687,25 +1807,34 @@ export class MenuService {
                     discountEndsAt: asDiscountDate(s.discountEndsAt),
                   }
                 : { discountPercentage: 0, discountStartsAt: null, discountEndsAt: null }
-            const match = byName.get(s.name)
             if (match) {
+              const translated = reconcileContentTranslation('productSize', match.id, match, {
+                ...match,
+                name: s.name,
+                ...(s.nameAr !== undefined ? { nameAr: nullIfEmpty(s.nameAr) } : {}),
+              }, s.translationEdits)
+              if (match.name !== translated.name || match.nameAr !== translated.nameAr) contentChanged = true
               await tx
                 .update(productSizes)
                 .set({
+                  name: s.name,
                   price: s.price,
                   sortOrder: order,
-                  nameAr: nullIfEmpty(s.nameAr),
+                  nameAr: translated.nameAr,
+                  translationState: translated.translationState,
                   ...sizeWindow,
                   // stage-56 — تصویر variant: undefined = دست‌نخورده؛
                   // رشته/خالی = تنظیم/پاک‌سازی
                   ...(s.image !== undefined ? { image: nullIfEmpty(s.image) } : {}),
                 })
                 .where(eq(productSizes.id, match.id))
-              keepIds.add(match.id)
             } else {
-              const [ins] = await tx
+              contentChanged = true
+              const sizeId = asSizeId(crypto.randomUUID())
+              await tx
                 .insert(productSizes)
-                .values({
+                .values(reconcileContentTranslation('productSize', sizeId, null, {
+                  id: sizeId,
                   productId: pid,
                   name: s.name,
                   nameAr: nullIfEmpty(s.nameAr),
@@ -1714,16 +1843,9 @@ export class MenuService {
                   // stage-56 — تصویر مستقل این variant
                   image: nullIfEmpty(s.image),
                   ...sizeWindow,
-                })
-                .returning({ id: productSizes.id })
-              if (ins) keepIds.add(ins.id)
+                }, s.translationEdits))
             }
             order++
-          }
-
-          const stale = existing.filter((s) => !keepIds.has(s.id)).map((s) => s.id)
-          if (stale.length > 0) {
-            await tx.delete(productSizes).where(inArray(productSizes.id, stale))
           }
         }
 
@@ -1738,6 +1860,7 @@ export class MenuService {
     if (!saved) return { success: false, message: 'محصول پیدا نشد' }
 
     await this.cache.invalidate()
+    if (contentChanged) await this.publishMenuLive({ productId: pid, reason: 'translation' })
 
     // ── stage-48: عوارض زنده ──
     const after = await this.deps.db.query.products.findFirst({
@@ -1862,9 +1985,12 @@ export class MenuService {
     this.validateSizeNames(sizes)
     await db.insert(productSizes).values(
       sizes.map((s, i) => {
+        if (s.id !== undefined) throw Err.validation('برای سایز جدید شناسه موجود ارسال نکنید.')
+        const id = asSizeId(crypto.randomUUID())
         // stage-47 — تخفیف مستقل هر سایز (نرمال + قیچی)
         const sizePct = clampPercent(s.discountPercentage ?? 0)
-        return {
+        return reconcileContentTranslation('productSize', id, null, {
+          id,
           productId,
           name: s.name,
           nameAr: nullIfEmpty(s.nameAr),
@@ -1875,7 +2001,7 @@ export class MenuService {
           // stage-56 — تصویر مستقل این variant (null = تصویر مشترک محصول)
           image: nullIfEmpty(s.image),
           sortOrder: i,
-        }
+        }, s.translationEdits)
       }),
     )
   }
@@ -1940,10 +2066,10 @@ export class MenuService {
 
     return rows.map((r) => ({
       id: r.id,
-      name: pickAr(lang, r.nameAr, r.name),
+      name: pickAr(lang, contentTranslationValue('product', r, ['name']), r.name),
       // stage-56 — slug سئو (null = URL همان UUID) — در همه‌ی لیست‌ها حاضر
       slug: r.slug ?? null,
-      description: pickAr(lang, r.descriptionAr, r.description ?? ''),
+      description: pickAr(lang, contentTranslationValue('product', r, ['description']), r.description ?? ''),
       originalPrice: r.originalPrice,
       finalPrice: finalPriceOf(r, now),
       discountPercentage: r.discountPercentage,
@@ -1966,7 +2092,7 @@ export class MenuService {
       sizesEnabled: r.sizesEnabled,
       sizes: (sizeMap.get(r.id) ?? []).map((s) => ({
         id: s.id,
-        name: pickAr(lang, s.nameAr, s.name),
+        name: pickAr(lang, contentTranslationValue('productSize', s, ['name']), s.name),
         price: s.price,
         // stage-47 — تخفیف مستقِ این سایز + قیمت مؤثر + فعال‌بودن پنجره
         discountPercentage: s.discountPercentage,
@@ -1977,9 +2103,9 @@ export class MenuService {
         // stage-56 — تصویر مستقل این variant (null = تصویر مشترک محصول)
         image: s.image ?? null,
         // round-34 — فقط پاسخ ادمین: نام عربی خام سایز برای فرم ویرایش
-        ...(opts?.includeAr ? { nameAr: s.nameAr ?? null } : {}),
+        ...(opts?.includeAr ? { nameAr: s.nameAr ?? null, translationState: s.translationState } : {}),
       })),
-      ingredients: pickArArr(lang, r.ingredientsAr, r.ingredients ?? []),
+      ingredients: pickArArr(lang, localizeContentRecord('product', r).ingredientsAr, r.ingredients ?? []),
       prepTime: r.prepTime,
       views: r.views,
       sales: r.sales,
@@ -2005,6 +2131,7 @@ export class MenuService {
             descriptionAr: r.descriptionAr ?? null,
             ingredientsAr: r.ingredientsAr ?? null,
             arAuto: r.arAuto,
+            translationState: r.translationState,
             /** stage-48 — قفل سوئیچ‌های فرم: دسته خاموش ⇒ محصول نمی‌تواند روشن کند */
             categoryCourierEnabled: opts.catModes?.get(r.categoryId)?.courier ?? true,
             categoryTakeawayEnabled: opts.catModes?.get(r.categoryId)?.takeaway ?? true,

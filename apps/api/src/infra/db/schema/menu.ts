@@ -57,6 +57,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core'
 import type { CategoryId, MainCategoryId, ProductId, SizeId } from '#/domain/shared/brand'
+import type { ContentTranslationState } from '@sinshin/shared'
 
 
 
@@ -67,6 +68,7 @@ export const mainCategories = pgTable(
     id: uuid('id').primaryKey().defaultRandom().$type<MainCategoryId>(), name: varchar('name', { length: 60 }).notNull(),
     /** round-34 — نام عربی (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     /** انگلیسی — در URL: /products?tab=restaurant */
     slug: varchar('slug', { length: 60 }).notNull(),
     isActive: boolean('is_active').notNull().default(false),
@@ -99,6 +101,7 @@ export const categories = pgTable(
     slug: varchar('slug', { length: 60 }).notNull(),
     /** round-34 — نام عربی دسته (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     /** سایزبندی برای این دسته فعال است؟ (پیتزا) — stage-48: از مودال دسته حذف شد؛ ستون برای سازگاری مانده */
     hasSizes: boolean('has_sizes').notNull().default(false),
     /** قالب نام سایزها — کوچک/متوسط/بزرگ/خانوادگی */
@@ -151,6 +154,7 @@ export const products = pgTable(
     slug: varchar('slug', { length: 80 }),
     /** round-34 — محتوای عربی (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 120 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     descriptionAr: text('description_ar'),
     /** پرچم «ترجمه‌ی خودکار» — رارد ۳۵ true می‌گذارد؛ ذخیره‌ی دستی false */
     arAuto: boolean('ar_auto').notNull().default(false),
@@ -237,6 +241,7 @@ export const productSizes = pgTable(
     name: varchar('name', { length: 60 }).notNull(),
     /** round-34 — نام عربی سایز (NULL = پشتیبان فارسی) */
     nameAr: varchar('name_ar', { length: 60 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     price: integer('price').notNull(),
     /** stage-47 — درصد تخفیف این سایز (۰ = بدون تخفیف) */
     discountPercentage: integer('discount_percentage').notNull().default(0),
@@ -325,6 +330,7 @@ export const packagingItems = pgTable(
     title: varchar('title', { length: 60 }).notNull(),
     /** round-34 — عنوان عربی (NULL = پشتیبان فارسی؛ فقط پنل ادمین) */
     titleAr: varchar('title_ar', { length: 60 }),
+    translationState: jsonb('translation_state').$type<ContentTranslationState>(),
     /** قیمت سراسری قلم (تومان) — مثل delivery_zones.fee فقط integer امن */
     price: integer('price').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),

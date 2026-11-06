@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
-import { getArticleBlockTranslationStatus, normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, setArticleBlockTranslation, type ArticleBlockTextPath, type ArticleBlockType, type ArticleBlocksDoc } from '@sinshin/shared'
+import { contentSourceRevision, contentTranslationFields, getArticleBlockTranslationStatus, normalizeArticleBlocksTranslation, readArticleBlockText, reconcileArticleBlocksTranslation, setArticleBlockText, setArticleBlockTranslation, type ArticleBlockTextPath, type ArticleBlockType, type ArticleBlocksDoc } from '@sinshin/shared'
 import { ArticleService } from '../src/domain/article/article.service'
 import { TranslationService } from '../src/domain/translation/translation.service'
 import { AppError } from '../src/domain/shared/errors'
@@ -38,7 +38,7 @@ const deferred = () => {
 let gate: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> } | undefined
 const payloads: string[][] = []
 let prefix = 'عربي '
-let rejectNext = false
+let rejectText: string | undefined
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input)
   assert.ok(url.startsWith('http://article-translator.test/'), `Unexpected network request: ${url}`)
@@ -49,7 +49,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   assert.equal(body.source, 'pes')
   assert.equal(body.target, 'arb')
   payloads.push(body.texts)
-  if (rejectNext) { rejectNext = false; return Response.json({ error: 'Rejected fixture' }, { status: 422 }) }
+  if (body.texts.includes(rejectText ?? '')) { rejectText = undefined; return Response.json({ error: 'Rejected fixture' }, { status: 422 }) }
   const pending = gate
   gate = undefined
   if (pending) { pending.entered.resolve(); await pending.release.promise }
@@ -205,7 +205,10 @@ try {
     && text((await service.byId(fieldId, 'ar'))!.blocks!, 'branch', ['title']) === 'نام جدید شعبه',
     'late field responses and stale source proofs cannot restore outdated Arabic or disturb an adjacent manual address')
   payloads.length = 0
-  const changedPreview = await translator.previewBlocks({ blocks: afterLate.blocks, blocksAr: afterLate.blocksAr })
+  await translator.previewBlocks({ blocks: afterLate.blocks, blocksAr: afterLate.blocksAr })
+  assert.deepEqual(payloads, [], 'bulk preview preserves stale manually reviewed fields until explicit review')
+  const changedField = await translator.previewBlockField({ blockId: 'branch', blockType: 'location', fieldPath: ['title'], text: 'نام جدید شعبه' })
+  const changedPreview = setArticleBlockTranslation(editedFieldSource, afterLate.blocksAr, changedField.blockId, changedField.fieldPath, changedField.translation)!
   assert.deepEqual(payloads, [['نام جدید شعبه']])
   check(text(changedPreview, 'branch', ['address']) === 'عنوان يدوي', 'changed-field preview excludes every completed sibling from translator payloads')
   await service.update(fieldId, { ...fieldInput, blocks: editedFieldSource, blocksAr: changedPreview })
@@ -233,14 +236,14 @@ try {
   check(await translator.processNext() === 'done', 'queue fills a changed field in an otherwise completed machine document')
   check(JSON.stringify(payloads.slice(beforeMachineField).flat()) === JSON.stringify(['فقط تیتر جدید برای صف']),
     'queue sends only the changed block field and does not retranslate completed article titles, excerpts or siblings')
-  let savedManual = setArticleBlockText(queued.blocksAr!, 'hero', ['title'], 'عنوان نهائي يدوي')
-  savedManual = setArticleBlockText(savedManual, 'image', ['caption'], '')
-  await service.update(id, { ...input, blocksAr: savedManual })
+  const savedManual = setArticleBlockTranslation(source, queued.blocksAr!, 'hero', ['title'], 'عنوان نهائي يدوي')!
+  const captionSource = setArticleBlockText(source, 'image', ['caption'], 'زیرنویس تازه تصویر')
+  await service.update(id, { ...input, blocks: captionSource, blocksAr: savedManual })
   prefix = 'ترجمة جديدة '
   await translator.enqueue('article', id)
   check(await translator.processNext() === 'done', 'worker completes partially translated documents')
   const manualQueued = (await service.adminDetail(id))!
-  check(text(manualQueued.blocksAr!, 'hero', ['title']) === 'عنوان نهائي يدوي' && text(manualQueued.blocksAr!, 'image', ['caption']) === 'ترجمة جديدة زیرنویس تصویر' && text(manualQueued.blocksAr!, 'paragraph', ['text']) === 'عربي متن پاراگراف' && manualQueued.arAuto === false, 'worker fills missing fields without replacing reviewed Arabic text or its manual flag')
+  check(text(manualQueued.blocksAr!, 'hero', ['title']) === 'عنوان نهائي يدوي' && text(manualQueued.blocksAr!, 'image', ['caption']) === 'ترجمة جديدة زیرنویس تازه تصویر' && text(manualQueued.blocksAr!, 'paragraph', ['text']) === 'عربي متن پاراگراف' && manualQueued.arAuto === false, 'worker fills missing fields without replacing reviewed Arabic text or its manual flag')
   const { id: raceId } = await service.create(input)
   assert.ok(raceId)
   const raceBefore = (await service.adminDetail(raceId))!
@@ -269,6 +272,7 @@ try {
   assert.equal(finalLocation.type, 'location')
   check(text(afterRace.blocksAr!, 'heading', ['text']) === 'تحرير أثناء الطلب' && text(afterRace.blocksAr!, 'paragraph', ['text']) === '' && text(racePublic.blocks!, 'paragraph', ['text']) === 'متن جدید بعد از درخواست' && afterRace.titleAr === null && text(afterRace.blocksAr!, 'hero', ['title']) === '', 'concurrent manual edits and clears win; stale translations fall back to current Persian')
   check(finalLocation.props.lat === 33.98765432109 && finalLocation.props.lng === 48.12345678901 && afterRace.blocksAr!.blocks.map((block) => block.id).join('|') === newSource.blocks.map((block) => block.id).join('|'), 'late translation preserves newest coordinates and block order')
+  check(await translator.processNext() === 'done', 'source changes during a running article job remain eligible for a successor job')
   // Populate scalar fields so missing counts exercise block slots alone.
   await db.update(articles).set({ titleAr: 'عنوان', excerptAr: 'ملخص', contentAr: 'محتوى', blocks: source, blocksAr: expectedDocument }).where(eq(articles.id, raceId))
   let partial = setArticleBlockText(expectedDocument, 'list', ['items', 1], '')
@@ -305,13 +309,21 @@ try {
   gate = fieldClearGate
   const fieldClearWork = translator.processNext()
   await fieldClearGate.entered.promise
-  await service.update(clearedFieldId, { ...input, blocksAr: blankDraft, titleAr: null, excerptAr: null, contentAr: null, processesAr: null })
+  const beforeFieldClear = (await service.adminDetail(clearedFieldId))!
+  const reviewedBlankCaption = setArticleBlockTranslation(source, beforeFieldClear.blocksAr, 'image', ['caption'], '')!
+  await service.update(clearedFieldId, { ...input, blocksAr: reviewedBlankCaption, titleAr: null, excerptAr: null, contentAr: null, processesAr: null,
+    translationEdits: contentTranslationFields('article', beforeFieldClear).map(field => ({ fieldId: field.fieldId, fieldPath: field.fieldPath,
+      sourceText: field.sourceText, revision: field.revision, value: '', origin: 'manual' as const })),
+  })
   fieldClearGate.release.resolve()
   check(await fieldClearWork === 'done', 'queued suggestions defer to a concurrent manual save of blank fields')
   const fieldCleared = (await service.adminDetail(clearedFieldId))!
   check(text(fieldCleared.blocksAr!, 'image', ['caption']) === '' && text(fieldCleared.blocksAr!, 'hero', ['title']) === 'عنوان يدوي باقٍ',
     'an intentionally blank Arabic field stays blank even while another Arabic field remains populated')
-  check(fieldCleared.titleAr === null && fieldCleared.excerptAr === null && fieldCleared.contentAr === null && fieldCleared.processesAr === null && fieldCleared.arAuto === false,
+  assert.deepEqual({ title: fieldCleared.titleAr, excerpt: fieldCleared.excerptAr, content: fieldCleared.contentAr, arAuto: fieldCleared.arAuto },
+    { title: null, excerpt: null, content: null, arAuto: false })
+  check(fieldCleared.titleAr === null && fieldCleared.excerptAr === null && fieldCleared.contentAr === null
+    && fieldCleared.processesAr?.every(process => !process.title && process.items.every(item => !item)) && fieldCleared.arAuto === false,
     'pending machine suggestions cannot restore manually cleared scalar or process translations')
   const { id: clearedId } = await service.create({ ...input, blocksAr: oldArabic })
   assert.ok(clearedId)
@@ -320,23 +332,77 @@ try {
   gate = clearingGate
   const clearingWork = translator.processNext()
   await clearingGate.entered.promise
-  await service.update(clearedId, { ...input, blocksAr: null })
+  await service.update(clearedId, { ...input, blocksAr: null, sourceRevision: contentSourceRevision('article', (await service.adminDetail(clearedId))!) })
   clearingGate.release.resolve()
   check(await clearingWork === 'done', 'queue finishes after an admin explicitly clears the Arabic document')
   const cleared = (await service.adminDetail(clearedId))!
-  check(cleared.blocksAr === null && cleared.arAuto === false,
+  check(cleared.blocksAr?.translation?.fields.every(field => field.origin === 'manual' && field.status !== 'translated') && cleared.arAuto === false,
     'late queue suggestions cannot repopulate an explicitly cleared Arabic document or change its manual flag')
   assert.deepEqual((await service.byId(clearedId, 'ar'))!.blocks, cleared.blocks)
   const { id: rejectedId } = await service.create(input)
   assert.ok(rejectedId)
   await translator.enqueue('article', rejectedId)
-  rejectNext = true
+  rejectText = 'متن پاراگراف'
   check(await translator.processNext() === 'failed', 'translator failure leaves work eligible for retry')
   const rejectedArticle = (await service.adminDetail(rejectedId))!
   const rejectedPublic = (await service.byId(rejectedId, 'ar'))!
-  assert.deepEqual(rejectedPublic.blocks, rejectedArticle.blocks)
-  check(rejectedArticle.blocksAr === null && rejectedPublic.blocks?.blocks.length === source.blocks.length,
-    'failed block translation preserves Persian documents and never returns null blocks for Arabic readers')
+  const failedBlockState = rejectedArticle.blocksAr?.translation?.fields.find(field => field.blockId === 'paragraph')
+  assert(failedBlockState?.error && failedBlockState.error.length <= 500, 'failed block state retains its bounded field-specific error')
+  assert(rejectedArticle.blocksAr?.translation?.fields.every(field => field.blockId === 'paragraph' || !field.error), 'unrelated block fields never acquire the failed field error')
+  assert.deepEqual(rejectedArticle.blocks, source)
+  check(rejectedArticle.blocksAr && text(rejectedArticle.blocksAr, 'paragraph', ['text']) === ''
+    && text(rejectedPublic.blocks!, 'paragraph', ['text']) === 'متن پاراگراف'
+    && text(rejectedPublic.blocks!, 'hero', ['title']) === `${prefix}عنوان هیرو`
+    && rejectedPublic.blocks?.blocks.length === source.blocks.length,
+    'one failed block field falls back to Persian while unrelated completed translations remain available')
+  await db.update(translationJobs).set({ nextAttemptAt: new Date() }).where(eq(translationJobs.entityId, rejectedId))
+  const beforeBlockRetry = payloads.length
+  check(await translator.processNext() === 'done', 'a single failed block field is retryable')
+  assert.deepEqual(payloads.slice(beforeBlockRetry), [['متن پاراگراف']])
+  check(text((await service.adminDetail(rejectedId))!.blocksAr!, 'paragraph', ['text']) === `${prefix}متن پاراگراف`,
+    'block retry fills only the failed field without retranslating any completed siblings')
+  assert.equal((await service.adminDetail(rejectedId))!.blocksAr?.translation?.fields.find(field => field.blockId === 'paragraph')?.error, undefined,
+    'successful retry clears only the failed field error')
+
+  const clearSource: ArticleBlocksDoc = { version: 1, blocks: [
+    { id: 'clear-heading', type: 'heading', props: { text: 'عنوان پیش از تغییر منبع', level: 2 } },
+    { id: 'manual-sibling', type: 'paragraph', props: { text: 'متن فارسی همسایه' } },
+  ] }
+  let clearArabic = setArticleBlockTranslation(clearSource, null, 'clear-heading', ['text'], 'العنوان المترجم', 'automatic')
+  clearArabic = setArticleBlockTranslation(clearSource, clearArabic, 'manual-sibling', ['text'], 'نص يدوي محفوظ', 'manual')
+  assert(clearArabic)
+  const { id: explicitClearId } = await service.create({ ...input, blocks: clearSource, blocksAr: clearArabic,
+    titleAr: 'عنوان المقالة اليدوي', excerptAr: 'ملخص المقالة اليدوي', contentAr: 'محتوى المقالة اليدوي' })
+  assert(explicitClearId)
+  const beforeExplicitClear = await service.adminDetail(explicitClearId); assert(beforeExplicitClear?.blocksAr)
+  const previousHeadingProof = beforeExplicitClear.blocksAr.translation?.fields.find(field => field.blockId === 'clear-heading'); assert(previousHeadingProof)
+  const siblingProof = beforeExplicitClear.blocksAr.translation?.fields.find(field => field.blockId === 'manual-sibling'); assert(siblingProof)
+  const editedSource = setArticleBlockText(clearSource, 'clear-heading', ['text'], 'عنوان تازه برای حذف صریح ترجمه')
+  const rebasedClear = reconcileArticleBlocksTranslation(clearSource, editedSource, beforeExplicitClear.blocksAr)
+  const explicitClear = setArticleBlockTranslation(editedSource, rebasedClear, 'clear-heading', ['text'], '', 'manual'); assert(explicitClear)
+  const clearProof = explicitClear.translation?.fields.find(field => field.blockId === 'clear-heading'); assert(clearProof)
+  // An explicit blank review is a current-source tombstone, rather than an unreviewed invalidation.
+  clearProof.status = 'missing'
+  assert.equal(clearProof.sourceText, text(editedSource, 'clear-heading', ['text']))
+  assert.equal(clearProof.revision, (previousHeadingProof.revision ?? 0) + 2, 'one source change plus one explicit review supplies the exact saved proof')
+  await service.update(explicitClearId, { ...input, blocks: editedSource, blocksAr: explicitClear,
+    sourceRevision: contentSourceRevision('article', beforeExplicitClear) })
+  const savedExplicitClear = await service.adminDetail(explicitClearId); assert(savedExplicitClear?.blocksAr)
+  assert.equal(text(savedExplicitClear.blocksAr, 'clear-heading', ['text']), '')
+  assert.deepEqual(savedExplicitClear.blocksAr.translation?.fields.find(field => field.blockId === 'clear-heading'), clearProof)
+  assert.equal(text(savedExplicitClear.blocksAr, 'manual-sibling', ['text']), 'نص يدوي محفوظ')
+  assert.deepEqual(savedExplicitClear.blocksAr.translation?.fields.find(field => field.blockId === 'manual-sibling'), siblingProof)
+  check(true, 'changing Persian heading and explicitly reviewing its empty Arabic field persists a current-source manual tombstone without altering manual siblings')
+  const beforeExplicitClearWork = payloads.length
+  await translator.enqueue('article', explicitClearId)
+  assert.equal(await translator.processNext(), 'done')
+  assert.equal(payloads.length, beforeExplicitClearWork, 'a manually reviewed blank source-changed field never enters the translator')
+  const afterExplicitClearWork = await service.adminDetail(explicitClearId); assert(afterExplicitClearWork?.blocksAr)
+  assert.deepEqual(afterExplicitClearWork.blocksAr, savedExplicitClear.blocksAr)
+  const publicExplicitClear = await service.byId(explicitClearId, 'ar'); assert(publicExplicitClear?.blocks)
+  assert.equal(text(publicExplicitClear.blocks, 'clear-heading', ['text']), text(editedSource, 'clear-heading', ['text']))
+  assert.equal(text(publicExplicitClear.blocks, 'manual-sibling', ['text']), 'نص يدوي محفوظ')
+  check(true, 'queue work cannot refill an explicitly cleared changed heading and public Arabic falls back only for that field')
   console.log(`\n${checks} Article block translation integration checks passed.`)
 } finally {
   globalThis.fetch = originalFetch

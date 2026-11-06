@@ -11,6 +11,7 @@ import type { GalleryService } from '#/domain/gallery/gallery.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { UUID_PATTERN } from '#/domain/shared/ids'
+import { translationEditsSchema } from './content-translation.schemas'
 
 
 export interface GalleryRoutesDeps {
@@ -36,6 +37,7 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
           alt: t.String({ maxLength: 200 }),
           // round-34 — متن جایگزین عربی (خالی = پشتیبان فارسی)
           altAr: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
+          translationEdits: t.Optional(translationEditsSchema),
           span: t.Union([t.Literal('wide'), t.Literal('normal')]),
         }),
         detail: { summary: 'Add image (sortOrder = last)' },
@@ -51,8 +53,10 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
           alt: t.Optional(t.String({ maxLength: 200 })),
           // round-34 — متن جایگزین عربی (خالی = حذف ترجمه = پشتیبان فارسی)
           altAr: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
+          translationEdits: t.Optional(translationEditsSchema),
           span: t.Optional(t.Union([t.Literal('wide'), t.Literal('normal')])),
           isActive: t.Optional(t.Boolean()),
+          sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
         }),
         detail: { summary: 'Patch image' },
       },

@@ -57,6 +57,7 @@ function unmount(active: Host) {
 type Input = { closed: boolean; disablePayments?: boolean; reason: string; reasonAr?: string | null; reopenTime?: string }
 type Mutation = { mutationFn: (input: Input) => Promise<unknown>; onSuccess: () => void; onError: (error: unknown) => void }
 const saves: Input[] = []
+const saveProofs: { sourceRevision?: string; translationEdits?: { fieldId: string; sourceText: string; value: string }[] }[] = []
 let saveWork = async (_input: Input) => {}
 let status: AdminRestaurantStatusDto | undefined
 let pendingWork: Promise<void> | null = null
@@ -84,8 +85,10 @@ mock.module('#/lib/api-fetch', () => ({
 			return { translations: await translationWork(body.texts) }
 		}
 		assert.equal(path, '/admin/settings/temporary-close')
-		saves.push(body)
-		await saveWork(body)
+		const { sourceRevision, translationEdits, ...businessFields } = body
+		saveProofs.push({ sourceRevision, translationEdits })
+		saves.push(businessFields)
+		await saveWork(businessFields)
 		return {}
 	},
 }))
@@ -198,6 +201,8 @@ change(arabicField(), '   ')
 change(find((node) => node.type === 'input'), '  ۱۹:۰۰  ')
 await confirm()
 assert.deepEqual(saves.at(-1), { closed: true, disablePayments: false, reason: twenty, reasonAr: null, reopenTime: '۱۹:۰۰' })
+assert.equal(saveProofs.at(-1)?.translationEdits?.[0]?.sourceText, twenty, 'manual Arabic proof is bound only to the current Persian reason')
+assert.equal(typeof saveProofs.at(-1)?.sourceRevision, 'string', 'the status mutation carries the pinned server source revision')
 assert(!nodes().some((node) => node.type === 'textarea'))
 assert.deepEqual(invalidations.slice(-2), [qk.settingsRestaurantStatus, qk.restaurantStatus])
 openModal(true)
@@ -227,11 +232,12 @@ assert.equal(arabicField().props.disabled, false, 'the Arabic draft remains edit
 finishTranslation([arabic])
 await settle()
 assert.equal(arabicField().props.value, arabic)
-assert.equal(previewButton().props.disabled, false)
+assert.equal(previewButton().props.disabled, true, 'completed translations are protected against redundant automatic replacement')
 change(arabicField(), twenty)
 assert.equal(arabicField().props.value, twenty, 'machine output is editable before saving')
 
-for (const output of [nineteen, 'ا'.repeat(121), '']) {
+for (const [index, output] of [nineteen, 'ا'.repeat(121), ''].entries()) {
+	change(reasonField(), twenty + 'ا'.repeat(index + 1))
 	translationWork = async () => [output]
 	previewButton().props.onClick()
 	await settle()
@@ -251,6 +257,7 @@ change(arabicField(), 'ب'.repeat(20))
 finishTranslation([arabic])
 await settle()
 assert.equal(arabicField().props.value, 'ب'.repeat(20), 'late translation cannot overwrite a manual Arabic edit')
+change(reasonField(), 'ت'.repeat(20))
 finishTranslation = deferTranslation()
 previewButton().props.onClick()
 change(reasonField(), 'پ'.repeat(20))

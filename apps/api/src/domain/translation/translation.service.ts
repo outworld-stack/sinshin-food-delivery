@@ -14,52 +14,28 @@
 
 // src/domain/translation/translation.service.ts
 /**
- * round-35 — ارکستراتور ترجمه‌ی خودکار محتوا (فارسی → عربی).
- *
- * دو مسیر مستقل:
- *  ۱) preview (روت ادمین): متن می‌گیرد، ترجمه‌ی پیشنهادی برمی‌گرداند —
- *     «هیچ» چیزی در DB نمی‌نویسد؛ فرم پر می‌شود و ادمین بازبینی/ذخیره
- *     می‌کند (ذخیره‌ی دستی = arAuto=false طبق قرارداد رارد ۳۴).
- *  ۲) صف (worker): کارها از جدول translation_jobs تصرف اتمیک می‌شوند
- *     (FOR UPDATE SKIP LOCKED — امن بین رپلیکاها) و نتیجه مستقیم در
- *     ستون‌های ar با arAuto=true نوشته می‌شود (بج «خودکار» در پنل).
- *
- * قرارداد «دستی برنده»: فیلدی که عربیِ پرِ «دستی» دارد (arAuto=false)
- * هرگز بازنویسی نمی‌شود؛ فقط فیلد خالی یا ماشینیِ قبلی (arAuto=true)
- * جایگزین می‌شود. arAuto=true فقط وقتی می‌نشیند که هیچ فیلد دستی‌ای
- * از قلم نیفتاده باشد.
- *
- * پایداری: خطای مترجم = تلاش مجدد با backoff (۳۰s × تلاش²) تا maxAttempts؛
- * «مترجم پایین» تلاش را نمی‌سوزاند (۵ دقیقه بعد، attempts بازگردانده).
- * خطای نهایی = ستون ar همان NULL می‌ماند → کاربر عربی پشتیبان فارسی
- * می‌بیند (COALESCE رارد ۳۴) — سایت هرگز از این بابت نمی‌ایستد.
+ * Persian-to-Arabic previews and the existing entity translation queue.
+ * Field provenance controls eligibility; arAuto is only a compatibility badge.
+ * Each queued field is source/revision checked under the entity row lock before persistence.
+ * Completed fields and manual translations are never automatically replaced.
+ * Existing block whitelists, document proofs and Markdown protection remain shared.
  */
-import { and, count, desc, eq, isNotNull, isNull, max, or, sql, type AnyColumn, type SQL } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, max, sql } from 'drizzle-orm'
 
-import type { Db } from '#/infra/db/client'
+import type { Db, DbOrTx } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import type { MenuService } from '#/domain/menu/menu.service'
 import type { ArticleService } from '#/domain/article/article.service'
-import {
-  asCategoryId,
-  asGalleryImageId,
-  asMainCategoryId,
-  asProductId,
-  asSizeId,
-} from '#/domain/shared/brand'
+import { asProductId } from '#/domain/shared/brand'
+import type { PackagingService } from '#/domain/menu/packaging.service'
+import type { SettingsService } from '#/domain/settings/settings.service'
+import { contentRows, readContentRow } from './content-translation.store'
+import { ContentTranslationWorker } from './content-translation.worker'
 import { AppError, Err } from '#/domain/shared/errors'
 import { isUniqueViolation } from '#/domain/shared/pg'
 import { TranslateClient } from '#/domain/translation/translate-client'
-import { planText, type TextPlan } from '#/domain/translation/markdown'
+import { planText } from '#/domain/translation/markdown'
 import {
-  articleCategories,
-  articleSubCategories,
-  articles,
-  categories,
-  contentAbout,
-  galleryImages,
-  mainCategories,
-  products,
   productSizes,
   terms,
   translationJobs,
@@ -68,27 +44,22 @@ import type {
   ArticleBlocksDoc,
   ArticleBlockType,
   ArticleBlockTextPath,
-  ArticleBlockTextUpdate,
   TranslationEntityType,
   TranslationJobDto,
   TranslationJobStatus,
   TranslationStatusDto,
 } from '@sinshin/shared'
 import {
-  ARTICLE_BLOCK_TEXT_KEYS,
-  blocksToPlainText,
-  fillMissingArticleBlocksTranslation,
   getArticleBlockTextFields,
   isArticleBlockTextPath,
-  mergeArticleBlocksTranslation,
   normalizeArticleBlocksTranslation,
   readArticleBlockText,
-  setArticleBlockTexts,
   setArticleBlockTranslations,
 } from '@sinshin/shared'
 
 export const TRANSLATION_ENTITY_TYPES: readonly TranslationEntityType[] = [
   'product',
+  'productSize',
   'mainCategory',
   'category',
   'article',
@@ -97,14 +68,16 @@ export const TRANSLATION_ENTITY_TYPES: readonly TranslationEntityType[] = [
   'gallery',
   'terms',
   'about',
+  'packagingItem',
+  'temporaryClose',
 ] as const
 
 /** TTL کش سلامت مترجم برای بج پنل */
 const HEALTH_CACHE_MS = 30_000
 /** سقف enqueued هر نوع در هر فراخوانی bulk */
 const BULK_CAP_PER_TYPE = 1000
-/** preview: سقف ورودی (هم‌قف کانتینر مترجم) */
-const PREVIEW_MAX_CHARS = 30_000
+  /** Bounded legacy text previews; Markdown is still segmented by the existing planner. */
+const PREVIEW_MAX_CHARS = 1_000_000
 
 interface ClaimedJob {
   id: string
@@ -112,23 +85,14 @@ interface ClaimedJob {
   entityId: string
   attempts: number
   maxAttempts: number
+  startedAt: Date
 }
-
-/** آیا مقدار ar پر است؟ (رشته‌ی غیرخالی یا آرایه‌ی غیرخالی) */
-const isFilled = (v: unknown): boolean => {
-  if (typeof v === 'string') return v.trim() !== ''
-  if (Array.isArray(v)) return v.length > 0
-  return false
-}
-
-/** برش امن به سقف varchar ستون */
-const clamp = (v: string, maxLen: number): string =>
-  v.length <= maxLen ? v : v.slice(0, maxLen).trimEnd()
 
 // stage-55 — isUniqueViolation به shared/pg رفت (DRY — همان 23505)
 
 export class TranslationService {
   private readonly client: TranslateClient
+  private readonly fields: ContentTranslationWorker
 
   // کش سلامت مترجم — بج پنل نباید به ازای هر poll یک fetch بزند
   private healthAt = 0
@@ -136,9 +100,15 @@ export class TranslationService {
   private healthModel = ''
 
   constructor(
-    private readonly deps: { db: Db; config: AppConfig; menu: MenuService; articles: ArticleService },
+    private readonly deps: { db: Db; config: AppConfig; menu: MenuService; articles: ArticleService; packaging?: PackagingService; settings?: SettingsService },
   ) {
     this.client = new TranslateClient({ config: deps.config })
+    this.fields = new ContentTranslationWorker({ db: deps.db, translate: texts => this.translateTexts(texts), invalidate: async type => {
+      if (['product', 'productSize', 'mainCategory', 'category', 'packagingItem'].includes(type)) await deps.menu.bustCache()
+      if (['article', 'articleCategory', 'articleSubCategory'].includes(type)) await deps.articles.bustCache()
+      if (type === 'packagingItem') deps.packaging?.bustCache()
+      if (type === 'temporaryClose') deps.settings?.invalidateContentTranslationCache()
+    } })
   }
 
   // ═══════════════════════ مسیر ۱: preview (بدون نوشتن DB) ═══════════════════════
@@ -150,8 +120,9 @@ export class TranslationService {
       throw Err.validation('متن خالی قابل ترجمه نیست.')
     }
     if (cleaned.some((t) => t.length > PREVIEW_MAX_CHARS)) {
-      throw Err.validation('متن خیلی طولانی است (سقف: ۳۰٬۰۰۰ کاراکتر).')
+      throw Err.validation('متن خیلی طولانی است (سقف: ۱٬۰۰۰٬۰۰۰ کاراکتر).')
     }
+    if (cleaned.reduce((length, text) => length + text.length, 0) > PREVIEW_MAX_CHARS) throw Err.validation('Preview input exceeds the total translation payload limit.')
     return this.translateTexts(cleaned)
   }
 
@@ -161,12 +132,18 @@ export class TranslationService {
     blockType: ArticleBlockType
     fieldPath: ArticleBlockTextPath
     text: string
+    entityType?: 'article' | 'about'
+    entityId?: string
+    revision?: number
   }): Promise<{
     blockId: string
     blockType: ArticleBlockType
     fieldPath: ArticleBlockTextPath
     sourceText: string
     translation: string
+    entityType?: 'article' | 'about'
+    entityId?: string
+    revision?: number
   }> {
     if (typeof input.blockId !== 'string' || !input.blockId.trim() || input.blockId.length > 64
       || !isArticleBlockTextPath(input.blockType, input.fieldPath)) {
@@ -174,6 +151,12 @@ export class TranslationService {
     }
     if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > PREVIEW_MAX_CHARS) {
       throw Err.validation('متن فیلد بلوک خالی یا خیلی طولانی است.')
+    }
+    if (input.entityType !== undefined || input.entityId !== undefined || input.revision !== undefined) {
+      if (!input.entityType || !input.entityId || input.revision === undefined) throw Err.validation('Saved block previews require entity identity and revision.')
+      const translation = await this.fields.previewStoredBlockField({ ...input, entityType: input.entityType, entityId: input.entityId, revision: input.revision })
+      return { blockId: input.blockId, blockType: input.blockType, fieldPath: [...input.fieldPath], sourceText: input.text, translation,
+        entityType: input.entityType, entityId: input.entityId, revision: input.revision }
     }
     const [translation] = await this.client.translate([input.text])
     return {
@@ -205,6 +188,9 @@ export class TranslationService {
       const current = out.blocks.find(candidate => candidate?.id === block?.id && candidate?.type === block?.type)
       for (const field of getArticleBlockTextFields(block)) {
         if (!field.text.trim() || readArticleBlockText(current, field.path).trim()) continue
+        const proof = out.translation?.fields.find(state => state.blockId === block.id && state.blockType === block.type
+          && JSON.stringify(state.fieldPath) === JSON.stringify(field.path))
+        if (proof?.origin === 'manual' || proof?.origin === 'legacy') continue
         if (field.text.length > PREVIEW_MAX_CHARS) throw Err.validation('متن بلوک خیلی طولانی است.')
         queue.push({ blockId: block.id, path: field.path, text: field.text })
       }
@@ -213,7 +199,7 @@ export class TranslationService {
       const translations = await this.translateTexts(queue.map(field => field.text))
       out = setArticleBlockTranslations(source, out, queue.map((field, index) => ({
         ...field, text: translations[index]?.trim() ?? '',
-      }))) ?? out
+      })), 'automatic') ?? out
     }
     if (Buffer.byteLength(JSON.stringify({ version: out.version, blocks: out.blocks }), 'utf8') > 262_144) {
       throw Err.validation('حجم ترجمه‌ی بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
@@ -237,46 +223,28 @@ export class TranslationService {
     })
   }
 
-  /**
-   * ترجمه‌ی لیست (مواد اولیه، مراحل، بندها) — ورودی/خروجی هم‌طول و هم‌ایندکس.
-   * هر آیتم یک متنِ تک‌خطی است → نگاشت ۱:۱ تضمینی سمت کانتینر.
-   */
-  private async translateList(items: readonly string[]): Promise<string[]> {
-    const idxs: number[] = []
-    const payload: string[] = []
-    items.forEach((s, i) => {
-      const t = s.trim()
-      if (t !== '') {
-        idxs.push(i)
-        payload.push(t)
-      }
-    })
-    const out = new Array<string>(items.length).fill('')
-    if (payload.length > 0) {
-      const tr = await this.client.translate(payload)
-      idxs.forEach((origIdx, k) => {
-        out[origIdx] = (tr[k] ?? '').trim()
-      })
-    }
-    return out
-  }
-
   // ═══════════════════════ مسیر ۲: صف ترجمه (worker) ═══════════════════════
 
   /** تصرف اتمیک یک کار — FOR UPDATE SKIP LOCKED بین رپلیکاها */
   private async claim(): Promise<ClaimedJob | null> {
-    const rows = await this.deps.db
-      .update(translationJobs)
-      .set({
-        status: 'running',
-        attempts: sql`${translationJobs.attempts} + 1`,
-        startedAt: new Date(),
-      })
+    return this.deps.db.transaction(async tx => {
+      // Serialize claims across replicas, including a pending successor to a running entity.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(73401926)`)
+      const rows = await tx
+        .update(translationJobs)
+        .set({
+          status: 'running',
+          attempts: sql`${translationJobs.attempts} + 1`,
+          startedAt: new Date(),
+          nextAttemptAt: new Date(),
+        })
       .where(
         sql`${translationJobs.id} = (
-          SELECT id FROM ${translationJobs}
-          WHERE status = 'pending' AND next_attempt_at <= now()
-          ORDER BY created_at
+          SELECT pending.id FROM ${translationJobs} pending
+          WHERE pending.status = 'pending' AND pending.next_attempt_at <= now()
+            AND NOT EXISTS (SELECT 1 FROM ${translationJobs} running
+              WHERE running.status = 'running' AND running.entity_type = pending.entity_type AND lower(running.entity_id) = lower(pending.entity_id))
+          ORDER BY pending.created_at
           LIMIT 1
           FOR UPDATE SKIP LOCKED
         )`,
@@ -290,22 +258,36 @@ export class TranslationService {
       entityId: r.entityId,
       attempts: r.attempts,
       maxAttempts: r.maxAttempts,
+      startedAt: r.startedAt ?? new Date(),
     }
+    })
+  }
+
+  private async returnToPending(job: ClaimedJob, patch: { nextAttemptAt: Date; lastError: string; attempts?: number }, staleBefore?: Date): Promise<boolean> {
+    return this.deps.db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(73401926)`)
+      const [successor] = await tx.select({ id: translationJobs.id }).from(translationJobs).where(and(
+        eq(translationJobs.entityType, job.entityType), sql`lower(${translationJobs.entityId}) = ${job.entityId.toLowerCase()}`, eq(translationJobs.status, 'pending'),
+      )).limit(1)
+      const changed = await tx.update(translationJobs).set(successor
+        ? { status: 'failed', finishedAt: new Date(), lastError: patch.lastError }
+        : { status: 'pending', ...patch }).where(and(eq(translationJobs.id, job.id),
+          eq(translationJobs.status, 'running'), eq(translationJobs.startedAt, job.startedAt),
+          staleBefore ? sql`${translationJobs.nextAttemptAt} < ${staleBefore}` : undefined)).returning({ id: translationJobs.id })
+      return changed.length > 0
+    })
   }
 
   /** نجات jobهای گیر‌کرده (کرش وسط اجرا) — runningِ کهنه → pending */
   async reapStuck(stuckMs: number): Promise<number> {
     const cutoff = new Date(Date.now() - stuckMs)
-    const rows = await this.deps.db
-      .update(translationJobs)
-      .set({
-        status: 'pending',
-        nextAttemptAt: new Date(),
-        lastError: 'بازگردانده به صف — اجرای قبلی نیمه‌کاره مانده بود',
-      })
-      .where(and(eq(translationJobs.status, 'running'), sql`${translationJobs.startedAt} < ${cutoff}`))
-      .returning({ id: translationJobs.id })
-    return rows.length
+    const rows = await this.deps.db.select().from(translationJobs)
+      .where(and(eq(translationJobs.status, 'running'), sql`${translationJobs.startedAt} < ${cutoff}`, sql`${translationJobs.nextAttemptAt} < ${cutoff}`))
+    let reaped = 0
+    for (const row of rows) if (await this.returnToPending({ ...row, startedAt: row.startedAt ?? new Date(), entityType: row.entityType as TranslationEntityType }, {
+      nextAttemptAt: new Date(), lastError: 'Recovered an interrupted translation job.',
+    }, cutoff)) reaped++
+    return reaped
   }
 
   /**
@@ -316,25 +298,27 @@ export class TranslationService {
   async processNext(): Promise<'empty' | 'done' | 'failed' | 'translator-down'> {
     const job = await this.claim()
     if (!job) return 'empty'
+    let heartbeatPending = false
+    const heartbeat = setInterval(() => {
+      if (heartbeatPending) return
+      heartbeatPending = true
+      void this.deps.db.update(translationJobs).set({ nextAttemptAt: new Date() }).where(and(
+        eq(translationJobs.id, job.id), eq(translationJobs.status, 'running'), eq(translationJobs.startedAt, job.startedAt),
+      )).catch(error => console.error('[translate] queue heartbeat failed', error)).finally(() => { heartbeatPending = false })
+    }, 30_000)
+    heartbeat.unref()
     try {
       const note = await this.runJob(job)
       await this.deps.db
         .update(translationJobs)
         .set({ status: 'done', finishedAt: new Date(), lastError: note })
-        .where(eq(translationJobs.id, job.id))
+        .where(and(eq(translationJobs.id, job.id), eq(translationJobs.status, 'running'), eq(translationJobs.startedAt, job.startedAt)))
       return 'done'
     } catch (err) {
       // مترجم پایین — تلاش را برمی‌گردانیم؛ صف بعداً خودش دوباره می‌آید
       if (err instanceof AppError && err.code === 'SERVICE_UNAVAILABLE') {
-        await this.deps.db
-          .update(translationJobs)
-          .set({
-            status: 'pending',
-            attempts: sql`GREATEST(${translationJobs.attempts} - 1, 0)`,
-            nextAttemptAt: new Date(Date.now() + 5 * 60_000),
-            lastError: 'مترجم در دسترس نبود — ۵ دقیقه بعد دوباره',
-          })
-          .where(eq(translationJobs.id, job.id))
+        await this.returnToPending(job, { attempts: Math.max(job.attempts - 1, 0),
+          nextAttemptAt: new Date(Date.now() + 5 * 60_000), lastError: 'Translator unavailable; retry in five minutes.' })
         return 'translator-down'
       }
       const msg = (err instanceof Error ? err.message : String(err)).slice(0, 500)
@@ -342,446 +326,41 @@ export class TranslationService {
         await this.deps.db
           .update(translationJobs)
           .set({ status: 'failed', lastError: msg, finishedAt: new Date() })
-          .where(eq(translationJobs.id, job.id))
+          .where(and(eq(translationJobs.id, job.id), eq(translationJobs.status, 'running'), eq(translationJobs.startedAt, job.startedAt)))
         console.error(`[translate] job ${job.entityType}/${job.entityId} نهایتاً شکست خورد:`, msg)
         return 'failed'
       }
       // backoff تصاعدی: ~۳۰s بعد تلاش اول، ~۱۲۰s بعد دومی
       const backoffMs = 30_000 * job.attempts * job.attempts
-      await this.deps.db
-        .update(translationJobs)
-        .set({ status: 'pending', lastError: msg, nextAttemptAt: new Date(Date.now() + backoffMs) })
-        .where(eq(translationJobs.id, job.id))
+      await this.returnToPending(job, { lastError: msg, nextAttemptAt: new Date(Date.now() + backoffMs) })
       return 'failed'
+    } finally {
+      clearInterval(heartbeat)
     }
   }
 
-  /** dispatch بر اساس نوع موجودیت — خروجی: یادداشت اختیاری برای lastError */
+  async previewField(input: Parameters<ContentTranslationWorker['previewField']>[0]) { return this.fields.previewField(input) }
+
   private async runJob(job: ClaimedJob): Promise<string | null> {
-    switch (job.entityType) {
-      case 'product':
-        return this.runProduct(job.entityId)
-      case 'mainCategory':
-        return this.runMainCategory(job.entityId)
-      case 'category':
-        return this.runCategory(job.entityId)
-      case 'article':
-        return this.runArticle(job.entityId)
-      case 'articleCategory':
-        return this.runArticleCategory(job.entityId)
-      case 'articleSubCategory':
-        return this.runArticleSubCategory(job.entityId)
-      case 'gallery':
-        return this.runGallery(job.entityId)
-      case 'terms':
-        return this.runTerms(job.entityId)
-      case 'about':
-        return this.runAbout()
+    const isActive = async (tx?: DbOrTx) => {
+      const query = (tx ?? this.deps.db).select({ id: translationJobs.id }).from(translationJobs).where(and(
+        eq(translationJobs.id, job.id), eq(translationJobs.status, 'running'), eq(translationJobs.startedAt, job.startedAt),
+      ))
+      return (tx ? await query.for('share') : await query).length > 0
     }
-  }
-
-  // ── product: name/description/ingredients + نام سایزها ──
-  private async runProduct(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const pid = asProductId(entityId)
-    const [p] = await db.select().from(products).where(eq(products.id, pid))
-    if (!p) return 'محصول پیدا نشد (شاید حذف شده باشد)'
-
-    let skippedManual = false
-    const queue: Array<{ plan: TextPlan; apply: (assembled: string) => void }> = []
-    const out: { nameAr?: string; descriptionAr?: string; ingredientsAr?: string[] } = {}
-    const sizeWrites: Array<{ id: string; nameAr: string }> = []
-
-    const submit = (fa: string | null | undefined, ar: unknown, apply: (t: string) => void): void => {
-      if (isFilled(ar) && p.arAuto === false) {
-        skippedManual = true
-        return
+    await this.fields.run(job.entityType, job.entityId, isActive)
+    if (!await isActive()) return null
+    if (job.entityType === 'product') {
+      const sizes = await this.deps.db.select({ id: productSizes.id }).from(productSizes).where(eq(productSizes.productId, asProductId(job.entityId)))
+      for (const size of sizes) {
+        const row = await readContentRow(this.deps.db, 'productSize', size.id)
+        if (row && this.fields.hasEligibleFields('productSize', row)) await this.enqueue('productSize', size.id)
       }
-      const src = (fa ?? '').trim()
-      if (src === '') return
-      const plan = planText(src)
-      if (plan.segments.length > 0) queue.push({ plan, apply })
     }
-
-    submit(p.name, p.nameAr, (t) => {
-      out.nameAr = clamp(t, 120)
-    })
-    submit(p.description, p.descriptionAr, (t) => {
-      const v = t.trim()
-      if (v !== '') out.descriptionAr = v
-    })
-
-    // مواد اولیه — لیستِ موازی
-    const ingredients = (p.ingredients ?? []).filter((s) => s.trim() !== '')
-    const listQueue: Array<{ items: string[]; apply: (list: string[]) => void }> = []
-    if (ingredients.length > 0) {
-      if (isFilled(p.ingredientsAr) && p.arAuto === false) skippedManual = true
-      else listQueue.push({ items: ingredients, apply: (l) => { out.ingredientsAr = l } })
-    }
-
-    // سایزها — ردیف‌های مستقل با پرچم رکوردِ محصول
-    const sizeRows = await db.select().from(productSizes).where(eq(productSizes.productId, pid))
-    for (const s of sizeRows) {
-      submit(s.name, s.nameAr, (t) => {
-        sizeWrites.push({ id: s.id, nameAr: clamp(t, 60) })
-      })
-    }
-
-    await this.flushQueues(queue, listQueue)
-
-    const patch: Record<string, unknown> = {}
-    if (out.nameAr !== undefined) patch.nameAr = out.nameAr
-    if (out.descriptionAr !== undefined) patch.descriptionAr = out.descriptionAr
-    if (out.ingredientsAr !== undefined) patch.ingredientsAr = out.ingredientsAr
-    // رارد ۴۸ (اسکن C9) — نوشتنِ سایزهای مستقل موازی شد (قبلاً پشت‌سرهم)
-    await Promise.all(
-      sizeWrites.map((s) =>
-        db.update(productSizes).set({ nameAr: s.nameAr }).where(eq(productSizes.id, asSizeId(s.id))),
-      ),
-    )
-    const wroteAny =
-      Object.keys(patch).length > 0 || sizeWrites.length > 0
-    if (wroteAny) {
-      // پرچم «خودکار» فقط وقتی هیچ فیلد دستی‌ای دور نگه داشته نشده باشد
-      if (!skippedManual) patch.arAuto = true
-      await db.update(products).set(patch).where(eq(products.id, pid))
-      await this.deps.menu.bustCache()
-      return null
-    }
-    return skippedManual ? 'همه‌ی فیلدها دستی بودند — چیزی بازنویسی نشد' : 'فیلد قابل‌ترجمه‌ای نبود'
-  }
-
-  // ── دسته‌ی اصلی منو: name (جدول ar_auto ندارد — سیاست: فقط خانه‌ی خالی) ──
-  private async runMainCategory(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const [row] = await db
-      .select()
-      .from(mainCategories)
-      .where(eq(mainCategories.id, asMainCategoryId(entityId)))
-    if (!row) return 'دسته‌ی اصلی پیدا نشد (شاید حذف شده باشد)'
-    if (isFilled(row.nameAr)) return 'ترجمه‌ی موجود بود — بازنویسی نشد'
-    const [t] = await this.translateTexts([row.name])
-    const nameAr = clamp(t ?? '', 60)
-    if (nameAr.trim() === '') return 'ترجمه خالی برگشت'
-    await db
-      .update(mainCategories)
-      .set({ nameAr })
-      .where(eq(mainCategories.id, asMainCategoryId(entityId)))
-    await this.deps.menu.bustCache()
+    const row = await readContentRow(this.deps.db, job.entityType, job.entityId)
+    if (row && this.fields.hasEligibleFields(job.entityType, row)) await this.enqueue(job.entityType, job.entityId)
     return null
   }
-
-  // ── دسته‌ی محصولات: name + قالب سایزها ──
-  private async runCategory(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const cid = asCategoryId(entityId)
-    const [c] = await db.select().from(categories).where(eq(categories.id, cid))
-    if (!c) return 'دسته پیدا نشد (شاید حذف شده باشد)'
-
-    // جدول ar_auto ندارد — سیاست: فقط خانه‌های خالی پر می‌شوند
-    const patch: Record<string, unknown> = {}
-    if (!isFilled(c.nameAr)) {
-      const [nameTr] = await this.translateTexts([c.name])
-      const nameAr = clamp(nameTr ?? '', 60)
-      if (nameAr.trim() === '') return 'ترجمه خالی برگشت'
-      patch.nameAr = nameAr
-    }
-    const sizeNames = (c.sizeNames ?? []).filter((s) => s.trim() !== '')
-    if (sizeNames.length > 0 && !isFilled(c.sizeNamesAr)) {
-      patch.sizeNamesAr = await this.translateList(sizeNames)
-    }
-    if (Object.keys(patch).length === 0) return 'ترجمه‌ی موجود بود — بازنویسی نشد'
-    await db.update(categories).set(patch).where(eq(categories.id, cid))
-    await this.deps.menu.bustCache()
-    return null
-  }
-
-  // ── مقاله: عنوان/خلاصه/محتوا (مارک‌داون) + مراحل ──
-  private async runArticle(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const [a] = await db.select().from(articles).where(eq(articles.id, entityId))
-    if (!a) return 'مقاله پیدا نشد (شاید حذف شده باشد)'
-
-    let skippedManual = false
-    const queue: Array<{ plan: TextPlan; apply: (assembled: string) => void }> = []
-    const out: { titleAr?: string; excerptAr?: string; contentAr?: string } = {}
-
-    const submit = (fa: string | null | undefined, ar: unknown, apply: (t: string) => void): void => {
-      if (isFilled(ar)) {
-        if (a.arAuto === false) skippedManual = true
-        return
-      }
-      const src = (fa ?? '').trim()
-      if (src === '') return
-      const plan = planText(src)
-      if (plan.segments.length > 0) queue.push({ plan, apply })
-    }
-
-    submit(a.title, a.titleAr, (t) => {
-      out.titleAr = clamp(t, 160)
-    })
-    submit(a.excerpt, a.excerptAr, (t) => {
-      const v = t.trim()
-      if (v !== '') out.excerptAr = v
-    })
-    // Builder documents are translated field by field; text-only legacy articles keep Markdown translation.
-    if (!a.blocks) {
-      submit(a.content, a.contentAr, (t) => {
-        const v = t.trim()
-        if (v !== '') out.contentAr = v
-      })
-    } else if (isFilled(a.contentAr) && a.arAuto === false) skippedManual = true
-
-    const blocksAr = a.blocks ? await this.previewBlocks({ blocks: a.blocks, blocksAr: a.blocksAr }) : null
-    if (a.arAuto === false && a.blocksAr?.blocks.some(block =>
-      getArticleBlockTextFields(block).some(field => field.text.trim()),
-    )) skippedManual = true
-
-    // روند تهیه — ساختار [{title, items[]}] با هم‌ایندکس
-    let processesAr: { title: string; items: string[] }[] | undefined
-    const processes = (a.processes ?? []).filter(
-      (pr) => pr.title.trim() !== '' || pr.items.length > 0,
-    )
-    if (processes.length > 0) {
-      if (isFilled(a.processesAr)) {
-        if (a.arAuto === false) skippedManual = true
-      } else {
-        const flat: string[] = []
-        for (const pr of processes) {
-          flat.push(pr.title)
-          flat.push(...pr.items)
-        }
-        const tr = await this.translateList(flat)
-        let i = 0
-        processesAr = processes.map((pr) => ({
-          title: tr[i++] ?? pr.title,
-          items: pr.items.map(() => tr[i++] ?? ''),
-        }))
-      }
-    }
-
-    await this.flushQueues(queue, [])
-
-    // Translation is slow. Re-read under the same row lock used by the editor so in-flight saves win.
-    const wrote = await db.transaction(async tx => {
-      const [current] = await tx.select().from(articles).where(eq(articles.id, entityId)).for('update')
-      if (!current) return false
-      if (current.arAuto === false && current.updatedAt.getTime() !== a.updatedAt.getTime()) {
-        // A manual save may intentionally clear even a previously empty field.
-        // Defer this job's suggestions rather than repopulating that saved fallback.
-        skippedManual = true
-        return false
-      }
-      const patch: Record<string, unknown> = {}
-      for (const [arKey, sourceKey] of [
-        ['titleAr', 'title'], ['excerptAr', 'excerpt'], ['contentAr', 'content'],
-      ] as const) {
-        if (out[arKey] === undefined || current[sourceKey] !== a[sourceKey]) continue
-        if (current.arAuto === false && isFilled(current[arKey])) {
-          skippedManual = true
-          continue
-        }
-        patch[arKey] = out[arKey]
-      }
-      if (processesAr !== undefined && JSON.stringify(current.processes) === JSON.stringify(a.processes)) {
-        if (current.arAuto === false && isFilled(current.processesAr)) skippedManual = true
-        else patch.processesAr = processesAr
-      }
-      if (current.blocks && blocksAr) {
-        // Discard stale source text and values that already existed before this request.
-        let suggestions = normalizeArticleBlocksTranslation(current.blocks, blocksAr)
-        if (!suggestions) return false
-        const discarded: ArticleBlockTextUpdate[] = []
-        for (const block of current.blocks.blocks) {
-          const previous = a.blocks?.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
-          const previousAr = a.blocksAr?.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
-          for (const field of getArticleBlockTextFields(block)) {
-            if (!previous || readArticleBlockText(previous, field.path) !== field.text
-              || readArticleBlockText(previousAr, field.path).trim()) {
-              discarded.push({ blockId: block.id, path: field.path, text: '' })
-            }
-          }
-        }
-        suggestions = setArticleBlockTexts(suggestions, discarded)
-        let merged = fillMissingArticleBlocksTranslation(current.blocks, current.blocksAr, suggestions)
-        if (!merged) return false
-        const baseline = normalizeArticleBlocksTranslation(current.blocks, current.blocksAr)
-        // Bind only this job's accepted suggestions; keep every existing manual value intact.
-        const acceptedUpdates: ArticleBlockTextUpdate[] = []
-        for (const block of current.blocks.blocks) {
-          const before = baseline?.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
-          const accepted = merged.blocks.find(candidate => candidate.id === block.id && candidate.type === block.type)
-          for (const field of getArticleBlockTextFields(block)) {
-            const value = readArticleBlockText(accepted, field.path)
-            if (!readArticleBlockText(before, field.path).trim() && value.trim()) {
-              acceptedUpdates.push({ blockId: block.id, path: field.path, text: value })
-            }
-          }
-        }
-        if (acceptedUpdates.length > 0) merged = setArticleBlockTranslations(current.blocks, merged, acceptedUpdates) ?? merged
-        if (JSON.stringify(merged) !== JSON.stringify(baseline)) {
-          patch.blocksAr = merged
-        }
-        if (!isFilled(current.contentAr) || current.arAuto !== false) {
-          const contentAr = blocksToPlainText(mergeArticleBlocksTranslation(current.blocks, merged))
-          if (contentAr && contentAr !== current.contentAr) patch.contentAr = contentAr
-        }
-        if (current.arAuto === false && current.blocksAr?.blocks.some(block =>
-          getArticleBlockTextFields(block).some(field => field.text.trim()),
-        )) skippedManual = true
-      }
-      if (Object.keys(patch).length === 0) return false
-      if (!skippedManual) patch.arAuto = true
-      await tx.update(articles).set({ ...patch, updatedAt: new Date() }).where(eq(articles.id, entityId))
-      return true
-    })
-    if (wrote) {
-      await this.deps.articles.bustCache()
-      return null
-    }
-    return skippedManual ? 'همه‌ی فیلدها دستی بودند — چیزی بازنویسی نشد' : 'فیلد قابل‌ترجمه‌ای نبود'
-  }
-
-  // ── دسته‌ی مقاله / ساب‌دسته: name (این دو جدول ar_auto ندارند — رارد ۳۴؛ سیاست: فقط خانه‌ی خالی) ──
-  private async runArticleCategory(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const [row] = await db.select().from(articleCategories).where(eq(articleCategories.id, entityId))
-    if (!row) return 'دسته‌ی مقاله پیدا نشد (شاید حذف شده باشد)'
-    if (isFilled(row.nameAr)) return 'ترجمه‌ی موجود بود — بازنویسی نشد'
-    const [t] = await this.translateTexts([row.name])
-    const nameAr = clamp(t ?? '', 60)
-    if (nameAr.trim() === '') return 'ترجمه خالی برگشت'
-    await db.update(articleCategories).set({ nameAr }).where(eq(articleCategories.id, entityId))
-    await this.deps.articles.bustCache()
-    return null
-  }
-
-  private async runArticleSubCategory(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const [row] = await db
-      .select()
-      .from(articleSubCategories)
-      .where(eq(articleSubCategories.id, entityId))
-    if (!row) return 'ساب‌دسته‌ی مقاله پیدا نشد (شاید حذف شده باشد)'
-    if (isFilled(row.nameAr)) return 'ترجمه‌ی موجود بود — بازنویسی نشد'
-    const [t] = await this.translateTexts([row.name])
-    const nameAr = clamp(t ?? '', 60)
-    if (nameAr.trim() === '') return 'ترجمه خالی برگشت'
-    await db.update(articleSubCategories).set({ nameAr }).where(eq(articleSubCategories.id, entityId))
-    await this.deps.articles.bustCache()
-    return null
-  }
-
-  // ── گالری: متن جایگزین ──
-  private async runGallery(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const gid = asGalleryImageId(entityId)
-    const [g] = await db.select().from(galleryImages).where(eq(galleryImages.id, gid))
-    if (!g) return 'تصویر گالری پیدا نشد (شاید حذف شده باشد)'
-    if (isFilled(g.altAr) && g.arAuto === false) return 'فیلد دستی بود — بازنویسی نشد'
-    const src = g.alt.trim()
-    if (src === '') return 'متن فارسی خالی است'
-    const [t] = await this.translateTexts([src])
-    const altAr = (t ?? '').trim()
-    if (altAr === '') return 'ترجمه خالی برگشت'
-    await db.update(galleryImages).set({ altAr, arAuto: true }).where(eq(galleryImages.id, gid))
-    return null
-  }
-
-  // ── terms: آخرین نسخه — sections[{title, items[]}] (آپدیت درجا، بدون نسخه‌ی جدید) ──
-  private async runTerms(entityId: string): Promise<string | null> {
-    const { db } = this.deps
-    const [row] = await db.select().from(terms).orderBy(desc(terms.version)).limit(1)
-    if (!row) return 'هنوز نسخه‌ای از قوانین ذخیره نشده است'
-    if (row.id !== entityId) return 'نسخه‌ی جدیدتری از قوانین ذخیره شده — این job منسوخ شد'
-    if (isFilled(row.sectionsAr) && row.arAuto === false) return 'بندهای دستی بودند — بازنویسی نشد'
-    const sections = (row.sections ?? []).filter((s) => s.title.trim() !== '' || s.items.length > 0)
-    if (sections.length === 0) return 'بندی برای ترجمه نبود'
-
-    const flat: string[] = []
-    for (const s of sections) {
-      flat.push(s.title)
-      flat.push(...s.items)
-    }
-    const tr = await this.translateList(flat)
-    let i = 0
-    const sectionsAr = sections.map((s) => ({
-      title: tr[i++] ?? s.title,
-      items: s.items.map(() => tr[i++] ?? ''),
-    }))
-    await db.update(terms).set({ sectionsAr, arAuto: true }).where(eq(terms.id, row.id))
-    return null
-  }
-
-  // ── about: چهار فیلد متنی singleton ──
-  private async runAbout(): Promise<string | null> {
-    const { db } = this.deps
-    const [row] = await db.select().from(contentAbout).where(eq(contentAbout.id, 1))
-    if (!row) return 'محتوای «درباره ما» ذخیره نشده است'
-
-    let skippedManual = false
-    const queue: Array<{ plan: TextPlan; apply: (t: string) => void }> = []
-    const out: { heroTitleAr?: string; heroTextAr?: string; teamTitleAr?: string; teamAltAr?: string } = {}
-    const fields: Array<[string, string | null]> = [
-      [row.heroTitle, row.heroTitleAr],
-      [row.heroText, row.heroTextAr],
-      [row.teamTitle, row.teamTitleAr],
-      [row.teamAlt, row.teamAltAr],
-    ]
-    const keys = ['heroTitleAr', 'heroTextAr', 'teamTitleAr', 'teamAltAr'] as const
-    fields.forEach(([fa, ar], idx) => {
-      if (isFilled(ar) && row.arAuto === false) {
-        skippedManual = true
-        return
-      }
-      const src = fa.trim()
-      if (src === '') return
-      const plan = planText(src)
-      if (plan.segments.length === 0) return
-      queue.push({
-        plan,
-        apply: (t) => {
-          const v = t.trim()
-          const k = keys[idx]
-          if (v !== '' && k !== undefined) out[k] = v
-        },
-      })
-    })
-
-    await this.flushQueues(queue, [])
-
-    const patch: Record<string, unknown> = {}
-    for (const k of keys) {
-      if (out[k] !== undefined) patch[k] = out[k]
-    }
-    if (Object.keys(patch).length > 0) {
-      if (!skippedManual) patch.arAuto = true
-      await db.update(contentAbout).set(patch).where(eq(contentAbout.id, 1))
-      return null
-    }
-    return skippedManual ? 'همه‌ی فیلدها دستی بودند — چیزی بازنویسی نشد' : 'فیلد قابل‌ترجمه‌ای نبود'
-  }
-
-  /** اجرای batchهای جمع‌شده — همه‌ی متن‌ها در یک فراخوانی مترجم */
-  private async flushQueues(
-    queue: Array<{ plan: TextPlan; apply: (assembled: string) => void }>,
-    listQueue: Array<{ items: string[]; apply: (list: string[]) => void }>,
-  ): Promise<void> {
-    if (queue.length > 0) {
-      const flat = queue.flatMap((q) => q.plan.segments)
-      const translated = await this.client.translate(flat)
-      let idx = 0
-      for (const q of queue) {
-        const slice = translated.slice(idx, idx + q.plan.segments.length)
-        idx += q.plan.segments.length
-        q.apply(q.plan.assemble(slice))
-      }
-    }
-    for (const l of listQueue) {
-      l.apply(await this.translateList(l.items))
-    }
-  }
-
   // ═══════════════════════ صف‌گذاری / دسته‌ای / وضعیت / کارها ═══════════════════════
 
   /** افزودن یک موجودیت به صف (dedupe روی pending) */
@@ -792,6 +371,7 @@ export class TranslationService {
     let id = entityId.trim()
     if (id === '') throw Err.validation('شناسه‌ی موجودیت خالی است.')
     if (entityType === 'about') id = '1'
+    if (entityType !== 'about' && entityType !== 'temporaryClose' && id !== 'latest') id = id.toLowerCase()
     if (entityType === 'terms' && id === 'latest') {
       const [row] = await this.deps.db
         .select({ id: terms.id })
@@ -801,25 +381,29 @@ export class TranslationService {
       if (!row) return { queued: false }
       id = row.id
     }
-    const existing = await this.deps.db
-      .select({ id: translationJobs.id })
-      .from(translationJobs)
-      .where(
-        and(
-          eq(translationJobs.entityType, entityType),
-          eq(translationJobs.entityId, id),
-          eq(translationJobs.status, 'pending'),
-        ),
-      )
-      .limit(1)
-    if (existing.length > 0) return { queued: false }
-    try {
-      await this.deps.db.insert(translationJobs).values({ entityType, entityId: id })
-      return { queued: true }
-    } catch (e) {
-      if (isUniqueViolation(e)) return { queued: false }
-      throw e
-    }
+    if (!await readContentRow(this.deps.db, entityType, id)) throw Err.notFound('Translation content not found.')
+    return this.deps.db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(73401926)`)
+      const existing = await tx
+        .select({ id: translationJobs.id })
+        .from(translationJobs)
+        .where(
+          and(
+            eq(translationJobs.entityType, entityType),
+          sql`lower(${translationJobs.entityId}) = ${id.toLowerCase()}`,
+            eq(translationJobs.status, 'pending'),
+          ),
+        )
+        .limit(1)
+      if (existing.length > 0) return { queued: false }
+      try {
+        await tx.insert(translationJobs).values({ entityType, entityId: id })
+        return { queued: true }
+      } catch (e) {
+        if (isUniqueViolation(e)) return { queued: false }
+        throw e
+      }
+    })
   }
 
   /** صف‌کردن همه‌ی رکوردهای ناقص یک نوع (یا همه‌ی انواع) */
@@ -834,11 +418,19 @@ export class TranslationService {
     for (const t of types) {
       const ids = await this.missingIds(t)
       if (ids.length === 0) continue
-      const rows = await this.deps.db
-        .insert(translationJobs)
-        .values(ids.map((id) => ({ entityType: t, entityId: id })))
+      const rows = await this.deps.db.transaction(async tx => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(73401926)`)
+        const pending = await tx.select({ entityId: translationJobs.entityId }).from(translationJobs).where(and(
+          eq(translationJobs.entityType, t), eq(translationJobs.status, 'pending'), inArray(sql`lower(${translationJobs.entityId})`, ids.map(id => id.toLowerCase())),
+        ))
+        const existing = new Set(pending.map(row => row.entityId.toLowerCase()))
+        const remaining = ids.filter(id => !existing.has(id.toLowerCase()))
+        if (remaining.length === 0) return []
+        return tx.insert(translationJobs)
+        .values(remaining.map((id) => ({ entityType: t, entityId: id })))
         .onConflictDoNothing()
         .returning({ id: translationJobs.id })
+      })
       queued += rows.length
     }
     return { queued }
@@ -905,229 +497,20 @@ export class TranslationService {
 
   // ═══════════════════════ اسکن رکوردهای ناقص ═══════════════════════
 
-  /**
-   * round-36 — jsonb مدار-انکد: داده‌های قدیمی (قبل از وصله‌ی client.ts)
-   * ممکن است آرایه را به‌صورت «رشته‌ی jsonb» ذخیره کرده باشند؛ این عبارت
-   * هر دو حالت را به jsonb آرایه‌ای برمی‌گرداند تا jsonb_array_length
-   * هرگز روی scalar نشکند (باگ ۵۰۰ اسکن در تست عمیق).
-   */
-  private static jsonArray(col: AnyColumn): SQL {
-    return sql`CASE
-      WHEN jsonb_typeof(${col}) = 'array' THEN ${col}
-      WHEN jsonb_typeof(${col}) = 'string' AND substring(${col} #>> '{}' from 1 for 1) = '['
-        THEN (${col} #>> '{}')::jsonb
-      ELSE '[]'::jsonb
-    END`
-  }
-
-  private productMissingWhere() {
-    return or(
-      isNull(products.nameAr),
-      and(isNotNull(products.description), isNull(products.descriptionAr)),
-      sql`jsonb_array_length(${TranslationService.jsonArray(products.ingredients)}) > 0 AND ${products.ingredientsAr} IS NULL`,
-      and(
-        eq(products.sizesEnabled, true),
-        sql`EXISTS (SELECT 1 FROM ${productSizes} ps WHERE ps.product_id = ${products.id} AND ps.name_ar IS NULL)`,
-      ),
-    )
-  }
-
-  private categoryMissingWhere() {
-    return or(
-      isNull(categories.nameAr),
-      and(
-        sql`jsonb_array_length(${TranslationService.jsonArray(categories.sizeNames)}) > 0`,
-        isNull(categories.sizeNamesAr),
-      ),
-    )
-  }
-
-  private articleMissingWhere() {
-    return or(
-      isNull(articles.titleAr),
-      isNull(articles.excerptAr),
-      isNull(articles.contentAr),
-      and(
-        sql`jsonb_array_length(${TranslationService.jsonArray(articles.processes)}) > 0`,
-        isNull(articles.processesAr),
-      ),
-      this.articleBlocksMissingWhere(),
-    )
-  }
-
-  /** SQL uses the shared textual whitelist and stable IDs, including individual list/gallery entries. */
-  private articleBlocksMissingWhere(): SQL {
-    const textKeys = sql`CASE source.block ->> 'type' ${sql.join(
-      Object.entries(ARTICLE_BLOCK_TEXT_KEYS).map(([type, keys]) =>
-        sql`WHEN ${type} THEN ${JSON.stringify(keys)}::text::jsonb`,
-      ), sql` `,
-    )} ELSE '[]'::jsonb END`
-    const sourceBlocks = sql`CASE WHEN jsonb_typeof(${articles.blocks} -> 'blocks') = 'array'
-      THEN ${articles.blocks} -> 'blocks' ELSE '[]'::jsonb END`
-    const translatedBlocks = sql`CASE WHEN jsonb_typeof(${articles.blocksAr} -> 'blocks') = 'array'
-      THEN ${articles.blocksAr} -> 'blocks' ELSE '[]'::jsonb END`
-    return sql`EXISTS (
-      SELECT 1 FROM jsonb_array_elements(${sourceBlocks}) AS source(block)
-      LEFT JOIN LATERAL (
-        SELECT candidate.block FROM jsonb_array_elements(${translatedBlocks}) AS candidate(block)
-        WHERE candidate.block ->> 'id' = source.block ->> 'id'
-          AND candidate.block ->> 'type' = source.block ->> 'type'
-        LIMIT 1
-      ) AS translated ON true
-      WHERE EXISTS (
-        SELECT 1 FROM jsonb_array_elements_text(${textKeys}) AS field(key)
-        WHERE jsonb_typeof(source.block -> 'props' -> field.key) = 'string'
-          AND btrim(source.block -> 'props' ->> field.key) <> ''
-          AND COALESCE(btrim(translated.block -> 'props' ->> field.key), '') = ''
-      ) OR (
-        source.block ->> 'type' = 'list' AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements(CASE
-            WHEN jsonb_typeof(source.block -> 'props' -> 'items') = 'array'
-              THEN source.block -> 'props' -> 'items' ELSE '[]'::jsonb END)
-            WITH ORDINALITY AS item(value, position)
-          WHERE jsonb_typeof(item.value) = 'string' AND btrim(item.value #>> '{}') <> ''
-            AND COALESCE(btrim(translated.block -> 'props' -> 'items' ->> (item.position - 1)::int), '') = ''
-        )
-      ) OR (
-        source.block ->> 'type' = 'gallery' AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements(CASE
-            WHEN jsonb_typeof(source.block -> 'props' -> 'images') = 'array'
-              THEN source.block -> 'props' -> 'images' ELSE '[]'::jsonb END)
-            WITH ORDINALITY AS image(value, position)
-          WHERE jsonb_typeof(image.value -> 'alt') = 'string' AND btrim(image.value ->> 'alt') <> ''
-            AND COALESCE(btrim(translated.block -> 'props' -> 'images' -> (image.position - 1)::int ->> 'alt'), '') = ''
-        )
-      )
-    )`
-  }
-
-  /** شناسه‌ی رکوردهایی که «حداقل یک» فیلد عربی‌شان خالی است */
-  private async missingIds(t: TranslationEntityType): Promise<string[]> {
-    const { db } = this.deps
-    switch (t) {
-      case 'product':
-        return (
-          await db
-            .select({ id: products.id })
-            .from(products)
-            .where(this.productMissingWhere())
-            .limit(BULK_CAP_PER_TYPE)
-        ).map((r) => r.id as string)
-      case 'mainCategory':
-        return (
-          await db
-            .select({ id: mainCategories.id })
-            .from(mainCategories)
-            .where(isNull(mainCategories.nameAr))
-            .limit(BULK_CAP_PER_TYPE)
-        ).map((r) => r.id as string)
-      case 'category':
-        return (
-          await db
-            .select({ id: categories.id })
-            .from(categories)
-            .where(this.categoryMissingWhere())
-            .limit(BULK_CAP_PER_TYPE)
-        ).map((r) => r.id as string)
-      case 'article':
-        return (
-          await db
-            .select({ id: articles.id })
-            .from(articles)
-            .where(this.articleMissingWhere())
-            .limit(BULK_CAP_PER_TYPE)
-        ).map((r) => r.id)
-      case 'articleCategory':
-        return (
-          await db
-            .select({ id: articleCategories.id })
-            .from(articleCategories)
-            .where(isNull(articleCategories.nameAr))
-            .limit(BULK_CAP_PER_TYPE)
-        ).map((r) => r.id)
-      case 'articleSubCategory':
-        return (
-          await db
-            .select({ id: articleSubCategories.id })
-            .from(articleSubCategories)
-            .where(isNull(articleSubCategories.nameAr))
-            .limit(BULK_CAP_PER_TYPE)
-        ).map((r) => r.id)
-      case 'gallery':
-        return (
-          await db
-            .select({ id: galleryImages.id })
-            .from(galleryImages)
-            .where(isNull(galleryImages.altAr))
-            .limit(BULK_CAP_PER_TYPE)
-        ).map((r) => r.id as string)
-      case 'terms': {
-        const [row] = await db
-          .select({ id: terms.id, sectionsAr: terms.sectionsAr })
-          .from(terms)
-          .orderBy(desc(terms.version))
-          .limit(1)
-        return row && !isFilled(row.sectionsAr) ? [row.id] : []
+  private async missingIds(type: TranslationEntityType, limit = BULK_CAP_PER_TYPE): Promise<string[]> {
+    const missing: string[] = []
+    for (let offset = 0; ; offset += 250) {
+      const rows = await contentRows(this.deps.db, type, 250, offset)
+      for (const row of rows) {
+        if (this.fields.hasEligibleFields(type, row)) missing.push(String(row.id))
+        if (missing.length >= limit) return missing
       }
-      case 'about': {
-        const [row] = await db.select().from(contentAbout).where(eq(contentAbout.id, 1))
-        if (!row) return []
-        const missing = [row.heroTitleAr, row.heroTextAr, row.teamTitleAr, row.teamAltAr].some(
-          (v) => !isFilled(v),
-        )
-        return missing ? ['1'] : []
-      }
+      if (rows.length < 250) break
     }
+    return missing
   }
 
-  private async missingCount(t: TranslationEntityType): Promise<number> {
-    const { db } = this.deps
-    switch (t) {
-      case 'product': {
-        const [r] = await db.select({ n: count() }).from(products).where(this.productMissingWhere())
-        return r?.n ?? 0
-      }
-      case 'mainCategory': {
-        const [r] = await db
-          .select({ n: count() })
-          .from(mainCategories)
-          .where(isNull(mainCategories.nameAr))
-        return r?.n ?? 0
-      }
-      case 'category': {
-        const [r] = await db.select({ n: count() }).from(categories).where(this.categoryMissingWhere())
-        return r?.n ?? 0
-      }
-      case 'article': {
-        const [r] = await db.select({ n: count() }).from(articles).where(this.articleMissingWhere())
-        return r?.n ?? 0
-      }
-      case 'articleCategory': {
-        const [r] = await db
-          .select({ n: count() })
-          .from(articleCategories)
-          .where(isNull(articleCategories.nameAr))
-        return r?.n ?? 0
-      }
-      case 'articleSubCategory': {
-        const [r] = await db
-          .select({ n: count() })
-          .from(articleSubCategories)
-          .where(isNull(articleSubCategories.nameAr))
-        return r?.n ?? 0
-      }
-      case 'gallery': {
-        const [r] = await db
-          .select({ n: count() })
-          .from(galleryImages)
-          .where(isNull(galleryImages.altAr))
-        return r?.n ?? 0
-      }
-      case 'terms':
-      case 'about':
-        return (await this.missingIds(t)).length
-    }
-  }
+  private async missingCount(type: TranslationEntityType): Promise<number> { return (await this.missingIds(type, Number.POSITIVE_INFINITY)).length }
 
   private async cachedHealth(): Promise<{ up: boolean; model: string }> {
     if (Date.now() - this.healthAt < HEALTH_CACHE_MS) {

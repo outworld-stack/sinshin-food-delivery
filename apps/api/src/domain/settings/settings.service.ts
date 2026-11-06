@@ -7,12 +7,12 @@
 
 //src/domain/settings/settings.service.ts
 
-import { eq } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
-import { DEFAULT_RESTAURANT_HOURS, isRestaurantHours, type RestaurantHoursDto, type RestaurantStatusDto } from '@sinshin/shared'
+import { assertContentSourceRevision, DEFAULT_RESTAURANT_HOURS, isRestaurantHours, localizeContentRecord, reconcileContentTranslation, type ContentTranslationState, type RestaurantHoursDto, type RestaurantStatusDto, type TranslationEdit } from '@sinshin/shared'
 import type { Lang } from '#/domain/shared/lang'
 import { Err, OrderPaymentsDisabledError } from '#/domain/shared/errors'
 
@@ -50,6 +50,8 @@ export class SettingsService {
   // رارد L8 — پروازهای در-جریان (single-flight): انقضای TTL با پیک‌ترافیک
   // یعنی ده‌ها کوئری موازی برای همان کلید؛ اولین صاحب پرواز است، بقیه می‌پیوندند.
   private readonly inflight = new Map<string, Promise<unknown>>()
+  private closeContentRevision = 0
+  private closeContentCache?: { at: number; row: { id: string; reason: string; reasonAr: string; translationState: ContentTranslationState | null } }
 
   async get<T>(key: string, fallback: T, db?: DbOrTx): Promise<T> {
     // Money transactions must not wait for a second pool connection or share
@@ -88,6 +90,66 @@ export class SettingsService {
       })
     // write-through — رپلیکای خودش بلافاصله مقدار تازه را می‌بیند
     this.cache.set(key, { value, at: Date.now() })
+    if (key === SETTING_KEYS.temporaryCloseReason || key === SETTING_KEYS.temporaryCloseReasonAr) this.invalidateContentTranslationCache()
+  }
+
+  /** Called after source/translation persistence, including worker writes outside this service. */
+  invalidateContentTranslationCache(): void {
+    this.closeContentRevision++
+    this.closeContentCache = undefined
+    this.cache.delete(SETTING_KEYS.temporaryCloseReason)
+    this.cache.delete(SETTING_KEYS.temporaryCloseReasonAr)
+  }
+
+  async readTemporaryCloseContent(db?: DbOrTx): Promise<{ id: string; reason: string; reasonAr: string; translationState: ContentTranslationState | null }> {
+    const hit = this.closeContentCache
+    if (!db && hit && Date.now() - hit.at < SETTINGS_CACHE_TTL_MS) return structuredClone(hit.row)
+    const revision = this.closeContentRevision
+    const queryDb = db ?? this.deps.db
+    const rows = await queryDb.select().from(settings).where(inArray(settings.key, [SETTING_KEYS.temporaryCloseReason, SETTING_KEYS.temporaryCloseReasonAr]))
+    const source = rows.find(row => row.key === SETTING_KEYS.temporaryCloseReason)
+    const arabic = rows.find(row => row.key === SETTING_KEYS.temporaryCloseReasonAr)
+    const row = { id: 'temporaryCloseReason', reason: typeof source?.value === 'string' ? source.value : '',
+      reasonAr: typeof arabic?.value === 'string' ? arabic.value : '', translationState: source?.translationState ?? null }
+    if (!db) {
+      if (revision !== this.closeContentRevision) return this.readTemporaryCloseContent()
+      this.closeContentCache = { at: Date.now(), row }
+    }
+    return structuredClone(row)
+  }
+
+  /** Serialize the bilingual message with the existing closure/payment policy in one transaction. */
+  async setTemporaryCloseContent(input: {
+    closed: boolean; reason: string; reasonAr?: string | null; reopenTime?: string | null; disablePayments: boolean
+    translationEdits?: TranslationEdit[]; sourceRevision?: string
+  }): Promise<void> {
+    const writes = await this.deps.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('content:temporaryClose'))`)
+      await tx.insert(settings).values({ key: SETTING_KEYS.temporaryCloseReason, value: '' }).onConflictDoNothing()
+      const [source] = await tx.select().from(settings).where(eq(settings.key, SETTING_KEYS.temporaryCloseReason)).for('update')
+      const [arabic] = await tx.select().from(settings).where(eq(settings.key, SETTING_KEYS.temporaryCloseReasonAr))
+      const current = { id: 'temporaryCloseReason', reason: typeof source?.value === 'string' ? source.value : '',
+        reasonAr: typeof arabic?.value === 'string' ? arabic.value : '', translationState: source?.translationState ?? null }
+      if (!assertContentSourceRevision('temporaryClose', current, input.sourceRevision)) throw Err.validation('علت بسته بودن تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+      const previous = !current.reason && !current.reasonAr && !current.translationState ? null : current
+      const next = reconcileContentTranslation('temporaryClose', current.id, previous, { ...current,
+        reason: input.closed ? input.reason : '', reasonAr: input.closed ? input.reasonAr ?? current.reasonAr : '',
+      }, input.closed ? input.translationEdits : [])
+      const updates: Array<{ key: string; value: unknown; translationState?: ContentTranslationState }> = []
+      if (!input.closed) updates.push({ key: SETTING_KEYS.temporarilyClosed, value: false })
+      updates.push({ key: SETTING_KEYS.temporaryCloseReason, value: next.reason, translationState: next.translationState },
+        { key: SETTING_KEYS.temporaryCloseReasonAr, value: input.closed ? next.reasonAr ?? '' : '' },
+        { key: SETTING_KEYS.temporaryReopenTime, value: input.closed ? (input.reopenTime ?? '').trim().slice(0, 40) : '' },
+        { key: SETTING_KEYS.temporaryPaymentsDisabled, value: input.closed && input.disablePayments })
+      if (input.closed) updates.push({ key: SETTING_KEYS.temporarilyClosed, value: true })
+      for (const update of updates) await tx.insert(settings).values({ ...update, value: update.value as never }).onConflictDoUpdate({
+        target: settings.key, set: { value: update.value as never, updatedAt: new Date(),
+          ...(update.translationState ? { translationState: update.translationState } : {}) },
+      })
+      return updates
+    })
+    for (const { key, value } of writes) this.cache.set(key, { value, at: Date.now() })
+    this.invalidateContentTranslationCache()
   }
 
   /** One KV value keeps the opening and closing times consistent on every read. */
@@ -110,11 +172,10 @@ export class SettingsService {
    *  round-34 — lang='ar': علت بسته‌بودن موقت از کلید موازی عربی
    *  (temporary_close_reason_ar) می‌آید؛ خالی = همان فارسی (fallback). */
   async restaurantStatus(lang: Lang = 'fa', db?: DbOrTx): Promise<RestaurantStatusDto> {
-    const [open, tempClosed, reason, reasonAr, tempReopen, hours, busy, paymentsDisabled] = await Promise.all([
+    const [open, tempClosed, closeContent, tempReopen, hours, busy, paymentsDisabled] = await Promise.all([
       this.get<boolean>(SETTING_KEYS.restaurantOpen, true, db),
       this.get<boolean>(SETTING_KEYS.temporarilyClosed, false, db),
-      this.get<string>(SETTING_KEYS.temporaryCloseReason, '', db),
-      this.get<string>(SETTING_KEYS.temporaryCloseReasonAr, '', db),
+      this.readTemporaryCloseContent(db),
       this.get<string>(SETTING_KEYS.temporaryReopenTime, '', db),
       this.restaurantHours(db),
       this.get<boolean>(SETTING_KEYS.restaurantBusy, false, db),
@@ -122,6 +183,9 @@ export class SettingsService {
     ])
     // round-34 — COALESCE: عربی خالی → همان فارسی (بدون ترجمه‌ی برچسب‌های زمانی —
     // ساعت‌ها عددی‌اند و فرانت با فرمتر خودش ارقام را عربی می‌کند)
+    const validContent = localizeContentRecord('temporaryClose', closeContent)
+    const reason = validContent.reason
+    const reasonAr = typeof validContent.reasonAr === 'string' ? validContent.reasonAr : ''
     const effectiveReason =
       lang === 'ar' && reasonAr.trim() !== '' ? reasonAr : reason || 'بسته موقت'
     return {

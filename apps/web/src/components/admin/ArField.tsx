@@ -24,6 +24,7 @@
 import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Loader, Wand2 } from 'reicon-react'
 import { translatePreview } from '#/server/translation'
+import type { ContentTranslationBinding } from '#/hooks/admin/useContentTranslationDraft'
 import { useToastStore } from '#/stores/toastStore'
 
 export type ArBadge = 'none' | 'manual' | 'auto'
@@ -69,6 +70,7 @@ interface ArFieldProps {
   /** round-35 — متن کامل فارسی برای ترجمه‌ی ماشینی (وقتی faReference کوتاه‌شده است) */
   faSource?: string
   disabled?: boolean
+  translation?: ContentTranslationBinding
 }
 
 const inputCls =
@@ -87,9 +89,15 @@ export const ArField = memo(function ArField({
   faReference,
   faSource,
   disabled,
+  translation,
 }: ArFieldProps) {
-  const badge = arBadgeOf(value, arAuto)
+  const displayValue = translation?.status === 'translated' ? translation.field.value ?? value : value
+  const badge = arBadgeOf(displayValue, translation ? translation.field.origin === 'automatic' : arAuto)
   const badgeStyle = BADGE_STYLES[badge]
+  translation?.register(onChange)
+  const translationLabels = {
+    missing: 'ترجمه نشده', translated: 'ترجمه‌شده', 'needs-retranslation': 'نیازمند ترجمه مجدد', 'needs-review': 'نیازمند بازبینی',
+  }
   // a11y — label باید به کنترل وصل باشد (useId → یکتا حتی در چند نمونه)
   const fieldId = useId()
   const showToast = useToastStore((s) => s.showToast)
@@ -113,6 +121,7 @@ export const ArField = memo(function ArField({
   }, [])
   useEffect(() => {
     // A preview belongs to the exact source and draft that requested it.
+    latest.current = { translateSource, value, disabled }
     request.current = null
     setIsPreviewing(false)
   }, [translateSource, value, disabled])
@@ -123,15 +132,16 @@ export const ArField = memo(function ArField({
       request.current = null
       setIsPreviewing(false)
       setMachineSuggested(false) // ویرایش دستی → حالت «پیشنهاد ماشینی» پاک می‌شود
+      translation?.edit(e.target.value, 'manual')
       onChange(e.target.value)
     },
-    [disabled, onChange],
+    [disabled, onChange, translation],
   )
 
   // round-35 — پیشنهاد ماشینی: پر کردن فیلد بدون ذخیره؛ بازبینی با ادمین
   const handlePreview = useCallback(async () => {
-    const source = (translateSource ?? '').trim()
-    if (source === '' || request.current !== null || disabled) return
+    const source = translateSource ?? ''
+    if (!source.trim() || request.current !== null || disabled || translation?.busy || translation?.status === 'translated') return
     const token = Symbol('translation-preview')
     request.current = token
     const isCurrent = () => mounted.current && request.current === token
@@ -139,9 +149,9 @@ export const ArField = memo(function ArField({
       && latest.current.value === value && !latest.current.disabled
     setIsPreviewing(true)
     try {
-      const translations = await translatePreview([source])
+      const translatedValue = translation ? await translation.translate() : (await translatePreview([source]))[0]
       if (!isCurrent()) return
-      const translated = translations[0]?.trim()
+      const translated = translatedValue?.trim()
       if (!translated) {
         showToast('ترجمه‌ای دریافت نشد؛ دوباره تلاش کنید', 'error')
         return
@@ -154,6 +164,7 @@ export const ArField = memo(function ArField({
         showToast(`ترجمه بیشتر از ${maxLength.toLocaleString('fa-IR')} نویسه است؛ متن فارسی را کوتاه‌تر کنید یا ترجمه را دستی بنویسید`, 'error')
         return
       }
+      translation?.edit(translated, translation.field.origin === 'automatic' ? 'automatic' : 'manual')
       onChange(translated)
       setMachineSuggested(true)
       showToast('ترجمه‌ی پیشنهادی قرار گرفت — بازبینی و ذخیره کنید')
@@ -165,7 +176,7 @@ export const ArField = memo(function ArField({
         setIsPreviewing(false)
       }
     }
-  }, [translateSource, value, disabled, minLength, maxLength, onChange, showToast])
+  }, [translateSource, value, disabled, minLength, maxLength, onChange, showToast, translation])
 
   return (
     <div>
@@ -186,18 +197,18 @@ export const ArField = memo(function ArField({
             }
           >
             <span aria-hidden className="font-DanaDemiBold">ع</span>
-            {badgeStyle.label}
+            {translation ? translation.busy ? 'در حال ترجمه...' : translation.failed ? 'ترجمه ناموفق' : translationLabels[translation.status] : badgeStyle.label}
           </span>
           {canSuggest && (
             <button
               type="button"
               onClick={() => void handlePreview()}
-              disabled={disabled || isPreviewing}
+              disabled={disabled || isPreviewing || translation?.busy || translation?.status === 'translated'}
               title="ترجمه‌ی خودکار (پیشنهاد ماشینی — قبل از ذخیره بازبینی کنید)"
               aria-label="ترجمه‌ی خودکار (پیشنهاد ماشینی — قبل از ذخیره بازبینی کنید)"
               className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center hover:bg-amber-200 dark:hover:bg-amber-500/20 transition cursor-pointer disabled:opacity-50"
             >
-              {isPreviewing ? (
+              {isPreviewing || translation?.busy ? (
                 <Loader size={15} className="animate-spin" />
               ) : (
                 <Wand2 size={15} />
@@ -213,10 +224,26 @@ export const ArField = memo(function ArField({
         </p>
       )}
 
+      {translation?.status === 'needs-review' && value.trim() && (
+        <button type="button" disabled={disabled} className="mb-2 text-xs text-amber-600 underline cursor-pointer"
+          onClick={() => { translation.edit(value, 'manual'); onChange(value) }}>
+          تأیید این ترجمه برای متن فارسی فعلی
+        </button>
+      )}
+      {translation?.field.staleValue && ['needs-review', 'needs-retranslation'].includes(translation.status) && (
+        <div className="mb-2 text-xs text-amber-600 whitespace-pre-line">
+          <p>پیش‌نویس ترجمه قبلی: {translation.field.staleValue}</p>
+          <button type="button" disabled={disabled} className="underline cursor-pointer"
+            onClick={() => { const draft = translation.field.staleValue ?? ''; translation.edit(draft, 'manual'); onChange(draft) }}>
+            بازبینی و استفاده از این پیش‌نویس
+          </button>
+        </div>
+      )}
+
       {multiline ? (
         <textarea
           id={fieldId}
-          value={value}
+          value={displayValue}
           onChange={handleChange}
           rows={rows}
           dir="rtl"
@@ -230,7 +257,7 @@ export const ArField = memo(function ArField({
         <input
           id={fieldId}
           type="text"
-          value={value}
+          value={displayValue}
           onChange={handleChange}
           dir="rtl"
           placeholder={placeholder}

@@ -10,11 +10,15 @@
 // فیلدهای الزامی — فرم‌ها همیشه مقدار اولیه‌ی کامل می‌سازن؛
 // اختیاری بودن تاریخی بود و مانع تایپ‌شدن میوتیشن‌ها (data: any) می‌شد.
 // نتیجه: createArticle/createAdminProduct الان ورودی کاملاً تایپ‌دار می‌گیرن.
-import type { ArticleBlocksDoc, Product } from '@sinshin/shared'
+import type { ArticleBlocksDoc, Product, ContentTranslationState, TranslationEdit } from '@sinshin/shared'
 // stage-101 — قرارداد انیمیشن صفحه‌ی محصول ویژه (اختصاصیِ هر محصول)
 import type { FeaturedAnimation } from '#/types/site/featured-animation'
 
 export interface ArticleFormData {
+	sourceRevision?: string
+	id?: string
+	translationState?: ContentTranslationState | null
+	translationEdits?: TranslationEdit[]
 	title: string
 	author?: string // اختیاری — سرور/فرم پیش‌فرض «سین شین» می‌ذارن (به سرور ارسال نمی‌شه)
 	excerpt: string
@@ -54,6 +58,12 @@ export interface ArticleFormProps {
  * window = null یعنی «بدون محدودیت زمانی» (تخفیف همیشه فعال).
  */
 export interface ProductFormSize {
+	sourceRevision?: string
+	id?: string
+	/** Local identity for an unsaved size; never submitted as a persisted size ID. */
+	draftId?: string
+	translationState?: ContentTranslationState | null
+	translationEdits?: TranslationEdit[]
 	name: string
 	nameAr: string
 	price: number
@@ -68,6 +78,8 @@ export interface ProductFormSize {
 }
 
 export interface ProductFormData {
+	sourceRevision?: string
+	translationEdits?: TranslationEdit[]
 	name: string
 	description: string
 	originalPrice: number
@@ -110,6 +122,8 @@ export interface ProductFormData {
 	descriptionAr: string
 	/** هر خط = یک ماده اولیه (مثل ادیتور قوانین) — خالی = بازگشت به فارسی */
 	ingredientsArText: string
+	/** Aligned Arabic fields; legacy form payloads may still provide ingredientsArText. */
+	ingredientsAr?: string[]
 	/** stage-56 — slug انگلیسی سئوپسند ('' = بدون slug → URL با UUID) */
 	slug: string
 }

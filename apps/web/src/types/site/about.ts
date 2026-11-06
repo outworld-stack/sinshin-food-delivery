@@ -7,9 +7,12 @@
 
 // src/types/site/about.ts
 // فیلدهای قابل ویرایش صفحه درباره ما
-import type { AboutLocationDto, ArticleBlocksDoc } from '@sinshin/shared'
+import type { AboutLocationDto, ArticleBlocksDoc, ContentTranslationState, TranslationEdit } from '@sinshin/shared'
 
 export interface AboutContentInput {
+	sourceRevision?: string
+	translationState?: ContentTranslationState | null
+	translationEdits?: TranslationEdit[]
 	heroTitle: string
 	heroText: string
 	heroGradient: string

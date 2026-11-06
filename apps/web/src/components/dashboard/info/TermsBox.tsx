@@ -12,14 +12,11 @@ import type { TermsSection } from '#/server/terms'
 import { useI18n } from '#/i18n'
 
 export const TermsBox = memo(function TermsBox() {
-  const { t, fmt, lang } = useI18n()
+  const { t, fmt } = useI18n()
   const { data: terms, isLoading } = useQuery(termsContentOptions)
 
   // عربی فقط وقتی موجود باشد (وگرنه فارسی)
-  const faSections: TermsSection[] = terms?.sections ?? []
-  const arSections: TermsSection[] | null | undefined = terms?.sectionsAr
-  const sections: TermsSection[] =
-    lang === 'ar' && arSections && arSections.length > 0 ? arSections : faSections
+  const sections: TermsSection[] = terms?.sections ?? []
 
   return (
     <div className="bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm xl:sticky xl:top-6">

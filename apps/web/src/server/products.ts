@@ -27,6 +27,7 @@ import type {
         ProductSize,
         PurchaseStateDto,
         SimilarProductsDto,
+        TranslationEdit,
 } from '@sinshin/shared'
 import { authJson, getJson, postJson } from '#/lib/api-fetch'
 import { similarProductExclusions, type SimilarProductsOptions } from '#/lib/similar-products'
@@ -66,6 +67,10 @@ export async function getCategoriesByMain(input: {
 
 export async function getCategories(): Promise<Category[]> {
         return getJson<Category[]>('/menu/categories')
+}
+
+export async function getAdminCategories(): Promise<Category[]> {
+        return authJson<Category[]>('/admin/menu/categories', 'GET')
 }
 
 // stage-56 — پارامتر UUID یا slug انگلیسی است (هر دو توسط سرور پذیرفته
@@ -128,14 +133,20 @@ export async function getAdminMainCategories(): Promise<MainCategory[]> {
 }
 
 export async function createMainCategory(input: {
-        data: { name: string; slug: string; nameAr?: string | null }
+        data: { name: string; slug: string; nameAr?: string | null; translationEdits?: TranslationEdit[] }
 }): Promise<AdminMutationResult> {
         return authJson<AdminMutationResult>('/admin/menu/mains', 'POST', {
                 name: input.data.name,
+                translationEdits: input.data.translationEdits,
                 slug: input.data.slug,
                 // round-34 — نام عربی ('' → null = بازگشت به فارسی)
                 nameAr: input.data.nameAr?.trim() || null,
         })
+}
+
+export async function updateMainCategory(input: { data: { id: string; name: string; nameAr?: string | null; translationEdits?: TranslationEdit[]; sourceRevision?: string } }): Promise<AdminMutationResult> {
+        const { id, ...body } = input.data
+        return authJson<AdminMutationResult>(`/admin/menu/mains/${id}`, 'PATCH', body)
 }
 
 export async function toggleMainCategory(input: {
@@ -180,6 +191,10 @@ export async function deleteMainCategory(input: {
 
 export async function createCategory(input: {
         data: {
+                translationEdits?: TranslationEdit[]
+                sourceRevision?: string
+                sizeNames?: string[]
+                sizeNamesAr?: string[]
                 name: string
                 /** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
                 mainCategoryIds: string[]
@@ -192,6 +207,10 @@ export async function createCategory(input: {
         }
 }): Promise<AdminMutationResult> {
         return authJson<AdminMutationResult>('/admin/menu/categories', 'POST', {
+                translationEdits: input.data.translationEdits,
+                sourceRevision: input.data.sourceRevision,
+                sizeNames: input.data.sizeNames,
+                sizeNamesAr: input.data.sizeNamesAr,
                 name: input.data.name,
                 // stage-60 — آرایه‌ی والدها (اولین = والد اصلی)؛ سرور categoryId قدیمی را هم می‌پذیرد
                 mainCategoryIds: input.data.mainCategoryIds,
@@ -205,6 +224,10 @@ export async function createCategory(input: {
 
 export async function updateCategory(input: {
         data: {
+                translationEdits?: TranslationEdit[]
+                sourceRevision?: string
+                sizeNames?: string[]
+                sizeNamesAr?: string[]
                 id: string
                 name: string
                 /** stage-60 — همه‌ی والدهای این دسته (اولین = والد اصلی؛ تا ۸ عدد) */
@@ -218,6 +241,10 @@ export async function updateCategory(input: {
         }
 }): Promise<AdminMutationResult> {
         await authJson<unknown>(`/admin/menu/categories/${input.data.id}`, 'PATCH', {
+                translationEdits: input.data.translationEdits,
+                sourceRevision: input.data.sourceRevision,
+                sizeNames: input.data.sizeNames,
+                sizeNamesAr: input.data.sizeNamesAr,
                 name: input.data.name,
                 // stage-60 — سینک کامل والدها (اولین = والد اصلی)
                 mainCategoryIds: input.data.mainCategoryIds,
@@ -239,14 +266,6 @@ export async function deleteCategory(input: {
 }
 
 // ── محصولات ──
-
-/** round-34 — متن چندخطی → آرایه (خطوط خالی حذف؛ مثل ادیتور قوانین) */
-function parseLines(text: string): string[] {
-        return text
-                .split('\n')
-                .map((l) => l.trim())
-                .filter(Boolean)
-}
 
 /**
  * stage-47 — پنجره‌ی تخفیف ISO | null → بدنه‌ی سرور. رشته‌ی خالی/خراب → null
@@ -280,11 +299,16 @@ function productModePayload(data: ProductFormData) {
 
 function productArPayload(data: ProductFormData) {
         return {
+                sourceRevision: data.sourceRevision,
+                translationEdits: data.translationEdits,
                 nameAr: data.nameAr.trim() || null,
                 descriptionAr: data.descriptionAr.trim() || null,
-                ingredientsAr: parseLines(data.ingredientsArText),
+                ingredientsAr: data.ingredients.map((_, index) => (data.ingredientsAr?.[index] ?? data.ingredientsArText.split('\n')[index] ?? '').trim()),
                 // stage-56 — تصویر مستقل هر variant (خالی = null = تصویر مشترک)
                 sizes: data.sizes.map((s) => ({
+                        id: s.id,
+                        sourceRevision: s.sourceRevision,
+                        translationEdits: s.translationEdits,
                         name: s.name,
                         nameAr: s.nameAr.trim() || null,
                         price: s.price,
@@ -454,6 +478,7 @@ export async function getPackagingItems(): Promise<PackagingItemDto[]> {
 
 export async function addPackagingItem(input: {
         data: {
+                translationEdits?: TranslationEdit[]
                 title: string
                 price: number
                 titleAr?: string | null
@@ -471,9 +496,11 @@ export async function addPackagingItem(input: {
 export async function updatePackagingItem(input: {
         id: string
         data: {
+                titleAr?: string | null
+                translationEdits?: TranslationEdit[]
+                sourceRevision?: string
                 title?: string
                 price?: number
-                titleAr?: string | null
                 isActive?: boolean
                 sortOrder?: number
         }

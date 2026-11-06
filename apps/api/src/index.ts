@@ -178,7 +178,7 @@ const articles = new ArticleService({ db, redis })
 const gallery = new GalleryService({ db })
 const geo = new GeoService({ db, config, settings })
 // round-35 — صف ترجمه‌ی خودکار (مترجم آفلاین؛ برای باطل‌کردن کش منو به menu وصل است)
-const translation = new TranslationService({ db, config, menu, articles })
+const translation = new TranslationService({ db, config, menu, articles, settings, packaging })
 
 // ── زمان‌بند — فقط یک‌بار ثبت می‌شود ──
 const scheduler = (g.__sinshin_cron ??= new CronScheduler(redis, monitor.jobRuns))

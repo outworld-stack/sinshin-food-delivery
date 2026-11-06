@@ -50,9 +50,11 @@ mock.module('#/components/admin/ArField', () => ({ ArField: () => null }))
 let previewInput: { blocks: ArticleBlocksDoc; blocksAr?: ArticleBlocksDoc | null; blockId?: string } | undefined
 let resolveTranslation: ((doc: ArticleBlocksDoc) => void) | undefined
 let previewCalls = 0
-const fieldRequests: { blockId: string; blockType: ArticleBlockType; fieldPath: ArticleBlockTextPath; text: string }[] = []
-let resolveField: ((result: { blockId: string; blockType: ArticleBlockType; fieldPath: ArticleBlockTextPath; sourceText: string; translation: string }) => void) | undefined
+const fieldRequests: { blockId: string; blockType: ArticleBlockType; fieldPath: ArticleBlockTextPath; text: string; entityType?: 'article' | 'about'; entityId?: string; revision?: number }[] = []
+let resolveField: ((result: { blockId: string; blockType: ArticleBlockType; fieldPath: ArticleBlockTextPath; sourceText: string; translation: string; entityType?: 'article' | 'about'; entityId?: string; revision?: number }) => void) | undefined
 mock.module('#/server/translation', () => ({
+  translatePreview: async () => { throw new Error('Unexpected scalar translation') },
+  translateContentField: async () => { throw new Error('Unexpected scalar translation') },
   translateArticleBlocksPreview: (input: typeof previewInput) => {
     previewCalls++
     previewInput = input
@@ -65,6 +67,7 @@ mock.module('#/server/translation', () => ({
 }))
 
 const { ArticleForm } = await import('../src/components/admin/ArticleForm')
+const { ArField } = await import('../src/components/admin/ArField')
 const { ArticlePageBuilder } = await import('../src/components/admin/articles/builder/ArticlePageBuilder')
 const { useArabicBlockTranslations } = await import('../src/components/admin/articles/builder/useArabicBlockTranslations')
 const { plainTextToDoc, blocksToPlainText } = await import('../src/components/admin/articles/builder/blockModel')
@@ -144,10 +147,10 @@ change('categoryId', 'category-b')
 submit()
 assert.equal(getSubmitted()?.subCategoryId, null, 'changing categories clears old subcategory')
 
-const arSteps = () => find(tree, node => node.type === 'textarea' && node.props.placeholder?.includes('هر خط = معرب'))
-arSteps().props.onChange({ target: { value: 'الخطوة الأولى\n' } })
+const arSteps = () => find(tree, node => node.type === ArField && node.props.label === 'گام 1')
+arSteps().props.onChange('الخطوة الأولى')
 renderForm()
-assert.equal(arSteps().props.value, 'الخطوة الأولى\n', 'Enter must remain available for the next translated step')
+assert.equal(arSteps().props.value, 'الخطوة الأولى', 'each translated step has an independent editor')
 const originalSteps = [...draft.processes[0]!.items]
 find(tree, node => node.props.placeholder === 'عنوان روند (مثلا: آماده‌سازی مواد)').props.onChange({ target: { value: ' First ' } })
 renderForm()
@@ -359,7 +362,7 @@ assert.deepEqual(savedLegacy?.blocksAr, arabicDoc, 'reviewed Arabic document is 
 // Exact source-field changes invalidate only that field and require an explicit targeted action.
 let fieldSource = structuredClone(bilingualSource)
 let fieldArabic = setArticleBlockTranslations(fieldSource, null, fieldSource.blocks.flatMap(block =>
-  getArticleBlockTextFields(block).filter(field => field.text.trim()).map(field => ({ blockId: block.id, path: field.path, text: `عربي ${field.text}` }))))!
+  getArticleBlockTextFields(block).filter(field => field.text.trim()).map(field => ({ blockId: block.id, path: field.path, text: `عربي ${field.text}` }))), 'automatic')!
 const fieldHost: Host = { cells: [], cursor: 0 }
 function renderFields() {
   return render(fieldHost, ArticlePageBuilder, { doc: fieldSource, docAr: fieldArabic,
@@ -469,4 +472,38 @@ await invalidateArticleQueries(client)
 for (const key of affectedKeys) assert.equal(client.getQueryState(key)?.isInvalidated, true, `Article mutation refreshes ${key.join('/')}`)
 assert.equal(client.getQueryState(['unrelated'])?.isInvalidated, false)
 client.clear()
-console.log('Articles admin regressions passed: plain/builder editing, draft preservation, mode conversion, categories, Arabic steps, immutable process edits, stable IDs, delayed uploads, undo, long text migration, map-based location picking and article cache invalidation.')
+// Saved block fields carry server-verifiable source/revision proof. Draft-only
+// changes preserve the established minimal preview without a stored entity.
+const savedFieldSource: ArticleBlocksDoc = { version: 1, blocks: [{ id: 'saved-heading', type: 'heading', props: { text: 'عنوان ذخیره‌شده', level: 2 } }] }
+const savedFieldArabic = normalizeArticleBlocksTranslation(savedFieldSource, null)
+assert(savedFieldArabic, 'Saved Persian blocks produce an editable Arabic document')
+savedFieldArabic.translation = { fields: [{ blockId: 'saved-heading', blockType: 'heading', fieldPath: ['text'], sourceText: 'عنوان ذخیره‌شده', status: 'missing', revision: 3, origin: 'automatic', error: 'Queued block timeout' }] }
+const savedFieldHost: Host = { cells: [], cursor: 0 }
+const savedSourceRef = { current: savedFieldSource }
+let acceptedSavedArabic = savedFieldArabic
+const renderSavedField = () => render(savedFieldHost, useArabicBlockTranslations, { doc: savedSourceRef, docAr: acceptedSavedArabic,
+  onChange: (value: ArticleBlocksDoc) => { acceptedSavedArabic = value }, mounted: { current: true }, showToast() {},
+  translationEntityType: 'article' as const, translationEntityId: 'saved-article-id', initialDoc: savedFieldSource, initialDocAr: savedFieldArabic })
+const queuedErrorTree = render({ cells: [], cursor: 0 }, ArticlePageBuilder, { doc: savedFieldSource, docAr: savedFieldArabic, onChange() {}, onArabicChange() {} })
+assert(nodes(queuedErrorTree).some(node => node.type === 'span' && node.props.title === 'Queued block timeout'), 'queued block failures remain visible in reopened Arabic editors')
+let savedFieldHook = renderSavedField()
+const storedFieldRequest = savedFieldHook.translate('saved-heading', ['text'])
+assert.deepEqual(fieldRequests.at(-1), { blockId: 'saved-heading', blockType: 'heading', fieldPath: ['text'], text: 'عنوان ذخیره‌شده', entityType: 'article', entityId: 'saved-article-id', revision: 3 })
+resolveField?.({ blockId: 'saved-heading', blockType: 'heading', fieldPath: ['text'], sourceText: 'عنوان ذخیره‌شده', translation: 'عنوان عربي محفوظ', entityType: 'article', entityId: 'saved-article-id', revision: 4 })
+await storedFieldRequest
+assert.equal(readArticleBlockText(acceptedSavedArabic.blocks[0], ['text']), '', 'a mismatched saved revision cannot publish a suggestion')
+savedFieldHook = renderSavedField()
+const retriedStoredField = savedFieldHook.translate('saved-heading', ['text'])
+resolveField?.({ blockId: 'saved-heading', blockType: 'heading', fieldPath: ['text'], sourceText: 'عنوان ذخیره‌شده', translation: 'عنوان عربي محفوظ', entityType: 'article', entityId: 'saved-article-id', revision: 3 })
+await retriedStoredField
+assert.equal(readArticleBlockText(acceptedSavedArabic.blocks[0], ['text']), 'عنوان عربي محفوظ')
+assert.equal(acceptedSavedArabic.translation?.fields[0]?.error, undefined, 'accepted review clears the queued field failure')
+savedSourceRef.current = { version: 1, blocks: [{ id: 'saved-heading', type: 'heading', props: { text: 'عنوان پیش‌نویس', level: 2 } }] }
+savedFieldHook = renderSavedField()
+const unsavedFieldRequest = savedFieldHook.translate('saved-heading', ['text'])
+assert.deepEqual(fieldRequests.at(-1), { blockId: 'saved-heading', blockType: 'heading', fieldPath: ['text'], text: 'عنوان پیش‌نویس' })
+resolveField?.({ blockId: 'saved-heading', blockType: 'heading', fieldPath: ['text'], sourceText: 'عنوان پیش‌نویس', translation: 'عنوان مسودة' })
+await unsavedFieldRequest
+assert.equal(readArticleBlockText(acceptedSavedArabic.blocks[0], ['text']), 'عنوان مسودة')
+
+console.log('Articles admin regressions passed: plain/builder editing, draft preservation, mode conversion, categories, Arabic steps, immutable process edits, stable IDs, delayed uploads, undo, long text migration, map-based location picking, saved field proof/failures and article cache invalidation.')

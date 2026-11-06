@@ -12,7 +12,7 @@
 
 import type { TranslationEntityType } from '@sinshin/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import {
 	enqueueBulkTranslation,
 	getTranslationJobs,
@@ -22,6 +22,7 @@ import {
 import { useToastStore } from '#/stores/toastStore'
 import { faNum } from '#/utils/format'
 import { qk } from '#/utils/queryKeys'
+import { invalidateTranslatedContentQueries } from '#/utils/contentTranslationCache'
 
 const POLL_ACTIVE_MS = 5_000 // صف در حال کار → پول تند
 const POLL_IDLE_MS = 30_000 // صف ساکن → پول آرام
@@ -60,6 +61,22 @@ export function useTranslationQueue({ enabled = true }: Options = {}) {
 				: POLL_IDLE_MS
 		},
 	})
+	const settledAttempts = useRef(new Map<string, string>())
+	useEffect(() => {
+		if (!enabled) return
+		const jobs = jobsQuery.data?.jobs ?? []
+		for (const id of settledAttempts.current.keys()) {
+			if (!jobs.some(job => job.id === id)) settledAttempts.current.delete(id)
+		}
+		for (const job of jobs) {
+			// An unsuccessful attempt can still persist sibling successes and field errors.
+			if (job.status !== 'done' && job.status !== 'failed' && !(job.status === 'pending' && job.lastError)) continue
+			const revision = JSON.stringify([job.entityType, job.entityId, job.status, job.attempts, job.startedAt, job.finishedAt, job.lastError])
+			if (settledAttempts.current.get(job.id) === revision) continue
+			settledAttempts.current.set(job.id, revision)
+			void invalidateTranslatedContentQueries(queryClient, job.entityType)
+		}
+	}, [enabled, jobsQuery.data, queryClient])
 
 	const invalidateTranslation = useCallback(() => {
 		void queryClient.invalidateQueries({ queryKey: qk.translationStatus })

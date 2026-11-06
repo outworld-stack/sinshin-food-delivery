@@ -32,6 +32,27 @@ export async function translatePreview(texts: string[]): Promise<string[]> {
 	return res.translations
 }
 
+export interface ContentFieldTranslationRequest {
+	entityType: TranslationEntityType
+	entityId: string
+	fieldId: string
+	fieldPath: (string | number)[]
+	sourceText: string
+	revision: number
+}
+
+/** The server validates this one saved field before contacting the translator. */
+export async function translateContentField(input: ContentFieldTranslationRequest): Promise<ContentFieldTranslationRequest & { value: string }> {
+	return authJson('/admin/translate/field', 'POST', {
+		entityType: input.entityType,
+		entityId: input.entityId,
+		fieldId: input.fieldId,
+		fieldPath: [...input.fieldPath],
+		sourceText: input.sourceText,
+		revision: input.revision,
+	}, { timeoutMs: 180_000 })
+}
+
 /** Separate Arabic block document for admin review; does not save the article. */
 export async function translateArticleBlocksPreview(input: {
 	blocks: ArticleBlocksDoc
@@ -48,6 +69,9 @@ export async function translateArticleBlocksPreview(input: {
 }
 
 export interface ArticleBlockFieldPreview {
+	entityType?: 'article' | 'about'
+	entityId?: string
+	revision?: number
 	blockId: string
 	blockType: ArticleBlockType
 	fieldPath: ArticleBlockTextPath
@@ -57,6 +81,9 @@ export interface ArticleBlockFieldPreview {
 
 /** One source field only; no Arabic document or unrelated article text is transmitted. */
 export async function translateArticleBlockField(input: {
+	entityType?: 'article' | 'about'
+	entityId?: string
+	revision?: number
 	blockId: string
 	blockType: ArticleBlockType
 	fieldPath: ArticleBlockTextPath
@@ -66,6 +93,7 @@ export async function translateArticleBlockField(input: {
 		'/admin/translate/block-field',
 		'POST',
 		{
+			...(input.entityType && input.entityId ? { entityType: input.entityType, entityId: input.entityId, revision: input.revision ?? 0 } : {}),
 			blockId: input.blockId,
 			blockType: input.blockType,
 			fieldPath: [...input.fieldPath],

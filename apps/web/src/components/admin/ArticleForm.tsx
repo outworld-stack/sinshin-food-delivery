@@ -16,6 +16,8 @@ import { Link } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { Brush, Star } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
+import { ContentTranslationTools } from '#/components/admin/ContentTranslationTools'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
 import { ArticlePageBuilder } from '#/components/admin/articles/builder/ArticlePageBuilder'
 import {
 	blocksToPlainText,
@@ -74,6 +76,10 @@ export function ArticleForm({
 			})) ?? [],
 	}))
 	const [processInput, setProcessInput] = useState({ title: '', item: '' })
+	const translation = useContentTranslationDraft({ entityType: 'article', entityId: initialData?.id,
+		initialRow: initialData ? { ...initialData } : null, row: { ...formData,
+			title: formData.title.trim(), excerpt: formData.excerpt.trim(), content: formData.content.trim(),
+			processes: formData.processes.map(process => ({ title: process.title.trim(), items: process.items.map(item => item.trim()) })) } })
 
 	// stage-82 — حالتِ ویرایش: مقاله‌ی بلوکی → صفحه‌ساز؛ متنی → متن ساده
 	// (مقاله‌ی تازه از صفحه‌ساز شروع می‌شود — تجربه‌ی اصلی این استیج)
@@ -196,17 +202,14 @@ export function ArticleForm({
 	// round-34 — ویرایش روند عربیِ ایندکس n (هر خط textarea = یک گام)
 	const updateProcessAr = (
 		index: number,
-		patch: Partial<{ title: string; itemsText: string }>,
+		patch: Partial<{ title: string; items: string[] }>,
 	) => {
 		setFormData((prev) => {
 			const next = [...(prev.processesAr || [])]
 			const cur = next[index] ?? { title: '', items: [] }
 			next[index] = {
 				title: patch.title !== undefined ? patch.title : cur.title,
-				items:
-					patch.itemsText !== undefined
-						? patch.itemsText.split('\n')
-						: cur.items,
+				items: patch.items ?? cur.items,
 			}
 			return { ...prev, processesAr: next }
 		})
@@ -330,7 +333,7 @@ export function ArticleForm({
 			author: formData.author?.trim() || 'سین شین',
 		}
 
-		onSubmit(finalData)
+		onSubmit({ ...finalData, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
 	}
 
 	const selectedCat = categories?.find((c) => c.id === formData.categoryId)
@@ -503,8 +506,10 @@ export function ArticleForm({
 				</div>
 
 				{/* round-34 — عنوان و خلاصه عربی */}
+				<ContentTranslationTools translation={translation} disabled={isSubmitting} />
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 					<ArField
+						translation={translation.field(['title'])}
 						label="عنوان مقاله"
 						value={formData.titleAr}
 						onChange={(v) => setFormData((prev) => ({ ...prev, titleAr: v }))}
@@ -513,6 +518,7 @@ export function ArticleForm({
 						maxLength={160}
 					/>
 					<ArField
+						translation={translation.field(['excerpt'])}
 						label="خلاصه مقاله"
 						value={formData.excerptAr}
 						onChange={(v) => setFormData((prev) => ({ ...prev, excerptAr: v }))}
@@ -567,6 +573,10 @@ export function ArticleForm({
 									بلوک‌های متنی ساخته می‌شود (لیست/سئو/ترجمه همیشه هم‌گام می‌مانند).
 								</p>
 								<ArticlePageBuilder
+									translationEntityType="article"
+									translationEntityId={initialData?.id}
+									initialDoc={initialData?.blocks}
+									initialDocAr={initialData?.blocksAr}
 									doc={formData.blocks ?? emptyDoc()}
 									onChange={setBlocks}
 									docAr={formData.blocksAr}
@@ -601,6 +611,7 @@ export function ArticleForm({
 				{/* round-34 — متن کامل عربی (پشتیبان: خالی = همان فارسی در حالت عربی) */}
 				{builderMode === 'plain' && (
 					<ArField
+						translation={translation.field(['content'])}
 						label="متن کامل مقاله"
 						value={formData.contentAr}
 						onChange={(v) => setFormData((prev) => ({ ...prev, contentAr: v }))}
@@ -704,26 +715,23 @@ export function ArticleForm({
 											عربی این روند{' '}
 											<span className="text-gray-300">(خالی = همان فارسی)</span>
 										</p>
-										<input
-											value={procAr.title}
-											onChange={(e) =>
-												updateProcessAr(i, { title: e.target.value })
-											}
-											dir="rtl"
-											placeholder={`عنوان عربی (فارسی: ${proc.title})`}
-											maxLength={120}
-											className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary"
-										/>
-										<textarea
-											value={procAr.items.join('\n')}
-											onChange={(e) =>
-												updateProcessAr(i, { itemsText: e.target.value })
-											}
-											dir="rtl"
-											rows={Math.min(6, Math.max(2, proc.items.length))}
-											placeholder={'هر خط = معرب یک گام از همین روند...'}
-											className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary resize-y"
-										/>
+										<ArField label="عنوان روند" value={procAr.title} faReference={proc.title}
+											translation={translation.field(['processes', i, 'title'])}
+											onChange={title => updateProcessAr(i, { title })} maxLength={120} />
+										{proc.items.map((item, index) => <ArField
+											key={translation.field(['processes', i, 'items', index])?.field.fieldId ?? index}
+											label={`گام ${index + 1}`} value={procAr.items[index] ?? ''} faReference={item}
+											translation={translation.field(['processes', i, 'items', index])}
+											onChange={value => {
+												setFormData(previous => {
+													const arabic = previous.processes.map((process, processIndex) => ({
+														title: previous.processesAr[processIndex]?.title ?? '',
+														items: process.items.map((_, itemIndex) => processIndex === i && itemIndex === index
+															? value : previous.processesAr[processIndex]?.items[itemIndex] ?? ''),
+													}))
+													return { ...previous, processesAr: arabic }
+												})
+											}} />)}
 									</div>
 								</div>
 							)

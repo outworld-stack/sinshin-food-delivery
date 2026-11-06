@@ -1,6 +1,7 @@
 export * from './brand'
 export * from './blocks'
 export * from './block-translations'
+export * from './content-translations'
 export * from './contracts'
 export * from './crawlers'
 export * from './jalali'

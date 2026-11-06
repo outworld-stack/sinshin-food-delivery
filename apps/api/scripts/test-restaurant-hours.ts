@@ -36,8 +36,8 @@ const db = {
   select: () => ({ from: () => ({
     where: async (where: Parameters<PgDialect['sqlToQuery']>[0]) => {
       outsideReads++
-      const key = dialect.sqlToQuery(where).params[0] as string
-      return stored.has(key) ? [{ value: structuredClone(stored.get(key)) }] : []
+      const keys = dialect.sqlToQuery(where).params as string[]
+      return keys.filter(key => stored.has(key)).map(key => ({ key, value: structuredClone(stored.get(key)), translationState: null }))
     },
   }) }),
   insert: () => ({
@@ -188,9 +188,9 @@ const txReads: string[] = []
 const tx = {
   select: () => ({ from: () => ({
     where: async (where: Parameters<PgDialect['sqlToQuery']>[0]) => {
-      const key = dialect.sqlToQuery(where).params[0] as string
-      txReads.push(key)
-      return txStored.has(key) ? [{ value: structuredClone(txStored.get(key)) }] : []
+      const keys = dialect.sqlToQuery(where).params as string[]
+      txReads.push(...keys)
+      return keys.filter(key => txStored.has(key)).map(key => ({ key, value: structuredClone(txStored.get(key)), translationState: null }))
     },
   }) }),
 } as never

@@ -202,4 +202,18 @@ const olderPartialArabic = reconcileArticleBlocksTranslation(olderPartialSource,
 assert.equal(olderPartialArabic.blocks[0], null, 'translation reconciliation retains older partial source structures')
 assert.equal(getArticleBlockTranslationStatus(olderPartialNext, olderPartialArabic, 'heading', ['text']), 'needs-retranslation', 'older partial documents remain field-translatable without rebuilding')
 assert.deepEqual(source, snapshot)
-console.log('Block translation regressions passed: every block type, exact structure, fallback, stable IDs, nested text, multiple precise locations, manual protection and source immutability.')
+const currentManual = setArticleBlockTranslation(newHeading, freshHeading, 'heading', ['text'], 'مراجعة أحدث')!
+const olderManual = setArticleBlockTranslation(newHeading, freshHeading, 'heading', ['text'], 'مراجعة قديمة')!
+assert.equal((reconcileArticleBlocksTranslation(newHeading, newHeading, currentManual, olderManual)!.blocks.find(block => block.id === 'heading')!.props as { text: string }).text,
+  'مراجعة أحدث', 'same-source stale revisions cannot overwrite a newer manual Arabic edit')
+const automaticOverManual = setArticleBlockTranslation(newHeading, currentManual, 'heading', ['text'], 'اقتراح تلقائي', 'automatic')!
+assert.equal((reconcileArticleBlocksTranslation(newHeading, newHeading, currentManual, automaticOverManual)!.blocks.find(block => block.id === 'heading')!.props as { text: string }).text,
+  'مراجعة أحدث', 'automatic origin cannot overwrite a manual field even with current source proof')
+assert.equal(currentManual.translation?.fields.find(field => field.blockId === 'heading')?.origin, 'manual')
+const omittedRevision = structuredClone(olderManual)
+for (const field of omittedRevision.translation?.fields ?? []) delete field.revision
+assert.equal((reconcileArticleBlocksTranslation(newHeading, newHeading, currentManual, omittedRevision)!.blocks.find(block => block.id === 'heading')!.props as { text: string }).text,
+  'مراجعة أحدث', 'omitting a client revision cannot bypass an existing field revision')
+assert.equal(invalidated.translation?.fields.find(field => field.blockId === 'heading')?.staleValue,
+  (reviewed.blocks.find(block => block.id === 'heading')!.props as { text: string }).text, 'invalidated manual text remains recoverable')
+console.log('Block translation regressions passed: every block type, exact structure, fallback, stable IDs, nested text, multiple precise locations, manual revision protection and source immutability.')

@@ -15,6 +15,8 @@ import { invalidateArticleQueries } from './invalidateArticleQueries'
 import { useToastStore } from '#/stores/toastStore'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { ArField } from '#/components/admin/ArField'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
+import { contentSourceRevision, type TranslationEdit } from '@sinshin/shared'
 import { Toggle } from '#/components/shared/Toggle'
 import { Pen, Trash2, X } from 'reicon-react'
 
@@ -29,6 +31,8 @@ interface ArticleCategoryFormState {
   subTags: string[]
   /** round-34 — نام عربی ساب‌دسته‌ها (موازی با subTags) */
   subTagsAr: string[]
+  subIds: (string | undefined)[]
+  subKeys: string[]
   subInput: string
   confirmDeleteId: string | null
 }
@@ -41,8 +45,22 @@ const EMPTY_FORM: ArticleCategoryFormState = {
   hasSub: false,
   subTags: [],
   subTagsAr: [],
+  subIds: [],
+  subKeys: [],
   subInput: '',
   confirmDeleteId: null,
+}
+
+function SubCategoryArabicField({ name, nameAr, initialRow, onChange }: {
+  name: string
+  nameAr: string
+  initialRow?: { id: string; name: string; nameAr?: string | null }
+  onChange: (value: string, edits: TranslationEdit[], sourceRevision?: string) => void
+}) {
+  const translation = useContentTranslationDraft({ entityType: 'articleSubCategory', entityId: initialRow?.id,
+    initialRow: initialRow ? { ...initialRow } : null, row: { name: name.trim(), nameAr } })
+  return <ArField label="نام زیردسته" value={nameAr} faReference={name.trim()} maxLength={60}
+    translation={translation.field(['name'])} onChange={value => onChange(value, translation.getEdits(), translation.sourceRevision)} />
 }
 
 export const ArticleCategoryManager = memo(function ArticleCategoryManager({ canWrite }: { canWrite: boolean }) {
@@ -57,6 +75,10 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
   }, [])
 
   const { data: categories } = useQuery(adminArticleCategoriesOptions)
+  const originalCategory = categories?.find(category => category.id === form.editingId)
+  const translation = useContentTranslationDraft({ entityType: 'articleCategory', entityId: form.editingId,
+    initialRow: originalCategory ? { ...originalCategory } : null, row: { name: form.name.trim(), nameAr: form.nameAr } })
+  const subEdits = useRef(new Map<string, { translationEdits: TranslationEdit[]; sourceRevision?: string }>())
 
   const createMut = useMutation({
     mutationFn: (data: {
@@ -65,6 +87,9 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       hasSubCategories: boolean
       subCategories: string[]
       subCategoriesAr?: string[] | null
+      translationEdits?: TranslationEdit[]
+      sourceRevision?: string
+      subCategoryEntries?: Parameters<typeof createArticleCategory>[0]['subCategoryEntries']
     }) => createArticleCategory(data),
     onSuccess: async () => {
       await invalidateArticleQueries(queryClient)
@@ -83,6 +108,9 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       hasSubCategories: boolean
       subCategories: string[]
       subCategoriesAr?: string[] | null
+      translationEdits?: TranslationEdit[]
+      sourceRevision?: string
+      subCategoryEntries?: Parameters<typeof createArticleCategory>[0]['subCategoryEntries']
     }) => updateArticleCategory(data),
     onSuccess: async () => {
       await invalidateArticleQueries(queryClient)
@@ -109,6 +137,8 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
 
   const openModal = useCallback((cat?: ArticleCategory) => {
     if (!canWrite || mutationLock.current) return
+    translation.reset()
+    subEdits.current.clear()
     if (cat) {
       set({
         isModalOpen: true,
@@ -118,12 +148,14 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
         hasSub: cat.hasSubCategories,
         subTags: (cat.subCategories ?? []).map(s => s.name),
         subTagsAr: (cat.subCategories ?? []).map(s => s.nameAr ?? ''),
+        subIds: (cat.subCategories ?? []).map(s => s.id),
+        subKeys: (cat.subCategories ?? []).map(s => s.id),
         subInput: '',
       })
     } else {
-      set({ isModalOpen: true, editingId: null, name: '', nameAr: '', hasSub: false, subTags: [], subTagsAr: [], subInput: '' })
+      set({ isModalOpen: true, editingId: null, name: '', nameAr: '', hasSub: false, subTags: [], subTagsAr: [], subIds: [], subKeys: [], subInput: '' })
     }
-  }, [canWrite, set])
+  }, [canWrite, set, translation])
 
   const closeModal = useCallback(() => {
     if (!mutationLock.current) set({ isModalOpen: false })
@@ -135,9 +167,9 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       if (mutationLock.current) return
       const tag = form.subInput.trim()
       if (form.subTags.length >= 12) { showToast('حداکثر ۱۲ زیردسته مجاز است', 'error'); return }
-      if (!form.subTags.includes(tag)) set({ subTags: [...form.subTags, tag], subTagsAr: [...form.subTagsAr, ''], subInput: '' })
+      if (!form.subTags.includes(tag)) set({ subTags: [...form.subTags, tag], subTagsAr: [...form.subTagsAr, ''], subIds: [...form.subIds, undefined], subKeys: [...form.subKeys, crypto.randomUUID()], subInput: '' })
     }
-  }, [form.subInput, form.subTags, form.subTagsAr, set, showToast])
+  }, [form, set, showToast])
 
   const removeSubTag = useCallback((tag: string) => {
     const idx = form.subTags.indexOf(tag)
@@ -145,13 +177,15 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       subTags: form.subTags.filter(t => t !== tag),
       // round-34 — جفت عربی هم‌ایندکس حذف می‌شود
       subTagsAr: idx === -1 ? form.subTagsAr : form.subTagsAr.filter((_, i) => i !== idx),
+      subIds: form.subIds.filter((_, i) => i !== idx),
+      subKeys: form.subKeys.filter((_, i) => i !== idx),
     })
-  }, [form.subTags, form.subTagsAr, set])
+  }, [form, set])
 
   // round-34 — ویرایش نام عربی ساب‌دسته‌ی ایندکس n
-  const setSubTagAr = useCallback((index: number, value: string) => {
-    set({ subTagsAr: form.subTagsAr.map((t, i) => (i === index ? value : t)) })
-  }, [form.subTagsAr, set])
+  const setSubTagAr = useCallback((key: string, value: string) => {
+    setForm(previous => ({ ...previous, subTagsAr: previous.subTagsAr.map((text, index) => previous.subKeys[index] === key ? value : text) }))
+  }, [])
 
   const handleSave = useCallback(() => {
     if (!canWrite || mutationLock.current) return
@@ -161,6 +195,14 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
     const subCategories = addPending ? [...form.subTags, pendingTag] : form.subTags
     if (subCategories.length > 12) { showToast('حداکثر ۱۲ زیردسته مجاز است', 'error'); return }
     const payload = {
+      translationEdits: translation.getEdits(),
+      sourceRevision: translation.sourceRevision,
+      subCategoryEntries: subCategories.map((name, index) => {
+        const initial = originalCategory?.subCategories?.find(entry => entry.id === form.subIds[index])
+        return { id: form.subIds[index], name,
+          nameAr: form.subTagsAr[index]?.trim() ?? '', sourceRevision: initial ? contentSourceRevision('articleSubCategory', initial) : undefined,
+          ...subEdits.current.get(form.subKeys[index]) }
+      }),
       name: form.name.trim(),
       nameAr: form.nameAr.trim() || null,
       hasSubCategories: form.hasSub,
@@ -170,7 +212,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
     mutationLock.current = true
     if (form.editingId) updateMut.mutate({ id: form.editingId, ...payload })
     else createMut.mutate(payload)
-  }, [canWrite, form, showToast, updateMut, createMut])
+  }, [canWrite, form, showToast, updateMut, createMut, translation, originalCategory])
 
   return (
     <div className="w-full bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm h-fit">
@@ -206,6 +248,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
 
             {/* round-34 — نام عربی دسته (خالی = پشتیبان فارسی) */}
             <ArField
+              translation={translation.field(['name'])}
               label="نام دسته"
               value={form.nameAr}
               onChange={(v) => set({ nameAr: v })}
@@ -234,20 +277,18 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
                 />
                 <div className="space-y-2 mt-2">
                   {form.subTags.map((t, i) => (
-                    <div key={t} className="flex items-center gap-2">
+                    <div key={form.subKeys[i]} className="flex flex-wrap items-center gap-2">
                       <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary text-xs shrink-0">
-                        {t}
+                        <input value={t} maxLength={60} aria-label="نام فارسی زیردسته" className="bg-transparent outline-none"
+                          onChange={event => set({ subTags: form.subTags.map((value, index) => index === i ? event.target.value : value) })} />
                         <button type="button" onClick={() => removeSubTag(t)} className="hover:opacity-70 cursor-pointer"><X size={10} /></button>
                       </div>
                       {/* round-34 — نام عربی همین ساب‌دسته */}
-                      <input
-                        value={form.subTagsAr[i] ?? ''}
-                        onChange={(e) => setSubTagAr(i, e.target.value)}
-                        dir="rtl"
-                        placeholder="نام عربی (اختیاری)"
-                        maxLength={60}
-                        className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] text-xs outline-none"
-                      />
+                      <SubCategoryArabicField name={t} nameAr={form.subTagsAr[i] ?? ''}
+                        initialRow={originalCategory?.subCategories?.find(entry => entry.id === form.subIds[i])}
+                        onChange={(value, translationEdits, sourceRevision) => {
+                          subEdits.current.set(form.subKeys[i], { translationEdits, sourceRevision }); setSubTagAr(form.subKeys[i], value)
+                        }} />
                     </div>
                   ))}
                 </div>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Elysia } from 'elysia'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { TEMPORARY_CLOSE_REASON_MIN_LENGTH } from '@sinshin/shared'
+import { contentTranslationFields, TEMPORARY_CLOSE_REASON_MIN_LENGTH } from '@sinshin/shared'
 import { Admin2Service, ALL_ADMIN2_PERMISSIONS } from '../src/domain/admin2/admin2.service'
 import { SettingsService } from '../src/domain/settings/settings.service'
 import { AppError } from '../src/domain/shared/errors'
@@ -11,22 +11,40 @@ import { SETTING_KEYS } from '../src/infra/db/schema'
 const actorId = '11111111-1111-4111-8111-111111111111'
 const profile = { ...ALL_ADMIN2_PERMISSIONS, isActive: true }
 const stored = new Map<string, unknown>()
+const provenance = new Map<string, unknown>()
 const writes: Array<{ key: string; value: unknown }> = []
 const activity: string[] = []
 const audit: unknown[] = []
 const dialect = new PgDialect()
-const settings = new SettingsService({ db: {
+const fakeDb = {
+  execute: async () => [],
+  transaction: async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+    const before = new Map(stored), beforeProvenance = new Map(provenance), beforeWrites = writes.length
+    try { return await fn(fakeDb) } catch (error) {
+      stored.clear(); for (const [key, value] of before) stored.set(key, value)
+      provenance.clear(); for (const [key, value] of beforeProvenance) provenance.set(key, value)
+      writes.splice(beforeWrites); throw error
+    }
+  },
+  select: () => ({ from: () => ({ where: (where: Parameters<PgDialect['sqlToQuery']>[0]) => {
+    const keys = dialect.sqlToQuery(where).params as string[]
+    const rows = keys.filter(key => stored.has(key)).map(key => ({ key, value: structuredClone(stored.get(key)), translationState: provenance.get(key) ?? null }))
+    return { for: async () => rows, then: (resolve: (value: typeof rows) => unknown) => Promise.resolve(rows).then(resolve) }
+  } }) }),
   query: { settings: { findFirst: async ({ where }: { where: Parameters<PgDialect['sqlToQuery']>[0] }) => {
     const key = dialect.sqlToQuery(where).params[0] as string
-    return stored.has(key) ? { value: structuredClone(stored.get(key)) } : undefined
+    return stored.has(key) ? { value: structuredClone(stored.get(key)), translationState: provenance.get(key) ?? null } : undefined
   } } },
-  insert: () => ({ values: ({ key, value }: { key: string; value: unknown }) => ({
+  insert: () => ({ values: ({ key, value, translationState }: { key: string; value: unknown; translationState?: unknown }) => ({
+    onConflictDoNothing: async () => { if (!stored.has(key)) stored.set(key, value) },
     onConflictDoUpdate: async () => {
       writes.push({ key, value })
       stored.set(key, value)
+      if (translationState !== undefined) provenance.set(key, translationState)
     },
   }) }),
-} as never })
+}
+const settings = new SettingsService({ db: fakeDb as never })
 const service = new Admin2Service({
   db: {
     query: { admin2Profiles: { findFirst: async ({ where }: { where: Parameters<PgDialect['sqlToQuery']>[0] }) => {
@@ -55,14 +73,23 @@ const app = new Elysia()
   }))
   .compile()
 
-const request = (body: unknown, role: string | null = 'admin') => app.handle(new Request(
+const request = async (body: unknown, role: string | null = 'admin') => {
+  let payload = body
+  const input = body as { closed?: boolean; reason?: string; reasonAr?: string | null }
+  if (input.closed && input.reasonAr !== undefined) {
+    const current = await settings.readTemporaryCloseContent()
+    const field = contentTranslationFields('temporaryClose', current)[0]!
+    payload = { ...input, translationEdits: [{ fieldId: 'reason', fieldPath: ['reason'], sourceText: typeof input.reason === 'string' ? input.reason.trim() : '',
+      revision: field.revision, value: typeof input.reasonAr === 'string' ? input.reasonAr.trim() : '', origin: 'manual' }] }
+  }
+  return app.handle(new Request(
   'http://localhost/admin/settings/temporary-close',
   {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(role ? { authorization: `Bearer ${role}` } : {}) },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   },
-))
+)) }
 const adminStatus = (role = 'admin') => app.handle(new Request('http://localhost/admin/settings/restaurant/status', {
   headers: { authorization: `Bearer ${role}` },
 }))
@@ -102,7 +129,8 @@ assert.deepEqual(activity, [], 'main-admin changes do not create admin2 activity
 
 for (const reasonAr of [undefined, null, '', '   ']) {
   assert.equal((await request({ closed: true, reason: boundary, reasonAr })).status, 200)
-  assert.equal(stored.get(SETTING_KEYS.temporaryCloseReasonAr), '', 'missing or blank translations allow primary-language fallback')
+  assert.equal(stored.get(SETTING_KEYS.temporaryCloseReasonAr), reasonAr === undefined ? boundary : '',
+    'omitted Arabic preserves existing manual content; explicitly reviewed blanks allow fallback')
 }
 assert.equal((await request({ closed: true, reason: 'ر'.repeat(120), reasonAr: 'ص'.repeat(120) })).status, 200)
 const beforeBlockedClose = writes.length

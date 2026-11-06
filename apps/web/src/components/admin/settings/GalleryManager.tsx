@@ -9,6 +9,8 @@
 import { memo, useState, useCallback } from 'react'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { FileUploader } from '#/components/FileUploader'
+import { ArField } from '#/components/admin/ArField'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
 import { GalleryImageRow, type GalleryImageEditFields } from './GalleryImageRow'
 import type { GalleryImage, GallerySpan, AddGalleryImageInput } from '#/types/site/gallery'
 
@@ -36,6 +38,7 @@ export const GalleryManager = memo(function GalleryManager({
   // ریست آپلودر بعد از افزودن — key تغییر می‌کند و پیش‌نمایش پاک می‌شود
   const [uploaderKey, setUploaderKey] = useState(0)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const translation = useContentTranslationDraft({ entityType: 'gallery', row: { alt: newAlt.trim(), altAr: newAltAr } })
 
   const toggleAdd = useCallback(() => setIsAddOpen((v) => !v), [])
   const handleNewAlt = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setNewAlt(e.target.value), [])
@@ -45,14 +48,14 @@ export const GalleryManager = memo(function GalleryManager({
     const alt = newAlt.trim()
     if (!alt || !newImage) return // عکس و alt هر دو اجباری
     // round-34 — altAr اختیاری (خالی = پشتیبان فارسی)
-    onAdd({ src: newImage, alt, altAr: newAltAr.trim() || null, span: newSpan })
+    onAdd({ src: newImage, alt, altAr: newAltAr.trim() || null, span: newSpan, translationEdits: translation.getEdits() })
     setNewAlt('')
     setNewAltAr('')
     setNewSpan('normal')
     setNewImage('')
     setUploaderKey((k) => k + 1)
     setIsAddOpen(false)
-  }, [newAlt, newAltAr, newImage, newSpan, onAdd])
+  }, [newAlt, newAltAr, newImage, newSpan, onAdd, translation])
 
   const handleToggleActive = useCallback(
     (id: string, isActive: boolean) => onPatch(id, { isActive }),
@@ -91,11 +94,8 @@ export const GalleryManager = memo(function GalleryManager({
               <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن جایگزین (alt)</span>
               <input value={newAlt} onChange={handleNewAlt} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary" placeholder="مثلاً: فضای رستوران سین‌شین" />
             </label>
-            <label className="block">
-              <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">متن جایگزین عربی (اختیاری)</span>
-              {/* round-34 — alt عربی تصویر جدید */}
-              <input value={newAltAr} onChange={(e) => setNewAltAr(e.target.value)} dir="rtl" maxLength={200} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary" placeholder="خالی = همان متن فارسی" />
-            </label>
+            <ArField label="متن جایگزین" value={newAltAr} onChange={setNewAltAr}
+              faReference={newAlt.trim()} maxLength={200} translation={translation.field(['alt'])} disabled={isBusy} />
             <label className="block">
               <span className="block text-xs font-DanaMedium text-gray-700 dark:text-gray-300 mb-2">چیدمان</span>
               <select value={newSpan} onChange={(e) => setNewSpan(e.target.value as GallerySpan)} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary">

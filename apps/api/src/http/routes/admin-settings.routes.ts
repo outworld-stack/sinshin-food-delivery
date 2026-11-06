@@ -17,6 +17,7 @@ import type { RegistrationPermitService } from '#/domain/auth/registration-permi
 import { SETTING_KEYS } from '#/infra/db/schema'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
+import { translationEditsSchema } from './content-translation.schemas'
 
 export interface AdminSettingsRoutesDeps {
   sessions: SessionService
@@ -52,13 +53,14 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
     .get(
       '/restaurant/status',
       async (): Promise<AdminRestaurantStatusDto> => {
-        const [status, reasonAr] = await Promise.all([
+        const [status, content] = await Promise.all([
           deps.settings.restaurantStatus(),
-          deps.settings.get<string>(SETTING_KEYS.temporaryCloseReasonAr, ''),
+          deps.settings.readTemporaryCloseContent(),
         ])
         return {
           ...status,
-          temporaryCloseReasonAr: status.temporarilyClosed ? reasonAr || null : null,
+          temporaryCloseReasonAr: status.temporarilyClosed ? content.reasonAr || null : null,
+          translationState: content.translationState,
         }
       },
       { detail: { summary: 'Full status — schedule + temporary + busy' } },
@@ -97,8 +99,10 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           body.reason,
           body.reopenTime ?? null,
           // round-34 — علت عربی (اختیاری؛ خالی = همان فارسی در حالت عربی چک‌اوت)
-          body.reasonAr ?? null,
+          body.reasonAr,
           body.disablePayments ?? false,
+          body.translationEdits,
+          body.sourceRevision,
         )
         // round-13 — ممیزی برای هر دو نقش (قبلاً ادمین اصلی هیچ ردی نداشت)
         await deps.audit.log({
@@ -118,6 +122,8 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
       {
         body: t.Object({
           closed: t.Boolean(),
+            translationEdits: t.Optional(translationEditsSchema),
+            sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
           /** Closing requires 20 trimmed characters; reopening requires 3 for the audit trail. */
           reason: t.String({ minLength: 3, maxLength: 120 }),
           /** Optional legacy metadata; temporary checkout warnings show only the reason. */

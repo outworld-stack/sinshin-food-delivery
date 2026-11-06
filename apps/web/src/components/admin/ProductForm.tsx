@@ -21,6 +21,7 @@
 // src/components/admin/ProductForm.tsx
 
 import { useQuery } from '@tanstack/react-query'
+import { contentSourceRevision } from '@sinshin/shared'
 import { Link } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -37,6 +38,8 @@ import {
 	X,
 } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
+import { ContentTranslationTools } from '#/components/admin/ContentTranslationTools'
+import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
 import { ProductCard } from '#/components/ProductCard'
 import { ImageField } from '#/components/shared/ImageField'
 import { PersianDatePicker } from '#/components/shared/PersianDatePicker'
@@ -347,6 +350,18 @@ const EMPTY_SIZE: ProductFormSize = {
 	image: '',
 }
 
+function ProductSizeArabicField({ size, initialSize, onChange }: {
+	size: ProductFormSize
+	initialSize?: { id?: string; name: string; nameAr?: string | null }
+	onChange: (size: ProductFormSize) => void
+}) {
+	const translation = useContentTranslationDraft({ entityType: 'productSize', entityId: initialSize?.id,
+		initialRow: initialSize ? { ...initialSize } : null, row: { ...size } })
+	return <div className="col-span-3"><ArField label="نام سایز" value={size.nameAr} faReference={size.name}
+		maxLength={60} translation={translation.field(['name'])}
+		onChange={nameAr => onChange({ ...size, nameAr, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })} /></div>
+}
+
 export function ProductForm({
 	initialData,
 	onSubmit,
@@ -421,9 +436,13 @@ export function ProductForm({
 		nameAr: '',
 		descriptionAr: '',
 		ingredientsArText: '',
+		ingredientsAr: [],
 	})
 
 	const [ingredientInput, setIngredientInput] = useState('')
+	const translation = useContentTranslationDraft({ entityType: 'product', entityId: initialData?.id,
+		initialRow: initialData ? { ...initialData } : null,
+		row: { ...formData, ingredientsAr: formData.ingredientsAr ?? formData.ingredientsArText.split('\n') } })
 	const initializedProductId = useRef<string | null>(null)
 
 	// stage-84 — مشتقات اقلام بسته‌بندی (بعد از formData — ترتیب هوک‌ها)
@@ -480,6 +499,9 @@ export function ProductForm({
 				ingredients: initialData.ingredients || [],
 				sizes:
 					initialData.sizes?.map((s) => ({
+						id: s.id,
+						sourceRevision: contentSourceRevision('productSize', s),
+						translationState: s.translationState,
 						name: s.name,
 						nameAr: s.nameAr || '',
 						price: s.price,
@@ -500,6 +522,7 @@ export function ProductForm({
 				nameAr: initialData.nameAr || '',
 				descriptionAr: initialData.descriptionAr || '',
 				ingredientsArText: (initialData.ingredientsAr || []).join('\n'),
+				ingredientsAr: [...(initialData.ingredientsAr ?? [])],
 			})
 		}
 	}, [initialData])
@@ -621,7 +644,7 @@ export function ProductForm({
 	const addSize = () =>
 		setFormData((prev) => ({
 			...prev,
-			sizes: [...(prev.sizes || []), { ...EMPTY_SIZE }],
+			sizes: [...(prev.sizes || []), { ...EMPTY_SIZE, draftId: crypto.randomUUID() }],
 		}))
 	const removeSize = (index: number) =>
 		setFormData((prev) => ({
@@ -637,7 +660,7 @@ export function ProductForm({
 				return {
 					...prev,
 					sizesEnabled: next,
-					sizes: sizeTemplate.map((name) => ({ ...EMPTY_SIZE, name })),
+					sizes: sizeTemplate.map((name) => ({ ...EMPTY_SIZE, name, draftId: crypto.randomUUID() })),
 				}
 			}
 			return { ...prev, sizesEnabled: next }
@@ -669,6 +692,7 @@ export function ProductForm({
 			setFormData((prev) => ({
 				...prev,
 				ingredients: [...(prev.ingredients || []), ingredientInput.trim()],
+				ingredientsAr: [...prev.ingredients.map((_, index) => prev.ingredientsAr?.[index] ?? prev.ingredientsArText.split('\n')[index] ?? ''), ''],
 			}))
 			setIngredientInput('')
 		}
@@ -775,7 +799,7 @@ export function ProductForm({
 			}
 		}
 
-		onSubmit(formData)
+		onSubmit({ ...formData, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
 	}
 
 	// قیمت نمایشی پیش‌نمایش
@@ -922,7 +946,9 @@ export function ProductForm({
 				</div>
 
 				{/* round-34 — نام عربی محصول (COALESCE: خالی = همان فارسی) */}
+				<ContentTranslationTools translation={translation} disabled={isSubmitting} />
 				<ArField
+					translation={translation.field(['name'])}
 					label="نام محصول"
 					value={formData.nameAr}
 					onChange={(v) => setFormData((prev) => ({ ...prev, nameAr: v }))}
@@ -946,6 +972,7 @@ export function ProductForm({
 
 				{/* round-34 — توضیحات عربی */}
 				<ArField
+					translation={translation.field(['description'])}
 					label="توضیحات"
 					value={formData.descriptionAr}
 					onChange={(v) =>
@@ -1464,7 +1491,7 @@ export function ProductForm({
 						<div className="space-y-3">
 							{formData.sizes?.map((size, index) => (
 								<div
-									key={index}
+									key={size.id ?? size.draftId ?? index}
 									className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] space-y-3"
 								>
 									{/* ردیف ۱: نام + نام عربی + قیمت + حذف */}
@@ -1496,17 +1523,11 @@ export function ProductForm({
 											/>
 										)}
 										{/* round-34 — نام عربی سایز (اختیاری) */}
-										<input
-											type="text"
-											dir="rtl"
-											value={size.nameAr}
-											onChange={(e) =>
-												handleSizeChange(index, 'nameAr', e.target.value)
-											}
-											placeholder="نام عربی (اختیاری)"
-											maxLength={60}
-											className="col-span-3 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none"
-										/>
+											<ProductSizeArabicField key={size.id ?? size.draftId ?? index} size={size}
+											initialSize={initialData?.sizes?.find(item => item.id === size.id)}
+											onChange={next => setFormData(previous => ({ ...previous,
+												sizes: previous.sizes.map(item => (item.id ?? item.draftId) === (size.id ?? size.draftId) ? { ...item, nameAr: next.nameAr,
+													translationEdits: next.translationEdits, sourceRevision: next.sourceRevision } : item) }))} />
 										<input
 											type="number"
 											placeholder="قیمت (تومان)"
@@ -1596,10 +1617,12 @@ export function ProductForm({
 					<div className="flex flex-wrap gap-2 mb-3">
 						{formData.ingredients?.map((ing, i) => (
 							<div
-								key={i}
+								key={translation.field(['ingredients', i])?.field.fieldId ?? i}
 								className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary dark:bg-dark-primary/10 dark:text-dark-primary text-xs"
 							>
-								{ing}
+								<input value={ing} aria-label={`ماده اولیه فارسی ${i + 1}`} className="bg-transparent outline-none"
+									onChange={event => setFormData(previous => ({ ...previous,
+										ingredients: previous.ingredients.map((value, index) => index === i ? event.target.value : value) }))} />
 								<button
 									type="button"
 									onClick={() =>
@@ -1607,6 +1630,8 @@ export function ProductForm({
 											...prev,
 											ingredients:
 												prev.ingredients?.filter((_, idx) => idx !== i) || [],
+											ingredientsArText: prev.ingredientsArText.split('\n').filter((_, idx) => idx !== i).join('\n'),
+											ingredientsAr: prev.ingredients.map((_, index) => prev.ingredientsAr?.[index] ?? prev.ingredientsArText.split('\n')[index] ?? '').filter((_, idx) => idx !== i),
 										}))
 									}
 									className="hover:opacity-70"
@@ -1636,22 +1661,16 @@ export function ProductForm({
 
 					{/* round-34 — مواد اولیه عربی (هر خط = یک ماده؛ موازی با چیپ‌های بالا) */}
 					<div className="mt-4">
-						<ArField
-							label="محتویات محصول"
-							value={formData.ingredientsArText}
-							onChange={(v) =>
-								setFormData((prev) => ({ ...prev, ingredientsArText: v }))
-							}
-							arAuto={initialData?.arAuto}
-							faSource={(formData.ingredients ?? []).join('\n')}
-							placeholder={
-								(formData.ingredients ?? []).length > 0
-									? `هر خط = معرب یکی از موارد بالا${formData.ingredients.length > 0 ? ` (مثلاً: ${formData.ingredients[0]})` : ''}`
-									: 'هر خط = یک ماده اولیه به عربی — خالی = همان فارسی'
-							}
-							multiline
-							rows={3}
-						/>
+						{formData.ingredients.map((ingredient, index) => <ArField
+							key={translation.field(['ingredients', index])?.field.fieldId ?? index}
+							label={`ماده اولیه ${index + 1}`} faReference={ingredient}
+							translation={translation.field(['ingredients', index])}
+							value={formData.ingredientsAr?.[index] ?? formData.ingredientsArText.split('\n')[index] ?? ''}
+							onChange={value => setFormData(previous => {
+								const arabic = previous.ingredients.map((_, item) => previous.ingredientsAr?.[item] ?? previous.ingredientsArText.split('\n')[item] ?? '')
+								arabic[index] = value
+								return { ...previous, ingredientsAr: arabic, ingredientsArText: arabic.join('\n') }
+							})} />)}
 					</div>
 				</div>
 

@@ -50,6 +50,8 @@ export async function getAdminArticles(): Promise<ArticleSummaryDto[]> {
 }
 
 export async function createArticle(input: {
+  translationEdits?: import('@sinshin/shared').TranslationEdit[]
+  sourceRevision?: string
   title: string
   excerpt: string
   content: string
@@ -80,6 +82,8 @@ export async function createArticle(input: {
 }
 
 export async function updateArticle(input: {
+  translationEdits?: import('@sinshin/shared').TranslationEdit[]
+  sourceRevision?: string
   id: string
   title: string
   excerpt: string
@@ -126,6 +130,9 @@ export async function getAdminArticleDetails(id: string): Promise<ArticleDto | n
 // ─── دسته‌بندی مقالات (ادمین) ───
 
 export async function createArticleCategory(input: {
+  translationEdits?: import('@sinshin/shared').TranslationEdit[]
+  sourceRevision?: string
+  subCategoryEntries?: { id?: string; name: string; nameAr?: string | null; translationEdits?: import('@sinshin/shared').TranslationEdit[]; sourceRevision?: string }[]
   name: string
   hasSubCategories: boolean
   subCategories: string[]
@@ -141,6 +148,9 @@ export async function createArticleCategory(input: {
 }
 
 export async function updateArticleCategory(input: {
+  translationEdits?: import('@sinshin/shared').TranslationEdit[]
+  sourceRevision?: string
+  subCategoryEntries?: { id?: string; name: string; nameAr?: string | null; translationEdits?: import('@sinshin/shared').TranslationEdit[]; sourceRevision?: string }[]
   id: string
   name: string
   hasSubCategories: boolean
