@@ -1360,6 +1360,7 @@ export class MenuService {
 
     return {
       products: await this.withSizes(rows, catMap, undefined, {
+        includeSourceRevision: true,
         catModes,
         categoryIdsMap,
         // stage-86 — خریدِ زنجیره‌ی دسته برای بج قفل روی کارت لیست ادمین
@@ -2071,6 +2072,8 @@ export class MenuService {
     opts?: {
       /** round-34 — پاسخ ادمین: فیلدهای ar خام هم برگردند (فرم ویرایش) */
       includeAr?: boolean
+      /** Admin list mutations need the revision without raw translation fields. */
+      includeSourceRevision?: boolean
       /** stage-48 — حالت‌های دسته برای محاسبه‌ی حالت مؤثر (نیامد = همه روشن) */
       catModes?: Map<CategoryId, OrderModes>
       // stage-60 — دسته‌های هر محصول (دسته‌ی اولیه اول)؛ نیامد = فقط اولیه
@@ -2159,6 +2162,9 @@ export class MenuService {
       courierAllowed: (opts?.catModes?.get(r.categoryId)?.courier ?? true) && r.courierAllowed,
       takeawayAllowed: (opts?.catModes?.get(r.categoryId)?.takeaway ?? true) && r.takeawayAllowed,
       dineInAllowed: (opts?.catModes?.get(r.categoryId)?.dineIn ?? true) && r.dineInAllowed,
+      ...(opts?.includeSourceRevision || opts?.includeAr
+        ? { sourceRevision: contentSourceRevision('product', r) }
+        : {}),
       // round-34 — فقط پاسخ ادمین (فرم ویرایش دوزبانه؛ بج دستی/خودکار/ندارد)
       ...(opts?.includeAr
         ? {
@@ -2167,7 +2173,6 @@ export class MenuService {
             ingredientsAr: r.ingredientsAr ?? null,
             arAuto: r.arAuto,
             translationState: r.translationState,
-            sourceRevision: contentSourceRevision('product', r),
             translationIdentities: collectionTranslationIdentities('product', r),
             /** stage-48 — قفل سوئیچ‌های فرم: دسته خاموش ⇒ محصول نمی‌تواند روشن کند */
             categoryCourierEnabled: opts.catModes?.get(r.categoryId)?.courier ?? true,

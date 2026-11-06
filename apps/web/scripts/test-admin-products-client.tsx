@@ -51,12 +51,17 @@ mock.module('#/utils/adminAccess', () => ({ hasAdminPermission: async () => true
 mock.module('#/stores/toastStore', () => ({
   useToastStore: (select: any) => select({ showToast() {} }),
 }))
-mock.module('#/server/products', () => ({
-  toggleProductStatus: async () => ({ success: true }),
-  setProductAvailability: async () => ({ success: true }),
-  deleteProduct: async () => ({ success: true }),
+const requests: { path: string; method: string; body?: unknown }[] = []
+mock.module('#/lib/api-fetch', () => ({
+  authJson: async (path: string, method: string, body?: unknown) => {
+    requests.push({ path, method, body })
+    return { success: true }
+  },
+  getJson: async () => null,
+  postJson: async () => null,
 }))
 const mutations: any[] = []
+const pendingMutations: Promise<unknown>[] = []
 const originalInvalidate = client.invalidateQueries.bind(client)
 client.invalidateQueries = (async (filters: any) => {
   events.push(`invalidate:${filters.queryKey[0]}`)
@@ -67,7 +72,9 @@ mock.module('@tanstack/react-query', () => ({
   useQueryClient: () => client,
   useMutation: (options: any) => {
     mutations.push(options)
-    return { isPending: false, mutate() {} }
+    return { isPending: false, mutate(value?: unknown) {
+      pendingMutations.push(Promise.resolve(options.mutationFn(value)))
+    } }
   },
 }))
 mock.module('#/utils/queryOptions', () => ({
@@ -87,11 +94,14 @@ for (const [path, names] of [
 const { adminProductsPageSizes, adminProductsSearchSchema, useAdminProductsPage } =
   await import('../src/hooks/admin/useAdminProductsPage')
 const { AdminProductCard } = await import('../src/components/admin/products/AdminProductCard')
+const { ConfirmModal } = await import('../src/components/ConfirmModal')
 const { Pagination } = await import('../src/components/Pagination')
 const { Route } = await import('../src/routes/admin/products/index')
 
-function render(component: () => any) {
-  host = { cells: [], cursor: 0, effects: [] }
+function render(component: () => any, previous?: Host) {
+  host = previous ?? { cells: [], cursor: 0, effects: [] }
+  host.cursor = 0
+  host.effects = []
   mutations.length = 0
   const result = component()
   for (const effect of host.effects) effect()
@@ -102,8 +112,8 @@ function nodes(value: any): any[] {
   if (!value || typeof value !== 'object' || !('props' in value)) return []
   return [value, ...nodes(value.props.children)]
 }
-const product = { id: 'edited', name: 'Pizza', prepTime: 15, finalPrice: 100,
-  status: 'ACTIVE', categoryId: 'category-a', isAvailable: true }
+const product = { id: '10000000-0000-4000-8000-000000000001', name: 'Pizza', prepTime: 15, finalPrice: 100,
+  status: 'ACTIVE', categoryId: 'category-a', isAvailable: true, sourceRevision: `sha256:${'a'.repeat(64)}` }
 function seedPage(page = 3) {
   search = { page, limit: 20, search: 'Pizza', status: 'all', categoryId: 'category-a' }
   const key = qk.adminProducts(search)
@@ -168,6 +178,30 @@ assert(events.indexOf('invalidate:admin-products') < events.indexOf('navigate'))
 assert.equal(search.limit, 20)
 assert.equal(search.categoryId, 'category-a')
 
+for (const available of [false, true]) {
+  requests.length = 0
+  pendingMutations.length = 0
+  const props = { ...card.props, product: { ...product, isAvailable: !available } }
+  const cardHost: Host = { cells: [], cursor: 0, effects: [] }
+  let tree = render(() => AdminProductCard(props), cardHost)
+  const button = nodes(tree).find((node) => node.type === 'button' && node.props.title ===
+    (available ? 'موجود کردن' : 'ناموجود کردن (فعلاً از فروش خارج)'))
+  assert(button, 'The admin card exposes the availability action')
+  button.props.onClick()
+  if (available) {
+    assert.equal(requests.length, 0, 'Marking a product available waits for confirmation')
+    tree = render(() => AdminProductCard(props), cardHost)
+    const confirmation = nodes(tree).find((node) => node.type === ConfirmModal && node.props.isOpen)
+    assert(confirmation, 'The card opens the availability confirmation')
+    confirmation.props.onConfirm()
+  }
+  await Promise.all(pendingMutations)
+  assert.deepEqual(requests, [{
+    path: `/admin/menu/products/${product.id}/availability`, method: 'POST',
+    body: { available, sourceRevision: product.sourceRevision },
+  }], `The admin card sends the saved list revision when marking a product ${available ? 'available' : 'unavailable'}`)
+}
+
 seedPage()
 render(() => AdminProductCard(card.props))
 await mutations[1]!.onSuccess({ success: true })
@@ -175,4 +209,4 @@ assert.equal(client.getQueryState(qk.similarProducts('another-anchor'))?.isInval
   'Deleting a product invalidates recommendations containing it')
 
 client.clear()
-console.log('PASS admin product page sizes, status rollback, first-page navigation and availability wiring')
+console.log('PASS admin product page sizes, status rollback, first-page navigation and both availability actions with source revisions')

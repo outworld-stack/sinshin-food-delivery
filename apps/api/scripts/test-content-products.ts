@@ -4,14 +4,16 @@ import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
+import { Elysia } from 'elysia'
 import { collectionTranslationIdentities, contentSourceRevision, contentTranslationFields, createContentCollectionItemId, type TranslationEdit } from '@sinshin/shared'
 import { Database } from '../src/infra/db/client'
-import { MenuService } from '../src/domain/menu/menu.service'
+import { MenuService, type ProductDto } from '../src/domain/menu/menu.service'
 import { PackagingService } from '../src/domain/menu/packaging.service'
 import { CartService } from '../src/domain/cart/cart.service'
 import { AppError } from '../src/domain/shared/errors'
 import { categories, mainCategories, productSizes, products } from '../src/infra/db/schema'
 import type { RedisService } from '../src/infra/redis/redis'
+import { adminMenuRoutes } from '../src/http/routes/admin-menu.routes'
 
 const source = new URL(process.env.DATABASE_URL?.startsWith('postgres')
   ? process.env.DATABASE_URL : 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin')
@@ -60,6 +62,62 @@ try {
   const read = async () => requireValue((await db.select().from(products).where(eq(products.id, pid)))[0])
   const sizes = async () => (await db.select().from(productSizes).where(eq(productSizes.productId, pid))).sort((a, b) => a.sortOrder - b.sortOrder)
   const field = async (id: string) => requireValue(contentTranslationFields('product', await read()).find(item => item.fieldId === id))
+
+  const editDetails = requireValue(await menu.adminProductDetails(pid))
+  assert.equal(editDetails.sourceRevision, contentSourceRevision('product', await read()))
+  assert.equal(editDetails.nameAr, (await read()).nameAr, 'edit details retain raw Arabic fields')
+  for (const size of await sizes()) {
+    const editSize = requireValue(editDetails.sizes.find(item => item.id === size.id))
+    assert.equal(editSize.nameAr, size.nameAr)
+    assert.equal(editSize.sourceRevision, contentSourceRevision('productSize', size), 'edit details retain size revisions')
+  }
+
+  const app = new Elysia().onError(({ error, set }) => {
+    if (error instanceof AppError) { set.status = error.status; return error.toJSON() }
+  }).use(adminMenuRoutes({
+    menu, packaging,
+    sessions: { authenticate: async () => ({ user: { id: crypto.randomUUID(), role: 'admin' }, ctx: {} }) } as never,
+    admin2: {} as never,
+    audit: { log: async () => undefined } as never,
+  })).compile()
+  const request = (method: string, path: string, body?: unknown) => app.handle(new Request(`http://localhost/admin/menu${path}`, {
+    method, headers: { authorization: 'Bearer admin', 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  }))
+  const adminCard = async () => {
+    const response = await request('GET', '/products?page=1&limit=10')
+    assert.equal(response.status, 200)
+    const list = await response.json() as { products: ProductDto[] }
+    const card = requireValue(list.products.find(product => product.id === pid))
+    assert.equal(card.sourceRevision, contentSourceRevision('product', await read()), 'card revision matches the complete persisted product')
+    for (const key of ['nameAr', 'descriptionAr', 'ingredientsAr', 'arAuto', 'translationState', 'translationIdentities']) {
+      assert.equal(key in card, false, `admin card omits ${key}`)
+    }
+    assert.equal(card.sizes.length, 2)
+    assert(card.sizes.every(size => !('nameAr' in size) && !('translationState' in size)), 'card sizes omit Arabic translation fields')
+    return card
+  }
+  for (const available of [false, true]) {
+    const card = await adminCard()
+    assert.equal(card.isAvailable, !available)
+    const response = await request('POST', `/products/${pid}/availability`, { available, sourceRevision: card.sourceRevision })
+    assert.equal(response.status, 200, `admin list revision permits marking the product ${available ? 'available' : 'unavailable'}`)
+    const result = await response.json() as { success: boolean; sourceRevision: string }
+    assert.equal(result.success, true)
+    assert.equal((await read()).isAvailable, available)
+    assert.equal(result.sourceRevision, contentSourceRevision('product', await read()))
+    assert.notEqual(result.sourceRevision, card.sourceRevision, 'availability change advances the revision')
+    const refreshed = await adminCard()
+    assert.equal(refreshed.isAvailable, available)
+    assert.equal(refreshed.sourceRevision, result.sourceRevision)
+    const saved = await read()
+    assert.equal((await request('POST', `/products/${pid}/availability`, { available: !available })).status, 422,
+      'availability endpoint requires a source revision')
+    assert.equal((await request('POST', `/products/${pid}/availability`, { available: !available, sourceRevision: card.sourceRevision })).status, 422,
+      'availability endpoint rejects the stale card revision')
+    assert.deepEqual(await read(), saved, 'rejected availability requests leave the product unchanged')
+    passed(`admin card list revision marks product ${available ? 'available' : 'unavailable'} and rejects missing/stale proofs`)
+  }
 
   const version = Number(cache.get('menu:ver'))
   await menu.productById(pid, 'ar')
@@ -169,6 +227,8 @@ try {
   assert.deepEqual(listed.ingredients, ['جبن', 'صلصة'])
   assert.equal(listed.name, 'آخرین غذا')
   assert.equal('translationState' in listed, false)
+  assert.equal('sourceRevision' in listed, false, 'public product lists omit admin save revisions')
+  assert.equal('sourceRevision' in detailed, false, 'public product details omit admin save revisions')
   passed('product list, detail and cart localize the same valid fields without public provenance')
 
   await fixtureUpdateCategory(menu, db, { id: requireValue(category).id, name: 'غذای تازه' })
