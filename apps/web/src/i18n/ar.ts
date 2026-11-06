@@ -289,6 +289,7 @@ export const ar: Dict = {
         'checkout.paymentsPausedHint': 'دفع الطلبات معطّل حتى انتهاء الإغلاق المؤقت للمطعم.',
         'checkout.paymentRecoveryTitle': 'جارٍ التحقق من دفع الطلب السابق',
         'checkout.paymentRecoveryHint': 'نتيجة الدفع السابق لم تُحسم بعد. يمكنك تجهيز السلة الجديدة وتعديلها؛ ستبقى سلتك محفوظة. لتجنب الدفع المكرر، يتوقف تسجيل الطلب والدفع الجديد حتى تتضح النتيجة.',
+        'checkout.paymentRecoveryAdvisoryHint': 'نتيجة الدفع السابق لم تُحسم بعد ويُراجع الطلب السابق بشكل مستقل. يمكنك تسجيل طلب جديد ودفعه؛ إذا تأكد الدفع السابق فسيُسجل الطلب السابق أيضاً. تحقق من حالة الطلب السابق قبل تسجيل طلب مماثل.',
         'checkout.paymentRecoveryOrder': 'رقم الطلب السابق',
         'checkout.paymentRecoveryWait': 'يمكن إعادة التحقق لدى البنك خلال {n} ثانية.',
         'checkout.paymentRecoveryView': 'عرض الطلب السابق',

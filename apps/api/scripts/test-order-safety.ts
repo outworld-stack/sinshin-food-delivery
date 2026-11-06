@@ -15,7 +15,7 @@ import { asPaymentId } from '../src/domain/shared/brand'
 import type { PaymentGateway } from '../src/domain/payment/gateway.types'
 import type { CheckoutInput } from '@sinshin/shared'
 import {
-  categories, checkoutIdempotency, coupons, mainCategories, orderItems, orders,
+  categories, checkoutIdempotency, coupons, firstPurchaseReservations, mainCategories, orderItems, orders,
   payments, products, users, walletTransactions,
 } from '../src/infra/db/schema'
 
@@ -204,7 +204,7 @@ try {
   await paymentService.handleCallback('ZARINPAL', { state: signState(personalOrder.value.paymentId!, config.jwtSecret) })
   verdict = 'failed'
   await assert.rejects(() => orderService.checkout(another.id, { ...input, couponCode: personal.code }),
-    'the per-user coupon limit still rejects reuse after the pending-order gate is cleared')
+    'the per-user coupon quota still rejects reuse after the original redemption')
   assert.equal((await db.select().from(coupons).where(eq(coupons.id, personal.id)))[0]!.usedCount, 1)
   passed('concurrent checkouts enforce global and per-user coupon reservation limits')
 
@@ -273,6 +273,54 @@ try {
   assert.equal(await orderService.walletBalance(db, indebted.id), 80_000)
   assert.equal(await paymentService.paymentReplayState(indebted.id, pending.displayId), 'failed')
   passed('duplicate callbacks settle once; refund is single-credit and refunded orders cannot be replayed as paid')
+
+  const independentBuyer = await makeUser()
+  await db.insert(walletTransactions).values({ userId: independentBuyer.id, type: 'DEPOSIT', amount: 150_000, description: 'Original held funding' })
+  const heldCheckout = await orderService.checkout(independentBuyer.id, { ...input,
+    items: [{ productId: product!.id, quantity: 2 }],
+  })
+  assert(heldCheckout.paymentId)
+  await paymentService.initiate(heldCheckout.paymentId, 'ZARINPAL', { displayId: heldCheckout.displayId, amount: heldCheckout.amountPaidOnline })
+  const heldOrder = await getOrder(heldCheckout.displayId)
+  await db.update(orders).set({ createdAt: new Date(Date.now() - 20 * 60_000) }).where(eq(orders.id, heldOrder.id))
+  verdict = 'indeterminate'
+  await db.insert(walletTransactions).values({ userId: independentBuyer.id, type: 'DEPOSIT', amount: 60_000, description: 'Independent purchase funding' })
+  const independentClaims = await Promise.all([
+    claimFor(independentBuyer.id, 'independent-one'), claimFor(independentBuyer.id, 'independent-two'),
+  ])
+  const independentOrders = await Promise.all(independentClaims.map(claim => orderService.checkout(independentBuyer.id, input, claim)))
+  assert.notEqual(independentOrders[0]!.displayId, independentOrders[1]!.displayId)
+  assert.equal(independentOrders.reduce((sum, result) => sum + result.breakdown.walletDeduction, 0), 60_000)
+  assert.equal(independentOrders.reduce((sum, result) => sum + result.amountPaidOnline, 0), 140_000)
+  assert.equal(await orderService.walletBalance(db, independentBuyer.id), 0)
+  const entitlement = await db.select().from(firstPurchaseReservations).where(eq(firstPurchaseReservations.userId, independentBuyer.id))
+  assert.equal(entitlement.length, 1); assert.equal(entitlement[0]!.orderId, heldOrder.id)
+  assert.equal((await getOrder(heldCheckout.displayId)).status, 'PENDING_PAYMENT')
+  const independentReplay = await idem.claim(independentBuyer.id, independentClaims[0]!.key, checkoutRequestHash(input))
+  assert.equal(independentReplay.kind, 'replay')
+  assert.equal(independentReplay.kind === 'replay' && independentReplay.response.orderId, independentOrders[0]!.displayId)
+  await assert.rejects(() => orderService.checkout(independentBuyer.id, input, independentClaims[0]))
+  await Promise.all(independentOrders.map(result => paymentService.initiate(result.paymentId!, 'ZARINPAL', {
+    displayId: result.displayId, amount: result.amountPaidOnline,
+  })))
+  verdict = 'success'
+  await Promise.all(independentOrders.map(result => paymentService.handleCallback('ZARINPAL', {
+    state: signState(result.paymentId!, config.jwtSecret),
+  })))
+  assert.equal((await getOrder(heldCheckout.displayId)).status, 'PENDING_PAYMENT')
+  assert.equal((await db.select().from(firstPurchaseReservations).where(eq(firstPurchaseReservations.userId, independentBuyer.id)))[0]!.orderId, heldOrder.id)
+  const independentSnapshots = await Promise.all(independentOrders.map(result => getOrder(result.displayId)))
+  assert(independentSnapshots.every(row => row.status === 'PAID'))
+  await paymentService.handleCallback('ZARINPAL', { state: signState(heldCheckout.paymentId, config.jwtSecret) })
+  assert.equal((await getOrder(heldCheckout.displayId)).status, 'PAID')
+  assert.deepEqual(await Promise.all(independentOrders.map(result => getOrder(result.displayId))), independentSnapshots)
+  assert.equal((await db.select().from(firstPurchaseReservations).where(eq(firstPurchaseReservations.userId, independentBuyer.id))).length, 0)
+  assert.equal(await orderService.walletBalance(db, independentBuyer.id), 0)
+  const independentWallet = await db.select().from(walletTransactions).where(eq(walletTransactions.userId, independentBuyer.id))
+  assert.equal(independentWallet.filter(row => row.type === 'WITHDRAW').reduce((sum, row) => sum + row.amount, 0), 210_000)
+  assert.equal(independentWallet.filter(row => row.type === 'DEPOSIT' && row.orderId).length, 0)
+  verdict = 'failed'
+  passed('independent checkout intents share remaining wallet safely, replay one order per key, and preserve the original hold and late callback')
 
   const initBuyer = await makeUser()
   const initOrder = await orderService.checkout(initBuyer.id, input)

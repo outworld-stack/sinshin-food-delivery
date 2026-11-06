@@ -36,6 +36,13 @@ export function rememberPendingCheckout(orderId: string, items?: readonly Checko
   try { sessionStorage.setItem(PENDING_CHECKOUT_KEY, JSON.stringify(pendingCheckout)) } catch { /* use memory */ }
 }
 
+/** Starting a new checkout makes this basket independent of an older order, including before the new response arrives. */
+export function forgetPendingCheckout(): void {
+  pendingCheckout = null
+  memoryInitialized = true
+  try { sessionStorage.removeItem(PENDING_CHECKOUT_KEY) } catch { /* use memory */ }
+}
+
 /** Only the submitted basket may be removed when a late financial result arrives. */
 export function pendingCheckoutMatchesCart(orderId: string, items: readonly CheckoutItemInput[]): boolean {
   if (consumedOrderId === orderId) return false

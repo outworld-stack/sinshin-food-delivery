@@ -10,6 +10,7 @@ import { AppConfig } from '../src/infra/config/env'
 import { CouponService } from '../src/domain/coupon/coupon.service'
 import { OrderService } from '../src/domain/order/order.service'
 import { PaymentService } from '../src/domain/payment/payment.service'
+import { CheckoutIdempotency, checkoutRequestHash } from '../src/domain/order/checkout-idempotency.service'
 import { signState } from '../src/domain/payment/state'
 import { asCampaignId } from '../src/domain/shared/brand'
 import { lockWalletAccounts } from '../src/domain/shared/wallet-sql'
@@ -38,18 +39,25 @@ const gate = () => {
   return { promise, release }
 }
 let initCalls = 0, verifyCalls = 0
-let nextAuthority = '', nextToken = ''
+const initRequests: Array<{ gateway: string; paymentId: string; reference: string; amount: number; orderId?: string }> = []
 const zarinpal = new Map<string, { code: number; inquiry?: string }>()
 const verifiedAuthorities: string[] = []
 const verifyHooks = new Map<string, () => Promise<void>>()
 let sepReply: unknown = { IsSuccess: false, ResultCode: -6 }
+const sepReplies = new Map<string, unknown>()
 let mellatVerify: string = 'outage'
 let mellatSettle = '0'
+const mellatReplies = new Map<string, { verify: string; settle: string }>()
 globalThis.fetch = (async (url: string | URL | Request, input?: RequestInit) => {
   const address = String(url)
   if (address.includes('/pg/v4/payment/')) {
-    const body = JSON.parse(String(input?.body)) as { authority?: string }
-    if (address.endsWith('/request.json')) { initCalls++; return json({ data: { code: 100, authority: nextAuthority } }) }
+    const body = JSON.parse(String(input?.body)) as { authority?: string; callback_url?: string; amount?: number }
+    if (address.endsWith('/request.json')) {
+      const paymentId = new URL(body.callback_url!).searchParams.get('state')!.split('.')[0]!
+      const authority = `A${paymentId.replaceAll('-', '')}`
+      initCalls++; initRequests.push({ gateway: 'ZARINPAL', paymentId, reference: authority, amount: body.amount! })
+      return json({ data: { code: 100, authority } })
+    }
     const state = zarinpal.get(body.authority ?? '') ?? { code: -51, inquiry: 'FAILED' }
     if (address.endsWith('/verify.json')) {
       verifyCalls++; verifiedAuthorities.push(body.authority ?? '')
@@ -59,18 +67,32 @@ globalThis.fetch = (async (url: string | URL | Request, input?: RequestInit) => 
     if (address.endsWith('/inquiry.json')) return json({ data: { code: 100, status: state.inquiry ?? 'FAILED' }, errors: [] })
   }
   if (address.includes('sep.ir') || address.includes('sep.shaparak.ir')) {
-    if (address.includes('Verify')) { verifyCalls++; return json(sepReply) }
-    initCalls++; return json({ IsSuccess: true, Token: nextToken })
+    const body = JSON.parse(String(input?.body)) as { RefNum?: string; ResNum?: string; Amount?: number }
+    if (address.includes('Verify')) { verifyCalls++; return json(sepReplies.get(body.RefNum ?? '') ?? sepReply) }
+    const token = `T${body.ResNum!.replaceAll('-', '')}`
+    initCalls++; initRequests.push({ gateway: 'SEP', paymentId: body.ResNum!, reference: token, amount: body.Amount! })
+    return json({ IsSuccess: true, Token: token })
   }
   if (address === 'https://bpm.shaparak.ir/pgwchannel/services/pgw') {
     const envelope = String(input?.body)
-    if (envelope.includes('<ns:bpPayRequest ')) { initCalls++; return soap(`0,${nextToken}`) }
+    if (envelope.includes('<ns:bpPayRequest ')) {
+      const orderId = /<orderId[^>]*>([^<]+)/.exec(envelope)![1]!
+      const callbackUrl = /<callBackUrl[^>]*>([^<]+)/.exec(envelope)![1]!.replaceAll('&amp;', '&')
+      const paymentId = new URL(callbackUrl).searchParams.get('state')!.split('.')[0]!
+      const token = `M${orderId}`
+      initCalls++; initRequests.push({ gateway: 'MELLAT', paymentId, reference: token, orderId,
+        amount: Number(/<amount[^>]*>([^<]+)/.exec(envelope)![1]) })
+      return soap(`0,${token}`)
+    }
+    const receipt = /<saleReferenceId[^>]*>([^<]+)/.exec(envelope)?.[1] ?? ''
+    const reply = mellatReplies.get(receipt)
     if (envelope.includes('<ns:bpVerifyRequest ')) {
       verifyCalls++
-      if (mellatVerify === 'outage') throw new Error('Stubbed Mellat verification outage')
-      return soap(mellatVerify)
+      const result = reply?.verify ?? mellatVerify
+      if (result === 'outage') throw new Error('Stubbed Mellat verification outage')
+      return soap(result)
     }
-    if (envelope.includes('<ns:bpSettleRequest ')) return soap(mellatSettle)
+    if (envelope.includes('<ns:bpSettleRequest ')) return soap(reply?.settle ?? mellatSettle)
   }
   throw new Error(`Unexpected external request: ${address}`)
 }) as typeof fetch
@@ -136,17 +158,172 @@ try {
     const checkout = await orderService.checkout(user!.id, checkoutInput)
     assert(checkout.paymentId)
     const [order] = await db.select().from(orders).where(eq(orders.displayId, checkout.displayId))
-    nextAuthority = `A${checkout.paymentId.replaceAll('-', '')}`
-    nextToken = `REC${n}`
     await service.initiate(checkout.paymentId, gateway, { displayId: checkout.displayId, amount: checkout.amountPaidOnline })
     await db.update(orders).set({ createdAt: new Date(Date.now() - 20 * 60_000) }).where(eq(orders.id, order!.id))
     return { user: user!, order: (await readOrder(order!.id)), payment: await readPayment(checkout.paymentId), input: checkoutInput }
   }
-  const callback = (fixture: Awaited<ReturnType<typeof make>>, query: Record<string, string> = {}) =>
+  const callback = (fixture: Pick<Awaited<ReturnType<typeof make>>, 'payment'>, query: Record<string, string> = {}) =>
     service.handleCallback(fixture.payment.gateway, { state: signState(fixture.payment.id, config.jwtSecret), ...query })
+
+  const idempotency = new CheckoutIdempotency({ db })
+  let receiptSequence = 800_000_000_000_000
+  const gatewayResult = (payment: typeof payments.$inferSelect, outcome: 'success' | 'unknown' | 'failure'): Record<string, string> => {
+    if (payment.gateway === 'ZARINPAL') {
+      zarinpal.set(payment.gatewayRef!, outcome === 'success' ? { code: 100 }
+        : { code: -51, inquiry: outcome === 'failure' ? 'REVERSED' : 'FAILED' })
+      return { Status: outcome === 'success' ? 'OK' : 'NOK' }
+    }
+    if (payment.gateway === 'SEP') {
+      const receipt = `S${payment.id.replaceAll('-', '')}`
+      sepReplies.set(receipt, outcome === 'success' ? { IsSuccess: true, RefNum: receipt,
+        ResNum: payment.id, TerminalId: '12345678', Amount: payment.amount * 10 }
+        : { IsSuccess: false, ResultCode: -6 })
+      return { State: outcome === 'success' ? 'OK' : 'Canceled', RefNum: receipt,
+        ResNum: payment.id, TerminalId: '12345678' }
+    }
+    const [orderId, , token] = payment.gatewayRef!.split(':')
+    const receipt = String(++receiptSequence)
+    mellatReplies.set(receipt, { verify: outcome === 'success' ? '0' : outcome === 'failure' ? '48' : '41', settle: '0' })
+    return { ResCode: outcome === 'success' ? '0' : '17', SaleOrderId: orderId!, RefId: token!, SaleReferenceId: receipt }
+  }
+
+  for (const gateway of ['ZARINPAL', 'SEP', 'MELLAT'] as const) {
+    const original = await make(gateway)
+    const ordinary: CheckoutInput = { ...input, gatewayId: gateway, customerNote: 'Independent purchase' }
+    const beforeNewPreviewVerify = verifyCalls
+    const normalPreview = await orderService.preview(original.user.id, ordinary)
+    assert.equal(verifyCalls, beforeNewPreviewVerify, 'new-order preview never depends on the old PSP verification/outage')
+    assert.equal(normalPreview.paymentRecovery?.blocksPayment, false)
+    assert.equal(normalPreview.breakdown.totalAmount, 100_000)
+    assert.equal(normalPreview.breakdown.amountPaidOnline, 100_000)
+    assert.equal(normalPreview.breakdown.walletDeduction, 0)
+    assert.equal(normalPreview.coupon, null)
+    const heldLedger = await ledger(original.order.id)
+    const heldGrant = await grant(original.user.id)
+    const heldReservation = await reservation(original.user.id)
+    assert.equal(heldReservation[0]!.orderId, original.order.id)
+    assert.equal((await readPayment(original.payment.id)).gatewayRef, original.payment.gatewayRef)
+    assert.equal((await readOrder(original.order.id)).status, 'PENDING_PAYMENT')
+
+    const firstKey = `independent-${gateway}-one`, secondKey = `independent-${gateway}-two`
+    const hash = checkoutRequestHash(ordinary)
+    const [claimOne, claimTwo] = await Promise.all([
+      idempotency.claim(original.user.id, firstKey, hash), idempotency.claim(original.user.id, secondKey, hash),
+    ])
+    assert.equal(claimOne.kind, 'claimed'); assert.equal(claimTwo.kind, 'claimed')
+    if (claimOne.kind !== 'claimed' || claimTwo.kind !== 'claimed') throw new Error('Independent claims expected')
+    assert.equal((await idempotency.claim(original.user.id, firstKey, hash)).kind, 'in-flight')
+    const [one, two] = await Promise.all([
+      orderService.checkout(original.user.id, ordinary, { key: firstKey, token: claimOne.token }),
+      orderService.checkout(original.user.id, ordinary, { key: secondKey, token: claimTwo.token }),
+    ])
+    assert.equal(verifyCalls, beforeNewPreviewVerify, 'independent checkout never verifies or waits for the old PSP')
+    assert(one.paymentId && two.paymentId)
+    assert.notEqual(one.displayId, two.displayId); assert.notEqual(one.paymentId, two.paymentId)
+    assert.equal(one.breakdown.discount, 0); assert.equal(two.breakdown.discount, 0)
+    assert.equal(one.breakdown.walletDeduction + two.breakdown.walletDeduction, 0)
+    assert.equal((await ownerOrders(original.user.id)).length, 3)
+    const sameKeyReplay = await idempotency.claim(original.user.id, firstKey, hash)
+    assert.equal(sameKeyReplay.kind, 'replay')
+    assert.equal(sameKeyReplay.kind === 'replay' && sameKeyReplay.response.orderId, one.displayId)
+    await assert.rejects(() => orderService.checkout(original.user.id, ordinary, { key: firstKey, token: claimOne.token }))
+    assert.equal((await ownerOrders(original.user.id)).length, 3)
+    const [oneUrl, twoUrl] = await Promise.all([
+      service.initiate(one.paymentId, gateway, { displayId: one.displayId, amount: one.amountPaidOnline }),
+      service.initiate(two.paymentId, gateway, { displayId: two.displayId, amount: two.amountPaidOnline }),
+    ])
+    assert.notEqual(oneUrl.paymentUrl, twoUrl.paymentUrl)
+    assert.notEqual(oneUrl.paymentUrl, original.payment.metadata!.paymentUrl)
+    const providerInits = initRequests.filter(request => [original.payment.id, one.paymentId, two.paymentId].includes(request.paymentId as never))
+    assert.equal(providerInits.length, 3)
+    assert.equal(new Set(providerInits.map(request => request.reference)).size, 3)
+    assert.equal(new Set(providerInits.map(request => request.paymentId)).size, 3)
+    if (gateway === 'MELLAT') assert.equal(new Set(providerInits.map(request => request.orderId)).size, 3)
+    assert.equal(providerInits.find(request => request.paymentId === original.payment.id)!.amount, original.payment.amount * 10)
+    assert.equal(providerInits.find(request => request.paymentId === one.paymentId)!.amount, 1_000_000)
+    const newOrder = (await db.select().from(orders).where(eq(orders.displayId, one.displayId)))[0]!
+    const secondOrder = (await db.select().from(orders).where(eq(orders.displayId, two.displayId)))[0]!
+    const newPayment = await readPayment(one.paymentId)
+    const secondPayment = await readPayment(two.paymentId)
+    assert.equal(newOrder.couponId, null); assert.equal(secondOrder.couponId, null)
+    await callback({ payment: newPayment }, gatewayResult(newPayment, 'success'))
+    assert.equal((await readOrder(newOrder.id)).status, 'PAID')
+    assert.equal((await readOrder(original.order.id)).status, 'PENDING_PAYMENT')
+    assert.equal((await readPayment(original.payment.id)).status, 'PENDING')
+    assert.equal((await readOrder(secondOrder.id)).status, 'PENDING_PAYMENT')
+    assert.deepEqual(await ledger(original.order.id), heldLedger)
+    assert.deepEqual(await grant(original.user.id), heldGrant)
+    assert.deepEqual(await reservation(original.user.id), heldReservation)
+    assert.equal(await balance(original.user.id), 0)
+    assert.equal((await redemption(newOrder.id)).length, 0)
+    assert.equal((await orderService.preview(original.user.id, original.input)).coupon?.valid, false)
+    const paidSnapshot = await readOrder(newOrder.id), paidPaymentSnapshot = await readPayment(newPayment.id)
+    const secondSnapshot = await readOrder(secondOrder.id)
+
+    const oldUnknownQuery = gatewayResult(original.payment, 'unknown')
+    await Promise.all([callback(original, oldUnknownQuery), callback(original, oldUnknownQuery)])
+    assert.equal((await readOrder(original.order.id)).status, 'PENDING_PAYMENT')
+    assert.deepEqual(await ledger(original.order.id), heldLedger)
+    assert.deepEqual(await readOrder(newOrder.id), paidSnapshot)
+    assert.deepEqual(await readPayment(newPayment.id), paidPaymentSnapshot)
+    assert.deepEqual(await readOrder(secondOrder.id), secondSnapshot)
+    const oldSuccessQuery = gatewayResult(original.payment, 'success')
+    await Promise.all([callback(original, oldSuccessQuery), callback(original, oldSuccessQuery)])
+    assert.equal((await readOrder(original.order.id)).status, 'PAID')
+    assert.equal((await readPayment(original.payment.id)).status, 'SUCCESS')
+    assert.equal((await redemption(original.order.id)).length, 1)
+    assert.equal((await reservation(original.user.id)).length, 0)
+    assert.deepEqual(await ledger(original.order.id), heldLedger)
+    assert.deepEqual(await readOrder(newOrder.id), paidSnapshot)
+    assert.deepEqual(await readPayment(newPayment.id), paidPaymentSnapshot)
+    assert.equal((await redemption(newOrder.id)).length, 0)
+    const callsAfterPaid = verifyCalls
+    await callback(original, oldUnknownQuery)
+    assert.equal(verifyCalls, callsAfterPaid)
+    await callback({ payment: secondPayment }, gatewayResult(secondPayment, 'success'))
+    assert.equal((await readOrder(secondOrder.id)).status, 'PAID')
+    assert.equal((await ownerOrders(original.user.id)).length, 3)
+    assert.equal((await ledger(newOrder.id)).length, 0)
+    assert.equal((await ledger(secondOrder.id)).length, 0)
+    passed(`${gateway}: new previews, distinct concurrent intents, distinct PSP sessions and new success remain independent of unknown/late-success old callbacks`)
+
+    const failedOriginal = await make(gateway)
+    const independent = await orderService.checkout(failedOriginal.user.id, ordinary)
+    assert(independent.paymentId)
+    await service.initiate(independent.paymentId, gateway, { displayId: independent.displayId, amount: independent.amountPaidOnline })
+    const independentOrder = (await db.select().from(orders).where(eq(orders.displayId, independent.displayId)))[0]!
+    const independentPayment = await readPayment(independent.paymentId)
+    await callback({ payment: independentPayment }, gatewayResult(independentPayment, 'success'))
+    const independentSnapshot = await readOrder(independentOrder.id)
+    const independentPaymentSnapshot = await readPayment(independentPayment.id)
+    const failureQuery = gatewayResult(failedOriginal.payment, 'failure')
+    await callback(failedOriginal, failureQuery)
+    await callback(failedOriginal, failureQuery)
+    assert.deepEqual(await readOrder(independentOrder.id), independentSnapshot)
+    assert.deepEqual(await readPayment(independentPayment.id), independentPaymentSnapshot)
+    assert.equal((await ledger(independentOrder.id)).length, 0)
+    assert.equal((await ownerOrders(failedOriginal.user.id)).length, 2)
+    if (gateway === 'SEP') {
+      // IsSuccess=false is not documented terminal nonpayment; never fabricate
+      // a refund merely to free this original order's reservations.
+      assert.equal((await readOrder(failedOriginal.order.id)).status, 'PENDING_PAYMENT')
+      assert.equal((await reservation(failedOriginal.user.id))[0]!.orderId, failedOriginal.order.id)
+      assert.equal(await balance(failedOriginal.user.id), 0)
+    } else {
+      assert.equal((await readOrder(failedOriginal.order.id)).status, 'CANCELED')
+      assert.equal((await readPayment(failedOriginal.payment.id)).status, 'FAILED')
+      assert.equal((await reservation(failedOriginal.user.id)).length, 0)
+      assert.equal((await ledger(failedOriginal.order.id)).filter(row => row.type === 'DEPOSIT').length, 1)
+      assert.equal(await balance(failedOriginal.user.id), 20_000)
+    }
+    assert.equal((await orderService.preview(failedOriginal.user.id, failedOriginal.input)).coupon?.valid, false,
+      'the independently paid purchase consumes first-purchase eligibility even when the original hold is later released')
+    passed(`${gateway}: old failure/unknown duplicates change only the original while the independently paid order and eligibility remain consistent`)
+  }
 
   const unpaidNow = await make()
   const beforeVerify = verifyCalls, beforeInit = initCalls
+  await service.reconcileOwnedOrder(unpaidNow.user.id, unpaidNow.order.displayId)
   const draft = await orderService.preview(unpaidNow.user.id, unpaidNow.input)
   assert.equal(draft.paymentRecovery?.orderId, unpaidNow.order.displayId)
   assert.equal(draft.coupon?.valid, false)
@@ -159,8 +336,8 @@ try {
   const [opened] = await findings(unpaidNow.payment.id)
   assert.equal(opened!.status, 'open')
   await Promise.all([orderService.preview(unpaidNow.user.id, unpaidNow.input), orderService.preview(unpaidNow.user.id, unpaidNow.input)])
-  const blocked = await Promise.allSettled([orderService.checkout(unpaidNow.user.id, unpaidNow.input), orderService.checkout(unpaidNow.user.id, unpaidNow.input)])
-  assert(blocked.every(result => result.status === 'rejected'))
+  const blockedCoupon = await Promise.allSettled([orderService.checkout(unpaidNow.user.id, unpaidNow.input), orderService.checkout(unpaidNow.user.id, unpaidNow.input)])
+  assert(blockedCoupon.every(result => result.status === 'rejected'), 'the held first-purchase coupon cannot be reserved twice')
   await assert.rejects(() => service.retryInitiation(unpaidNow.user.id, unpaidNow.order.displayId))
   assert.equal(verifyCalls, beforeVerify + 1)
   assert.equal(initCalls, beforeInit)
@@ -169,7 +346,7 @@ try {
   const pendingState = await service.reconcileOwnedOrder(unpaidNow.user.id, unpaidNow.order.displayId)
   assert.equal(pendingState.orderId, unpaidNow.order.displayId); assert.equal(pendingState.status, 'PENDING_PAYMENT')
   await assert.rejects(() => service.reconcileOwnedOrder(crypto.randomUUID(), unpaidNow.order.displayId))
-  passed('Zarinpal -51/FAILED preserves holds and first purchase, previews a draft, blocks concurrent charges, and backs off R12/verification')
+  passed('Zarinpal -51/FAILED preserves holds and first purchase, previews new prices, rejects duplicate first coupons, and backs off verification')
 
   zarinpal.set(unpaidNow.payment.gatewayRef!, { code: -51, inquiry: 'REVERSED' })
   await due(unpaidNow.payment.id)
@@ -192,6 +369,7 @@ try {
 
   const late = await make()
   await orderService.preview(late.user.id, late.input)
+  await service.reconcileOwnedOrder(late.user.id, late.order.displayId)
   zarinpal.set(late.payment.gatewayRef!, { code: 100 })
   await Promise.all([callback(late, { Status: 'NOK' }), callback(late, { Status: 'OK' })])
   assert.equal((await readOrder(late.order.id)).status, 'PAID')
@@ -208,6 +386,40 @@ try {
   const firstDiscountAfterPaid = await orderService.preview(late.user.id, late.input)
   assert.equal(firstDiscountAfterPaid.coupon?.valid, false)
   passed('late real verification beats browser NOK and expiry, finalizes the original once, and consumes first-purchase eligibility once')
+
+  for (const outcome of ['success', 'failure'] as const) {
+    const raced = await make()
+    await service.reconcileOwnedOrder(raced.user.id, raced.order.displayId)
+    const [originalFinding] = await findings(raced.payment.id)
+    assert.equal(originalFinding!.status, 'open')
+    await due(raced.payment.id)
+    const entered = gate(), resume = gate()
+    verifyHooks.set(raced.payment.gatewayRef!, async () => {
+      verifyHooks.delete(raced.payment.gatewayRef!)
+      entered.release()
+      await resume.promise
+    })
+    const inFlight = service.reconcileOwnedOrder(raced.user.id, raced.order.displayId)
+    await entered.promise
+    try {
+      zarinpal.set(raced.payment.gatewayRef!, outcome === 'success'
+        ? { code: 100 } : { code: -51, inquiry: 'REVERSED' })
+      await callback(raced)
+      assert.equal((await findings(raced.payment.id))[0]!.status, 'auto_fixed')
+      // The old worker's response must remain unknown even though the callback
+      // already settled the real payment and resolved its diagnostic.
+      zarinpal.set(raced.payment.gatewayRef!, { code: -51, inquiry: 'FAILED' })
+    } finally { resume.release() }
+    await inFlight
+    assert.equal((await readOrder(raced.order.id)).status, outcome === 'success' ? 'PAID' : 'CANCELED')
+    assert.equal((await readPayment(raced.payment.id)).status, outcome === 'success' ? 'SUCCESS' : 'FAILED')
+    assert.equal((await findings(raced.payment.id))[0]!.status, 'auto_fixed',
+      'a stale unknown worker result cannot reopen R12 after concurrent terminal settlement')
+    assert.equal((await findings(raced.payment.id))[0]!.occurrences, originalFinding!.occurrences)
+    assert.equal((await ledger(raced.order.id)).length, outcome === 'success' ? 1 : 2)
+    assert.equal((await reservation(raced.user.id)).length, 0)
+  }
+  passed('stale unknown worker results cannot reopen resolved R12 findings after concurrent success or definitive failure')
 
   const previouslyVerified = await make()
   zarinpal.set(previouslyVerified.payment.gatewayRef!, { code: 101 })
@@ -240,20 +452,24 @@ try {
   assert.equal(verifiedAuthorities.filter(authority => authority === persisted.payment.gatewayRef).length, persistedCalls,
     'persisted verified success is recovered without another PSP verification of that original attempt')
   assert((await orderService.preview(persisted.user.id, persisted.input)).paymentRecovery)
-  await assert.rejects(() => orderService.checkout(persisted.user.id, persisted.input))
+  const independentAfterRecovery = await orderService.checkout(persisted.user.id, input)
+  assert.notEqual(independentAfterRecovery.displayId, persisted.order.displayId)
+  assert.equal((await readPayment(persistedSibling!.id)).status, 'PENDING')
   await service.reconcileOwnedOrder(persisted.user.id, persisted.order.displayId)
   assert.equal((await ledger(persisted.order.id)).length, 1)
   assert.equal((await redemption(persisted.order.id)).length, 1)
   assert.equal((await findings(persisted.payment.id)).length, 0)
-  passed('persisted verified success settles the original once under concurrent preview/recheck without PSP calls; its unverified sibling still blocks a new payment')
+  passed('persisted verified success settles the original once without PSP calls; its unverified sibling preserves review while another independent order is allowed')
 
   const returning = await make('ZARINPAL', true)
   const oldCount = (await ownerOrders(returning.user.id)).length
   const returningPreview = await orderService.preview(returning.user.id, returning.input)
   assert.equal(returningPreview.paymentRecovery?.orderId, returning.order.displayId)
-  await assert.rejects(() => orderService.checkout(returning.user.id, { ...returning.input, useWallet: false }))
-  assert.equal((await ownerOrders(returning.user.id)).length, oldCount)
-  passed('stale unknown payment also blocks a new charge for returning customers without first-purchase reservations')
+  const returningNewOrder = await orderService.checkout(returning.user.id, { ...returning.input, useWallet: false })
+  assert.notEqual(returningNewOrder.displayId, returning.order.displayId)
+  assert.equal((await ownerOrders(returning.user.id)).length, oldCount + 1)
+  assert.equal((await readPayment(returning.payment.id)).status, 'PENDING')
+  passed('stale unknown payment preserves its financial record while returning customers create an independent order')
 
   const [legacySecondOrder] = await db.insert(orders).values({ userId: returning.user.id, displayId: 'ord-rec-legacy',
     status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', deliveryType: 'DINE_IN', totalAmount: 100_000,
@@ -264,12 +480,11 @@ try {
     orderId: legacySecondOrder!.id, gateway: 'ZARINPAL', mode: 'direct', amount: 100_000,
   }).returning()
   const beforeLegacyInit = initCalls
-  await assert.rejects(() => service.initiate(legacySecondAttempt!.id, 'ZARINPAL',
-    { displayId: legacySecondOrder!.displayId, amount: 100_000 }))
-  assert.equal(initCalls, beforeLegacyInit)
-  assert.equal((await readPayment(legacySecondAttempt!.id)).gatewayRef, null)
+  await service.initiate(legacySecondAttempt!.id, 'ZARINPAL', { displayId: legacySecondOrder!.displayId, amount: 100_000 })
+  assert.equal(initCalls, beforeLegacyInit + 1)
+  assert.notEqual((await readPayment(legacySecondAttempt!.id)).gatewayRef, returning.payment.gatewayRef)
   assert.equal((await readPayment(returning.payment.id)).status, 'PENDING')
-  passed('legacy multiple pending orders cannot bypass the PSP-initiation guard to create a second payable session')
+  passed('distinct pending orders initialize distinct PSP sessions without changing an earlier unresolved attempt')
 
   const siblingFixture = await make()
   const [paidAttempt] = await db.insert(payments).values({ userId: siblingFixture.user.id, orderId: siblingFixture.order.id,
@@ -281,7 +496,9 @@ try {
   assert.equal((await readPayment(siblingFixture.payment.id)).status, 'PENDING')
   const blockedBySibling = await orderService.preview(siblingFixture.user.id, input)
   assert.equal(blockedBySibling.paymentRecovery?.orderId, siblingFixture.order.displayId)
-  await assert.rejects(() => orderService.checkout(siblingFixture.user.id, input))
+  await service.reconcileOwnedOrder(siblingFixture.user.id, siblingFixture.order.displayId)
+  const siblingIndependent = await orderService.checkout(siblingFixture.user.id, input)
+  assert.notEqual(siblingIndependent.displayId, siblingFixture.order.displayId)
   const siblingLedger = await ledger(siblingFixture.order.id)
   const siblingRedemptions = await redemption(siblingFixture.order.id)
   zarinpal.set(siblingFixture.payment.gatewayRef!, { code: -51, inquiry: 'REVERSED' })
@@ -291,8 +508,10 @@ try {
   assert.deepEqual(await ledger(siblingFixture.order.id), siblingLedger)
   assert.deepEqual(await redemption(siblingFixture.order.id), siblingRedemptions)
   assert.equal((await findings(siblingFixture.payment.id))[0]!.status, 'auto_fixed')
-  assert.equal((await orderService.preview(siblingFixture.user.id, input)).paymentRecovery, null)
-  passed('an outstanding sibling blocks new charges after settlement; its terminal failure closes only that sibling and unlocks recovery')
+  const remainingIndependent = await orderService.preview(siblingFixture.user.id, input)
+  assert.equal(remainingIndependent.paymentRecovery?.orderId, siblingIndependent.displayId)
+  assert.equal(remainingIndependent.paymentRecovery?.blocksPayment, false)
+  passed('an outstanding sibling preserves review while new orders are allowed; its terminal failure closes only that sibling')
 
   const extraSuccess = await make()
   zarinpal.set(extraSuccess.payment.gatewayRef!, { code: 100 })
@@ -308,11 +527,14 @@ try {
   assert.equal((await ledger(extraSuccess.order.id)).length, 1)
   assert.equal((await redemption(extraSuccess.order.id)).length, 1)
   assert((await orderService.preview(extraSuccess.user.id, input)).paymentRecovery)
-  await assert.rejects(() => orderService.checkout(extraSuccess.user.id, input))
-  passed('additional paid sibling stays under R12 review and never re-settles or unlocks another payment')
+  const extraIndependent = await orderService.checkout(extraSuccess.user.id, input)
+  assert.notEqual(extraIndependent.displayId, extraSuccess.order.displayId)
+  assert.equal((await findings(extraAttempt!.id))[0]!.status, 'open')
+  passed('additional paid sibling stays under R12 review without re-settlement or blocking a new independent order')
 
   const sepFixture = await make('SEP')
   await orderService.preview(sepFixture.user.id, sepFixture.input)
+  await service.reconcileOwnedOrder(sepFixture.user.id, sepFixture.order.displayId)
   sepReply = { IsSuccess: true, Amount: sepFixture.payment.amount * 10, ResNum: 'wrong-reservation', TerminalId: '12345678' }
   await callback(sepFixture, { State: 'OK', RefNum: 'SEP-REC-RECEIPT', ResNum: sepFixture.payment.id, TerminalId: '12345678' })
   assert.equal((await readPayment(sepFixture.payment.id)).gatewayRef, null)
@@ -332,6 +554,7 @@ try {
 
   const mellat = await make('MELLAT')
   await orderService.preview(mellat.user.id, mellat.input)
+  await service.reconcileOwnedOrder(mellat.user.id, mellat.order.displayId)
   const [saleOrderId, , token] = mellat.payment.gatewayRef!.split(':')
   const mellatQuery = { ResCode: '0', SaleOrderId: saleOrderId!, RefId: token!, SaleReferenceId: '123456789012345' }
   mellatVerify = 'outage'
@@ -447,6 +670,7 @@ try {
   const missingInit = initCalls, missingVerify = verifyCalls
   const missingPreview = await orderService.preview(missing.user.id, missing.input)
   assert.equal(missingPreview.paymentRecovery?.orderId, missing.order.displayId)
+  await service.reconcileOwnedOrder(missing.user.id, missing.order.displayId)
   const missingFindings = () => db.select().from(reconcileFindings).where(and(
     eq(reconcileFindings.checkId, 'R12'), eq(reconcileFindings.entityId, missing.order.id),
   ))
@@ -473,6 +697,25 @@ try {
   assert.equal(initCalls, missingInit)
   assert.equal(verifyCalls, missingVerify)
   passed('missing original payment records preserve wallet/coupon/first-purchase reservations and create one throttled actionable order finding')
+
+  const missingIndependent = await orderService.checkout(missing.user.id, input)
+  assert(missingIndependent.paymentId)
+  await service.initiate(missingIndependent.paymentId, 'ZARINPAL', {
+    displayId: missingIndependent.displayId, amount: missingIndependent.amountPaidOnline,
+  })
+  const missingNewPayment = await readPayment(missingIndependent.paymentId)
+  await callback({ payment: missingNewPayment }, gatewayResult(missingNewPayment, 'success'))
+  const [missingNewOrder] = await db.select().from(orders).where(eq(orders.displayId, missingIndependent.displayId))
+  assert.equal(missingNewOrder!.status, 'PAID')
+  assert.equal((await readOrder(missing.order.id)).status, 'PENDING_PAYMENT')
+  assert.equal((await ownerOrders(missing.user.id)).length, 2)
+  assert.deepEqual(await ledger(missing.order.id), missingLedger)
+  assert.deepEqual(await grant(missing.user.id), missingGrant)
+  assert.equal((await reservation(missing.user.id))[0]!.orderId, missing.order.id)
+  assert.equal((await missingFindings())[0]!.status, 'open')
+  assert.equal(initCalls, missingInit + 1)
+  assert.equal(verifyCalls, missingVerify + 1, 'only the new payment is verified; missing original evidence never gates it')
+  passed('missing original financial evidence remains reviewable while a new independent order initiates and pays successfully')
 
   for (const change of [{ gateway: 'SEP' }, { mode: 'indirect' }]) {
     const changed = await make()

@@ -13,6 +13,8 @@ const checkoutRequests: Array<{ input: CheckoutInput; key: string }> = []
 const previewCodes: Array<string | null> = []
 let checkoutResponse: { orderCompleted: boolean; orderId?: string; paymentUrl?: string } = { orderCompleted: false }
 let checkoutError: Error | null = null
+let checkoutWait: Promise<void> | null = null
+let previewWait: Promise<void> | null = null
 let mockPayment: () => Promise<{ paymentStatus: string; orderDisplayId: string }> = async () => ({ paymentStatus: 'SUCCESS', orderDisplayId: 'mock-paid' })
 let onlineAmount = 100
 let pendingMutation: Promise<void> | null = null
@@ -25,6 +27,15 @@ let previewFailed = false
 let paymentRecovery: CheckoutPreviewData['paymentRecovery']
 let refetches = 0
 const previewAddresses: Array<string | null> = []
+const renderedEffects: Array<{ run: () => void | (() => void) }> = []
+const react = { ...await import('react') }
+// Keep React's real reducers/refs and collect the final render's effect for
+// each hook position, so browser listeners can be mounted and cleaned up.
+mock.module('react', () => ({ ...react, useEffect: (effect: () => void | (() => void)) => {
+  const entry = react.useRef<{ run: () => void | (() => void) } | null>(null)
+  if (!entry.current) { entry.current = { run: effect }; renderedEffects.push(entry.current) }
+  entry.current.run = effect
+} }))
 
 mock.module('@tanstack/react-router', () => ({ useNavigate: () => (next: any) => { navigations.push(next); return navigationResult } }))
 mock.module('@tanstack/react-query', () => ({
@@ -42,7 +53,7 @@ mock.module('@tanstack/react-query', () => ({
         paymentRecovery,
       },
       isLoading: false, isFetching: previewFetching, isPlaceholderData: previewPlaceholder,
-      isPaused: previewPaused, isError: previewFailed, refetch: async () => { refetches++ },
+      isPaused: previewPaused, isError: previewFailed, refetch: async () => { refetches++; if (previewWait) await previewWait },
     }
   },
   useMutation: (options: any) => ({
@@ -63,8 +74,11 @@ mock.module('#/i18n', () => ({
 mock.module('#/server/checkout', () => ({
   processCheckout: async (input: CheckoutInput, key: string) => {
     checkoutRequests.push({ input, key })
-    if (checkoutError) throw checkoutError
-    return checkoutResponse
+    const response = checkoutResponse
+    const error = checkoutError
+    if (checkoutWait) await checkoutWait
+    if (error) throw error
+    return response
   },
   mockPay: async () => mockPayment(),
 }))
@@ -73,18 +87,24 @@ mock.module('#/stores/toastStore', () => ({ useToastStore: (select: any) => sele
 mock.module('#/utils/queryOptions', () => ({ checkoutPreviewOptions: (...previewArgs: unknown[]) => ({ previewArgs }) }))
 
 const location = { href: '' }
-Object.defineProperty(globalThis, 'window', { configurable: true, value: { location } })
+const windowEvents = new EventTarget()
+Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+  location,
+  addEventListener: windowEvents.addEventListener.bind(windowEvents),
+  removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
+} })
 Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get() { throw new DOMException('Storage denied', 'SecurityError') } })
 
 const { useCheckoutPage } = await import('../src/hooks/site/useCheckoutPage')
 const { consumePendingCheckout, rememberPendingCheckout, pendingCheckoutMatchesCart } = await import('../src/lib/pending-checkout')
 const { PENDING_CHECKOUT_KEY } = await import('../src/types/site/checkout')
-const { clearCheckoutIntent } = await import('../src/lib/checkout-intent')
+const { checkoutIntentIsCurrent, checkoutIntentKey, clearCheckoutIntent } = await import('../src/lib/checkout-intent')
 type Page = ReturnType<typeof useCheckoutPage>
 
 // Render-phase updates exercise React's real reducer and preserve its refs;
 // no hook source extraction, reducer copies, browser APIs or live API calls.
 function renderCheckout(coupon?: string, delivery?: { addressId?: string }, paymentsDisabled = false, draft?: { items: CheckoutItemInput[]; note: string }): Page {
+  renderedEffects.length = 0
   let page!: Page
   let step = 0
   function Probe() {
@@ -118,6 +138,12 @@ async function submit(page: Page) {
   assert.equal(checkoutRequests.length, count + 1)
 }
 
+function assertDuplicateSubmitBlocked(page: Page) {
+  const count = checkoutRequests.length
+  page.handleFinalSubmit()
+  assert.equal(checkoutRequests.length, count, 'a duplicate click cannot create or repay an order during navigation')
+}
+
 for (const amount of [0, 100]) {
   onlineAmount = amount
   const blocked = renderCheckout(undefined, undefined, true)
@@ -128,8 +154,7 @@ for (const amount of [0, 100]) {
   assert.equal(toasts.at(-1), 'checkout.paymentsPausedHint')
 }
 
-// A stale financial outcome permits editing the persisted cart, but neither a
-// button click nor a direct handler call may create a second order/payment.
+// Older APIs retain their explicit or implicit payment-recovery block.
 const draftStorage = new Map<string, string>()
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   getItem: (key: string) => draftStorage.get(key) ?? null,
@@ -140,32 +165,61 @@ Object.defineProperty(window, 'localStorage', { configurable: true, value: globa
 const { useCartStore, cartItemKey } = await import('../src/stores/cartStore')
 const draftProduct = '00000000-0000-4000-8000-000000000099'
 useCartStore.setState({ items: [{ productId: draftProduct, sizeId: null, quantity: 1 }] })
-paymentRecovery = { orderId: 'stale-original-order', message: 'Previous payment is under review', retryAfterSeconds: 60 }
+for (const blocksPayment of [undefined, true]) {
+  paymentRecovery = { orderId: 'stale-original-order', message: 'Previous payment is under review', retryAfterSeconds: 60, blocksPayment }
+  for (const amount of [0, 100]) {
+    onlineAmount = amount
+    useCartStore.getState().updateQuantity(cartItemKey(draftProduct, null), 3)
+    const draft = { items: useCartStore.getState().items, note: 'New draft note' }
+    const recovering = renderCheckout('NEW20', undefined, false, draft)
+    assert.equal(recovering.paymentRecovery?.orderId, paymentRecovery.orderId)
+    assert.equal(recovering.isSubmitBlocked, true)
+    assert.equal(recovering.state.customerNote, draft.note)
+    assert.equal(recovering.state.deliveryType, 'PICKUP')
+    assert.equal(recovering.state.couponDraft, 'NEW20')
+    const beforeRequests = checkoutRequests.length
+    recovering.handleFinalSubmit()
+    assert.equal(checkoutRequests.length, beforeRequests)
+    assert.equal(toasts.at(-1), 'checkout.paymentRecoveryHint')
+    assert.equal(useCartStore.getState().items[0]!.quantity, 3)
+    assert.equal(JSON.parse(draftStorage.get('sinshin-cart-storage')!).state.items[0].quantity, 3)
+    const beforeRefresh = refetches
+    await recovering.refetchPreview()
+    assert.equal(refetches, beforeRefresh + 1, 'recovery offers a safe preview/status refresh')
+  }
+}
+// A current advisory preserves the old order while the same basket can be paid
+// as an independent order. A durable old response must not replay its key.
 for (const amount of [0, 100]) {
-  onlineAmount = amount
-  useCartStore.getState().updateQuantity(cartItemKey(draftProduct, null), 3)
+  paymentRecovery = undefined
+  onlineAmount = 100
   const draft = { items: useCartStore.getState().items, note: 'New draft note' }
-  const recovering = renderCheckout('NEW20', undefined, false, draft)
-  assert.equal(recovering.paymentRecovery?.orderId, paymentRecovery.orderId)
-  assert.equal(recovering.isSubmitBlocked, true)
-  assert.equal(recovering.state.customerNote, draft.note)
-  assert.equal(recovering.state.deliveryType, 'PICKUP')
-  assert.equal(recovering.state.couponDraft, 'NEW20')
-  const beforeRequests = checkoutRequests.length
-  recovering.handleFinalSubmit()
-  assert.equal(checkoutRequests.length, beforeRequests)
-  assert.equal(toasts.at(-1), 'checkout.paymentRecoveryHint')
+  checkoutResponse = { orderCompleted: false, orderId: 'stale-original-order', paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/old-authority' }
+  await submit(renderCheckout('NEW20', undefined, false, draft))
+  const oldKey = checkoutRequests.at(-1)!.key
+  onlineAmount = amount
+  paymentRecovery = { orderId: 'stale-original-order', message: 'Previous payment is under review', retryAfterSeconds: 60, blocksPayment: false }
+  const orderId = `independent-${amount}`
+  checkoutResponse = { orderCompleted: amount === 0, orderId, paymentUrl: amount > 0 ? 'https://payment.zarinpal.com/pg/StartPay/new-authority' : undefined }
+  const independent = renderCheckout('NEW20', undefined, false, draft)
+  assert.equal(independent.paymentRecovery?.orderId, 'stale-original-order')
+  assert.equal(independent.isPaymentRecoveryBlocking, false)
+  assert.equal(independent.isSubmitBlocked, false)
+  await submit(independent)
+  assert.notEqual(checkoutRequests.at(-1)!.key, oldKey, 'an identical basket must receive a fresh key after a known old order')
+  assert.deepEqual(checkoutRequests.at(-1)!.input.items, draft.items)
+  if (amount > 0) assert.equal(location.href, 'https://payment.zarinpal.com/pg/StartPay/new-authority')
+  else assert.equal(navigations.at(-1)?.params?.orderId, orderId)
+  assert(pendingCheckoutMatchesCart(orderId, draft.items))
+  assert.equal(consumePendingCheckout('stale-original-order'), false, 'late old callback cannot consume the new checkout marker')
+  assertDuplicateSubmitBlocked(independent)
   assert.equal(useCartStore.getState().items[0]!.quantity, 3)
-  assert.equal(JSON.parse(draftStorage.get('sinshin-cart-storage')!).state.items[0].quantity, 3)
-  const beforeRefresh = refetches
-  await recovering.refetchPreview()
-  assert.equal(refetches, beforeRefresh + 1, 'recovery offers a safe preview/status refresh')
 }
 paymentRecovery = undefined
 assert.equal(renderCheckout().isSubmitBlocked, false, 'verified recovery removes the submission block')
 useCartStore.getState().clearCart()
 refetches = 0
-console.log('PASS stale payment recovery blocks wallet/gateway charges, keeps draft edits persisted and permits safe refresh')
+console.log('PASS payment recovery preserves legacy blocks and allows independent wallet/gateway checkout with a fresh key and intact draft')
 
 // Blocked storage cannot interrupt wallet success, order activation or routing.
 onlineAmount = 0
@@ -180,14 +234,14 @@ assert(pendingCheckoutMatchesCart('wallet-paid', checkoutRequests.at(-1)!.input.
 assert.equal(navigations.at(-1)?.params?.orderId, 'wallet-paid')
 assert.equal(activeOrders.at(-1), 'wallet-paid')
 const completedWalletKey = checkoutRequests.at(-1)!.key
-await submit(walletPage)
+assertDuplicateSubmitBlocked(walletPage)
 assert.equal(navigationFinished, false, 'old checkout remains visible while navigation is pending')
-assert.equal(checkoutRequests.at(-1)!.key, completedWalletKey, 'a second click before confirmation replays the paid order')
+assert.equal(checkoutRequests.at(-1)!.key, completedWalletKey)
 finishNavigation()
 await navigationResult
 assert(consumePendingCheckout('wallet-paid'))
 assert(!consumePendingCheckout('wallet-paid'), 'clear the cart at most once')
-clearCheckoutIntent() // matching terminal order-page confirmation
+clearCheckoutIntent('wallet-paid') // matching terminal order-page confirmation
 await submit(renderCheckout())
 assert.notEqual(checkoutRequests.at(-1)!.key, completedWalletKey, 'a new basket after matching confirmation gets a new key')
 
@@ -206,10 +260,11 @@ assert.equal(navigations.at(-1)?.params?.orderId, 'unsafe-url-order')
 assert(consumePendingCheckout('unsafe-url-order'), 'retain recovery for a created order with an invalid redirect')
 
 let submitted = false
+let bankSubmissionError: Error | null = null
 const bankForm = {
   method: '', action: '', style: { display: '' }, fields: [] as any[],
   appendChild(input: any) { this.fields.push(input) },
-  submit() { submitted = true }, remove() {},
+  submit() { if (bankSubmissionError) throw bankSubmissionError; submitted = true }, remove() {},
 }
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
   createElement: (tag: string) => tag === 'form' ? bankForm : {},
@@ -224,6 +279,61 @@ assert.deepEqual(bankForm.fields, [{ type: 'hidden', name: 'RefId', value: 'REF1
 assert.equal(location.href, '')
 assert(consumePendingCheckout('mellat-order'))
 
+bankSubmissionError = new Error('Browser blocked bank navigation')
+checkoutResponse = { orderCompleted: false, orderId: 'blocked-bank-order', paymentUrl: 'https://bpm.shaparak.ir/StartPay/BLOCKEDREF' }
+const blockedBankPage = renderCheckout()
+await submit(blockedBankPage)
+assert.equal(navigations.at(-1)?.params?.orderId, 'blocked-bank-order', 'failed browser payment navigation recovers the known original order')
+assert.equal(activeOrders.at(-1), 'blocked-bank-order')
+assert(pendingCheckoutMatchesCart('blocked-bank-order', checkoutRequests.at(-1)!.input.items))
+assert(toasts.includes('Browser blocked bank navigation'))
+assertDuplicateSubmitBlocked(blockedBankPage)
+bankSubmissionError = null
+
+// A BFCache browser Back restore refreshes the preview and makes an explicit
+// independent purchase possible without automatically reopening the old bank session.
+checkoutResponse = { orderCompleted: false, orderId: 'before-browser-back', paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/before-browser-back-authority' }
+const backPage = renderCheckout()
+const cleanups = renderedEffects.map(entry => entry.run()).filter((cleanup): cleanup is () => void => typeof cleanup === 'function')
+const showPage = (persisted: boolean) => {
+  const event = new Event('pageshow')
+  Object.defineProperty(event, 'persisted', { value: persisted })
+  windowEvents.dispatchEvent(event)
+}
+const refreshesBeforeBack = refetches
+showPage(true)
+assert.equal(refetches, refreshesBeforeBack, 'a restore with no known order does not reset an unknown checkout request')
+await submit(backPage)
+const beforeBackKey = checkoutRequests.at(-1)!.key
+showPage(false)
+assert.equal(refetches, refreshesBeforeBack, 'ordinary pageshow cannot unlock payment navigation')
+assertDuplicateSubmitBlocked(backPage)
+let finishBackPreview!: () => void
+previewWait = new Promise<void>(resolve => { finishBackPreview = resolve })
+const requestsBeforeBack = checkoutRequests.length
+showPage(true)
+assert.equal(refetches, refreshesBeforeBack + 1)
+assert.equal(checkoutRequests.length, requestsBeforeBack, 'restoring the checkout never submits or navigates to another payment automatically')
+assertDuplicateSubmitBlocked(backPage)
+showPage(true)
+assert.equal(refetches, refreshesBeforeBack + 1, 'duplicate restore events share the same refresh')
+finishBackPreview()
+await previewWait
+await Promise.resolve()
+await Promise.resolve()
+previewWait = null
+checkoutResponse = { orderCompleted: false, orderId: 'after-browser-back', paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/after-browser-back-authority' }
+await submit(backPage)
+assert.notEqual(checkoutRequests.at(-1)!.key, beforeBackKey, 'an explicit purchase after browser Back receives a fresh checkout key')
+assert.equal(location.href, 'https://payment.zarinpal.com/pg/StartPay/after-browser-back-authority')
+assert(pendingCheckoutMatchesCart('after-browser-back', checkoutRequests.at(-1)!.input.items))
+assert.equal(consumePendingCheckout('before-browser-back'), false)
+for (const cleanup of cleanups) cleanup()
+const refreshesAfterCleanup = refetches
+showPage(true)
+assert.equal(refetches, refreshesAfterCleanup, 'unmount removes the browser restore listener')
+refetches = 0
+
 // A replay may contain only the existing order; it is still a valid recovery.
 checkoutResponse = { orderCompleted: false, orderId: 'existing-order' }
 await submit(renderCheckout())
@@ -231,7 +341,8 @@ assert.equal(navigations.at(-1)?.params?.orderId, 'existing-order')
 assert.equal(activeOrders.at(-1), 'existing-order')
 assert(consumePendingCheckout('existing-order'))
 
-// Uncertain mock-payment network failure retains the original purchase key.
+// An uncertain mock-payment result navigates to the known original order and
+// blocks automatic repeat payment from the mounted checkout.
 checkoutResponse = { orderCompleted: false, orderId: 'uncertain-order', paymentUrl: '/api/payments/mock/00000000-0000-4000-8000-000000000001.0123456789abcdef0123456789abcdef' }
 mockPayment = async () => { throw new Error('Network connection lost') }
 const retryPage = renderCheckout()
@@ -240,7 +351,7 @@ const originalKey = checkoutRequests.at(-1)!.key
 assert.equal(navigations.at(-1)?.params?.orderId, 'uncertain-order')
 assert(toasts.includes('Network connection lost'))
 checkoutResponse = { orderCompleted: false, orderId: 'uncertain-order' }
-await submit(retryPage)
+assertDuplicateSubmitBlocked(retryPage)
 assert.equal(checkoutRequests.at(-1)!.key, originalKey)
 
 // The same guarantee also applies before the checkout response arrives.
@@ -248,12 +359,75 @@ checkoutError = new Error('Checkout response lost')
 const requestRetryPage = renderCheckout()
 await submit(requestRetryPage)
 const failedKey = checkoutRequests.at(-1)!.key
+const reloadedRetryPage = renderCheckout()
+await submit(reloadedRetryPage)
+assert.equal(checkoutRequests.at(-1)!.key, failedKey, 'a reloaded checkout also retries the unknown response with the same key')
 checkoutError = null
-await submit(renderCheckout())
+await submit(requestRetryPage)
 assert.equal(checkoutRequests.at(-1)!.key, failedKey)
 
-// Successful mock payment also retains its key until the matching order
-// confirms it; only a definite failed payment permits an immediate new try.
+// Duplicate clicks are blocked synchronously, before the request resolves.
+clearCheckoutIntent()
+let releaseCheckout!: () => void
+checkoutWait = new Promise<void>(resolve => { releaseCheckout = resolve })
+rememberPendingCheckout('older-in-flight-order', checkoutRequests.at(-1)!.input.items)
+const concurrentPage = renderCheckout()
+concurrentPage.handleFinalSubmit()
+const concurrentRequest = pendingMutation!
+const concurrentInput = checkoutRequests.at(-1)!.input
+const concurrentKey = checkoutRequests.at(-1)!.key
+assertDuplicateSubmitBlocked(concurrentPage)
+assert.equal(pendingCheckoutMatchesCart('older-in-flight-order', concurrentInput.items), false, 'old callbacks cannot clear the new basket before its checkout response')
+clearCheckoutIntent('older-in-flight-order')
+assert.equal(checkoutIntentKey(concurrentInput), concurrentKey, 'old callback cannot retire a new in-flight request key')
+releaseCheckout()
+await concurrentRequest
+checkoutWait = null
+assertDuplicateSubmitBlocked(concurrentPage)
+
+// A response from a checkout that was left before it finished must not replace
+// the newer order, marker or gateway navigation.
+clearCheckoutIntent()
+checkoutWait = new Promise<void>(resolve => { releaseCheckout = resolve })
+checkoutResponse = { orderCompleted: false, orderId: 'delayed-old-order', paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/delayed-old-authority' }
+const oldPage = renderCheckout(undefined, undefined, false, { items: concurrentInput.items, note: 'Earlier purchase' })
+oldPage.handleFinalSubmit()
+const oldRequest = pendingMutation!
+checkoutWait = null
+checkoutResponse = { orderCompleted: false, orderId: 'newest-order', paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/newest-authority' }
+await submit(renderCheckout(undefined, undefined, false, { items: concurrentInput.items, note: 'Independent purchase' }))
+const newestKey = checkoutRequests.at(-1)!.key
+releaseCheckout()
+await oldRequest
+assert(pendingCheckoutMatchesCart('newest-order', concurrentInput.items))
+assert(checkoutIntentIsCurrent(newestKey), 'the old API response cannot replace a newer checkout intent')
+assert.equal(location.href, 'https://payment.zarinpal.com/pg/StartPay/newest-authority')
+
+// A slow mock callback is also attributed to its own checkout, even when a new
+// purchase has identical contents and was already navigated to a real gateway.
+let mockStarted!: () => void
+let settleOldMock!: (result: { paymentStatus: string; orderDisplayId: string }) => void
+const oldMockStarted = new Promise<void>(resolve => { mockStarted = resolve })
+const oldMockResult = new Promise<{ paymentStatus: string; orderDisplayId: string }>(resolve => { settleOldMock = resolve })
+mockPayment = async () => { mockStarted(); return oldMockResult }
+checkoutResponse = { orderCompleted: false, orderId: 'delayed-mock-order', paymentUrl: '/api/payments/mock/00000000-0000-4000-8000-000000000004.0123456789abcdef0123456789abcdef' }
+const slowMockPage = renderCheckout()
+slowMockPage.handleFinalSubmit()
+const slowMockRequest = pendingMutation!
+await oldMockStarted
+assertDuplicateSubmitBlocked(slowMockPage)
+checkoutResponse = { orderCompleted: false, orderId: 'new-after-mock', paymentUrl: 'https://payment.zarinpal.com/pg/StartPay/new-after-mock-authority' }
+await submit(renderCheckout())
+const afterMockKey = checkoutRequests.at(-1)!.key
+settleOldMock({ paymentStatus: 'SUCCESS', orderDisplayId: 'delayed-mock-order' })
+await slowMockRequest
+assert(pendingCheckoutMatchesCart('new-after-mock', checkoutRequests.at(-1)!.input.items))
+assert(checkoutIntentIsCurrent(afterMockKey))
+assert.equal(location.href, 'https://payment.zarinpal.com/pg/StartPay/new-after-mock-authority')
+assert.notEqual(navigations.at(-1)?.params?.orderId, 'delayed-mock-order')
+
+// Mock success keeps the mounted checkout blocked through navigation; a
+// definitive failed mock payment permits an immediate independent new try.
 for (const paymentStatus of ['SUCCESS', 'FAILED']) {
   clearCheckoutIntent()
   checkoutResponse = { orderCompleted: false, orderId: `mock-${paymentStatus}`, paymentUrl: '/api/payments/mock/00000000-0000-4000-8000-000000000002.0123456789abcdef0123456789abcdef' }
@@ -264,13 +438,14 @@ for (const paymentStatus of ['SUCCESS', 'FAILED']) {
   const mockPage = renderCheckout()
   await submit(mockPage)
   const terminalKey = checkoutRequests.at(-1)!.key
-  await submit(mockPage)
   if (paymentStatus === 'SUCCESS') {
+    assertDuplicateSubmitBlocked(mockPage)
     assert.equal(navigationFinished, false)
     assert.equal(checkoutRequests.at(-1)!.key, terminalKey)
     assert(consumePendingCheckout('mock-SUCCESS'))
-    clearCheckoutIntent()
+    clearCheckoutIntent('mock-SUCCESS')
   } else {
+    await submit(mockPage)
     assert.notEqual(checkoutRequests.at(-1)!.key, terminalKey)
   }
   finishNavigation()

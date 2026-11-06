@@ -110,7 +110,7 @@ function CheckoutPage() {
 			{page.paymentRecovery && (
 				<div role="status" className="mb-6 p-5 rounded-2xl bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 text-yellow-700 dark:text-yellow-300">
 					<h2 className="font-DanaDemiBold">{t['checkout.paymentRecoveryTitle']}</h2>
-					<p className="text-sm mt-2 leading-relaxed">{t['checkout.paymentRecoveryHint']}</p>
+					<p className="text-sm mt-2 leading-relaxed">{t[page.isPaymentRecoveryBlocking ? 'checkout.paymentRecoveryHint' : 'checkout.paymentRecoveryAdvisoryHint']}</p>
 					<p className="text-sm mt-2">{t['checkout.paymentRecoveryOrder']}: <span dir="ltr" className="inline-block font-DanaDemiBold">{page.paymentRecovery.orderId}</span></p>
 					{page.paymentRecovery.retryAfterSeconds > 0 && (
 						<p className="text-xs mt-2">{tpl(t['checkout.paymentRecoveryWait'], { n: fmt.num(page.paymentRecovery.retryAfterSeconds) })}</p>
@@ -218,7 +218,7 @@ function CheckoutPage() {
 					deliveryType={page.state.deliveryType}
 					isLoading={page.isDetailsLoading}
 					isSubmitBlocked={page.isSubmitBlocked}
-					isSubmitting={page.checkoutMutation.isPending || page.mockPayPending}
+					isSubmitting={page.checkoutMutation.isPending || page.mockPayPending || page.checkoutNavigating}
 					onSubmit={page.handleFinalSubmit}
 					restaurantStatus={restaurantStatus}
 				/>

@@ -95,7 +95,7 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 		if (!order || !['SUCCESS', 'FAILED', 'REFUNDED'].includes(order.paymentStatus)) return
 		const submittedCartStillPresent = pendingCheckoutMatchesCart(orderId, useCartStore.getState().items)
 		if (!consumePendingCheckout(orderId)) return
-		clearCheckoutIntent()
+		clearCheckoutIntent(orderId)
 		if (order.paymentStatus === 'SUCCESS' && submittedCartStillPresent) clearCart()
 		setActiveOrderId(orderId)
 	}, [order, orderId, clearCart, setActiveOrderId])

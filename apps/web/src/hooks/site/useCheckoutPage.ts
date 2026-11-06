@@ -19,8 +19,8 @@ import {
 } from 'react'
 import { useMenuLive } from '#/hooks/shared/useMenuLive'
 import { tpl, useI18n } from '#/i18n'
-import { checkoutIntentKey, clearCheckoutIntent } from '#/lib/checkout-intent'
-import { rememberPendingCheckout } from '#/lib/pending-checkout'
+import { checkoutIntentIsCurrent, checkoutIntentKey, clearCheckoutIntent, completeCheckoutIntent } from '#/lib/checkout-intent'
+import { forgetPendingCheckout, rememberPendingCheckout } from '#/lib/pending-checkout'
 import { navigateToPayment } from '#/lib/payment-navigation'
 import { mockPay, processCheckout } from '#/server/checkout'
 import { useAuthStore } from '#/stores/authStore'
@@ -134,6 +134,9 @@ export function useCheckoutPage(deps: {
 	// است؛ کلیکِ دوباره ⇒ processCheckout دوباره با همان کلید (سرور رد
 	// می‌کند) + mockPay/توستِ تکراری. دکمه تا پایانِ ناوبری قفل می‌ماند.
 	const [mockPayPending, setMockPayPending] = useState(false)
+	const submissionInFlight = useRef(false)
+	const submissionOrderKnown = useRef(false)
+	const [checkoutNavigating, setCheckoutNavigating] = useState(false)
 
 	// ⬅ پیش‌نمایش — قیمت‌گذاری ۱۰۰٪ سروری: سایز/تخفیف/کوپن/ناحیه/بسته‌بندی/کیف پول
 	const {
@@ -156,6 +159,21 @@ export function useCheckoutPage(deps: {
 		enabled: isAuthenticated && items.length > 0,
 		retry: false, // خطای اعتبارسنجی (سایز حذف‌شده و…) را با تلاش مجدد مخفی نکن
 	})
+	useEffect(() => {
+		const restoreCheckout = (event: PageTransitionEvent) => {
+			if (!event.persisted || !submissionOrderKnown.current) return
+			// Browser Back can restore the mounted checkout after bank navigation.
+			// Refresh its prices/recovery state before an explicit new purchase;
+			// the completed intent remains bound to the original order.
+			submissionOrderKnown.current = false
+			void refetchPreview().finally(() => {
+				submissionInFlight.current = false
+				setCheckoutNavigating(false)
+			})
+		}
+		window.addEventListener('pageshow', restoreCheckout)
+		return () => window.removeEventListener('pageshow', restoreCheckout)
+	}, [refetchPreview])
 
 	// ── stage-48 — SSE عمومی menu:live: ناموجودی/حالت ارسال عوض شد ⇒
 	// پیش‌نمایش چک‌اوت درجا رفرش می‌شود (هشدار نارنجی + قفل پرداخت فوری).
@@ -311,9 +329,11 @@ export function useCheckoutPage(deps: {
 				: blocked.dineInBlockedNames
 	const isDeliveryBlocked = deliveryBlockedFor.length > 0
 	const paymentRecovery = previewData?.paymentRecovery
+	const isPaymentRecoveryBlocking = !!paymentRecovery && paymentRecovery.blocksPayment !== false
 	const isSubmitBlocked =
 		paymentsDisabled ||
-		!!paymentRecovery ||
+		isPaymentRecoveryBlocking ||
+		checkoutNavigating ||
 		!isPreviewReady ||
 		!isDeliveryQuoteReady ||
 		(state.couponStatus === 'HAVE' && !couponApplied) ||
@@ -383,19 +403,29 @@ export function useCheckoutPage(deps: {
 
 	// --- ثبت سفارش ---
 	const checkoutMutation = useMutation({
-		mutationFn: (payload: CheckoutSubmitPayload) =>
-			processCheckout(payload, checkoutIntentKey(payload)),
+		mutationFn: async (payload: CheckoutSubmitPayload) => {
+			const key = checkoutIntentKey(payload)
+			forgetPendingCheckout()
+			const res = await processCheckout(payload, key)
+			if (res.orderId) {
+				submissionOrderKnown.current = true
+				completeCheckoutIntent(key, res.orderId)
+			}
+			return { ...res, checkoutKey: key }
+		},
 		onSuccess: async (res, payload) => {
 			queryClient.invalidateQueries({ queryKey: qk.userProfile })
 			queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
 			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
 			// stage-56 — سفارش تازه باید در «سفارشات من» (صفحه‌بندی سروری) ظاهر شود
 			queryClient.invalidateQueries({ queryKey: qk.myOrdersPrefix })
+			if (!checkoutIntentIsCurrent(res.checkoutKey)) return
+			if (res.orderId || res.paymentUrl) setCheckoutNavigating(true)
 
 			// ── تمام-کیف‌پول: همین، نتیجه است ──
 			if (res.orderCompleted && res.orderId) {
-				// Keep this purchase key while navigation is pending and the old
-				// basket is still visible. The matching order page clears it.
+				// Keep this mounted checkout blocked through navigation. A new
+				// checkout can start an independent purchase with a fresh key.
 				rememberPendingCheckout(res.orderId, payload.items)
 				setActiveOrderId(res.orderId)
 				showToast(t['checkout.orderPlaced'])
@@ -421,6 +451,7 @@ export function useCheckoutPage(deps: {
 					setMockPayPending(true)
 					try {
 						const payResult = await mockPay(res.paymentUrl, true)
+						if (!checkoutIntentIsCurrent(res.checkoutKey)) return
 						if (payResult.paymentStatus === 'SUCCESS') {
 							rememberPendingCheckout(payResult.orderDisplayId, payload.items)
 							setActiveOrderId(payResult.orderDisplayId)
@@ -431,12 +462,15 @@ export function useCheckoutPage(deps: {
 							})
 						} else {
 							// شکست قطعی → کلید تازه؛ سبد «پاک نشده» — کاربر دوباره می‌زند
-							clearCheckoutIntent()
+							if (res.orderId) clearCheckoutIntent(res.orderId)
+							submissionInFlight.current = false
+							setCheckoutNavigating(false)
 							showToast(t['checkout.payFailed'], 'error')
 						}
 					} catch (err) {
-						// Network failure is not a confirmed payment failure. Keep
-						// the purchase key and recover through the existing order.
+						if (!checkoutIntentIsCurrent(res.checkoutKey)) return
+						// Recover the known order; payment uncertainty cannot unlock
+						// this mounted checkout for another automatic payment.
 						if (res.orderId) {
 							rememberPendingCheckout(res.orderId, payload.items)
 							setActiveOrderId(res.orderId)
@@ -459,7 +493,17 @@ export function useCheckoutPage(deps: {
 				// برگشت از درگاه → /dashboard/orders/:orderId → پول →
 				// اولین SUCCESS با پرچمِ همین سفارش → سبد پاک می‌شود
 				if (res.orderId) rememberPendingCheckout(res.orderId, payload.items)
-				navigateToPayment(res.paymentUrl)
+				try {
+					navigateToPayment(res.paymentUrl)
+				} catch (err) {
+					// A blocked browser redirect must recover the known order,
+					// while keeping repeat payment from this checkout disabled.
+					if (res.orderId) {
+						setActiveOrderId(res.orderId)
+						void navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
+					}
+					showToast(apiError(err instanceof Error ? err.message : t['checkout.payError']), 'error')
+				}
 				return
 			}
 
@@ -473,10 +517,14 @@ export function useCheckoutPage(deps: {
 				return
 			}
 			showToast(t['checkout.orderProcessFail'], 'error')
+			submissionInFlight.current = false
+			setCheckoutNavigating(false)
 		},
 		// onError عمداً کلید را عوض «نمی‌کند»: خطای شبکه → تلاش مجدد با همان کلید
 		// امن است (اگر سفارش ساخته شده باشد، پاسخ کش‌شده برمی‌گردد)
 		onError: (err) => {
+			// Only an unknown checkout response retries the original request.
+			if (!submissionOrderKnown.current) submissionInFlight.current = false
 			showToast(apiError(err.message || t['checkout.orderProcessError']), 'error')
 			void queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
 		},
@@ -487,11 +535,12 @@ export function useCheckoutPage(deps: {
 			showToast(t['checkout.paymentsPausedHint'], 'error')
 			return
 		}
-		if (paymentRecovery) {
+		if (isPaymentRecoveryBlocking) {
 			showToast(t['checkout.paymentRecoveryHint'], 'error')
 			return
 		}
 		if (
+			submissionInFlight.current ||
 			checkoutMutation.isPending ||
 			mockPayPending ||
 			!isPreviewReady
@@ -551,12 +600,14 @@ export function useCheckoutPage(deps: {
 			couponCode: couponApplied ? state.couponCode : null,
 			gatewayId: isGatewayDisabled ? null : state.selectedGateway,
 		}
+		submissionInFlight.current = true
+		submissionOrderKnown.current = false
 		checkoutMutation.mutate(payload)
 	}, [
 		state,
 		items,
 		paymentsDisabled,
-		paymentRecovery,
+		isPaymentRecoveryBlocking,
 		isSubmitBlocked,
 		isGatewayDisabled,
 		couponApplied,
@@ -580,6 +631,8 @@ export function useCheckoutPage(deps: {
 		calc,
 		previewData,
 		paymentRecovery,
+		isPaymentRecoveryBlocking,
+		checkoutNavigating,
 		isDetailsLoading,
 		isPreviewFetching,
 		isPreviewError,

@@ -45,7 +45,6 @@ import {
         addresses,
         checkoutIdempotency,
         couponRedemptions,
-        couponGrants,
         firstPurchaseReservations,
         coupons,
         couriers,
@@ -154,16 +153,8 @@ export class OrderService {
                 return Number(rows[0]?.balance ?? 0);
         }
 
-        /** Read-only in preview; checkout calls this under the existing wallet/user locks. */
+        /** Checkout calls this under the existing wallet/user locks. Pending entitlements belong to their original order. */
         private async needsFirstPurchaseReservation(db: DbOrTx, userId: string): Promise<boolean> {
-                // Outstanding financial attempts block every customer, including returning buyers.
-                const [unresolved] = await db.select({ id: orders.id }).from(orders).where(and(
-                        eq(orders.userId, userId), eq(orders.status, "PENDING_PAYMENT"),
-                )).limit(1);
-                const [unresolvedAttempt] = await db.select({ id: payments.id }).from(payments).where(and(
-                        eq(payments.userId, userId), eq(payments.status, "PENDING"),
-                )).limit(1);
-                if (unresolved || unresolvedAttempt) throw Err.conflict(FIRST_ORDER_PENDING_MESSAGE);
                 const [state] = await db.select({
                         successful: sql<boolean>`exists (
                                 select 1 from orders o where o.user_id = ${userId}::uuid
@@ -176,10 +167,8 @@ export class OrderService {
                         )`,
                 }).from(users).where(eq(users.id, userId));
                 if (!state) throw Err.unauthorized();
-                if (state.successful) return false;
-                // Pending orders from before user-level reservations also block a new first order.
-                if (state.pending) throw Err.conflict(FIRST_ORDER_PENDING_MESSAGE);
-                return true;
+                // Legacy pending orders also keep FIRST_PURCHASE unavailable without preventing an independent purchase.
+                return !state.successful && !state.pending;
         }
 
         /**
@@ -196,10 +185,9 @@ export class OrderService {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
                 await this.deps.settings.assertOrderPaymentsAllowed(db);
-                // PSP reconciliation must finish before acquiring checkout's money locks.
-                // Eligibility is checked again inside the transaction below.
-                const recovery = await this.pendingPaymentReconciler?.(userId);
-                if (recovery) throw Err.conflict(recovery.message);
+                // Read the prior-order advisory without PSP calls; its unresolved outcome cannot block a new purchase.
+                // First-purchase eligibility is checked inside the money transaction below.
+                await this.pendingPaymentReconciler?.(userId);
 
                 // A slow maps provider must not hold wallet/user/campaign locks.
                 // Only route measurements are prepared; ownership, coordinates and
@@ -575,7 +563,7 @@ export class OrderService {
         }
 
         /**
-         * Reconcile stale payments first, then preview prices without creating an order or reservation.
+         * Preview prices and the prior-order advisory without creating an order or reservation or querying the PSP.
          * مرگ SINSHIN20 و هزینه‌ی ارسال فلتِ فرانت — UI از این اعداد زنده نمایش می‌دهد.
          */
         async preview(
@@ -585,7 +573,6 @@ export class OrderService {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
                 const paymentRecovery = await this.pendingPaymentReconciler?.(userId);
-                if (!paymentRecovery) await this.needsFirstPurchaseReservation(db, userId);
 
                 // Address selection is optional during preview; delivery stays
                 // unquoted until the customer selects an owned address.
@@ -964,15 +951,8 @@ export class OrderService {
                                         await tx.select().from(coupons).where(eq(coupons.id, row.couponId))
                                 )[0];
                                 if (coupon && !coupon.isPublic && deletedRedemptions.length > 0) {
-                                        await tx
-                                                .update(couponGrants)
-                                                .set({ consumedAt: null })
-                                                .where(
-                                                        and(
-                                                                eq(couponGrants.couponId, row.couponId),
-                                                                eq(couponGrants.userId, row.userId),
-                                                        ),
-                                                );
+                                        // Legacy overlapping records may still hold the same private grant.
+                                        await this.deps.coupons.releaseGrant(tx, row.couponId, row.userId);
                                 }
                         }
 

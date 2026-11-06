@@ -509,8 +509,8 @@ export type DeliveryQuote =
   | { status: 'address_required' | 'unavailable' | 'no_route'; message: string }
 
 export interface CheckoutPreviewData {
-  /** A cart can be prepared, but no new charge/first-purchase benefit is allowed until this order is resolved. */
-  paymentRecovery?: { orderId: string; message: string; retryAfterSeconds: number } | null
+  /** An unresolved previous payment stays linked for review; omitted blocksPayment preserves legacy blocking. */
+  paymentRecovery?: { orderId: string; message: string; retryAfterSeconds: number; blocksPayment?: boolean } | null
   breakdown: OrderBreakdown
   /** Server-priced road distance; null for pickup/dine-in. Optional for older servers. */
   deliveryQuote?: DeliveryQuote | null

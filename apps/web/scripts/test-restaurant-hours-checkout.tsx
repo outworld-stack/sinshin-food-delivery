@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
-import type { RestaurantStatusDto, RestaurantStatusDisplay } from '@sinshin/shared'
+import type { CheckoutPreviewData, RestaurantStatusDto, RestaurantStatusDisplay } from '@sinshin/shared'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { fa } from '../src/i18n/fa'
@@ -18,6 +18,7 @@ let status: RestaurantStatusDto = {
 	isBusy: false,
 }
 const requests: string[] = []
+let paymentRecovery: CheckoutPreviewData['paymentRecovery']
 mock.module('#/lib/api-fetch', () => ({
 	getJson: async (path: string) => {
 		requests.push(path)
@@ -51,8 +52,10 @@ mock.module('#/hooks/site/useCheckoutPage', () => ({
 		calc: { payableFood: 100, discount: 0, walletDeduction: 0, deliveryFee: 0, packagingFee: 0, total: 100, amountPaidOnline: 100 },
 		blocked: { courierBlockedNames: [], takeawayBlockedNames: [], dineInBlockedNames: [] },
 		checkoutMutation: { isPending: false },
+		paymentRecovery,
+		isPaymentRecoveryBlocking: !!paymentRecovery && paymentRecovery.blocksPayment !== false,
 		isDetailsLoading: false,
-		isSubmitBlocked: false,
+		isSubmitBlocked: !!paymentRecovery && paymentRecovery.blocksPayment !== false,
 		mockPayPending: false,
 		handleFinalSubmit() {},
 	}),
@@ -194,7 +197,21 @@ try {
 	assert(!open.includes(fa['checkout.closedSummary'].split('{n}')[0]), 'open restaurant hides the summary warning')
 	assert(!open.includes('دوباره اطلاع می‌دهیم'), 'inactive temporary closure details stay hidden')
 	assert(requests.every((path) => path === '/orders/restaurant-status'), 'checkout reads the public status endpoint')
+	for (const locale of ['fa', 'ar'] as const) {
+		lang = locale
+		const dictionary = lang === 'fa' ? fa : ar
+		for (const blocksPayment of [undefined, true, false]) {
+			paymentRecovery = { orderId: 'old-order-under-review', message: 'Review', retryAfterSeconds: 60, blocksPayment }
+			const html = render()
+			const paymentButton = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].find(match => match[2]!.includes(dictionary['checkout.submitPay']))
+			assert(paymentButton, 'checkout keeps its ordinary payment button during financial review')
+			assert.equal(/\bdisabled(?:=|\s|$)/.test(paymentButton[1]!), blocksPayment !== false, 'only legacy blocking recovery disables payment')
+			assert(html.includes('old-order-under-review'), 'the previous order remains visible')
+			assert(html.includes(dictionary[blocksPayment === false ? 'checkout.paymentRecoveryAdvisoryHint' : 'checkout.paymentRecoveryHint']), 'the explanation matches independent checkout availability')
+		}
+	}
 	console.log('PASS restaurant hours checkout: permanent saved-time notices, query refresh, Persian/Arabic clocks, midnight, reason-only temporary warnings, closure precedence, escaped multiline messages and unchanged payment availability')
+	console.log('PASS Persian/Arabic financial-review advisory keeps the previous order visible and permits the ordinary payment button')
 } finally {
 	client.clear()
 }

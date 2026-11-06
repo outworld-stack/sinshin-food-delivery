@@ -327,6 +327,12 @@ export class CouponService {
     const conds = await tx.select().from(couponConditions).where(eq(couponConditions.couponId, coupon.id))
     const conditions = conds.map(c => ({ type: c.type as ConditionType, params: (c.params ?? {}) as Record<string, unknown> }))
     const hasFirstPurchase = conditions.some(c => c.type === 'FIRST_PURCHASE')
+    // Legacy pending private-coupon orders may predate consumedAt reservations.
+    // Their grant is still held; a new independent purchase must use another coupon.
+    const [pendingGrant] = await tx.select({ id: orders.id }).from(orders).where(and(
+      eq(orders.userId, userId), eq(orders.couponId, coupon.id), eq(orders.status, 'PENDING_PAYMENT'),
+    )).limit(1)
+    if (pendingGrant) return { ok: false, reason: hasFirstPurchase ? 'first_purchase_reserved' : 'not_granted' }
     // Ordinary grants are earned entitlements: a rolling history window,
     // refund or later campaign edit must not revoke an existing unused grant.
     // FIRST_PURCHASE is different: every redemption must revalidate its full
@@ -389,7 +395,7 @@ export class CouponService {
     return rows.length > 0
   }
 
-  /** آزادسازی گرنت — در failPayment / بازپرداخت (برگرداندن به قابل‌استفاده) */
+  /** Release only when no other pending order or active redemption owns this private grant. */
   async releaseGrant(tx: DbOrTx, couponId: CampaignId, userId: string): Promise<void> {
     await tx
       .update(couponGrants)
@@ -398,6 +404,10 @@ export class CouponService {
         and(
           eq(couponGrants.couponId, couponId),
           eq(couponGrants.userId, userId),
+          sql`not exists (select 1 from orders held where held.user_id = ${userId}::uuid
+            and held.coupon_id = ${couponId}::uuid and held.status = 'PENDING_PAYMENT')`,
+          sql`not exists (select 1 from coupon_redemptions redeemed where redeemed.user_id = ${userId}::uuid
+            and redeemed.coupon_id = ${couponId}::uuid)`,
         ),
       )
   }

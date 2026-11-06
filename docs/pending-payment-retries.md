@@ -12,19 +12,46 @@ initialization that finishes too late retains its reference for reconciliation
 without returning a payment URL. Checkout replay also rejects a cached URL from
 an older attempt and respects the configured window rather than a fixed grace.
 
-Both backend preview and checkout reconcile the customer's expired orders before
-pricing or creating a new order. Checkout rechecks outstanding orders and payment
-attempts under the customer money locks. This includes returning customers and
-unresolved sibling attempts on an already paid order. Initiation and retry also
-reject other outstanding payments under those locks. A bank-confirmed success
-settles only the original order, once; no recovery path creates another charge
-while that settlement is in progress.
+An older `PENDING_PAYMENT` order never prevents an authenticated customer from
+creating and paying for a new, independent order. Backend preview and checkout
+read a database-only `paymentRecovery` advisory with `blocksPayment: false`;
+neither waits for the old PSP or cancels old records to permit a purchase.
+Initialization and retry enforce payment safety within their own order under
+the existing money locks. Multiple active or successful attempts on that same
+order cannot authorize another charge. An outstanding attempt on another order,
+including a sibling of an already paid order, is reconciled independently.
 
-An unresolved expired payment allows a priced cart preview with `paymentRecovery`
-and an editable saved cart, while payment submission remains blocked on both
-client and server. First-purchase reservations and discounts remain tied to the
-original order. A late success clears the submitted cart only when its contents
-still match the original checkout; it preserves a subsequently edited draft.
+Each new checkout intent creates its own order, payment attempt, signed callback
+state and PSP session. Zarinpal uses a separate authority; SEP uses a separate
+Token and the payment UUID as ResNum; Mellat uses a separate token and numeric
+request ID derived from the payment UUID. Replaying the same intent returns its
+original order. A lost checkout response retains the intent key across reloads;
+once an order response is known, another explicit purchase gets a fresh key even
+if its basket and payment details are identical. Concurrent submissions and
+delayed responses cannot replace a newer checkout's navigation or cart marker.
+
+Old financial records, wallet holds, coupon/grant reservations and first-purchase
+entitlements remain attached to the original order until conclusively resolved.
+New purchases use only remaining available wallet funds and coupon capacity.
+FIRST_PURCHASE benefits remain unavailable while an original entitlement is
+reserved; this does not block an ordinary new purchase. A previously reserved
+first discount may settle late even when the new ordinary purchase pays first,
+but further purchases cannot receive another first discount. Legacy pending
+orders without a reservation row also withhold FIRST benefits alone.
+
+A legacy pending private-coupon order holds its grant even if `consumedAt` was
+never populated. Reuse of that held coupon is rejected, while checkout without
+it remains available. Failure or refund cannot clear a grant still owned by
+another pending order or active redemption, including historical overlaps.
+
+Callbacks settle only the payment's original order, once. Browser cart cleanup
+requires both the matching order marker and matching submitted contents. Starting
+an independent checkout retires the old browser marker without touching its
+financial records. A late callback cannot clear an identical newer basket or its
+in-flight intent key. Legacy recovery responses without `blocksPayment: false`
+retain their old client behavior; the current backend always emits the advisory.
+Browser payment-navigation errors recover through the known order. A browser
+Back restore refreshes preview before enabling another explicit purchase.
 
 Retries check previous bank results before replacing an attempt. A successful
 verification settles the existing payment. An inconclusive result or network
@@ -62,6 +89,9 @@ mode and receipt candidate. A stale negative result cannot override newer
 callback evidence. Scheduling metadata does not change the financial snapshot
 revision. R12 findings are unique and recurring equivalent findings increment
 at most hourly; new anomaly kinds or receipt changes can reopen/update review.
+Diagnostic writes serialize with payment settlement so a stale unknown worker
+response cannot reopen a finding after success or definitive failure has resolved
+it. Genuine late/additional success and integrity anomalies still require review.
 
 Expiry checks every pending attempt belonging to an order:
 
@@ -126,10 +156,12 @@ finding does not classify a financial outcome or release reservations.
   candidates permit background recovery after verification becomes available.
 
 No elapsed-time rule revokes an issued PSP session. If the provider cannot
-establish a terminal result, support must obtain conclusive PSP evidence; the
-customer's new payment stays blocked. No forced-failure or deletion endpoint was
-added. Public SEP/Behpardakht documentation did not establish additional terminal
-failure guarantees, and no live gateways were exercised.
+establish a terminal result, support must obtain conclusive PSP evidence for the
+original order. The customer can still pay for an independent new order; both
+orders can ultimately succeed as separate purchases. Recovery never initiates
+another charge on the unresolved original order. No forced-failure or deletion
+endpoint was added. Public SEP/Behpardakht documentation did not establish
+additional terminal failure guarantees, and no live gateways were exercised.
 
 Validation uses local scratch PostgreSQL with stubbed gateways, including
 concurrent retries, callback races, ownership and amount mismatches, duplicate
@@ -145,10 +177,11 @@ All commands below passed using `rtk proxy bun` from their application directory
 | API script | Passed checks/groups |
 | --- | ---: |
 | `db:test:payment-safety` | 53 |
-| `db:test:payment-recovery` | 17 |
+| `db:test:payment-recovery` | 25 |
 | `db:test:payment-verification` | 11 |
-| `db:test:order` | 22 |
-| `scripts/test-coupon-upgrade.ts` | 40 |
+| `db:test:order` | 23 |
+| `scripts/test-coupon-upgrade.ts` | 47 |
+| `db:test:coupon` | 30 |
 | `db:test:zarinpal` | 72 |
 | `db:test:sep` | 57 |
 | `db:test:mellat` | 43 |
@@ -156,11 +189,21 @@ All commands below passed using `rtk proxy bun` from their application directory
 | `db:test:wallet` | 10 |
 | `db:test:payment-disable` | 11 |
 | `db:test:financial-reconcile` | 11 |
-| `scripts/test-coupon-upgrade-migration.ts` | 4 |
 
 Web checks passed: `test:checkout-client`, `test:payment-retry`,
-`test:payment-draft`, `test:checkout-intent`, and `test:coupon-client`.
-Both API and web `typecheck` passed, as did `git diff --check`.
+`test:payment-draft`, `test:checkout-intent`, `test:coupon-client`, and the rendered
+`scripts/test-restaurant-hours-checkout.tsx` check. API, web and shared package
+type checks passed, as did `git diff --check`.
+
+The recovery suite uses the actual adapters with stubbed provider HTTP/SOAP to
+verify independent concurrent orders, same-key replays, distinct sessions,
+successful new payments while the old result is unknown, and late old
+success/failure/duplicate callbacks for all three providers. SEP's unsuccessful
+verification remains indeterminate because it does not prove terminal nonpayment.
+Wallet and coupon suites exercise real transaction locks, residual wallet funds,
+legacy orders, first-purchase reservation races and late original settlement.
+Browser Back restoration is covered through simulated `pageshow` events using
+the real checkout hook effects; a real Chrome BFCache navigation was not run.
 
 The coupon, money-path, wallet and payment-disable test harnesses avoid a
 confirmed Bun reserved-transaction stall in parallel settings reads. They use
@@ -171,28 +214,23 @@ No production settings implementation was changed.
 
 ## Changed files
 
-Backend implementation and scripts:
+Files changed from `stage hundred-twentyFive`
+(`3eeb224355666385a1f834fa2d0904ca2487f3fe`) on the existing `main` branch:
 
 ```text
-apps/api/package.json
 apps/api/src/domain/order/order.service.ts
 apps/api/src/domain/payment/payment.service.ts
-apps/api/src/domain/payment/payment-verification.ts
-apps/api/src/domain/payment/zarinpal.adapter.ts
-apps/api/src/domain/payment/sep.adapter.ts
-apps/api/src/domain/payment/mellat.adapter.ts
-apps/api/src/http/routes/payment.routes.ts
+apps/api/src/domain/coupon/coupon.service.ts
 packages/shared/src/contracts.ts
 ```
 
 Customer recovery and cart preservation:
 
 ```text
-apps/web/package.json
 apps/web/src/hooks/site/useCheckoutPage.ts
 apps/web/src/routes/checkout/index.tsx
 apps/web/src/routes/dashboard/orders/$orderId.tsx
-apps/web/src/components/dashboard/order-detail/PendingPaymentBox.tsx
+apps/web/src/lib/checkout-intent.ts
 apps/web/src/lib/pending-checkout.ts
 apps/web/src/i18n/fa.ts
 apps/web/src/i18n/ar.ts
@@ -202,18 +240,11 @@ Regression coverage and report:
 
 ```text
 apps/api/scripts/test-payment-recovery.ts
-apps/api/scripts/test-payment-verification.ts
-apps/api/scripts/test-payment-safety.ts
-apps/api/scripts/test-payment-money-path.ts
-apps/api/scripts/test-payment-disable.ts
 apps/api/scripts/test-order-safety.ts
 apps/api/scripts/test-coupon-upgrade.ts
-apps/api/scripts/test-wallet-safety.ts
-apps/api/scripts/test-zarinpal-verify.ts
-apps/api/scripts/test-sep-verify.ts
-apps/api/scripts/test-mellat-verify.ts
 apps/web/scripts/test-checkout-client.tsx
-apps/web/scripts/test-payment-window-client.tsx
+apps/web/scripts/test-checkout-intent.ts
 apps/web/scripts/test-payment-draft-client.tsx
+apps/web/scripts/test-restaurant-hours-checkout.tsx
 docs/pending-payment-retries.md
 ```

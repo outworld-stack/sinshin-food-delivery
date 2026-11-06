@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { CheckoutItemInput, UserOrder } from '@sinshin/shared'
+import type { CheckoutInput, CheckoutItemInput, UserOrder } from '@sinshin/shared'
 
 const effects: Array<() => void> = []
 const react = { ...await import('react') }
@@ -52,7 +52,8 @@ Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value:
   removeItem: (key: string) => { sessionValues.delete(key) },
 } })
 const { useCartStore } = await import('../src/stores/cartStore')
-const { rememberPendingCheckout, pendingCheckoutMatchesCart } = await import('../src/lib/pending-checkout')
+const { forgetPendingCheckout, rememberPendingCheckout, pendingCheckoutMatchesCart } = await import('../src/lib/pending-checkout')
+const { checkoutIntentKey, completeCheckoutIntent } = await import('../src/lib/checkout-intent')
 const { Route } = await import('../src/routes/dashboard/orders/$orderId')
 const component = Route.options.component!
 const submitted: CheckoutItemInput[] = [
@@ -101,6 +102,32 @@ renderOrder()
 assert.deepEqual(useCartStore.getState().items, draft, 'an older order cannot consume a newer checkout marker')
 assert(pendingCheckoutMatchesCart('newer-order', draft))
 
+// Even identical baskets belong to the new checkout once it has begun.
+const checkoutInput: CheckoutInput = { items: submitted, deliveryType: 'PICKUP', useWallet: false, gatewayId: 'ZARINPAL' }
+const newerKey = checkoutIntentKey(checkoutInput)
+completeCheckoutIntent(newerKey, 'newer-identical-order')
+rememberPendingCheckout('newer-identical-order', submitted)
+setCart(submitted)
+const newerIntent = sessionValues.get('sinshin:checkout-intent')
+renderOrder()
+assert.deepEqual(useCartStore.getState().items, submitted, 'an old success cannot clear a newer identical basket')
+assert(pendingCheckoutMatchesCart('newer-identical-order', submitted), 'the new payment marker survives the old callback')
+assert.equal(sessionValues.get('sinshin:checkout-intent'), newerIntent, 'the newer durable checkout intent also survives')
+
+// The new checkout request may still be in flight when the old success arrives.
+rememberPendingCheckout(routeOrderId, submitted)
+const inFlightKey = checkoutIntentKey(checkoutInput)
+forgetPendingCheckout()
+renderOrder()
+assert.deepEqual(useCartStore.getState().items, submitted, 'an old success cannot clear an identical basket during a new checkout request')
+assert.equal(checkoutIntentKey(checkoutInput), inFlightKey, 'old success cannot destroy the lost-response retry key')
+
+// Order-bound clearing protects a new intent even with a leftover legacy marker.
+rememberPendingCheckout(routeOrderId, submitted)
+setCart(draft)
+renderOrder()
+assert.equal(checkoutIntentKey(checkoutInput), inFlightKey, 'consuming an old marker cannot clear an unrelated new request')
+
 for (const outcome of ['FAILED', 'REFUNDED'] as const) {
   routeOrderId = `terminal-${outcome}`
   paymentStatus = outcome; orderStatus = 'CANCELED'
@@ -120,4 +147,4 @@ assert.equal(useCartStore.getState().items.length, 0, 'memory fallback still cle
 setCart(draft)
 renderOrder()
 assert.deepEqual(useCartStore.getState().items, draft, 'storage denial cannot revive a consumed marker')
-console.log('PASS actual order-page effects clear only the submitted basket; late/duplicate success, edited drafts, legacy markers and unavailable storage stay safe')
+console.log('PASS actual order-page effects protect identical new baskets, in-flight retry keys, newer payment markers, late/duplicate success, edited drafts and unavailable storage')

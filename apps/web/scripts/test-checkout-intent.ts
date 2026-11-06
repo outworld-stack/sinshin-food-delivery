@@ -48,6 +48,23 @@ const changedKey = reloaded.checkoutIntentKey(changedInput)
 assert.notEqual(changedKey, initialKey, 'a changed purchase needs its own idempotency key')
 assert.equal((await reload()).checkoutIntentKey(changedInput), changedKey)
 
+// The server's durable order response retires this request for an independent
+// checkout without waiting for a PSP outcome. Storage must preserve this boundary.
+reloaded.completeCheckoutIntent(changedKey, 'unresolved-original-order')
+const independent = await reload()
+const independentKey = independent.checkoutIntentKey(changedInput)
+assert.notEqual(independentKey, changedKey, 'the same basket can start a new checkout after the original order is known')
+assert.equal(independent.checkoutIntentKey(changedInput), independentKey, 'a lost new response still retries its own key')
+independent.completeCheckoutIntent(changedKey, 'unresolved-original-order')
+independent.clearCheckoutIntent('unresolved-original-order')
+assert.equal(independent.checkoutIntentKey(changedInput), independentKey, 'old callbacks cannot mark or clear a newer in-flight request')
+independent.completeCheckoutIntent(independentKey, 'new-order')
+const boundRecord = [...values.values()][0]
+independent.clearCheckoutIntent('unresolved-original-order')
+assert.equal([...values.values()][0], boundRecord, 'old callbacks cannot clear a newer known-order intent')
+independent.clearCheckoutIntent('new-order')
+assert.notEqual(independent.checkoutIntentKey(changedInput), independentKey)
+
 // Clearing a terminal purchase allows an identical future purchase.
 reloaded.clearCheckoutIntent()
 const nextPurchase = (await reload()).checkoutIntentKey(changedInput)
@@ -68,6 +85,10 @@ writesBlocked = true
 const memoryKey = terminal.checkoutIntentKey(input)
 assert.notEqual(memoryKey, afterBlockedRemoval)
 assert.equal(terminal.checkoutIntentKey(structuredClone(input)), memoryKey)
+terminal.completeCheckoutIntent(memoryKey, 'memory-only-order')
+const independentMemoryKey = terminal.checkoutIntentKey(input)
+assert.notEqual(independentMemoryKey, memoryKey, 'a failed storage write cannot trap a known order in memory')
+assert.equal(terminal.checkoutIntentKey(input), independentMemoryKey)
 removalsBlocked = true
 terminal.clearCheckoutIntent()
 assert.notEqual(terminal.checkoutIntentKey(input), memoryKey)
@@ -88,4 +109,4 @@ try {
   Date.now = originalNow
 }
 
-console.log('Checkout intent regressions passed: real module reload, changed payload, terminal reset, blocked removal/write, malformed storage and expiry.')
+console.log('Checkout intent regressions passed: lost-response reload, independent identical checkout after durable order, order-bound callback reset, blocked storage, malformed state and expiry.')
