@@ -216,6 +216,11 @@ async function buildLegacyAt0004(url: string): Promise<void> {
   if (res.code !== 0) throw new Error('migrate اولیه برای ساخت legacy ناموفق بود')
   await removeContentProvenanceColumns(url)
   await q(url, `
+    -- Restore the 0028 allocation namespace before replaying the older chain.
+    drop trigger if exists "payments_mellat_order_id_immutable" on "payments";
+    drop function if exists "public"."protect_mellat_order_id"();
+    alter table "payments" drop column if exists "mellat_order_id";
+    drop sequence if exists "public"."mellat_order_id_seq";
     drop table if exists "registration_permits";
     drop table if exists "backfill_runs";
     drop index if exists "devices_client_id_uidx";
@@ -752,7 +757,12 @@ await withScratch('article-ar', async (url) => {
   if (!migration) throw new Error('Arabic article migration is missing from the journal')
   // Restore the schema immediately before the additive Arabic column migration.
   await removeContentProvenanceColumns(url)
-  await q(url, `alter table "articles" drop column "blocks_ar";
+  await q(url, `
+    drop trigger if exists "payments_mellat_order_id_immutable" on "payments";
+    drop function if exists "public"."protect_mellat_order_id"();
+    alter table "payments" drop column if exists "mellat_order_id";
+    drop sequence if exists "public"."mellat_order_id_seq";
+    alter table "articles" drop column "blocks_ar";
     delete from "drizzle"."__drizzle_migrations" where created_at >= ${migration.when};
     insert into "article_categories" ("id", "name", "slug")
       values ('30000000-0000-0000-0000-000000000001', 'مقالات', 'article-ar-upgrade');

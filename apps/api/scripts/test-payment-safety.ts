@@ -2,7 +2,7 @@
  * every PSP request is stubbed and notification delivery is disabled. */
 import assert from 'node:assert/strict'
 import { SQL } from 'bun'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
 import { Database } from '../src/infra/db/client'
 import { AppConfig } from '../src/infra/config/env'
@@ -422,13 +422,16 @@ try {
   assert((await zarinpal.init({ paymentId: unknown.payment.id, amount: 80_000, description: 'Test', displayId: 'ord-test', callbackUrl: 'https://example.test/callback' })).paymentUrl.endsWith('/valid-authority'))
   passed('Zarinpal initialization requires an explicit success code as well as a usable authority')
 
-  const mellatInput = { paymentId: unknown.payment.id, amount: 80_000, description: 'Test', displayId: unknown.order.displayId, callbackUrl: 'https://sinshin.example/callback' }
+  const [allocatedMellat] = await db.update(payments).set({ mellatOrderId: sql`nextval('public.mellat_order_id_seq')` })
+    .where(eq(payments.id, unknown.payment.id)).returning()
+  const mellatOrderId = allocatedMellat!.mellatOrderId!.toString()
+  const mellatInput = { paymentId: unknown.payment.id, mellatOrderId, amount: 80_000, description: 'Test', displayId: unknown.order.displayId, callbackUrl: 'https://sinshin.example/callback' }
   fetchHandler = async () => new Response('<return>0,REF123</return>')
   const mellatInit = await mellat.init(mellatInput)
   fetchHandler = noCapture
-  const cancellation = await mellat.verify({ paymentId: unknown.payment.id, amount: 80_000, gatewayRef: mellatInit.gatewayRef, query: { ResCode: '17' } })
+  const cancellation = await mellat.verify({ paymentId: unknown.payment.id, mellatOrderId, amount: 80_000, gatewayRef: mellatInit.gatewayRef, query: { ResCode: '17' } })
   assert.equal(cancellation.indeterminate, true)
-  const swapped = await mellat.verify({ paymentId: unknown.payment.id, amount: 80_000, gatewayRef: mellatInit.gatewayRef,
+  const swapped = await mellat.verify({ paymentId: unknown.payment.id, mellatOrderId, amount: 80_000, gatewayRef: mellatInit.gatewayRef,
     query: { ResCode: '0', RefId: 'REF123', SaleOrderId: 'wrong-order', SaleReferenceId: '123456' } })
   assert.equal(swapped.indeterminate, true)
   passed('Mellat cancellation or mismatched sale order cannot release a hold')

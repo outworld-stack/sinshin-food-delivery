@@ -1,6 +1,6 @@
 //src/domain/payment/mellat.adapter.ts
 import type { AppConfig } from '#/infra/config/env'
-import { Err } from '#/domain/shared/errors'
+import { AppError, Err } from '#/domain/shared/errors'
 import { amountInRial } from './http-util'
 import { parsePaymentTarget } from '@sinshin/shared'
 import type {
@@ -16,6 +16,20 @@ const SOAP_URL = 'https://bpm.shaparak.ir/pgwchannel/services/pgw'
 const STARTPAY = 'https://bpm.shaparak.ir/StartPay'
 /** فضای‌نام متدهای ساب — همان که پیاده‌سازی‌های خامِ فعالِ بانک می‌فرستند */
 const SOAP_NS = 'http://interfaces.core.sw.bps.com/'
+const MAX_ORDER_ID = 9223372036854775807n
+// The 48-bit historical hash namespace stays reserved for existing payments.
+const FIRST_ALLOCATED_ORDER_ID = 281474976710656n
+
+const canonicalPositiveLong = (value: unknown): value is string =>
+  typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value) && BigInt(value) <= MAX_ORDER_ID
+
+/** A lost/ambiguous initialization response may already have created a bank session. */
+export class MellatInitError extends AppError {
+  constructor(message: string, readonly indeterminate: boolean, preflightError?: AppError) {
+    super(preflightError?.code ?? 'CONFLICT', message, preflightError?.status ?? 409, preflightError?.details)
+    this.name = 'MellatInitError'
+  }
+}
 
 /** پارامتر یک متد ساب — نوع برای ویژگی xsi:type */
 interface BpParam {
@@ -119,8 +133,8 @@ const qget = (query: Record<string, string>, name: string): string | undefined =
  * بانک ملت (به‌پرداخت) — مستقیم، ساب قدیمی شاپرک.
  *
  * جریان:
- *   ۱) init → bpPayRequest (مبلغ ریال؛ orderId = هش عددیِ پایدار از
- *      شناسه‌ی پرداخت) → RefId؛ مرورگر RefId را به startpay.mellat با POST می‌فرستد.
+ *   ۱) init → bpPayRequest (مبلغ ریال؛ orderId عددیِ تخصیص‌یافته و
+ *      ذخیره‌شده برای همین تلاش پرداخت) → RefId؛ مرورگر RefId را با POST می‌فرستد.
  *   ۲) برگشت بانک به callback با فرم POST (ResCode/RefId/SaleOrderId/
  *      SaleReferenceId) — ResCode امضا ندارد؛ نتیجهٔ سرور بانک ملاک است.
  *   ۳) تایید → bpVerifyRequest و بلافاصله bpSettleRequest سمت سرور؛
@@ -157,16 +171,30 @@ export class MellatAdapter implements PaymentGateway {
   }
 
   async init(input: GatewayInitInput): Promise<GatewayInitResult> {
-    const { terminalId, userName, userPassword } = this.creds
+    const orderId = input.mellatOrderId
+    if (!canonicalPositiveLong(orderId) || BigInt(orderId) < FIRST_ALLOCATED_ORDER_ID) {
+      throw new MellatInitError('شناسه عددی تخصیص‌یافته برای پرداخت ملت معتبر نیست.', false)
+    }
+    let credentials: { terminalId: string; userName: string; userPassword: string }
+    let rial: number
+    try {
+      credentials = this.creds
+      rial = amountInRial(input.amount)
+    } catch (error) {
+      // This scope runs before bpCall; a known validation/configuration error
+      // cannot have created a payable bank session. Keep its original message.
+      if (error instanceof AppError) throw new MellatInitError(error.message, false, error)
+      throw error
+    }
+    const { terminalId, userName, userPassword } = credentials
     const now = new Date()
-    const orderId = this.numericOrderId(input.paymentId)
 
     const raw = await this.bpCall('bpPayRequest', [
       { name: 'terminalId', value: terminalId, type: 'long' },
       { name: 'userName', value: userName, type: 'string' },
       { name: 'userPassword', value: userPassword, type: 'string' },
       { name: 'orderId', value: orderId, type: 'long' },
-      { name: 'amount', value: String(amountInRial(input.amount)), type: 'long' },
+      { name: 'amount', value: String(rial), type: 'long' },
       { name: 'localDate', value: localDate(now), type: 'string' },
       { name: 'localTime', value: localTime(now), type: 'string' },
       { name: 'additionalData', value: '', type: 'string' },
@@ -174,12 +202,15 @@ export class MellatAdapter implements PaymentGateway {
       { name: 'payerId', value: '0', type: 'long' },
     ])
     if (raw === null) {
-      throw Err.conflict('ایجاد پرداخت ملت ناموفق بود (پاسخ نامعتبر بانک).')
+      throw new MellatInitError('نتیجه ایجاد پرداخت ملت مشخص نیست؛ وضعیت سفارش را بررسی کنید.', true)
     }
 
     const { code, refId } = parsePayResult(raw)
     if (code !== '0' || !/^[A-Za-z0-9]{1,100}$/.test(refId)) {
-      throw Err.conflict(`ایجاد پرداخت ملت ناموفق بود (کد ${code}).`)
+      // A standalone initialization rejection has no payable token.
+      // Other responses stay reviewable.
+      const definiteRejection = raw.trim() === '13'
+      throw new MellatInitError(`ایجاد پرداخت ملت ناموفق بود (کد ${code}).`, !definiteRejection)
     }
     return {
       // Token-bearing descriptor consumed by the shared payment target parser;
@@ -190,8 +221,11 @@ export class MellatAdapter implements PaymentGateway {
   }
 
   resumeUrl(input: GatewayResumeInput): string | null {
-    const ref = /^(\d{1,15}):([ts]):([A-Za-z0-9]+)$/.exec(input.gatewayRef ?? '')
-    if (!ref || ref[1] !== this.numericOrderId(input.paymentId)) return null
+    const ref = /^(\d{1,19}):([ts]):([A-Za-z0-9]+)$/.exec(input.gatewayRef ?? '')
+    const orderId = input.mellatOrderId !== undefined
+      ? canonicalPositiveLong(input.mellatOrderId) ? input.mellatOrderId : null
+      : this.legacyNumericOrderId(input.paymentId)
+    if (!ref || orderId === null || ref[1] !== orderId) return null
     const url = input.paymentUrl ?? (ref[2] === 't' ? `${STARTPAY}/${ref[3]}` : null)
     const target = typeof url === 'string' ? parsePaymentTarget(url) : null
     if (target?.gateway !== this.id || (ref[2] === 't' && target.token !== ref[3])) return null
@@ -203,15 +237,24 @@ export class MellatAdapter implements PaymentGateway {
   async verify(input: GatewayVerifyInput): Promise<GatewayVerifyResult> {
     // Without a valid stored order/receipt association, nonpayment cannot
     // be established. Preserve the hold for reconciliation.
-    const m = /^(\d{1,15}):([ts]):([A-Za-z0-9]+)$/.exec(input.gatewayRef ?? '')
-    if (!m) return { success: false, gatewayRef: input.gatewayRef ?? null, indeterminate: true }
-    const [, orderId = '', kind = '', storedRef = ''] = m
-    if (input.paymentId && orderId !== this.numericOrderId(input.paymentId)) {
-      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
-    }
-
+    const unknown = (): GatewayVerifyResult => ({ success: false, gatewayRef: input.gatewayRef ?? null, indeterminate: true })
+    const trustedOrderId = input.mellatOrderId
+    if (trustedOrderId !== undefined && !canonicalPositiveLong(trustedOrderId)) return unknown()
     const saleReferenceId = qget(input.query, 'SaleReferenceId')
     const saleOrderId = qget(input.query, 'SaleOrderId')
+    // Initialization can succeed at the bank while its token-bearing response
+    // is lost. Verify a late receipt only against our independently stored ID.
+    if (input.gatewayRef === null && trustedOrderId !== undefined) {
+      if (!saleReferenceId || (saleOrderId !== undefined && saleOrderId !== trustedOrderId)) return unknown()
+      return this.verifyAndSettle(trustedOrderId, saleReferenceId, null)
+    }
+    const m = /^(\d{1,19}):([ts]):([A-Za-z0-9]+)$/.exec(input.gatewayRef ?? '')
+    if (!m) return unknown()
+    const [, orderId = '', kind = '', storedRef = ''] = m
+    const expectedOrderId = trustedOrderId ?? (input.paymentId ? this.legacyNumericOrderId(input.paymentId) : undefined)
+    if (expectedOrderId !== undefined && orderId !== expectedOrderId) return unknown()
+    if (trustedOrderId === undefined && (orderId.length > 15 || BigInt(orderId) >= FIRST_ALLOCATED_ORDER_ID)) return unknown()
+
     if (saleOrderId !== undefined && saleOrderId !== orderId) {
       return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
@@ -246,8 +289,8 @@ export class MellatAdapter implements PaymentGateway {
 
   // ── داخلی ──
 
-  /** شناسه‌ی عددی سفارش — به‌پرداخت عدد می‌خواهد؛ هشِ پایدار از شناسه‌ی پرداخت (≤۱۵ رقم) */
-  private numericOrderId(paymentId: string): string {
+  /** Historical reference validation only; never generate a new bank request ID from this hash. */
+  private legacyNumericOrderId(paymentId: string): string {
     const hex = new Bun.CryptoHasher('sha256').update(`mellat:${paymentId}`).digest('hex').slice(0, 12)
     return String(Number.parseInt(hex, 16))
   }

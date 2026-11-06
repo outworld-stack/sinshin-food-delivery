@@ -5,6 +5,7 @@ import type { GatewayVerifyResult, PaymentGateway } from './gateway.types'
 
 type Verification = {
   reference: string | null
+  mellatOrderId: string | null
   amount: number
   gateway: string
   mode: string
@@ -34,7 +35,7 @@ export class PaymentVerification {
     callback = false,
   ): Promise<GatewayVerifyResult> {
     const [current] = await this.db.select().from(payments).where(eq(payments.id, payment.id))
-    if (!current || current.gatewayRef !== payment.gatewayRef || current.amount !== payment.amount ||
+    if (!current || current.gatewayRef !== payment.gatewayRef || current.mellatOrderId !== payment.mellatOrderId || current.amount !== payment.amount ||
       current.gateway !== payment.gateway || current.mode !== payment.mode ||
       current.userId !== payment.userId || current.orderId !== payment.orderId) {
       return unknown(payment.gatewayRef)
@@ -51,6 +52,7 @@ export class PaymentVerification {
       eq(payments.id, payment.id),
       eq(payments.status, 'PENDING'),
       sql`${payments.gatewayRef} is not distinct from ${payment.gatewayRef}`,
+      sql`${payments.mellatOrderId} is not distinct from ${payment.mellatOrderId}`,
       eq(payments.amount, payment.amount), eq(payments.gateway, payment.gateway),
       eq(payments.mode, payment.mode),
       eq(payments.userId, payment.userId), eq(payments.orderId, payment.orderId),
@@ -63,7 +65,8 @@ export class PaymentVerification {
         return unknown(payment.gatewayRef)
       }
       const claim: Verification = {
-        reference: payment.gatewayRef, amount: payment.amount, gateway: payment.gateway, mode: payment.mode, queryKey,
+        reference: payment.gatewayRef, mellatOrderId: payment.mellatOrderId?.toString() ?? null,
+        amount: payment.amount, gateway: payment.gateway, mode: payment.mode, queryKey,
         failures: previous?.failures ?? 0, token,
         // Allow an extra minute for provider handling and process scheduling.
         leaseUntil: new Date(now + Math.max(60_000, this.timeoutMs * 2 + 60_000)).toISOString(),
@@ -81,14 +84,15 @@ export class PaymentVerification {
     // background lease, and its persistence makes that lease owner's CAS stale.
     let result: GatewayVerifyResult
     try {
-      result = await gateway.verify({ paymentId: payment.id, gatewayRef: payment.gatewayRef,
+      result = await gateway.verify({ paymentId: payment.id, mellatOrderId: payment.mellatOrderId?.toString(), gatewayRef: payment.gatewayRef,
         amount: payment.amount, query: effectiveQuery })
     } catch {
       result = unknown(payment.gatewayRef)
     }
     const failures = result.indeterminate ? Math.min((previous?.failures ?? 0) + 1, 7) : 0
     const verification: Verification = {
-      reference: payment.gatewayRef, amount: payment.amount, gateway: payment.gateway, mode: payment.mode, queryKey,
+      reference: payment.gatewayRef, mellatOrderId: payment.mellatOrderId?.toString() ?? null,
+      amount: payment.amount, gateway: payment.gateway, mode: payment.mode, queryKey,
       failures, checkedAt: new Date().toISOString(), result,
       ...(result.indeterminate ? {
         nextAt: new Date(Date.now() + Math.min(60_000 * 2 ** (failures - 1), 3_600_000)).toISOString(),
@@ -99,6 +103,7 @@ export class PaymentVerification {
         // An older unknown callback must not discard conclusive PSP evidence.
         ? sql`not coalesce((
             ${payments.metadata}->'verification'->>'reference' is not distinct from ${payment.gatewayRef}
+            and ${payments.metadata}->'verification'->>'mellatOrderId' is not distinct from ${payment.mellatOrderId?.toString() ?? null}
             and ${payments.metadata}->'verification'->>'amount' = ${String(payment.amount)}
             and ${payments.metadata}->'verification'->>'gateway' = ${payment.gateway}
             and ${payments.metadata}->'verification'->>'mode' = ${payment.mode}
@@ -131,7 +136,8 @@ export class PaymentVerification {
   private read(value: unknown, payment: PaymentRow, queryKey: string): Verification | undefined {
     if (!value || typeof value !== 'object') return undefined
     const item = value as Partial<Verification>
-    if (item.reference !== payment.gatewayRef || item.amount !== payment.amount || item.gateway !== payment.gateway ||
+    if (item.reference !== payment.gatewayRef || (item.mellatOrderId ?? null) !== (payment.mellatOrderId?.toString() ?? null) ||
+      item.amount !== payment.amount || item.gateway !== payment.gateway ||
       item.mode !== payment.mode || item.queryKey !== queryKey ||
       !Number.isInteger(item.failures) || item.failures! < 0 || item.failures! > 7) return undefined
     if (item.result && (typeof item.result.success !== 'boolean' ||

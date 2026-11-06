@@ -33,7 +33,7 @@ export const CouponBox = memo(function CouponBox({ status, code, applied, onStat
       </div>
 
       {status === 'HAVE' && (
-        <div className="flex gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
           <input
             type="text"
             value={code}
@@ -49,14 +49,14 @@ export const CouponBox = memo(function CouponBox({ status, code, applied, onStat
                 onApply()
               }
             }}
-            className="flex-1 px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white font-DanaMedium disabled:opacity-50"
+            className="w-full min-w-0 sm:flex-1 px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c] focus:border-primary outline-none text-gray-800 dark:text-white font-DanaMedium disabled:opacity-50"
             placeholder={t['checkout.couponPlaceholder']}
           />
           <button
             type="button"
             onClick={onApply}
             disabled={applied}
-            className="px-6 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-700 dark:text-gray-300 font-DanaDemiBold border border-primary dark:border-dark-primary hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full shrink-0 sm:w-auto px-6 py-3 rounded-xl bg-gray-100 dark:bg-[#1a0a0e] text-gray-700 dark:text-gray-300 font-DanaDemiBold border border-primary dark:border-dark-primary hover:bg-gray-200 dark:hover:bg-[#3a151c] transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {applied ? t['checkout.appliedCode'] : t['checkout.applyCode']}
           </button>

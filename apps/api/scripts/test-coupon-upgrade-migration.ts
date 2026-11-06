@@ -73,7 +73,7 @@ try {
       (select jsonb_agg(to_jsonb(r) order by id) from coupon_redemptions r) as redemptions,
       (select jsonb_agg(to_jsonb(o) - 'coupon_eligible_subtotal' order by id) from orders o) as orders,
       (select jsonb_agg(to_jsonb(i) - 'coupon_discount_amount' order by id) from order_items i) as items,
-      (select jsonb_agg(to_jsonb(p) order by id) from payments p) as payments,
+      (select jsonb_agg(to_jsonb(p) - 'mellat_order_id' order by id) from payments p) as payments,
       (select jsonb_agg(to_jsonb(w) order by id) from wallet_transactions w) as ledger`)
     return row
   }

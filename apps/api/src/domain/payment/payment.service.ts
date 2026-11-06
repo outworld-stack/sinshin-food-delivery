@@ -32,7 +32,7 @@ import { signState, verifyState } from './state'
 import { MockAdapter } from './mock.adapter'
 import { ZarinpalAdapter } from './zarinpal.adapter'
 import { SepAdapter } from './sep.adapter'
-import { MellatAdapter } from './mellat.adapter'
+import { MellatAdapter, MellatInitError } from './mellat.adapter'
 import type { PaymentGateway } from './gateway.types'
 import { PaymentVerification } from './payment-verification'
 import type { CheckoutPreviewData } from '@sinshin/shared'
@@ -110,7 +110,8 @@ export class PaymentService {
       await tx.select({ id: users.id }).from(users).where(eq(users.id, candidate.userId)).for('no key update')
       await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, candidate.orderId)).for('update')
       const [pending] = await tx.select().from(payments).where(eq(payments.id, paymentId)).for('update')
-      if (!pending || pending.status !== 'PENDING' || pending.gatewayRef || pending.metadata?.paymentUrl ||
+      if (!pending || pending.status !== 'PENDING' || pending.gatewayRef || pending.metadata?.paymentUrl || pending.mellatOrderId !== null ||
+        this.unresolvedMellatDispatch(pending) ||
         (pending.metadata?.initToken && pending.metadata?.initFailed !== true)) {
         throw Err.conflict('این تلاش پرداخت قابل شروع نیست؛ صفحه سفارش را به‌روز کنید.')
       }
@@ -129,14 +130,26 @@ export class PaymentService {
         // Record that nothing was sent so reopening need not wait the normal
         // grace period reserved for a possibly running PSP request.
         await tx.update(payments).set({
-          metadata: { ...(pending.metadata ?? {}), initFailed: true }, updatedAt: new Date(),
+          metadata: { ...(pending.metadata ?? {}), initFailed: true, ...(gw.id === 'MELLAT' ? { mellatDispatched: false } : {}) }, updatedAt: new Date(),
         }).where(eq(payments.id, paymentId))
         return { blocked: error }
       }
-      await tx.update(payments).set({
-        metadata: { ...(pending.metadata ?? {}), initToken, initFailed: false }, updatedAt: new Date(),
-      }).where(eq(payments.id, paymentId))
-      return { pending, order, gw }
+      let claimed: PaymentRow | undefined
+      try {
+        ;[claimed] = await tx.update(payments).set({
+          ...(gw.id === 'MELLAT' ? { mellatOrderId: sql`nextval('public.mellat_order_id_seq')` } : {}),
+          metadata: { ...(pending.metadata ?? {}), initToken, initFailed: false, ...(gw.id === 'MELLAT' ? { mellatDispatched: false } : {}) }, updatedAt: new Date(),
+        }).where(eq(payments.id, paymentId)).returning()
+      } catch (error) {
+        const databaseError = error as { code?: unknown; errno?: unknown; cause?: { code?: unknown; errno?: unknown } }
+        if (gw.id === 'MELLAT' && [databaseError?.code, databaseError?.errno,
+          databaseError?.cause?.code, databaseError?.cause?.errno].includes('2200H')) {
+          throw Err.conflict('ظرفیت شناسه‌های پرداخت ملت به پایان رسیده است؛ برای پیگیری با پشتیبانی تماس بگیرید.')
+        }
+        throw error
+      }
+      if (!claimed) throw Err.conflict('این تلاش پرداخت قابل شروع نیست؛ صفحه سفارش را به‌روز کنید.')
+      return { pending: claimed, order, gw }
     })
     if ('blocked' in initiation) throw initiation.blocked
     const { pending, order, gw } = initiation
@@ -154,10 +167,23 @@ export class PaymentService {
         : `${this.deps.config.siteUrl}/api/payments/${gw.id.toLowerCase()}/callback?state=${state}`
 
     let r: Awaited<ReturnType<PaymentGateway['init']>>
+    let mellatDispatched = false
     try {
       await this.settings.assertOrderPaymentsAllowed(db)
+      if (gw.id === 'MELLAT') {
+        // Commit the original bank association and callback before dispatch.
+        // A timeout can then be reconciled without inventing another request ID.
+        const [dispatched] = await db.update(payments).set({ callbackUrl,
+          metadata: sql`coalesce(${payments.metadata}, '{}'::jsonb) || ${{ mellatDispatched: true }}::jsonb`,
+        }).where(and(eq(payments.id, paymentId), eq(payments.status, 'PENDING'),
+          eq(payments.mellatOrderId, pending.mellatOrderId!), sql`${payments.metadata}->>'initToken' = ${initToken}`,
+        )).returning({ id: payments.id })
+        if (!dispatched) throw Err.conflict('این تلاش پرداخت جایگزین شده است؛ صفحه سفارش را به‌روز کنید.')
+        mellatDispatched = true
+      }
       r = await gw.init({
         paymentId,
+        mellatOrderId: pending.mellatOrderId?.toString(),
         displayId: order.displayId,
         amount: pending.amount,
         callbackUrl: callbackUrl ?? '',
@@ -165,8 +191,9 @@ export class PaymentService {
         mobile: input.mobile,
       })
     } catch (error) {
+      const initFailed = !mellatDispatched || (error instanceof MellatInitError && !error.indeterminate)
       await db.update(payments).set({
-        metadata: { ...(pending.metadata ?? {}), initToken, initFailed: true },
+        metadata: sql`coalesce(${payments.metadata}, '{}'::jsonb) || ${{ initToken, initFailed }}::jsonb`,
         updatedAt: new Date(),
       }).where(and(eq(payments.id, paymentId), eq(payments.status, 'PENDING'), sql`${payments.metadata}->>'initToken' = ${initToken}`))
       throw error
@@ -174,10 +201,16 @@ export class PaymentService {
 
     const saved = await db
       .update(payments)
-      .set({ gatewayRef: r.gatewayRef, callbackUrl, metadata: { ...(pending.metadata ?? {}), initToken, initFailed: false, paymentUrl: r.paymentUrl }, updatedAt: new Date() })
-      .where(and(eq(payments.id, paymentId), eq(payments.status, 'PENDING'), sql`${payments.metadata}->>'initToken' = ${initToken}`))
-      .returning({ id: payments.id })
+      .set({ gatewayRef: gw.id === 'MELLAT' ? sql`coalesce(${payments.gatewayRef}, ${r.gatewayRef})` : r.gatewayRef,
+        callbackUrl, metadata: sql`coalesce(${payments.metadata}, '{}'::jsonb) || ${{ initToken, initFailed: false, paymentUrl: r.paymentUrl }}::jsonb`, updatedAt: new Date() })
+      .where(and(eq(payments.id, paymentId), eq(payments.status, 'PENDING'), sql`${payments.metadata}->>'initToken' = ${initToken}`,
+        gw.id === 'MELLAT' ? sql`not coalesce(${payments.metadata}->'verification'->'result'->>'success' = 'true', false)` : undefined,
+      ))
+      .returning({ id: payments.id, gatewayRef: payments.gatewayRef })
     if (saved.length === 0) throw Err.conflict('این تلاش پرداخت جایگزین شده است؛ صفحه سفارش را به‌روز کنید.')
+    if (gw.id === 'MELLAT' && saved[0]!.gatewayRef !== r.gatewayRef) {
+      throw Err.conflict('نتیجه پرداخت قبلی هنوز در حال بررسی است؛ صفحه سفارش را به‌روز کنید.')
+    }
     // A slow initialization may finish after the order deadline. Keep its
     // reference for reconciliation, but never hand out an expired session.
     if (this.paymentWindowClosed(order)) throw Err.conflict('مهلت شروع پرداخت این سفارش به پایان رسیده است.')
@@ -396,7 +429,7 @@ export class PaymentService {
     let resume: { id: PaymentId; paymentUrl: string } | undefined
     const resumeExisting = (p: PaymentRow): boolean => {
       if (p.gateway.toUpperCase() !== gwId) return false
-      const paymentUrl = gw.resumeUrl({ paymentId: p.id, gatewayRef: p.gatewayRef, paymentUrl: p.metadata?.paymentUrl })
+      const paymentUrl = gw.resumeUrl({ paymentId: p.id, mellatOrderId: p.mellatOrderId?.toString(), gatewayRef: p.gatewayRef, paymentUrl: p.metadata?.paymentUrl })
       if (!paymentUrl) return false
       // Multiple unresolved sessions require reconciliation; never choose one
       // arbitrarily or replace an attempt which could already have charged.
@@ -412,7 +445,7 @@ export class PaymentService {
       }
       const pGwId = (p.gateway ?? '').toUpperCase()
       const pGw = pGwId && pGwId !== 'MOCK' ? this.gateways.get(pGwId) : undefined
-      const isRealWithRef = !!pGw && pGw.mode !== 'mock' && !!p.gatewayRef
+      const isRealWithRef = !!pGw && pGw.mode !== 'mock' && (!!p.gatewayRef || this.unresolvedMellatDispatch(p))
       if (pGwId !== 'MOCK' && !pGw) {
         throw Err.conflict('پرداخت قبلی نیاز به بررسی درگاه دارد؛ تلاش جدید فعلاً ممکن نیست.')
       }
@@ -438,6 +471,7 @@ export class PaymentService {
         throw Err.conflict('وضعیت پرداخت قبلی هنوز قطعی نیست — پس از بررسی درگاه دوباره تلاش کنید.')
       }
       if (pGwId === 'MOCK' && resumeExisting(p)) continue
+      if (this.safeMellatInitFailure(p)) continue
       if (!p.gatewayRef && (p.metadata?.paymentUrl || p.callbackUrl)) {
         // SEP does not issue RefNum until callback; a null reference does not
         // mean initiation failed. Its saved Token URL resumes the same session.
@@ -474,9 +508,10 @@ export class PaymentService {
       }
       if (currentPending.length !== pendingRows.length || currentPending.some((p) => {
         const checked = pendingRows.find((old) => old.id === p.id)
-        return !checked || checked.gatewayRef !== p.gatewayRef || checked.updatedAt.getTime() !== p.updatedAt.getTime() ||
+        return !checked || checked.gatewayRef !== p.gatewayRef || checked.mellatOrderId !== p.mellatOrderId || checked.updatedAt.getTime() !== p.updatedAt.getTime() ||
           checked.userId !== p.userId || checked.amount !== p.amount || checked.gateway !== p.gateway || checked.mode !== p.mode ||
-          checked.metadata?.paymentUrl !== p.metadata?.paymentUrl || checked.callbackUrl !== p.callbackUrl
+          checked.metadata?.paymentUrl !== p.metadata?.paymentUrl || checked.callbackUrl !== p.callbackUrl ||
+          checked.metadata?.mellatDispatched !== p.metadata?.mellatDispatched
       })) {
         throw Err.conflict('وضعیت پرداخت تغییر کرد؛ صفحه سفارش را به‌روز کنید.')
       }
@@ -614,7 +649,7 @@ export class PaymentService {
           continue
         }
 
-        if (isRealGateway && (p.gatewayRef || p.metadata?.callbackQuery)) {
+        if (isRealGateway && (p.gatewayRef || p.metadata?.callbackQuery || this.unresolvedMellatDispatch(p))) {
           const v = await this.verification.verify(p, gw!)
           verifiedRef = v.gatewayRef ?? p.gatewayRef
           if (v.indeterminate) {
@@ -628,7 +663,8 @@ export class PaymentService {
             continue
           }
           success = v.success
-        } else if (isRealGateway && !p.gatewayRef && (p.metadata?.paymentUrl || p.callbackUrl || p.metadata?.initFailed !== true)) {
+        } else if (isRealGateway && !p.gatewayRef && !this.safeMellatInitFailure(p) &&
+          (p.metadata?.paymentUrl || p.callbackUrl || p.metadata?.initFailed !== true)) {
           // رارد H6 — درگاه واقعی بدون callback/RefNum: همان پنجره‌ی ۲۴h + R12.
           // قبلاً این پرداخت ۳۰ دقیقه بعد fail و کیف پول آزاد می‌شد در حالی که
           // پولِ مشتری در PSP captured بود.
@@ -823,9 +859,10 @@ export class PaymentService {
         continue
       }
       if (gwId === 'MOCK') continue
+      if (this.safeMellatInitFailure(payment) && !payment.metadata?.callbackQuery) continue
       // A never-started attempt or a recorded init failure has no payable
       // session. An init currently in flight must finish before we decide.
-      if (!payment.gatewayRef && !payment.metadata?.paymentUrl && !payment.callbackUrl && !payment.metadata?.callbackQuery &&
+      if (!this.unresolvedMellatDispatch(payment) && !payment.gatewayRef && !payment.metadata?.paymentUrl && !payment.callbackUrl && !payment.metadata?.callbackQuery &&
         (!payment.metadata?.initToken || payment.metadata?.initFailed === true)) continue
       let verdict: Awaited<ReturnType<PaymentGateway['verify']>> | null = null
       try {
@@ -881,6 +918,20 @@ export class PaymentService {
     return Date.now() >= order.createdAt.getTime() + this.deps.config.pendingOrderExpiryMinutes * 60_000
   }
 
+  private unresolvedMellatDispatch(payment: PaymentRow): boolean {
+    if (payment.gateway !== 'MELLAT') return false
+    // Historical initFailed included timeouts. A missing reference cannot prove
+    // that the old hashed request was never sent or safely authorize replacing it.
+    if (payment.mellatOrderId === null) {
+      return !!payment.metadata?.initToken && payment.metadata?.mellatDispatched !== false
+    }
+    return payment.metadata?.mellatDispatched === true && payment.metadata?.initFailed !== true
+  }
+
+  private safeMellatInitFailure(payment: PaymentRow): boolean {
+    return payment.gateway === 'MELLAT' && payment.mellatOrderId !== null && payment.metadata?.initFailed === true
+  }
+
   /** Persist review diagnostics only after rollback frees the transaction's
    * connection and locks. This also works with a one-connection DB pool. */
   private async moneyTransaction<T>(work: (tx: Tx) => Promise<T>): Promise<T> {
@@ -908,6 +959,7 @@ export class PaymentService {
     const evidence = raw as Record<string, unknown>
     const result = evidence.result as Record<string, unknown> | undefined
     return evidence.reference === payment.gatewayRef && evidence.amount === payment.amount &&
+      (evidence.mellatOrderId ?? null) === (payment.mellatOrderId?.toString() ?? null) &&
       evidence.gateway === payment.gateway && evidence.mode === payment.mode &&
       result?.success === true && result.indeterminate !== true
   }
@@ -958,12 +1010,13 @@ export class PaymentService {
           orderId: order?.displayId ?? null,
           orderInternalId: p.orderId,
           paymentId: p.id,
+          mellatOrderId: p.mellatOrderId?.toString() ?? null,
           gateway: (p.gateway ?? '').toUpperCase() || null,
           gatewayRef: p.gatewayRef ?? null,
           amount: p.amount,
           note,
           paymentUpdatedAt: p.updatedAt?.toISOString() ?? null,
-          action: 'Check this original transaction in the PSP merchant panel. Only verified payment or terminal nonpayment/reversal permits financial settlement or release; acknowledging this finding does not resolve the payment.',
+          action: 'Check this original transaction in the PSP merchant panel using mellatOrderId for an allocated Mellat request. Only verified payment or terminal nonpayment/reversal permits financial settlement or release; acknowledging this finding does not resolve the payment.',
         }
         return tx
           .insert(reconcileFindings)
@@ -1045,6 +1098,7 @@ export class PaymentService {
         throw Err.conflict('مرجع پرداخت تغییر کرد؛ استعلام جدید لازم است.')
       }
       if (verificationSnapshot && (current.gateway !== verificationSnapshot.gateway || current.mode !== verificationSnapshot.mode ||
+        current.mellatOrderId !== verificationSnapshot.mellatOrderId ||
         current.amount !== verificationSnapshot.amount || current.userId !== verificationSnapshot.userId || current.orderId !== verificationSnapshot.orderId)) {
         throw new PaymentReviewError(current, 'payment identity changed during PSP verification')
       }
@@ -1095,10 +1149,11 @@ export class PaymentService {
         const checked = new Map(expirySnapshot.map(p => [p.id, p]))
         if (pending.length !== checked.size || pending.some(p => {
           const old = checked.get(p.id)
-          return !old || p.updatedAt.getTime() !== old.updatedAt.getTime() || p.gatewayRef !== old.gatewayRef ||
+          return !old || p.updatedAt.getTime() !== old.updatedAt.getTime() || p.gatewayRef !== old.gatewayRef || p.mellatOrderId !== old.mellatOrderId ||
             p.userId !== old.userId || p.amount !== old.amount || p.gateway !== old.gateway || p.mode !== old.mode ||
             p.callbackUrl !== old.callbackUrl || p.metadata?.paymentUrl !== old.metadata?.paymentUrl ||
-            p.metadata?.initToken !== old.metadata?.initToken || p.metadata?.initFailed !== old.metadata?.initFailed
+            p.metadata?.initToken !== old.metadata?.initToken || p.metadata?.initFailed !== old.metadata?.initFailed ||
+            p.metadata?.mellatDispatched !== old.metadata?.mellatDispatched
         })) throw Err.conflict('وضعیت پرداخت تغییر کرد؛ استعلام جدید لازم است.')
         // These siblings were all proven unpaid above. Close them in the same
         // transaction as cancellation, after checking the full verified set.

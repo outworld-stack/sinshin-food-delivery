@@ -7,6 +7,8 @@ import type { PaymentId } from '#/domain/shared/brand'
  */
 export interface GatewayInitInput {
   paymentId: PaymentId
+  /** Persisted Mellat request ID allocated independently of the display/payment UUID. */
+  mellatOrderId?: string
   /** کد نمایشی سفارش — فقط برای توضیحات درگاه */
   displayId: string
   /** تومان */
@@ -25,6 +27,8 @@ export interface GatewayInitResult {
 export interface GatewayVerifyInput {
   /** Internal attempt used to validate any PSP reservation identifier. */
   paymentId?: PaymentId
+  /** Trusted persisted Mellat request ID; browser SaleOrderId never supplies this association. */
+  mellatOrderId?: string
   gatewayRef: string | null
   amount: number
   /** کوئری خام بازگشت درگاه */
@@ -39,6 +43,7 @@ export interface GatewayVerifyResult {
 
 export interface GatewayResumeInput {
   paymentId: PaymentId
+  mellatOrderId?: string
   gatewayRef: string | null
   paymentUrl: unknown
 }

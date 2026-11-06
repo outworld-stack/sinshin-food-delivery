@@ -1,8 +1,19 @@
 //src/infra/db/schema/payments.ts
-import { index, integer, jsonb, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+import { bigint, check, index, integer, jsonb, pgSequence, pgTable, text, timestamp, unique, uuid, varchar } from 'drizzle-orm/pg-core'
 import type { OrderId, PaymentId } from '#/domain/shared/brand'
 import { users } from './users'
 import { orders } from './orders'
+
+/** Reserve every historical 48-bit Mellat hash; new IDs are never recycled. */
+export const mellatOrderIdSequence = pgSequence('mellat_order_id_seq', {
+  increment: 1,
+  minValue: '281474976710656',
+  maxValue: '9223372036854775807',
+  startWith: '281474976710656',
+  cache: 1,
+  cycle: false,
+})
 
 /** هر تلاش پرداخت یک ردیف — ممیزی کامل */
 export const payments = pgTable(
@@ -24,7 +35,9 @@ export const payments = pgTable(
     /** PENDING | SUCCESS | FAILED */
     status: varchar('status', { length: 20 }).notNull().default('PENDING'),
     /** شناسه‌ی خارجی درگاه — authority/token (string خارجی، نه id داخلی) */
-    gatewayRef: varchar('gateway_ref', { length: 120 }),
+    gatewayRef: varchar('gateway_ref', { length: 128 }),
+    /** Allocated and committed before Mellat dispatch; null preserves legacy associations. */
+    mellatOrderId: bigint('mellat_order_id', { mode: 'bigint' }),
     callbackUrl: text('callback_url'),
     webhookSignature: varchar('webhook_signature', { length: 64 }),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
@@ -37,6 +50,8 @@ export const payments = pgTable(
     index('payments_user_idx').on(t.userId),
     index('payments_status_idx').on(t.status),
     index('payments_ref_idx').on(t.gatewayRef),
+    unique('payments_mellat_order_id_unique').on(t.mellatOrderId),
+    check('payments_mellat_order_id_range', sql`${t.mellatOrderId} >= 281474976710656 and ${t.mellatOrderId} <= 9223372036854775807`),
   ],
 )
 

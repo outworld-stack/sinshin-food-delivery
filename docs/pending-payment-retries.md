@@ -23,8 +23,8 @@ including a sibling of an already paid order, is reconciled independently.
 
 Each new checkout intent creates its own order, payment attempt, signed callback
 state and PSP session. Zarinpal uses a separate authority; SEP uses a separate
-Token and the payment UUID as ResNum; Mellat uses a separate token and numeric
-request ID derived from the payment UUID. Replaying the same intent returns its
+Token and the payment UUID as ResNum; Mellat uses a separate token and a unique
+PostgreSQL-allocated numeric request ID. Replaying the same intent returns its
 original order. A lost checkout response retains the intent key across reloads;
 once an order response is known, another explicit purchase gets a fresh key even
 if its basket and payment details are identical. Concurrent submissions and
@@ -102,7 +102,9 @@ Expiry checks every pending attempt belonging to an order:
   This includes adapters that return `indeterminate` instead of throwing.
 - Cancellation is allowed only when all pending attempts are conclusively
   unpaid, are mock payments, or have no initiated session (never started or a
-  recorded initialization failure). An initialization in flight stays pending.
+  recorded conclusive initialization failure). Mellat timeouts and ambiguous
+  legacy `initFailed` flags retain their original request and reservations.
+  An initialization in flight stays pending.
 
 Before cancellation, the verified set of attempts is checked again under
 settlement locks. A new attempt, changed receipt or successful payment blocks
@@ -154,6 +156,9 @@ finding does not classify a financial outcome or release reservations.
   codes, other bank codes and outages remain indeterminate. An unverified sale
   receipt never replaces the initialization reference; retained callback
   candidates permit background recovery after verification becomes available.
+  New IDs are allocated and committed before dispatch and never reused. See
+  [Mellat allocation details](mellat-order-id-allocation.md) for migration,
+  legacy compatibility, numeric range and concurrency evidence.
 
 No elapsed-time rule revokes an issued PSP session. If the provider cannot
 establish a terminal result, support must obtain conclusive PSP evidence for the

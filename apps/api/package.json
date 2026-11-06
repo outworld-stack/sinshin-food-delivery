@@ -36,6 +36,8 @@
     "db:test:zarinpal": "bun scripts/test-zarinpal-verify.ts",
     "db:test:sep": "bun scripts/test-sep-verify.ts",
     "db:test:mellat": "bun scripts/test-mellat-verify.ts",
+    "db:test:mellat-allocation": "bun scripts/test-mellat-allocation.ts",
+    "db:test:mellat-requests": "bun scripts/test-mellat-request-safety.ts",
     "db:test:permit": "bun scripts/test-registration-permit.ts",
     "test:courier": "bun scripts/test-courier-scan.ts",
     "db:test:courier": "bun scripts/test-courier-safety.ts",
