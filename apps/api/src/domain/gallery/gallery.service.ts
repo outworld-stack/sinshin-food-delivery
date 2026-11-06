@@ -10,7 +10,7 @@ import type { Db } from '#/infra/db/client'
 import { galleryImages } from '#/infra/db/schema'
 import { asGalleryImageId } from '#/domain/shared/brand'
 import { nullIfEmpty, pickAr, type Lang } from '#/domain/shared/lang'
-import { assertContentSourceRevision, localizeContentRecord, reconcileContentTranslation, type TranslationEdit } from '@sinshin/shared'
+import { assertContentSourceRevision, contentSourceRevision, localizeContentRecord, reconcileContentTranslation, type TranslationEdit } from '@sinshin/shared'
 import { Err } from '#/domain/shared/errors'
 
 export class GalleryService {
@@ -29,7 +29,8 @@ export class GalleryService {
   }
 
   async listAdmin() {
-    return this.deps.db.select().from(galleryImages).orderBy(asc(galleryImages.sortOrder))
+    const rows = await this.deps.db.select().from(galleryImages).orderBy(asc(galleryImages.sortOrder))
+    return rows.map(row => ({ ...row, sourceRevision: contentSourceRevision('gallery', row) }))
   }
 
   async add(input: {
@@ -62,7 +63,7 @@ export class GalleryService {
       /** round-34 — متن جایگزین عربی (خالی = NULL = پشتیبان فارسی) */
       altAr?: string | null
       translationEdits?: TranslationEdit[]
-      sourceRevision?: string
+      sourceRevision: string
     },
   ): Promise<void> {
     // round-34 — altAr فقط وقتی فرستاده شده دست می‌خورد (PATCH سمانتیک)؛
@@ -70,7 +71,7 @@ export class GalleryService {
     await this.deps.db.transaction(async (tx) => {
       const [current] = await tx.select().from(galleryImages)
         .where(eq(galleryImages.id, asGalleryImageId(id))).for('update')
-      if (!current) return
+      if (!current) throw Err.notFound('تصویر پیدا نشد.')
       if (!assertContentSourceRevision('gallery', current, patch.sourceRevision)) throw Err.validation('متن تصویر تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
       const { translationEdits, sourceRevision: _sourceRevision, ...changes } = patch
       const next = reconcileContentTranslation('gallery', id, current, {
@@ -89,16 +90,25 @@ export class GalleryService {
     await this.deps.db.delete(galleryImages).where(eq(galleryImages.id, asGalleryImageId(id)))
   }
 
-  async reorder(id: string, direction: 'up' | 'down'): Promise<void> {
-    const sorted = await this.listAdmin()
-    const idx = sorted.findIndex((g) => g.id === id)
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (idx === -1 || swapIdx < 0 || swapIdx >= sorted.length) return
-    const a = sorted[idx]!
-    const b = sorted[swapIdx]!
+  async reorder(id: string, direction: 'up' | 'down', sourceRevisions: Record<string, string>): Promise<void> {
     await this.deps.db.transaction(async (tx) => {
-      await tx.update(galleryImages).set({ sortOrder: b.sortOrder }).where(eq(galleryImages.id, a.id))
-      await tx.update(galleryImages).set({ sortOrder: a.sortOrder }).where(eq(galleryImages.id, b.id))
+      const sorted = await tx.select().from(galleryImages).orderBy(asc(galleryImages.sortOrder), asc(galleryImages.id)).for('update')
+      const idx = sorted.findIndex(row => row.id === id)
+      const a = sorted[idx]
+      if (!a) throw Err.notFound('تصویر پیدا نشد.')
+      if (!assertContentSourceRevision('gallery', a, sourceRevisions?.[a.id])) throw Err.validation('گالری تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+      const b = sorted[swapIdx]
+      if (!b) {
+        const next = reconcileContentTranslation('gallery', a.id, a, a)
+        await tx.update(galleryImages).set({ translationState: next.translationState }).where(eq(galleryImages.id, a.id))
+        return
+      }
+      if (!assertContentSourceRevision('gallery', b, sourceRevisions?.[b.id])) throw Err.validation('تصویر مجاور تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+      const nextA = reconcileContentTranslation('gallery', a.id, a, a)
+      const nextB = reconcileContentTranslation('gallery', b.id, b, b)
+      await tx.update(galleryImages).set({ sortOrder: b.sortOrder, translationState: nextA.translationState }).where(eq(galleryImages.id, a.id))
+      await tx.update(galleryImages).set({ sortOrder: a.sortOrder, translationState: nextB.translationState }).where(eq(galleryImages.id, b.id))
     })
   }
 }

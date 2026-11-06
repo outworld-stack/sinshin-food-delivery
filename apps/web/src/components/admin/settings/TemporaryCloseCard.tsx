@@ -50,7 +50,7 @@ export const TemporaryCloseCard = memo(function TemporaryCloseCard({ visible }: 
   const modalSession = useRef(0)
   const session = modalSession.current
   const translation = useContentTranslationDraft({ entityType: 'temporaryClose', entityId: status ? 'temporaryCloseReason' : undefined,
-    initialRow: status ? { reason: status.temporaryCloseReason ?? '', reasonAr: status.temporaryCloseReasonAr,
+    initialRow: status ? { sourceRevision: status.sourceRevision, reason: status.temporaryCloseReason ?? '', reasonAr: status.temporaryCloseReasonAr,
       translationState: status.translationState } : null, row: { reason: reason.trim(), reasonAr } })
 
   const mutation = useMutation({

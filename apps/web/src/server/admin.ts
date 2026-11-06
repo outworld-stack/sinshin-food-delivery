@@ -35,6 +35,7 @@ import type {
 	SubAdminRecordDto,
 } from '@sinshin/shared'
 import { authJson } from '#/lib/api-fetch'
+import { requireContentSourceRevision } from '#/utils/contentTranslationDraft'
 // stage-100 — قرارداد انیمیشن صفحه‌ی محصول ویژه (admin/main + عمومی)
 import {
 	type FeaturedAnimation,
@@ -579,6 +580,7 @@ export async function setTemporaryClose(input: {
 		reasonAr?: string | null
 	}
 }): Promise<{ success: boolean }> {
+	requireContentSourceRevision(input.data.sourceRevision)
 	await authJson<unknown>('/admin/settings/temporary-close', 'POST', {
 		...input.data,
 		// round-34 — علت عربی ('' → null = حذف ترجمه = بازگشت به فارسی)

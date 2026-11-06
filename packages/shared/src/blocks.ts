@@ -72,7 +72,7 @@ export interface ArticleImageProps {
         caption?: string
 }
 export interface ArticleGalleryProps {
-        images: { src: string; alt?: string }[]
+        images: { id?: string; src: string; alt?: string }[]
         layout: 'grid' | 'slider'
 }
 export interface ArticleQuoteProps {
@@ -85,6 +85,8 @@ export interface ArticleCalloutProps {
 }
 export interface ArticleListProps {
         items: string[]
+        /** Persistent source item identities; legacy documents bind these on their next edit. */
+        itemIds?: string[]
         ordered?: boolean
 }
 export interface ArticleCtaProps {
@@ -153,7 +155,7 @@ export interface ArticleBlocksDoc {
         version: 1
         blocks: ArticleBlock[]
         /** Optional Arabic field provenance; older documents need no conversion. */
-        translation?: { fields: ArticleBlockTranslationState[] }
+        translation?: { fields: ArticleBlockTranslationState[]; orphanedFields?: ArticleBlockTranslationState[]; retiredItemIds?: string[] }
 }
 
 export type ArticleBlockTranslationStatus =
@@ -164,6 +166,8 @@ export interface ArticleBlockTranslationState {
 	blockId: string
 	blockType: ArticleBlockType
 	fieldPath: (string | number)[]
+	/** Nested list/gallery identity; fieldPath remains the current display/request address. */
+	itemId?: string
 	sourceText: string
 	status: ArticleBlockTranslationStatus
 	/** Optional for older documents; unknown populated translations remain legacy content. */

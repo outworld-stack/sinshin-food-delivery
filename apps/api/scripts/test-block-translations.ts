@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+	bindArticleBlockItemIdentities,
 	fillMissingArticleBlocksTranslation, getArticleBlockTextFields,
 	mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation,
 	setArticleBlockText, type ArticleBlocksDoc,
@@ -9,7 +10,7 @@ import {
 } from '@sinshin/shared'
 import { normalizeBlocksDoc } from '../src/domain/article/blocks-normalize'
 
-const source: ArticleBlocksDoc = {
+const source: ArticleBlocksDoc = bindArticleBlockItemIdentities({
 	version: 1,
 	blocks: [
 		{ id: 'hero', type: 'hero', props: { src: '/hero.webp', title: 'سرآغاز', text: 'خوش آمدید' } },
@@ -31,7 +32,7 @@ const source: ArticleBlocksDoc = {
 		anim: (['none', 'fade', 'fade-up', 'slide', 'zoom', 'blur'] as const)[i % 6],
 		style: { bg: '#123456', fg: '#FEDCBA', align: 'center', pad: 'lg' },
 	})) as ArticleBlocksDoc['blocks'],
-}
+})
 const arabicProps: Record<string, Record<string, unknown>> = {
 	hero: { title: 'البداية', text: 'أهلاً' },
 	heading: { text: 'القسم الأول' }, paragraph: { text: 'نص عربي' },
@@ -83,9 +84,9 @@ const partial = { version: 1, blocks: [
 	{ id: 'heading', type: 'paragraph', props: { text: 'Wrong block type' } },
 ] }
 const fallback = mergeArticleBlocksTranslation(source, partial)!
-assert.deepEqual(fallback.blocks.find(b => b.type === 'list')?.props, { ordered: true, items: ['الأول', 'دوم', 'الثالث'] })
+assert.deepEqual(fallback.blocks.find(b => b.type === 'list')?.props, { ...source.blocks.find(b => b.type === 'list')?.props, items: ['الأول', 'دوم', 'الثالث'] })
 assert.deepEqual(fallback.blocks.find(b => b.type === 'gallery')?.props,
-	{ layout: 'slider', images: [{ src: '/a.webp', alt: 'اول' }, { src: '/b.webp', alt: 'الثانية' }] })
+	{ layout: 'slider', images: source.blocks.filter(b => b.type === 'gallery').flatMap(b => b.props.images.map((image, index) => ({ ...image, alt: index === 0 ? 'اول' : 'الثانية' }))) })
 assert.deepEqual(fallback.blocks.filter(b => b.type === 'location').map(b => b.props), [
 	{ lat: 37.4822056789, lng: 49.4418273456, title: 'رستوران', address: 'العنوان الأول' },
 	{ lat: -12.987654321, lng: 0, title: 'الفرع', address: 'آدرس دوم' },
@@ -165,7 +166,7 @@ assert.deepEqual((reconcileArticleBlocksTranslation(source, listChanged, reviewe
 const galleryChanged = setArticleBlockText(source, 'gallery', ['images', 1, 'alt'], 'شرح تازه')
 const galleryArabic = reconcileArticleBlocksTranslation(source, galleryChanged, reviewed, reviewed)!.blocks.find(b => b.id === 'gallery')!
 assert.equal(galleryArabic.type, 'gallery')
-assert.deepEqual(galleryArabic.props.images, [{ src: '/a.webp', alt: 'الأولى' }, { src: '/b.webp', alt: '' }])
+assert.deepEqual(galleryArabic.props.images, source.blocks.filter(b => b.type === 'gallery').flatMap(b => b.props.images.map((image, index) => ({ ...image, alt: index === 0 ? 'الأولى' : '' }))))
 const duplicate = { ...source, blocks: [...source.blocks, { ...structuredClone(source.blocks[1]!), id: 'heading-copy' }] }
 const copiedArabic = { ...reviewed, blocks: [...reviewed.blocks, { ...structuredClone(reviewed.blocks.find(b => b.id === 'heading')!), id: 'heading-copy' }] }
 const duplicateArabic = reconcileArticleBlocksTranslation(source, duplicate, reviewed, copiedArabic)!

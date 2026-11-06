@@ -6,9 +6,9 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/settings/TermsEditor.tsx
-import { memo, useState, useCallback, useEffect } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAdminTerms, updateTerms } from '#/server/terms'
+import { createTerms, getAdminTerms, updateTerms } from '#/server/terms'
 import { ArField } from '#/components/admin/ArField'
 import { ContentTranslationTools } from '#/components/admin/ContentTranslationTools'
 import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
@@ -17,15 +17,16 @@ import { useAuthStore } from '#/stores/authStore'
 import { useToastStore } from '#/stores/toastStore'
 import { Plus, Trash2, File } from 'reicon-react'
 import { formatDate, faNum } from '#/utils/format'
-import type { Role, TranslationEdit } from '@sinshin/shared'
+import { collectionTranslationIdentities, type Role, type TranslationEdit, type ContentCollectionIdentity, type TermsContentDto } from '@sinshin/shared'
+import { collectionIds, moveCollectionItem } from '#/utils/contentTranslationDraft'
 
 // فرم — هر بخش: عنوان + متن چندخطی (هر خط = یک بند)
 interface TermsFormSection {
+    id: string
     title: string
-    itemsText: string
+    items: { id: string; text: string; textAr: string }[]
     /** round-34 — عنوان عربی + بندهای عربی (هر خط = یک بند؛ خالی = پشتیبان فارسی) */
     titleAr: string
-    itemsAr: string[]
 }
 
 // ادیتور قوانین — فقط ادمین اصلی (تنظیمات) — هر ذخیره = نسخه جدید
@@ -38,60 +39,70 @@ export const TermsEditor = memo(function TermsEditor() {
     const { data: terms, isLoading } = useQuery({ queryKey: ['admin', 'terms-content'], queryFn: getAdminTerms })
 
     const [sections, setSections] = useState<TermsFormSection[]>([])
+    const [snapshot, setSnapshot] = useState<TermsContentDto | null>(null)
     const [isDirty, setIsDirty] = useState(false)
-    const sourceSections = sections.map(s => ({ title: s.title.trim(), items: s.itemsText.split('\n').map(item => item.trim()).filter(Boolean) }))
-    const translation = useContentTranslationDraft({ entityType: 'terms', entityId: terms?.id,
-        initialRow: terms ? { ...terms } : null, row: { sections: sourceSections,
-            sectionsAr: sections.map((s, index) => ({ title: s.titleAr, items: sourceSections[index].items.map((_, item) => s.itemsAr[item] ?? '') })) } })
+    const sourceSections = useMemo(() => sections.map(s => ({ title: s.title.trim(), items: s.items.map(item => item.text.trim()) })), [sections])
+    const translationIdentities = useMemo<ContentCollectionIdentity[]>(() => [{ collectionPath: ['sections'], itemIds: sections.map(section => section.id) },
+        ...sections.map((section, index) => ({ collectionPath: ['sections', index, 'items'], itemIds: section.items.map(item => item.id) }))], [sections])
+    const translation = useContentTranslationDraft({ entityType: 'terms', entityId: snapshot?.id,
+        initialRow: snapshot ? { ...snapshot } : null, row: { sections: sourceSections, translationIdentities,
+            sectionsAr: sections.map(s => ({ title: s.titleAr, items: s.items.map(item => item.textAr) })) } })
 
     // هیدرات — فقط تا وقتی ادمین دست نزده (الگوی isDirty — ویرایش‌ها پاک نمی‌شوند)
     useEffect(() => {
         if (terms && !isDirty) {
+            setSnapshot(terms)
+            const identities = collectionTranslationIdentities('terms', terms)
             // round-34 — sectionsAr خام از سرور؛ ساختار موازی با sections (جفت با ایندکس)
             const ar = terms.sectionsAr ?? []
             setSections(terms.sections.map((s, i) => ({
+                id: collectionIds(identities, ['sections'])[i],
                 title: s.title,
-                itemsText: s.items.join('\n'),
+                items: s.items.map((text, index) => ({ id: collectionIds(identities, ['sections', i, 'items'])[index], text, textAr: ar[i]?.items[index] ?? '' })),
                 titleAr: ar[i]?.title ?? '',
-                itemsAr: [...(ar[i]?.items ?? [])],
             })))
         }
     }, [terms, isDirty])
 
-    const handleTitleChange = useCallback((index: number, value: string) => {
+    const handleTitleChange = useCallback((sectionId: string, value: string) => {
         setIsDirty(true)
-        setSections(prev => prev.map((s, i) => i === index ? { ...s, title: value } : s))
+        setSections(prev => prev.map(s => s.id === sectionId ? { ...s, title: value } : s))
     }, [])
 
-    const handleItemsChange = useCallback((index: number, value: string) => {
+    const handleItemChange = useCallback((sectionId: string, itemId: string, value: string) => {
         setIsDirty(true)
-        setSections(prev => prev.map((s, i) => i === index ? { ...s, itemsText: value } : s))
+        setSections(prev => prev.map(s => s.id === sectionId ? { ...s, items: s.items.map(item => item.id === itemId ? { ...item, text: value } : item) } : s))
     }, [])
 
     // round-34 — ویرایش قسمت عربی بخش n
-    const handleArChange = useCallback((index: number, patch: Partial<{ titleAr: string; itemsAr: string[] }>) => {
+    const handleArChange = useCallback((sectionId: string, patch: Partial<{ titleAr: string }>) => {
         setIsDirty(true)
-        setSections(prev => prev.map((s, i) => i === index ? { ...s, ...patch } : s))
+        setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...patch } : s))
     }, [])
 
     const addSection = useCallback(() => {
         setIsDirty(true)
-        setSections(prev => [...prev, { title: '', itemsText: '', titleAr: '', itemsAr: [] }])
+        setSections(prev => {
+            const id = `sections:${crypto.randomUUID()}`
+            return [...prev, { id, title: '', items: [{ id: `${id}:items:${crypto.randomUUID()}`, text: '', textAr: '' }], titleAr: '' }]
+        })
     }, [])
 
-    const removeSection = useCallback((index: number) => {
+    const removeSection = useCallback((sectionId: string) => {
         setIsDirty(true)
-        setSections(prev => prev.filter((_, i) => i !== index))
+        setSections(prev => prev.filter(section => section.id !== sectionId))
     }, [])
 
     const saveMut = useMutation({
         mutationFn: (data: {
+            operation: 'create' | 'update'
             role: Role
             sections: { title: string; items: string[] }[]
             sectionsAr?: { title: string; items: string[] }[] | null
             translationEdits?: TranslationEdit[]
+            translationIdentities?: ContentCollectionIdentity[]
             sourceRevision?: string
-        }) => updateTerms(data),
+        }) => data.operation === 'create' ? createTerms(data) : updateTerms(data),
         onSuccess: (res) => {
             queryClient.invalidateQueries({ queryKey: qk.termsContent })
             queryClient.invalidateQueries({ queryKey: ['admin', 'terms-content'] })
@@ -102,27 +113,27 @@ export const TermsEditor = memo(function TermsEditor() {
     })
 
     const handleSave = useCallback(() => {
+        if (!snapshot) { showToast('قوانین ذخیره‌شده را دوباره بارگذاری کنید؛ پیش‌نویس شما حفظ شده است', 'error'); return }
         if (sections.length === 0) { showToast('حداقل یک بخش لازم است', 'error'); return }
         if (sections.some(s => !s.title.trim())) { showToast('عنوان همه‌ی بخش‌ها را وارد کنید', 'error'); return }
 
         // متن چندخطی → آرایه‌ی بندها (خطوط خالی حذف)
-        const parsed = sections.map(s => ({
-            title: s.title.trim(),
-            items: s.itemsText.split('\n').map(l => l.trim()).filter(Boolean),
-        }))
+        const parsed = sourceSections
         if (parsed.some(s => s.items.length === 0)) { showToast('هر بخش حداقل یک بند (یک خط) لازم دارد', 'error'); return }
+        if (parsed.some(s => s.items.some(item => !item))) { showToast('متن همه بندها را وارد کنید یا بند خالی را حذف کنید', 'error'); return }
         if (!role) { showToast('نشست شما منقضی شده است. دوباره وارد شوید.', 'error'); return }
 
         // round-34 — بندهای عربی موازی با ایندکس (بدون filter — هم‌ترازی با sections
         // حیاتی است؛ بخش بدون ترجمه سمت سرور per-section به فارسی برمی‌گردد)
         const parsedAr = sections.map((s, index) => ({
             title: s.titleAr.trim(),
-            items: parsed[index].items.map((_, item) => s.itemsAr[item]?.trim() ?? ''),
+            items: parsed[index].items.map((_, item) => s.items[item].textAr.trim()),
         }))
         const hasAnyAr = parsedAr.some(s => s.title !== '' || s.items.length > 0)
 
-        saveMut.mutate({ role, sections: parsed, sectionsAr: hasAnyAr ? parsedAr : null, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
-    }, [sections, role, saveMut, showToast, translation])
+        const operation = !snapshot.id && snapshot.version === 0 && snapshot.sections.length === 0 ? 'create' : 'update'
+        saveMut.mutate({ operation, role, sections: parsed, sectionsAr: hasAnyAr ? parsedAr : null, translationIdentities, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
+    }, [sections, role, saveMut, showToast, translation, sourceSections, translationIdentities, snapshot])
 
     const inputCls = 'px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm outline-none focus:border-primary'
 
@@ -155,30 +166,43 @@ export const TermsEditor = memo(function TermsEditor() {
                     <ContentTranslationTools translation={translation} disabled={saveMut.isPending} />
                     <div className="space-y-4">
                         {sections.map((section, index) => (
-                            <div key={translation.field(['sections', index, 'title'])?.field.fieldId ?? index} className="p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5 space-y-3">
+                            <div key={section.id} className="p-4 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-white/5 space-y-3">
                                 <div className="flex items-center gap-2">
                                     <input
                                         value={section.title}
-                                        onChange={(e) => handleTitleChange(index, e.target.value)}
+                                        maxLength={200}
+                                        onChange={(e) => handleTitleChange(section.id, e.target.value)}
                                         placeholder="عنوان بخش — مثلا: ۳. سفارش و پرداخت"
                                         className={`flex-1 ${inputCls}`}
                                     />
+                                    {[-1, 1].map(direction => <button key={direction} type="button" aria-label={direction < 0 ? 'انتقال بخش به بالا' : 'انتقال بخش به پایین'}
+                                        disabled={index + direction < 0 || index + direction >= sections.length} className="text-xs disabled:opacity-30"
+                                        onClick={() => { setIsDirty(true); setSections(previous => { const currentIndex = previous.findIndex(entry => entry.id === section.id)
+                                            return moveCollectionItem(previous, currentIndex, currentIndex + direction) }) }}>{direction < 0 ? '↑' : '↓'}</button>)}
                                     <button
                                         type="button"
-                                        onClick={() => removeSection(index)}
+                                        onClick={() => removeSection(section.id)}
                                         className="p-2 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer shrink-0"
                                         aria-label="حذف بخش"
                                     >
                                         <Trash2 size={16} />
                                     </button>
                                 </div>
-                                <textarea
-                                    value={section.itemsText}
-                                    onChange={(e) => handleItemsChange(index, e.target.value)}
-                                    rows={5}
-                                    placeholder="هر خط = یک بند قوانین..."
-                                    className={`w-full ${inputCls} resize-y font-DanaMedium`}
-                                />
+                                {section.items.map((item, itemIndex) => <div key={item.id} className="flex gap-2 items-start">
+                                    <textarea value={item.text} aria-label={`متن فارسی بند ${itemIndex + 1}`} maxLength={1000}
+                                        onChange={event => handleItemChange(section.id, item.id, event.target.value)} rows={2}
+                                        placeholder="متن بند قوانین" className={`flex-1 ${inputCls} resize-y font-DanaMedium`} />
+                                    {[-1, 1].map(direction => <button key={direction} type="button" aria-label={direction < 0 ? 'انتقال بند به بالا' : 'انتقال بند به پایین'}
+                                        disabled={itemIndex + direction < 0 || itemIndex + direction >= section.items.length} className="text-xs disabled:opacity-30"
+                                        onClick={() => { setIsDirty(true); setSections(previous => previous.map(entry => { if (entry.id !== section.id) return entry
+                                            const currentIndex = entry.items.findIndex(current => current.id === item.id)
+                                            return { ...entry, items: moveCollectionItem(entry.items, currentIndex, currentIndex + direction) } })) }}>{direction < 0 ? '↑' : '↓'}</button>)}
+                                    <button type="button" aria-label="حذف بند" className="text-red-400" onClick={() => { setIsDirty(true);
+                                        setSections(previous => previous.map(entry => entry.id === section.id ? { ...entry, items: entry.items.filter(current => current.id !== item.id) } : entry)) }}>×</button>
+                                </div>)}
+                                <button type="button" className="text-xs text-primary" disabled={section.items.length >= 100}
+                                    onClick={() => { setIsDirty(true); setSections(previous => previous.map(entry => entry.id === section.id
+                                        ? { ...entry, items: [...entry.items, { id: `${entry.id}:items:${crypto.randomUUID()}`, text: '', textAr: '' }] } : entry)) }}>افزودن بند</button>
                                 {/* round-34 — ترجمه‌ی عربی همین بخش (خالی = fallback فارسی) */}
                                 <div className="pt-3 border-t border-dashed border-gray-200 dark:border-white/10 space-y-2">
                                     <p className="text-[11px] text-gray-400 font-DanaMedium">
@@ -186,18 +210,16 @@ export const TermsEditor = memo(function TermsEditor() {
                                     </p>
                                     <ArField label="عنوان بخش" value={section.titleAr} faReference={sourceSections[index].title}
                                         translation={translation.field(['sections', index, 'title'])}
-                                        onChange={titleAr => handleArChange(index, { titleAr })} maxLength={200} />
+                                        onChange={titleAr => handleArChange(section.id, { titleAr })} maxLength={200} />
                                     {sourceSections[index].items.map((item, itemIndex) => <ArField
-                                        key={translation.field(['sections', index, 'items', itemIndex])?.field.fieldId ?? itemIndex}
-                                        label={`بند ${itemIndex + 1}`} faReference={item} value={section.itemsAr[itemIndex] ?? ''}
+                                        key={section.items[itemIndex].id}
+                                        label={`بند ${itemIndex + 1}`} faReference={item} value={section.items[itemIndex].textAr}
                                         translation={translation.field(['sections', index, 'items', itemIndex])}
                                         onChange={value => {
                                             setIsDirty(true)
-                                            setSections(previous => previous.map((entry, position) => {
-                                                if (position !== index) return entry
-                                                const arabic = entry.itemsText.split('\n').map(item => item.trim()).filter(Boolean)
-                                                    .map((_, item) => item === itemIndex ? value : entry.itemsAr[item] ?? '')
-                                                return { ...entry, itemsAr: arabic }
+                                            setSections(previous => previous.map(entry => {
+                                                if (entry.id !== section.id) return entry
+                                                return { ...entry, items: entry.items.map(item => item.id === section.items[itemIndex].id ? { ...item, textAr: value } : item) }
                                             }))
                                         }} multiline />)}
                                 </div>

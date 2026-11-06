@@ -8,6 +8,7 @@
 import type { AboutContentDto } from '@sinshin/shared'
 // src/server/about.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
+import { requireContentSourceRevision } from '#/utils/contentTranslationDraft'
 import type { AboutContentInput } from '#/types/site/about'
 
 // ─── عمومی ───
@@ -24,6 +25,7 @@ export async function getAdminAboutContent(): Promise<AboutContentDto> {
 export async function updateAboutContent(
 	input: AboutContentInput,
 ): Promise<{ success: boolean }> {
+	requireContentSourceRevision(input.sourceRevision)
 	return authJson<{ success: boolean }>('/admin/about', 'PATCH', {
 		...input,
 		heroTitleAr: input.heroTitleAr.trim() || null,

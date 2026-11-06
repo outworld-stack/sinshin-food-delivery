@@ -79,7 +79,7 @@ export function makeBlock(type: ArticleBlock['type']): ArticleBlock {
 				props: { title: '', text: '' },
 			}
 		case 'list':
-			return { id, type, width: 'md', anim: 'fade-up', props: { items: [''] } }
+			return { id, type, width: 'md', anim: 'fade-up', props: { items: [''], itemIds: [newBlockId()] } }
 		case 'cta':
 			return {
 				id,
@@ -191,6 +191,8 @@ export function duplicateBlock(
 	const src = blocks[index]
 	if (!src) return doc
 	const clone = { ...structuredClone(src), id: newBlockId() }
+	if (clone.type === 'list') clone.props.itemIds = clone.props.items.map(() => newBlockId())
+	if (clone.type === 'gallery') clone.props.images = clone.props.images.map(image => ({ ...image, id: newBlockId() }))
 	blocks.splice(index + 1, 0, clone)
 	return { ...doc, blocks }
 }

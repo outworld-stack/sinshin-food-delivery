@@ -103,7 +103,7 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 	const updateMutation = useMutation({
 		mutationFn: (input: {
 			id: string
-			data: { title?: string; price?: number; isActive?: boolean }
+			data: { title?: string; price?: number; isActive?: boolean; sourceRevision?: string }
 		}) => updatePackagingItem(input),
 		onSuccess: () => invalidate(),
 		onError: (err: Error) =>
@@ -167,7 +167,7 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 			})
 			return
 		}
-		updateMutation.mutate({ id: item.id, data: { price: Math.round(price) } })
+		updateMutation.mutate({ id: item.id, data: { price: Math.round(price), sourceRevision: item.sourceRevision } })
 		setEditingPrice((prev) => {
 			const next = { ...prev }
 			delete next[item.id]
@@ -284,7 +284,7 @@ export const PackagingItemsManager = memo(function PackagingItemsManager({
 											onToggle={() =>
 												updateMutation.mutate({
 													id: item.id,
-													data: { isActive: !item.isActive },
+													data: { isActive: !item.isActive, sourceRevision: item.sourceRevision },
 												})
 											}
 											label={`فعال بودن ${item.title}`}

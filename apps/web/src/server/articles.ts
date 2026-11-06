@@ -7,6 +7,7 @@
 
 // src/server/articles.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
+import { requireContentSourceRevision } from '#/utils/contentTranslationDraft'
 import type { ArticleBlocksDoc, ArticleCategoryDto, ArticleDto, ArticleSummaryDto } from '@sinshin/shared'
 
 // ─── عمومی ───
@@ -50,6 +51,7 @@ export async function getAdminArticles(): Promise<ArticleSummaryDto[]> {
 }
 
 export async function createArticle(input: {
+  translationIdentities?: import('@sinshin/shared').ContentCollectionIdentity[]
   translationEdits?: import('@sinshin/shared').TranslationEdit[]
   sourceRevision?: string
   title: string
@@ -82,6 +84,7 @@ export async function createArticle(input: {
 }
 
 export async function updateArticle(input: {
+  translationIdentities?: import('@sinshin/shared').ContentCollectionIdentity[]
   translationEdits?: import('@sinshin/shared').TranslationEdit[]
   sourceRevision?: string
   id: string
@@ -106,6 +109,7 @@ export async function updateArticle(input: {
   processesAr?: { title: string; items: string[] }[] | null
 }): Promise<{ success: boolean }> {
   const { id, ...body } = input
+  requireContentSourceRevision(input.sourceRevision)
   return authJson<{ success: boolean }>(`/admin/articles/${encodeURIComponent(id)}`, 'PATCH', {
     ...body,
     ...(input.titleAr !== undefined ? { titleAr: input.titleAr?.trim() || null } : {}),
@@ -119,8 +123,8 @@ export async function deleteArticle(id: string): Promise<{ success: boolean }> {
   return authJson<{ success: boolean }>(`/admin/articles/${id}`, 'DELETE')
 }
 
-export async function toggleArticleStatus(id: string): Promise<void> {
-  await authJson<unknown>(`/admin/articles/${id}/toggle`, 'POST')
+export async function toggleArticleStatus(id: string, sourceRevision?: string): Promise<void> {
+  await authJson<unknown>(`/admin/articles/${id}/toggle`, 'POST', { sourceRevision: requireContentSourceRevision(sourceRevision) })
 }
 
 export async function getAdminArticleDetails(id: string): Promise<ArticleDto | null> {
@@ -160,6 +164,8 @@ export async function updateArticleCategory(input: {
   subCategoriesAr?: string[] | null
 }): Promise<void> {
   const { id, ...body } = input
+  requireContentSourceRevision(input.sourceRevision)
+  for (const entry of input.subCategoryEntries ?? []) if (entry.id) requireContentSourceRevision(entry.sourceRevision)
   await authJson<unknown>(`/admin/articles/categories/${encodeURIComponent(id)}`, 'PATCH', {
     ...body,
     ...(input.nameAr !== undefined ? { nameAr: input.nameAr?.trim() || null } : {}),

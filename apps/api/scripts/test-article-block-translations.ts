@@ -1,9 +1,10 @@
+import { fixtureUpdateArticle, maximumBlockTranslationFixture } from './content-save-fixtures'
 /** Uses only a uniquely named local scratch database and a mock translator. */
 import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
-import { contentSourceRevision, contentTranslationFields, getArticleBlockTranslationStatus, normalizeArticleBlocksTranslation, readArticleBlockText, reconcileArticleBlocksTranslation, setArticleBlockText, setArticleBlockTranslation, type ArticleBlockTextPath, type ArticleBlockType, type ArticleBlocksDoc } from '@sinshin/shared'
+import { bindArticleBlockItemIdentities, contentTranslationFields, getArticleBlockTranslationStatus, normalizeArticleBlocksTranslation, readArticleBlockText, reconcileArticleBlocksTranslation, setArticleBlockText, setArticleBlockTranslation, type ArticleBlockTextPath, type ArticleBlockType, type ArticleBlocksDoc } from '@sinshin/shared'
 import { ArticleService } from '../src/domain/article/article.service'
 import { TranslationService } from '../src/domain/translation/translation.service'
 import { AppError } from '../src/domain/shared/errors'
@@ -56,7 +57,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return Response.json({ translations: body.texts.map((text) => `${prefix}${text}`) })
 }) as typeof fetch
 
-const source: ArticleBlocksDoc = { version: 1, blocks: [
+const source: ArticleBlocksDoc = bindArticleBlockItemIdentities({ version: 1, blocks: [
   { id: 'hero', type: 'hero', width: 'full', anim: 'fade', props: { src: '/uploads/hero.webp', title: 'عنوان هیرو', text: 'متن هیرو' } },
   { id: 'heading', type: 'heading', width: 'md', props: { text: 'عنوان بخش', level: 3 } },
   { id: 'paragraph', type: 'paragraph', anim: 'slide', props: { text: 'متن پاراگراف' } },
@@ -70,7 +71,7 @@ const source: ArticleBlocksDoc = { version: 1, blocks: [
   { id: 'location-one', type: 'location', width: 'lg', anim: 'zoom', props: { lat: 37.48220561234, lng: 49.44182739876, title: 'عنوان شعبه اول', address: 'آدرس شعبه اول' } },
   { id: 'location-two', type: 'location', width: 'sm', anim: 'blur', props: { lat: 35.12345678901, lng: 51.98765432109, title: 'عنوان شعبه دوم', address: 'آدرس شعبه دوم' } },
   { id: 'divider', type: 'divider', props: { variant: 'dots' } },
-] }
+] })
 const expected: Array<[string, ArticleBlockTextPath, string]> = [
   ['hero', ['title'], 'عنوان هیرو'], ['hero', ['text'], 'متن هیرو'], ['heading', ['text'], 'عنوان بخش'], ['paragraph', ['text'], 'متن پاراگراف'],
   ['image', ['alt'], 'توضیح تصویر'], ['image', ['caption'], 'زیرنویس تصویر'], ['gallery', ['images', 0, 'alt'], 'توضیح اول'], ['gallery', ['images', 1, 'alt'], 'توضیح دوم'],
@@ -194,11 +195,11 @@ try {
   const latePreview = translator.previewBlockField({ blockId: 'branch', blockType: 'location', fieldPath: ['title'], text: 'نام شعبه' })
   await fieldHold.entered.promise
   const editedFieldSource = setArticleBlockText(fieldSource, 'branch', ['title'], 'نام جدید شعبه')
-  await service.update(fieldId, { ...fieldInput, blocks: editedFieldSource })
+  await fixtureUpdateArticle(service, db, fieldId, { ...fieldInput, blocks: editedFieldSource })
   fieldHold.release.resolve()
   const staleField = await latePreview
   const lateArabic = setArticleBlockTranslation(fieldSource, fieldArabic, staleField.blockId, staleField.fieldPath, staleField.translation)!
-  await service.update(fieldId, { ...fieldInput, blocks: editedFieldSource, blocksAr: lateArabic })
+  await fixtureUpdateArticle(service, db, fieldId, { ...fieldInput, blocks: editedFieldSource, blocksAr: lateArabic })
   const afterLate = (await service.adminDetail(fieldId))!
   check(text(afterLate.blocksAr!, 'branch', ['title']) === '' && text(afterLate.blocksAr!, 'branch', ['address']) === 'عنوان يدوي'
     && getArticleBlockTranslationStatus(afterLate.blocks, afterLate.blocksAr, 'branch', ['title']) === 'needs-retranslation'
@@ -211,7 +212,7 @@ try {
   const changedPreview = setArticleBlockTranslation(editedFieldSource, afterLate.blocksAr, changedField.blockId, changedField.fieldPath, changedField.translation)!
   assert.deepEqual(payloads, [['نام جدید شعبه']])
   check(text(changedPreview, 'branch', ['address']) === 'عنوان يدوي', 'changed-field preview excludes every completed sibling from translator payloads')
-  await service.update(fieldId, { ...fieldInput, blocks: editedFieldSource, blocksAr: changedPreview })
+  await fixtureUpdateArticle(service, db, fieldId, { ...fieldInput, blocks: editedFieldSource, blocksAr: changedPreview })
   const freshSaved = (await service.adminDetail(fieldId))!
   check(getArticleBlockTranslationStatus(freshSaved.blocks, freshSaved.blocksAr, 'branch', ['title']) === 'translated'
     && freshSaved.blocksAr?.translation?.fields.some(field => field.blockId === 'branch' && field.fieldPath[0] === 'title' && field.sourceText === 'نام جدید شعبه')
@@ -230,7 +231,7 @@ try {
   assert.ok(machineId)
   await db.update(articles).set({ arAuto: true }).where(eq(articles.id, machineId))
   const machineSource = setArticleBlockText(source, 'heading', ['text'], 'فقط تیتر جدید برای صف')
-  await service.update(machineId, { ...input, blocks: machineSource })
+  await fixtureUpdateArticle(service, db, machineId, { ...input, blocks: machineSource })
   await translator.enqueue('article', machineId)
   const beforeMachineField = payloads.length
   check(await translator.processNext() === 'done', 'queue fills a changed field in an otherwise completed machine document')
@@ -238,7 +239,7 @@ try {
     'queue sends only the changed block field and does not retranslate completed article titles, excerpts or siblings')
   const savedManual = setArticleBlockTranslation(source, queued.blocksAr!, 'hero', ['title'], 'عنوان نهائي يدوي')!
   const captionSource = setArticleBlockText(source, 'image', ['caption'], 'زیرنویس تازه تصویر')
-  await service.update(id, { ...input, blocks: captionSource, blocksAr: savedManual })
+  await fixtureUpdateArticle(service, db, id, { ...input, blocks: captionSource, blocksAr: savedManual })
   prefix = 'ترجمة جديدة '
   await translator.enqueue('article', id)
   check(await translator.processNext() === 'done', 'worker completes partially translated documents')
@@ -248,7 +249,7 @@ try {
   assert.ok(raceId)
   const raceBefore = (await service.adminDetail(raceId))!
   const oldArabic = setArticleBlockText(normalizeArticleBlocksTranslation(raceBefore.blocks, null)!, 'hero', ['title'], 'قديم يدوي')
-  await service.update(raceId, { ...input, blocksAr: oldArabic })
+  await fixtureUpdateArticle(service, db, raceId, { ...input, blocksAr: oldArabic })
   await translator.enqueue('article', raceId)
   const hold = { entered: deferred(), release: deferred() }
   gate = hold
@@ -262,7 +263,7 @@ try {
   movedLocation.props.lng = 48.12345678901
   let concurrentArabic = setArticleBlockTranslation(newSource, oldArabic, 'heading', ['text'], 'تحرير أثناء الطلب')!
   concurrentArabic = setArticleBlockTranslation(newSource, concurrentArabic, 'hero', ['title'], '')!
-  await service.update(raceId, { ...input, title: 'عنوان جدید بعد از درخواست', blocks: newSource, blocksAr: concurrentArabic })
+  await fixtureUpdateArticle(service, db, raceId, { ...input, title: 'عنوان جدید بعد از درخواست', blocks: newSource, blocksAr: concurrentArabic })
   hold.release.resolve()
   check(await working === 'done', 'in-flight translation completes after a concurrent save')
   const afterRace = (await service.adminDetail(raceId))!
@@ -311,7 +312,7 @@ try {
   await fieldClearGate.entered.promise
   const beforeFieldClear = (await service.adminDetail(clearedFieldId))!
   const reviewedBlankCaption = setArticleBlockTranslation(source, beforeFieldClear.blocksAr, 'image', ['caption'], '')!
-  await service.update(clearedFieldId, { ...input, blocksAr: reviewedBlankCaption, titleAr: null, excerptAr: null, contentAr: null, processesAr: null,
+  await fixtureUpdateArticle(service, db, clearedFieldId, { ...input, blocksAr: reviewedBlankCaption, titleAr: null, excerptAr: null, contentAr: null, processesAr: null,
     translationEdits: contentTranslationFields('article', beforeFieldClear).map(field => ({ fieldId: field.fieldId, fieldPath: field.fieldPath,
       sourceText: field.sourceText, revision: field.revision, value: '', origin: 'manual' as const })),
   })
@@ -332,7 +333,7 @@ try {
   gate = clearingGate
   const clearingWork = translator.processNext()
   await clearingGate.entered.promise
-  await service.update(clearedId, { ...input, blocksAr: null, sourceRevision: contentSourceRevision('article', (await service.adminDetail(clearedId))!) })
+  await fixtureUpdateArticle(service, db, clearedId, { ...input, blocksAr: null, sourceRevision: (await service.adminDetail(clearedId))!.sourceRevision })
   clearingGate.release.resolve()
   check(await clearingWork === 'done', 'queue finishes after an admin explicitly clears the Arabic document')
   const cleared = (await service.adminDetail(clearedId))!
@@ -385,8 +386,8 @@ try {
   clearProof.status = 'missing'
   assert.equal(clearProof.sourceText, text(editedSource, 'clear-heading', ['text']))
   assert.equal(clearProof.revision, (previousHeadingProof.revision ?? 0) + 2, 'one source change plus one explicit review supplies the exact saved proof')
-  await service.update(explicitClearId, { ...input, blocks: editedSource, blocksAr: explicitClear,
-    sourceRevision: contentSourceRevision('article', beforeExplicitClear) })
+  await fixtureUpdateArticle(service, db, explicitClearId, { ...input, blocks: editedSource, blocksAr: explicitClear,
+    sourceRevision: beforeExplicitClear.sourceRevision })
   const savedExplicitClear = await service.adminDetail(explicitClearId); assert(savedExplicitClear?.blocksAr)
   assert.equal(text(savedExplicitClear.blocksAr, 'clear-heading', ['text']), '')
   assert.deepEqual(savedExplicitClear.blocksAr.translation?.fields.find(field => field.blockId === 'clear-heading'), clearProof)
@@ -403,6 +404,24 @@ try {
   assert.equal(text(publicExplicitClear.blocks, 'clear-heading', ['text']), text(editedSource, 'clear-heading', ['text']))
   assert.equal(text(publicExplicitClear.blocks, 'manual-sibling', ['text']), 'نص يدوي محفوظ')
   check(true, 'queue work cannot refill an explicitly cleared changed heading and public Arabic falls back only for that field')
+  const maximumPreview = maximumBlockTranslationFixture()
+  assert(Buffer.byteLength(JSON.stringify(maximumPreview.source)) > 262_144)
+  assert(Buffer.byteLength(JSON.stringify(maximumPreview.arabic)) > 2_097_152)
+  const beforeMaximumPreview = payloads.length
+  const completedMaximumPreview = await translator.previewBlocks({ blocks: maximumPreview.source, blocksAr: maximumPreview.arabic })
+  assert.equal(completedMaximumPreview.translation?.fields.length, 6000)
+  assert.equal(payloads.length, beforeMaximumPreview, 'completed maximum documents never retransmit Persian or Arabic fields')
+  const firstMaximumBlock = maximumPreview.source.blocks[0]
+  assert(firstMaximumBlock)
+  const oneMissingMaximum = setArticleBlockTranslation(maximumPreview.source, maximumPreview.arabic,
+    firstMaximumBlock.id, ['items', 0], '', 'automatic')
+  assert(oneMissingMaximum)
+  const filledMaximumPreview = await translator.previewBlocks({ blocks: maximumPreview.source, blocksAr: oneMissingMaximum })
+  assert.deepEqual(payloads.slice(beforeMaximumPreview), [['متن']], 'a maximum document with one eligible field sends exactly one Persian text')
+  assert.equal(text(filledMaximumPreview, firstMaximumBlock.id, ['items', 0]), `${prefix}متن`)
+  assert.equal(filledMaximumPreview.translation?.fields.length, 6000)
+  assert.equal(text(filledMaximumPreview, firstMaximumBlock.id, ['items', 1]), 'عرب')
+  check(true, 'maximum legacy block previews preserve all 6000 proofs and translate only their one missing eligible field within unchanged content limits')
   console.log(`\n${checks} Article block translation integration checks passed.`)
 } finally {
   globalThis.fetch = originalFetch

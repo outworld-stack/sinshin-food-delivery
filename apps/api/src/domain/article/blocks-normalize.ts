@@ -14,7 +14,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { randomUUID } from 'node:crypto'
 
-import { isArticleBlockUrl, isHexColor, type ArticleBlock, type ArticleBlocksDoc } from '@sinshin/shared'
+import { articleBlocksContentForLimit, bindArticleBlockItemIdentities, isArticleBlockUrl, isHexColor, type ArticleBlock, type ArticleBlocksDoc } from '@sinshin/shared'
 import { Err } from '#/domain/shared/errors'
 
 /** سقف‌ها — آینه‌ی articleBody (روت) برای دفاع در عمق */
@@ -142,9 +142,10 @@ function normalizeProps(type: string, raw: unknown): Record<string, unknown> | u
                                         const src = url(im.src)
                                         if (!src) return null
                                         const alt = str(im.alt, LIMITS.alt)
-                                        return alt ? { src, alt } : { src }
+                                        const id = typeof im.id === 'string' && im.id.length <= 180 && /^[a-zA-Z0-9:_-]+$/.test(im.id) ? im.id : undefined
+                                        return { src, ...(alt ? { alt } : {}), ...(id ? { id } : {}) }
                                 })
-                                .filter((x): x is { src: string; alt?: string } => x !== null)
+                                .filter((x) => x !== null)
                                 .slice(0, LIMITS.gallery)
                         if (images.length === 0) return undefined
                         const layout = raw.layout === 'slider' ? 'slider' : 'grid'
@@ -164,13 +165,15 @@ function normalizeProps(type: string, raw: unknown): Record<string, unknown> | u
                 }
                 case 'list': {
                         const rawItems = Array.isArray(raw.items) ? raw.items : []
-                        const items = rawItems
-                                .map((it) => str(it, LIMITS.listItem))
-                                .filter((x): x is string => x !== undefined)
+                        const entries = rawItems
+                                .map((it, index) => ({ text: str(it, LIMITS.listItem), id: Array.isArray(raw.itemIds) ? raw.itemIds[index] : undefined }))
+                                .filter((entry): entry is { text: string; id: unknown } => entry.text !== undefined)
                                 .slice(0, LIMITS.listItems)
+                        const items = entries.map(entry => entry.text)
                         if (items.length === 0) return undefined
                         const ordered = bool(raw.ordered)
-                        return ordered ? { items, ordered: true } : { items }
+                        const itemIds = entries.map(entry => typeof entry.id === 'string' && entry.id.length <= 180 && /^[a-zA-Z0-9:_-]+$/.test(entry.id) ? entry.id : '')
+                        return { items, ...(ordered ? { ordered: true } : {}), ...(itemIds.some(Boolean) ? { itemIds } : {}) }
                 }
                 case 'cta': {
                         const label = str(raw.label, LIMITS.ctaLabel)
@@ -274,8 +277,10 @@ export function normalizeBlocksDoc(input: unknown): ArticleBlocksDoc | null {
         }
 
         if (blocks.length === 0) return null
-        const doc: ArticleBlocksDoc = { version: 1, blocks }
-        if (Buffer.byteLength(JSON.stringify(doc), 'utf8') > LIMITS.docBytes) {
+        const doc = bindArticleBlockItemIdentities({ version: 1, blocks })
+        // Identity bookkeeping must not make an existing near-limit document uneditable.
+        // Preserve the existing content-byte limit; item IDs have their own bounded shape.
+        if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit(doc)), 'utf8') > LIMITS.docBytes) {
                 // Returning null would silently erase a saved article's block layout.
                 throw Err.validation('حجم محتوای بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
         }

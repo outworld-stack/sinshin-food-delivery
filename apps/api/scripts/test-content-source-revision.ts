@@ -24,7 +24,7 @@ const item = section.items[11]
 assert(item, 'the changed legacy item exists')
 section.items[11] = `${item}تغییر`
 assert(!matchesContentSourceRevision('terms', changed, token), 'changing one large nested field rejects the old proof')
-assert.equal(contentSourceRevision('terms', { ...row, unrelatedStyle: 'new' }), token, 'unrelated structural properties do not invalidate content proofs')
+assert.notEqual(contentSourceRevision('terms', { ...row, unrelatedStyle: 'new' }), token, 'structural saves invalidate save proofs without invalidating translations')
 
 const product = reconcileContentTranslation('product', 'one', null, { id: 'one', name: 'نام', nameAr: null, description: 'متن', descriptionAr: null })
 const before = contentSourceRevision('product', product)
@@ -34,7 +34,7 @@ const reviewed = reconcileContentTranslation('product', 'one', product, product,
 	sourceText: field.sourceText, revision: field.revision, value: 'اسم', origin: 'manual' }])
 assert(!matchesContentSourceRevision('product', reviewed, before), 'manual field revisions fence late drafts')
 const legacyToken = JSON.stringify([contentTranslationFields('product', product).map(item => [item.fieldId, item.fieldPath, item.sourceText, item.revision]), null, null])
-assert(matchesContentSourceRevision('product', product, legacyToken), 'an unchanged earlier exact token remains compatible')
+assert(!matchesContentSourceRevision('product', product, legacyToken), 'only compact validated revision tokens are accepted')
 assert(!matchesContentSourceRevision('product', reviewed, legacyToken), 'earlier exact tokens cannot bypass a newer revision')
 const proofApi = new Elysia().post('/proofs', ({ body }) => ({ count: body.edits.length }), { body: t.Object({ edits: translationEditsSchema }) })
 const maximumTermsEdits = Array.from({ length: 100 }, (_, section) => [
@@ -46,4 +46,4 @@ const proofResponse = await proofApi.handle(new Request('http://localhost/proofs
 	headers: { 'content-type': 'application/json' }, body: JSON.stringify({ edits: maximumTermsEdits }) }))
 assert.equal(proofResponse.status, 200, 'the proof schema accepts every field in the existing maximum terms model')
 assert.deepEqual(await proofResponse.json(), { count: 10100 })
-console.log('PASS compact source revisions: SHA-256 vectors, large legacy terms, exact text changes, manual revisions and earlier proof compatibility')
+console.log('PASS compact source revisions: SHA-256 vectors, large legacy terms, exact text changes, structural changes and strict token validation')

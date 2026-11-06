@@ -28,7 +28,7 @@ import type { RedisService } from '#/infra/redis/redis'
 import { VersionedCache } from '#/domain/shared/versioned-cache'
 import { UUID_RE } from '#/domain/shared/ids'
 import { normalizeBlocksDoc } from './blocks-normalize'
-import { assertContentSourceRevision, blocksToPlainText, getArticleBlockTextFields, localizeContentRecord, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, reconcileArticleBlocksTranslation, reconcileContentTranslation, setArticleBlockTranslations, type ArticleBlocksDoc, type ContentTranslationState, type TranslationEdit } from '@sinshin/shared'
+import { articleBlocksContentForLimit, assertContentSourceRevision, assertContentTranslationIdentities, blocksToPlainText, collectionTranslationIdentities, contentSourceRevision, getArticleBlockTextFields, localizeContentRecord, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, reconcileArticleBlocksTranslation, reconcileContentTranslation, setArticleBlockTranslations, validateArticleBlockItemIdentities, type ArticleBlocksDoc, type ContentCollectionIdentity, type ContentTranslationState, type TranslationEdit } from '@sinshin/shared'
 
 
 /** قرارداد ArticleDto از @sinshin/shared */
@@ -64,6 +64,8 @@ export interface ArticleView {
     /** Raw Arabic block text for the admin editor. */
     blocksAr?: ArticleBlocksDoc | null
     translationState?: ContentTranslationState | null
+    sourceRevision?: string
+    translationIdentities?: ContentCollectionIdentity[]
 }
 
 /**
@@ -82,8 +84,9 @@ export interface ArticleCategoryView {
     nameAr?: string | null
     slug: string
     hasSubCategories: boolean
-    subCategories: { id: string; name: string; nameAr?: string | null; slug: string }[]
+    subCategories: { id: string; name: string; nameAr?: string | null; slug: string; sourceRevision?: string }[]
     translationState?: ContentTranslationState | null
+    sourceRevision?: string
 }
 
 export interface ArticleInput {
@@ -108,6 +111,7 @@ export interface ArticleInput {
     blocksAr?: unknown
     translationEdits?: TranslationEdit[]
     sourceRevision?: string
+    translationIdentities?: ContentCollectionIdentity[]
 }
 
 interface ArticleCategoryInput {
@@ -181,7 +185,7 @@ export class ArticleService {
             nameAr: c.nameAr ?? null,
             slug: c.slug,
             hasSubCategories: c.hasSubCategories,
-            ...(includeState ? { translationState: c.translationState } : {}),
+            ...(includeState ? { translationState: c.translationState, sourceRevision: contentSourceRevision('articleCategory', stored) } : {}),
             subCategories: (subsByCat.get(c.id) ?? []).map((storedSub) => {
               const s = lang === 'ar' ? localizeContentRecord('articleSubCategory', storedSub) : storedSub
               return ({
@@ -189,7 +193,7 @@ export class ArticleService {
                 name: pickAr(lang, s.nameAr, s.name),
                 nameAr: s.nameAr ?? null,
                 slug: s.slug,
-                ...(includeState ? { translationState: s.translationState } : {}),
+                ...(includeState ? { translationState: s.translationState, sourceRevision: contentSourceRevision('articleSubCategory', storedSub) } : {}),
             })}),
         })})
     }
@@ -287,8 +291,11 @@ export class ArticleService {
     // ═══ ادمین: مقالات ═══
 
     async listAdmin(): Promise<ArticleSummaryView[]> {
-        const rows = await this.joinedSummary().orderBy(desc(articles.createdAt))
-        return rows.map(({ a, c, s }) => this.toSummary(a, c, s))
+        const rows = await this.deps.db.select({ a: articles, c: articleCategories, s: articleSubCategories })
+            .from(articles).innerJoin(articleCategories, eq(articleCategories.id, articles.categoryId))
+            .leftJoin(articleSubCategories, eq(articleSubCategories.id, articles.subCategoryId))
+            .orderBy(desc(articles.createdAt))
+        return rows.map(({ a, c, s }) => ({ ...this.toSummary(a, c, s), sourceRevision: contentSourceRevision('article', a) }))
     }
 
     async adminDetail(id: string): Promise<ArticleView | null> {
@@ -343,19 +350,25 @@ export class ArticleService {
                 status: 'ACTIVE',
                 // stage-60 — پرچم ویژه/سنجاق
                 isFeatured: input.isFeatured ?? false,
-            }, input.translationEdits))
+            }, input.translationEdits, input.translationIdentities))
             .returning()
         if (!created) throw Err.internal('ذخیره‌سازی مقاله ناموفق بود.')
         await this.cache.invalidate()
         return { success: true, id: created.id }
     }
 
-    async update(id: string, input: ArticleInput): Promise<{ success: boolean }> {
+    async update(id: string, input: ArticleInput & { sourceRevision: string }): Promise<{ success: boolean }> {
         if (!UUID_RE.test(id)) throw Err.notFound('مقاله پیدا نشد.')
         await this.deps.db.transaction(async (tx) => {
             const [current] = await tx.select().from(articles).where(eq(articles.id, id)).for('update')
             if (!current) throw Err.notFound('مقاله پیدا نشد.')
             if (!assertContentSourceRevision('article', current, input.sourceRevision)) throw Err.validation('محتوای مقاله تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+            if (input.processes !== undefined && !assertContentTranslationIdentities('article', { ...current, processes: input.processes }, input.translationIdentities, current)) {
+                throw Err.validation('شناسه مراحل مقاله معتبر نیست؛ فرم را دوباره بارگذاری کنید.')
+            }
+            if (input.blocks !== undefined && !validateArticleBlockItemIdentities(current.blocks, input.blocks, current.blocksAr)) {
+                throw Err.validation('شناسه آیتم‌های بلوک معتبر نیست؛ فرم را دوباره بارگذاری کنید.')
+            }
 
             // Omitted optional fields retain their values; null explicitly clears them.
             // A category change cannot retain a sub-category from the old category.
@@ -366,10 +379,6 @@ export class ArticleService {
             // A translation-only save must retain older documents exactly as stored.
             const blocks = input.blocks === undefined || isDeepStrictEqual(input.blocks, current.blocks)
                 ? current.blocks : normalizeBlocksDoc(input.blocks)
-            if (blocks && input.blocksAr === null && input.sourceRevision === undefined
-                && current.blocksAr?.blocks.some(block => getArticleBlockTextFields(block).some(field => field.text.trim()))) {
-                throw Err.validation('برای حذف ترجمه‌های عربی، فرم مقاله را دوباره بارگذاری کنید.')
-            }
             const blocksAr = input.blocksAr !== undefined || blocks !== current.blocks
                 ? this.normalizeBlocksAr(blocks, input.blocksAr === null ? setArticleBlockTranslations(blocks, current.blocksAr,
                     (blocks?.blocks ?? []).flatMap(block => getArticleBlockTextFields(block).map(field => ({ blockId: block.id, path: field.path, text: '' }))), 'manual') : reconcileArticleBlocksTranslation(
@@ -402,7 +411,7 @@ export class ArticleService {
                 updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)),
                 ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
                 ...(input.author !== undefined ? { author: input.author.trim() || 'سین شین' } : {}),
-            }, input.translationEdits)
+            }, input.translationEdits, input.translationIdentities)
             await tx.update(articles).set({
                 ...next,
                 id: undefined,
@@ -426,14 +435,17 @@ export class ArticleService {
         return { success: true }
     }
 
-    async toggle(id: string): Promise<void> {
+    async toggle(id: string, sourceRevision: string): Promise<void> {
         if (!UUID_RE.test(id)) throw Err.notFound('مقاله پیدا نشد.')
-        const [updated] = await this.deps.db
-            .update(articles)
-            .set({ status: sql`case when ${articles.status} = 'ACTIVE' then 'INACTIVE' else 'ACTIVE' end`, updatedAt: new Date() })
-            .where(eq(articles.id, id))
-            .returning({ id: articles.id })
-        if (!updated) throw Err.notFound('مقاله پیدا نشد.')
+        await this.deps.db.transaction(async tx => {
+            const [current] = await tx.select().from(articles).where(eq(articles.id, id)).for('update')
+            if (!current) throw Err.notFound('مقاله پیدا نشد.')
+            if (!assertContentSourceRevision('article', current, sourceRevision)) throw Err.validation('مقاله تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+            const next = reconcileContentTranslation('article', id, current, current)
+            await tx.update(articles).set({ status: current.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+                translationState: next.translationState, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)),
+            }).where(eq(articles.id, id))
+        })
         await this.cache.invalidate()
     }
 
@@ -470,7 +482,7 @@ export class ArticleService {
         return { success: true }
     }
 
-    async updateCategory(id: string, input: ArticleCategoryInput): Promise<void> {
+    async updateCategory(id: string, input: ArticleCategoryInput & { sourceRevision: string }): Promise<void> {
         if (!UUID_RE.test(id)) throw Err.notFound('دسته مقاله پیدا نشد.')
         const name = input.name.trim()
         if (!name) throw Err.validation('نام دسته الزامی است.')
@@ -495,12 +507,16 @@ export class ArticleService {
 
             const existing = await tx.select().from(articleSubCategories)
                 .where(eq(articleSubCategories.categoryId, id)).for('update')
-            const wanted = this.categoryEntries(input)
+            if (input.subCategories !== undefined && input.subCategoryEntries === undefined) {
+                throw Err.validation('برای ویرایش ساب‌دسته‌ها شناسه‌های پایدار لازم است؛ فرم را دوباره بارگذاری کنید.')
+            }
+            const wanted = this.categoryEntries(input, true)
             const kept = new Set<string>()
             for (const entry of wanted) {
-                const match = entry.id ? existing.find((s) => s.id === entry.id) : existing.find((s) => s.name === entry.name)
+                const match = entry.id ? existing.find((s) => s.id === entry.id) : undefined
                 if (entry.id && !match) throw Err.validation('ساب‌دسته به این دسته تعلق ندارد.')
                 if (match) {
+                    if (kept.has(match.id)) throw Err.validation('شناسه ساب‌دسته تکراری است.')
                     if (!assertContentSourceRevision('articleSubCategory', match, entry.sourceRevision)) throw Err.validation('ساب‌دسته تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
                     kept.add(match.id)
                     const next = reconcileContentTranslation('articleSubCategory', match.id, match, {
@@ -604,10 +620,10 @@ export class ArticleService {
         if (input == null) return null
         const translation = normalizeArticleBlocksTranslation(blocks, input)
         if (translation) {
-            if (Buffer.byteLength(JSON.stringify({ version: translation.version, blocks: translation.blocks }), 'utf8') > 262_144) {
+            if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit({ version: translation.version, blocks: translation.blocks })), 'utf8') > 262_144) {
                 throw Err.validation('حجم ترجمه بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
             }
-            if (Buffer.byteLength(JSON.stringify(translation), 'utf8') > 2_097_152) {
+            if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit(translation)), 'utf8') > 2_097_152) {
                 throw Err.validation('حجم سند ترجمه و وضعیت فیلدهای آن نباید بیشتر از ۲ مگابایت باشد.')
             }
         }
@@ -628,17 +644,24 @@ export class ArticleService {
         return subs
     }
 
-    private categoryEntries(input: ArticleCategoryInput): NonNullable<ArticleCategoryInput['subCategoryEntries']> {
+    private categoryEntries(input: ArticleCategoryInput, rejectAmbiguousNames = false): NonNullable<ArticleCategoryInput['subCategoryEntries']> {
         if (!input.subCategoryEntries) return [...this.categorySubs(input)].map(([name, nameAr]) => ({
             name, ...(input.subCategoriesAr !== undefined ? { nameAr } : {}),
         }))
         const entries = new Map<string, NonNullable<ArticleCategoryInput['subCategoryEntries']>[number]>()
         const ids = new Set<string>()
         for (const entry of input.subCategoryEntries) {
-            const name = entry.name.trim()
-            if (!name || entries.has(name)) continue
             if (entry.id && (!UUID_RE.test(entry.id) || ids.has(entry.id))) throw Err.validation('شناسه ساب‌دسته معتبر نیست.')
             if (entry.id) ids.add(entry.id)
+            const name = entry.name.trim()
+            if (!name) {
+                if (rejectAmbiguousNames && entry.id) throw Err.validation('نام ساب‌دسته موجود نمی‌تواند خالی باشد.')
+                continue
+            }
+            if (entries.has(name)) {
+                if (rejectAmbiguousNames) throw Err.validation('نام ساب‌دسته‌ها نمی‌تواند تکراری باشد.')
+                continue
+            }
             entries.set(name, { ...entry, name })
         }
         return [...entries.values()]
@@ -731,6 +754,8 @@ export class ArticleService {
                     blocksAr: a.blocksAr ?? null,
                     arAuto: a.arAuto,
                     translationState: a.translationState,
+                    sourceRevision: contentSourceRevision('article', a),
+                    translationIdentities: collectionTranslationIdentities('article', a),
                 }
                 : {}),
             // stage-60 — پرچم ویژه/سنجاق (۴ آیتم اول + Aurora)

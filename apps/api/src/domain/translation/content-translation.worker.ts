@@ -10,7 +10,9 @@ import { AppError, Err } from '#/domain/shared/errors'
 import { readContentRow, writeContentRow, type ContentRow } from './content-translation.store'
 
 type FieldRequest = { entityType: ContentEntityType; entityId: string; fieldId: string; fieldPath: ContentFieldPath; sourceText: string; revision: number }
-type BlockField = { blockId: string; blockType: ArticleBlockType; path: ArticleBlockTextPath; text: string; revision: number; maxLength: number }
+type BlockField = { blockId: string; blockType: ArticleBlockType; path: ArticleBlockTextPath; itemId?: string; text: string; revision: number; maxLength: number }
+const sameBlockField = (candidate: BlockField, selected: BlockField) => candidate.blockId === selected.blockId && candidate.blockType === selected.blockType
+  && (selected.itemId ? candidate.itemId === selected.itemId : JSON.stringify(candidate.path) === JSON.stringify(selected.path))
 
 /** Uses the existing text planner and block primitives, with one guarded write per field. */
 export class ContentTranslationWorker {
@@ -66,7 +68,7 @@ export class ContentTranslationWorker {
       fieldPath: field.path, sourceText: field.text, revision: field.revision, maxLength: field.maxLength,
       value: null, origin: 'automatic', status: 'missing' })
     const latest = find(await readContentRow(this.deps.db, input.entityType, input.entityId))
-    if (!latest || latest.text !== field.text || latest.revision !== field.revision) throw Err.validation('The block field changed while translation was running.')
+    if (!latest || latest.itemId !== field.itemId || latest.text !== field.text || latest.revision !== field.revision) throw Err.validation('The block field changed while translation was running.')
     return value
   }
 
@@ -80,7 +82,7 @@ export class ContentTranslationWorker {
         const proof = translated.translation?.fields.find(state => state.blockId === block.id && state.blockType === block.type
           && JSON.stringify(state.fieldPath) === JSON.stringify(field.path))
         return field.text.trim() && !readArticleBlockText(current, field.path).trim() && proof?.origin !== 'manual' && proof?.origin !== 'legacy'
-          ? [{ blockId: block.id, blockType: block.type, path: field.path, text: field.text, revision: proof?.revision ?? 0, maxLength: field.maxLength }] : []
+          ? [{ blockId: block.id, blockType: block.type, path: field.path, itemId: field.itemId, text: field.text, revision: proof?.revision ?? 0, maxLength: field.maxLength }] : []
       })
     })
   }
@@ -115,7 +117,7 @@ export class ContentTranslationWorker {
         if (wrote) await this.deps.invalidate(type)
       } catch (error) {
         failure ??= error
-        await this.deps.db.transaction(async tx => {
+        const wrote = await this.deps.db.transaction(async tx => {
           const current = await readContentRow(tx, type, id, true)
           if (!current) return
           if (!await isActive(tx)) return
@@ -126,7 +128,9 @@ export class ContentTranslationWorker {
           const state = updated.translationState.fields.find(candidate => candidate.fieldId === field.fieldId)
           if (state) state.error = (error instanceof Error ? error.message : String(error)).slice(0, 500)
           await writeContentRow(tx, type, id, updated)
+          return true
         })
+        if (wrote) await this.deps.invalidate(type)
         if (error instanceof AppError && error.code === 'SERVICE_UNAVAILABLE') throw error
       }
     }
@@ -135,49 +139,48 @@ export class ContentTranslationWorker {
         try {
           if (!await isActive()) return
           const beforeRequest = await readContentRow(this.deps.db, type, id)
-          const selected = beforeRequest && this.blockFields(beforeRequest).find(candidate => candidate.blockId === field.blockId && candidate.blockType === field.blockType
-            && JSON.stringify(candidate.path) === JSON.stringify(field.path))
+          const selected = beforeRequest && this.blockFields(beforeRequest).find(candidate => sameBlockField(candidate, field))
           if (!selected || selected.text !== field.text || selected.revision !== field.revision) continue
-          const value = await this.translate(type, id, { fieldId: JSON.stringify([field.blockId, field.blockType, field.path]), fieldPath: field.path,
+          const value = await this.translate(type, id, { fieldId: JSON.stringify([field.blockId, field.blockType, field.itemId ?? field.path]), fieldPath: selected.path,
             sourceText: field.text, revision: field.revision, maxLength: field.maxLength, value: null, origin: 'automatic', status: 'missing' })
           const wrote = await this.deps.db.transaction(async tx => {
             const current = await readContentRow(tx, type, id, true)
             if (!current) return false
             if (!await isActive(tx)) return false
             if (row.blocksAr && !current.blocksAr) return false
-            const latest = this.blockFields(current).find(candidate => candidate.blockId === field.blockId && candidate.blockType === field.blockType
-              && JSON.stringify(candidate.path) === JSON.stringify(field.path))
+            const latest = this.blockFields(current).find(candidate => sameBlockField(candidate, field))
             if (!latest || latest.text !== field.text || latest.revision !== field.revision) return false
             const source = current.blocks as ArticleBlocksDoc
-            const blocksAr = setArticleBlockTranslations(source, current.blocksAr, [{ blockId: field.blockId, path: field.path, text: value }], 'automatic')
+            const blocksAr = setArticleBlockTranslations(source, current.blocksAr, [{ blockId: field.blockId, path: latest.path, text: value }], 'automatic')
             if (!blocksAr) return false
-            const updated: ContentRow = { ...current, blocksAr }
+            const updated = reconcileContentTranslation(type, id, current, { ...current, blocksAr })
             await writeContentRow(tx, type, id, updated)
             return true
           })
           if (wrote) await this.deps.invalidate(type)
         } catch (error) {
           failure ??= error
-          await this.deps.db.transaction(async tx => {
+          const wrote = await this.deps.db.transaction(async tx => {
             const current = await readContentRow(tx, type, id, true)
             if (!current || row.blocksAr && !current.blocksAr) return
             if (!await isActive(tx)) return
-            const latest = this.blockFields(current).find(candidate => candidate.blockId === field.blockId && candidate.blockType === field.blockType
-              && JSON.stringify(candidate.path) === JSON.stringify(field.path) && candidate.text === field.text && candidate.revision === field.revision)
+            const latest = this.blockFields(current).find(candidate => sameBlockField(candidate, field) && candidate.text === field.text && candidate.revision === field.revision)
             if (!latest) return
             const translated = normalizeArticleBlocksTranslation(current.blocks as ArticleBlocksDoc | null, current.blocksAr)
             if (!translated) return
             const fields = translated.translation?.fields ?? []
             const index = fields.findIndex(state => state.blockId === field.blockId && state.blockType === field.blockType
-              && JSON.stringify(state.fieldPath) === JSON.stringify(field.path))
+              && JSON.stringify(state.fieldPath) === JSON.stringify(latest.path))
             const failed = { ...(index >= 0 ? fields[index] : {}), blockId: field.blockId, blockType: field.blockType,
-              fieldPath: [...field.path], sourceText: field.text, revision: field.revision, origin: 'automatic' as const,
+              fieldPath: [...latest.path], itemId: field.itemId, sourceText: field.text, revision: field.revision, origin: 'automatic' as const,
               status: 'missing' as const, error: (error instanceof Error ? error.message : String(error)).slice(0, 500) }
             if (index >= 0) fields[index] = failed
             else fields.push(failed)
-            translated.translation = { fields }
-            await writeContentRow(tx, type, id, { ...current, blocksAr: translated })
+            translated.translation = { ...translated.translation, fields }
+            await writeContentRow(tx, type, id, reconcileContentTranslation(type, id, current, { ...current, blocksAr: translated }))
+            return true
           })
+          if (wrote) await this.deps.invalidate(type)
           if (error instanceof AppError && error.code === 'SERVICE_UNAVAILABLE') throw error
         }
       }

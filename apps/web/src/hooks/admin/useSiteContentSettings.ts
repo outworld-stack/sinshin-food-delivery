@@ -9,6 +9,7 @@ import {
 } from '#/server/gallery'
 import { adminAboutContentOptions, adminGalleryImagesOptions } from '#/utils/queryOptions'
 import { qk } from '#/utils/queryKeys'
+import { contentRevisionMap } from '#/utils/contentTranslationDraft'
 import type { AboutContentInput } from '#/types/site/about'
 import type {
   AddGalleryImageInput, UpdateGalleryImageInput, ReorderGalleryImageInput,
@@ -62,6 +63,7 @@ export function useSiteContentSettings({ enabled }: Options) {
     mutationFn: (input: UpdateGalleryImageInput) =>
       updateGalleryImage(input),
     onSuccess: invalidateContent,
+    onError: error => showToast(error.message || 'ذخیره تصویر انجام نشد؛ پیش‌نویس شما حفظ شده است', 'error'),
   })
 
   const deleteMutation = useMutation({
@@ -74,7 +76,7 @@ export function useSiteContentSettings({ enabled }: Options) {
 
   const reorderMutation = useMutation({
     mutationFn: (input: ReorderGalleryImageInput) =>
-      reorderGalleryImage(input),
+      reorderGalleryImage({ ...input, sourceRevisions: contentRevisionMap(galleryQuery.data ?? []) }),
     onSuccess: invalidateContent,
   })
 
@@ -87,8 +89,8 @@ export function useSiteContentSettings({ enabled }: Options) {
     [addMutation.mutate],
   )
   const patchImage = useCallback(
-    (input: UpdateGalleryImageInput) => updateMutation.mutate(input),
-    [updateMutation.mutate],
+    (input: UpdateGalleryImageInput) => updateMutation.mutateAsync(input),
+    [updateMutation.mutateAsync],
   )
   const removeImage = useCallback(
     (id: string) => deleteMutation.mutate(id),

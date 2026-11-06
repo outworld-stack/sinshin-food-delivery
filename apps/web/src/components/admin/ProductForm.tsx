@@ -21,7 +21,7 @@
 // src/components/admin/ProductForm.tsx
 
 import { useQuery } from '@tanstack/react-query'
-import { contentSourceRevision } from '@sinshin/shared'
+import { collectionTranslationIdentities } from '@sinshin/shared'
 import { Link } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -53,6 +53,7 @@ import type {
 // stage-101 — انیمیشن اختصاصی صفحه‌ی محصول ویژه (باکس زیر سوئیچ ویژه)
 import type { FeaturedAnimation } from '#/types/site/featured-animation'
 import { formatPrice } from '#/utils/format'
+import { collectionIds, appendCollectionIdentity, removeCollectionIdentity, moveCollectionIdentity, moveCollectionItem } from '#/utils/contentTranslationDraft'
 import {
 	gregorianToJalali,
 	jalaliFromISO,
@@ -352,7 +353,7 @@ const EMPTY_SIZE: ProductFormSize = {
 
 function ProductSizeArabicField({ size, initialSize, onChange }: {
 	size: ProductFormSize
-	initialSize?: { id?: string; name: string; nameAr?: string | null }
+	initialSize?: { id?: string; name: string; nameAr?: string | null; sourceRevision?: string }
 	onChange: (size: ProductFormSize) => void
 }) {
 	const translation = useContentTranslationDraft({ entityType: 'productSize', entityId: initialSize?.id,
@@ -403,6 +404,7 @@ export function ProductForm({
 	const showToast = useToastStore((s) => s.showToast)
 
 	const [formData, setFormData] = useState<ProductFormData>({
+		translationIdentities: [{ collectionPath: ['ingredients'], itemIds: [] }],
 		name: '',
 		description: '',
 		// stage-56 — slug انگلیسی سئو (خالی = آدرس با UUID)
@@ -470,6 +472,7 @@ export function ProductForm({
 		if (initialData && initializedProductId.current !== initialData.id) {
 			initializedProductId.current = initialData.id
 			setFormData({
+				translationIdentities: collectionTranslationIdentities('product', initialData),
 				name: initialData.name || '',
 				description: initialData.description || '',
 				// stage-56 — slug سئو از سرور (null/نیامد = خالی)
@@ -500,7 +503,7 @@ export function ProductForm({
 				sizes:
 					initialData.sizes?.map((s) => ({
 						id: s.id,
-						sourceRevision: contentSourceRevision('productSize', s),
+						sourceRevision: s.sourceRevision,
 						translationState: s.translationState,
 						name: s.name,
 						nameAr: s.nameAr || '',
@@ -611,10 +614,9 @@ export function ProductForm({
 		field: keyof ProductFormSize,
 		value: string | number,
 	) => {
-		const newSizes = [...(formData.sizes || [])]
-		// @ts-expect-error — فیلدهای رشته/عدد ساده؛ فراخواننده مقدار درست می‌دهد
-		newSizes[index][field] = value
-		setFormData((prev) => ({ ...prev, sizes: newSizes }))
+		const sizeId = formData.sizes[index]?.id ?? formData.sizes[index]?.draftId
+		setFormData(previous => sizeId ? { ...previous,
+			sizes: previous.sizes.map(size => (size.id ?? size.draftId) === sizeId ? { ...size, [field]: value } : size) } : previous)
 	}
 
 	/** stage-47 — آپدیت پنجره‌ی زمانی تخفیف یک سایز */
@@ -623,22 +625,16 @@ export function ProductForm({
 		startsAt: string | null,
 		endsAt: string | null,
 	) => {
-		const newSizes = [...(formData.sizes || [])]
-		newSizes[index] = {
-			...newSizes[index],
-			discountStartsAt: startsAt,
-			discountEndsAt: endsAt,
-		}
-		setFormData((prev) => ({ ...prev, sizes: newSizes }))
+		const sizeId = formData.sizes[index]?.id ?? formData.sizes[index]?.draftId
+		setFormData(previous => sizeId ? { ...previous,
+			sizes: previous.sizes.map(size => (size.id ?? size.draftId) === sizeId ? { ...size, discountStartsAt: startsAt, discountEndsAt: endsAt } : size) } : previous)
 	}
 
 	/** stage-56 — تصویر مستقل این سایز (url = آپلود؛ '' = حذف → تصویر مشترک) */
 	const handleSizeImage = (index: number, url: string) => {
-		setFormData((prev) => {
-			const next = [...(prev.sizes || [])]
-			next[index] = { ...next[index], image: url }
-			return { ...prev, sizes: next }
-		})
+		const sizeId = formData.sizes[index]?.id ?? formData.sizes[index]?.draftId
+		setFormData(previous => sizeId ? { ...previous,
+			sizes: previous.sizes.map(size => (size.id ?? size.draftId) === sizeId ? { ...size, image: url } : size) } : previous)
 	}
 
 	const addSize = () =>
@@ -646,11 +642,13 @@ export function ProductForm({
 			...prev,
 			sizes: [...(prev.sizes || []), { ...EMPTY_SIZE, draftId: crypto.randomUUID() }],
 		}))
-	const removeSize = (index: number) =>
-		setFormData((prev) => ({
+	const removeSize = (index: number) => {
+		const sizeId = formData.sizes[index]?.id ?? formData.sizes[index]?.draftId
+		setFormData((prev) => sizeId ? ({
 			...prev,
-			sizes: prev.sizes?.filter((_, i) => i !== index) || [],
-		}))
+			sizes: prev.sizes.filter(size => (size.id ?? size.draftId) !== sizeId),
+		}) : prev)
+	}
 
 	// روشن کردن → اگه لیست خالیه و قالبی داریم، خودکار از قالب پر می‌کنیم
 	const handleToggleSizes = useCallback(() => {
@@ -692,6 +690,7 @@ export function ProductForm({
 			setFormData((prev) => ({
 				...prev,
 				ingredients: [...(prev.ingredients || []), ingredientInput.trim()],
+				translationIdentities: appendCollectionIdentity(prev.translationIdentities ?? [], ['ingredients']),
 				ingredientsAr: [...prev.ingredients.map((_, index) => prev.ingredientsAr?.[index] ?? prev.ingredientsArText.split('\n')[index] ?? ''), ''],
 			}))
 			setIngredientInput('')
@@ -1621,19 +1620,33 @@ export function ProductForm({
 								className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary dark:bg-dark-primary/10 dark:text-dark-primary text-xs"
 							>
 								<input value={ing} aria-label={`ماده اولیه فارسی ${i + 1}`} className="bg-transparent outline-none"
-									onChange={event => setFormData(previous => ({ ...previous,
-										ingredients: previous.ingredients.map((value, index) => index === i ? event.target.value : value) }))} />
+									onChange={event => { const text = event.target.value, ingredientId = collectionIds(formData.translationIdentities ?? [], ['ingredients'])[i]
+										setFormData(previous => ingredientId ? ({ ...previous,
+											ingredients: previous.ingredients.map((value, index) => collectionIds(previous.translationIdentities ?? [], ['ingredients'])[index] === ingredientId ? text : value) }) : previous) }} />
+									{[-1, 1].map(direction => <button key={direction} type="button" aria-label={direction < 0 ? 'انتقال ماده به بالا' : 'انتقال ماده به پایین'}
+										disabled={i + direction < 0 || i + direction >= formData.ingredients.length}
+										className="text-xs px-1 disabled:opacity-30" onClick={() => { const ingredientId = collectionIds(formData.translationIdentities ?? [], ['ingredients'])[i]
+											setFormData(previous => { const currentIndex = collectionIds(previous.translationIdentities ?? [], ['ingredients']).indexOf(ingredientId)
+												if (currentIndex < 0) return previous
+												return { ...previous, ingredients: moveCollectionItem(previous.ingredients, currentIndex, currentIndex + direction),
+													ingredientsAr: moveCollectionItem(previous.ingredients.map((_, index) => previous.ingredientsAr?.[index] ?? ''), currentIndex, currentIndex + direction),
+													translationIdentities: moveCollectionIdentity(previous.translationIdentities ?? [], ['ingredients'], currentIndex, currentIndex + direction) }
+											}) }}>
+										{direction < 0 ? '↑' : '↓'}</button>)}
 								<button
 									type="button"
-									onClick={() =>
-										setFormData((prev) => ({
+									onClick={() => { const ingredientId = collectionIds(formData.translationIdentities ?? [], ['ingredients'])[i]
+										setFormData((prev) => { const currentIndex = collectionIds(prev.translationIdentities ?? [], ['ingredients']).indexOf(ingredientId)
+											if (currentIndex < 0) return prev
+											return ({
 											...prev,
+											translationIdentities: removeCollectionIdentity(prev.translationIdentities ?? [], ['ingredients'], currentIndex),
 											ingredients:
-												prev.ingredients?.filter((_, idx) => idx !== i) || [],
-											ingredientsArText: prev.ingredientsArText.split('\n').filter((_, idx) => idx !== i).join('\n'),
-											ingredientsAr: prev.ingredients.map((_, index) => prev.ingredientsAr?.[index] ?? prev.ingredientsArText.split('\n')[index] ?? '').filter((_, idx) => idx !== i),
-										}))
-									}
+												prev.ingredients.filter((_, idx) => idx !== currentIndex),
+											ingredientsArText: prev.ingredientsArText.split('\n').filter((_, idx) => idx !== currentIndex).join('\n'),
+											ingredientsAr: prev.ingredients.map((_, index) => prev.ingredientsAr?.[index] ?? prev.ingredientsArText.split('\n')[index] ?? '').filter((_, idx) => idx !== currentIndex),
+										}) })
+									} }
 									className="hover:opacity-70"
 								>
 									<X size={12} />
@@ -1666,11 +1679,13 @@ export function ProductForm({
 							label={`ماده اولیه ${index + 1}`} faReference={ingredient}
 							translation={translation.field(['ingredients', index])}
 							value={formData.ingredientsAr?.[index] ?? formData.ingredientsArText.split('\n')[index] ?? ''}
-							onChange={value => setFormData(previous => {
+							onChange={value => { const ingredientId = collectionIds(formData.translationIdentities ?? [], ['ingredients'])[index]; setFormData(previous => {
+								const currentIndex = collectionIds(previous.translationIdentities ?? [], ['ingredients']).indexOf(ingredientId)
+								if (currentIndex < 0) return previous
 								const arabic = previous.ingredients.map((_, item) => previous.ingredientsAr?.[item] ?? previous.ingredientsArText.split('\n')[item] ?? '')
-								arabic[index] = value
+								arabic[currentIndex] = value
 								return { ...previous, ingredientsAr: arabic, ingredientsArText: arabic.join('\n') }
-							})} />)}
+							}) }} />)}
 					</div>
 				</div>
 

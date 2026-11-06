@@ -8,6 +8,10 @@ export type ContentEntityType =
 export type ContentTranslationStatus = 'missing' | 'translated' | 'needs-retranslation' | 'needs-review'
 export type ContentTranslationOrigin = 'manual' | 'automatic' | 'legacy'
 export type ContentFieldPath = (string | number)[]
+export interface ContentCollectionIdentity {
+	collectionPath: ContentFieldPath
+	itemIds: string[]
+}
 export interface ContentTranslationFieldState {
 	fieldId: string
 	fieldPath: ContentFieldPath
@@ -24,6 +28,12 @@ export interface ContentTranslationState {
 	entityType: ContentEntityType
 	entityId: string
 	fields: ContentTranslationFieldState[]
+	/** Ordered source identities, persisted in the existing provenance sidecar. */
+	collections?: ContentCollectionIdentity[]
+	/** Advances on every accepted write, including metadata-only and empty saves. */
+	writeRevision?: number
+	/** Removed source identities cannot later be claimed by replacement entries. */
+	retiredItemIds?: string[]
 	/** Recoverable removed/ambiguous drafts, bounded to 1,000 entries and two million text characters. */
 	orphanedFields?: (ContentTranslationFieldState & { value: string })[]
 }
@@ -83,78 +93,148 @@ function states(row: unknown, type?: ContentEntityType): ContentTranslationField
 		&& Number.isSafeInteger(field.revision) && Number(field.revision) >= 0)
 }
 
-/** Match exact unique text before positions; ambiguous duplicates never inherit a different item's Arabic. */
-function entries(values: string[], old: ContentTranslationFieldState[], prefix: string): string[] {
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const pathKey = (path: ContentFieldPath) => JSON.stringify(path)
+function collectionPaths(type: ContentEntityType, row: unknown): ContentFieldPath[] {
+	if (type === 'product') return [['ingredients']]
+	if (type === 'category') return [['sizeNames']]
+	const key = type === 'terms' ? 'sections' : type === 'article' ? 'processes' : null
+	if (!key) return []
+	return [[key], ...array(record(row) ? row[key] : undefined).map((_section, index) => [key, index, 'items'])]
+}
+function storedCollections(row: unknown): ContentCollectionIdentity[] {
+	const state = record(row) ? row.translationState : undefined
+	return record(state) && Array.isArray(state.collections) ? state.collections.filter((entry): entry is ContentCollectionIdentity =>
+		record(entry) && Array.isArray(entry.collectionPath) && entry.collectionPath.length > 0
+		&& entry.collectionPath.every(key => typeof key === 'string' || Number.isInteger(key) && Number(key) >= 0)
+		&& Array.isArray(entry.itemIds) && entry.itemIds.every(id => typeof id === 'string')) : []
+}
+function collectionPrefix(path: ContentFieldPath, collections: ContentCollectionIdentity[]): string {
+	if (path.length === 1) return String(path[0])
+	return `${collections.find(entry => samePath(entry.collectionPath, [String(path[0])]))?.itemIds[Number(path[1])]}:items`
+}
+/** New source entries receive an identity before their text can be edited or translated. */
+export function createContentCollectionItemId(prefix: string): string {
+	return `${prefix}:${crypto.randomUUID()}`
+}
+/** Safe legacy bootstrap: use a saved path only while its exact source binding still matches. */
+export function collectionTranslationIdentities(type: ContentEntityType, row: unknown): ContentCollectionIdentity[] {
+	const result: ContentCollectionIdentity[] = []
+	const saved = storedCollections(row)
+	const fields = states(row, type)
 	const used = new Set<string>()
-	const counts = (texts: string[]) => {
-		const map = new Map<string, number>()
-		for (const text of texts) map.set(text, (map.get(text) ?? 0) + 1)
-		return map
+	for (const path of collectionPaths(type, row)) {
+		const values = array(at(row, path))
+		const prefix = collectionPrefix(path, result)
+		const stored = saved.find(entry => samePath(entry.collectionPath, path))
+		const itemIds = values.map((value, index) => {
+			const fieldPath = path.length === 1 && (path[0] === 'sections' || path[0] === 'processes')
+				? [...path, index, 'title'] : [...path, index]
+			const sourceText = fieldPath.at(-1) === 'title' ? record(value) ? string(value.title) : '' : string(value)
+			const exact = fields.find(field => samePath(field.fieldPath, fieldPath) && field.sourceText === sourceText && field.fieldId.startsWith(`${prefix}:`))
+			let id = stored?.itemIds.length === values.length ? stored.itemIds[index] : exact?.fieldId
+			if (!id || !id.startsWith(`${prefix}:`) || used.has(id)) {
+				const oldAtPath = fields.some(field => samePath(field.fieldPath, fieldPath))
+				id = oldAtPath ? `${prefix}:legacy-${contentSourceFingerprint(JSON.stringify([fieldPath, sourceText])).slice(0, 24)}` : `${prefix}:${index}`
+			}
+			used.add(id)
+			return id
+		})
+		result.push({ collectionPath: [...path], itemIds })
 	}
-	const previousCounts = counts(old.map(field => field.sourceText))
-	const nextCounts = counts(values)
-	const ids: (string | undefined)[] = values.map(text => {
-		if (previousCounts.get(text) !== 1 || nextCounts.get(text) !== 1) return undefined
-		const match = old.find(field => field.sourceText === text)
-		if (!match) return undefined
-		used.add(match.fieldId)
-		return match.fieldId
-	})
-	// An unchanged duplicate slot is safe only if the complete collection keeps its shape.
-	const unchanged = old.length === values.length && old.every((field, index) => field.sourceText === values[index])
-	for (let index = 0; index < ids.length; index++) {
-		if (ids[index]) continue
-		const before = old[index]
-		const text = values[index] ?? ''
-		const canRetain = before && !used.has(before.fieldId) && (unchanged
-			|| old.length === values.length && previousCounts.get(before.sourceText) === 1 && nextCounts.get(text) === 1)
-		let id = canRetain ? before.fieldId : `${prefix}:${index}`
-		if (!canRetain && (used.has(id) || old.some(field => field.fieldId === id))) id = `${prefix}:${crypto.randomUUID()}`
-		used.add(id)
-		ids[index] = id
+	return result
+}
+/** Validate the complete ordered projection; unrelated paths, collisions and retired IDs are rejected. */
+export function assertContentTranslationIdentities(type: ContentEntityType, row: unknown, input: unknown, previous?: unknown): input is ContentCollectionIdentity[] {
+	if (!Array.isArray(input)) return false
+	const expected = collectionPaths(type, row)
+	if (input.length !== expected.length) return false
+	const previousCollections = collectionTranslationIdentities(type, previous)
+	const currentIds = new Set(previousCollections.flatMap(entry => entry.itemIds))
+	const previousState = record(previous) && record(previous.translationState) ? previous.translationState : undefined
+	const retired = new Set([...array(previousState?.retiredItemIds).map(string),
+		...array(previousState?.orphanedFields).filter(record).map(field => string(field.fieldId))])
+	const used = new Set<string>(), paths = new Set<string>()
+	const validated: ContentCollectionIdentity[] = []
+	// Parents are validated first so child ownership is tied to the submitted stable parent ID.
+	for (const path of expected) {
+		const matches = input.filter(entry => record(entry) && Array.isArray(entry.collectionPath) && samePath(entry.collectionPath, path))
+		const entry = matches[0]
+		if (matches.length !== 1 || !record(entry) || !Array.isArray(entry.itemIds) || entry.itemIds.length !== array(at(row, path)).length) return false
+		const prefix = collectionPrefix(path, validated)
+		for (const id of entry.itemIds) {
+			if (typeof id !== 'string' || id.length > 256 || !id.startsWith(`${prefix}:`) || used.has(id) || retired.has(id)) return false
+			if (!currentIds.has(id) && !uuid.test(id.slice(prefix.length + 1))) return false
+			used.add(id)
+		}
+		const key = pathKey(path)
+		if (paths.has(key)) return false
+		paths.add(key)
+		validated.push({ collectionPath: [...path], itemIds: [...entry.itemIds] })
 	}
-	return ids as string[]
+	return true
+}
+/** Draft-only projection; persisted translation states are always rebuilt by the server. */
+export function withContentTranslationIdentities<T extends object>(_type: ContentEntityType, row: T, identities: ContentCollectionIdentity[]): T & { translationIdentities: ContentCollectionIdentity[] } {
+	const out = structuredClone(row) as Row
+	out.translationIdentities = structuredClone(identities)
+	const state = record(out.translationState) ? out.translationState : {}
+	out.translationState = { ...state, collections: structuredClone(identities) }
+	return out as T & { translationIdentities: ContentCollectionIdentity[] }
+}
+function resolvedCollections(type: ContentEntityType, next: unknown, previous?: unknown, input?: unknown): ContentCollectionIdentity[] {
+	const explicit = input ?? (record(next) ? next.translationIdentities : undefined)
+	if (explicit !== undefined) {
+		if (!assertContentTranslationIdentities(type, next, explicit, previous)) throw new Error('Invalid translation collection identities')
+		return structuredClone(explicit)
+	}
+	if (!previous) {
+		if (states(next, type).length || storedCollections(next).length) return collectionTranslationIdentities(type, next)
+		const created: ContentCollectionIdentity[] = []
+		for (const path of collectionPaths(type, next)) created.push({ collectionPath: [...path],
+			itemIds: array(at(next, path)).map(() => createContentCollectionItemId(collectionPrefix(path, created))) })
+		return created
+	}
+	const old = collectionTranslationIdentities(type, previous), result: ContentCollectionIdentity[] = []
+	for (const path of collectionPaths(type, next)) {
+		const prefix = collectionPrefix(path, result)
+		const parent = path.length > 1 ? result.find(entry => samePath(entry.collectionPath, [String(path[0])]))?.itemIds[Number(path[1])] : undefined
+		const priorParent = path.length > 1 ? old.find(entry => samePath(entry.collectionPath, [String(path[0])]))?.itemIds[Number(path[1])] : undefined
+		const before = old.find(entry => samePath(entry.collectionPath, path))
+		const unchanged = JSON.stringify(at(next, path)) === JSON.stringify(at(previous, path)) && parent === priorParent
+		result.push({ collectionPath: [...path], itemIds: unchanged && before ? [...before.itemIds]
+			: array(at(next, path)).map(() => createContentCollectionItemId(prefix)) })
+	}
+	return result
 }
 
-function definitions(type: ContentEntityType, input: unknown, previous?: unknown): FieldDefinition[] {
+function definitions(type: ContentEntityType, input: unknown, previous?: unknown, identities?: ContentCollectionIdentity[]): FieldDefinition[] {
 	const row = record(input) ? input : {}
-	const old = states(previous ?? input, type)
+	const collections = identities ?? resolvedCollections(type, input, previous ?? input)
 	const result: FieldDefinition[] = []
 	const scalar = (path: ContentFieldPath, arabicPath: ContentFieldPath, maxLength: number) => {
 		result.push({ fieldId: path.join('.'), fieldPath: path, arabicPath, sourceText: string(at(row, path)), maxLength })
 	}
-	const list = (path: ContentFieldPath, arabicPath: ContentFieldPath, prefix: string, maxLength: number) => {
+	const list = (path: ContentFieldPath, arabicPath: ContentFieldPath, maxLength: number) => {
 		const values = array(at(row, path)).map(string)
-		const before = old.filter(field => field.fieldId.startsWith(`${prefix}:`) && field.fieldPath.length === path.length + 1)
-			.sort((a, b) => Number(a.fieldPath.at(-1)) - Number(b.fieldPath.at(-1)))
-		const ids = entries(values, before, prefix)
+		const ids = collections.find(entry => samePath(entry.collectionPath, path))?.itemIds ?? []
 		values.forEach((text, index) => {
-			result.push({ fieldId: ids[index] ?? `${prefix}:${index}`, fieldPath: [...path, index], arabicPath: [...arabicPath, index], sourceText: text, maxLength })
+			result.push({ fieldId: ids[index] ?? `${collectionPrefix(path, collections)}:${index}`, fieldPath: [...path, index], arabicPath: [...arabicPath, index], sourceText: text, maxLength })
 		})
 	}
 	const sections = (key: 'sections' | 'processes') => {
 		const sections = array(row[key])
-		const oldTitles = old.filter(field => field.fieldId.startsWith(`${key}:`) && field.fieldPath.at(-1) === 'title')
-			.sort((a, b) => Number(a.fieldPath[1]) - Number(b.fieldPath[1]))
-		const titles = sections.map(section => record(section) ? string(section.title) : '')
-		const duplicates = new Set([...titles, ...oldTitles.map(field => field.sourceText)].filter(title =>
-			titles.filter(text => text === title).length > 1 || oldTitles.filter(field => field.sourceText === title).length > 1))
-		const identity = (title: string, section: unknown) => duplicates.has(title)
-			? JSON.stringify([title, array(record(section) ? section.items : undefined).map(string)]) : title
-		const previousRow = previous ?? input
-		const previousSections = record(previousRow) ? array(previousRow[key]) : []
-		const identities = oldTitles.map(field => ({ ...field, sourceText: identity(field.sourceText, previousSections[Number(field.fieldPath[1])]) }))
-		const ids = entries(sections.map((section, index) => identity(titles[index] ?? '', section)), identities, key)
+		const ids = collections.find(entry => samePath(entry.collectionPath, [key]))?.itemIds ?? []
 		sections.forEach((section, index) => {
 			const id = ids[index] ?? `${key}:${index}`
 			result.push({ fieldId: id, fieldPath: [key, index, 'title'], arabicPath: [`${key}Ar`, index, 'title'], sourceText: record(section) ? string(section.title) : '', maxLength: key === 'sections' ? 200 : 120 })
-			list([key, index, 'items'], [`${key}Ar`, index, 'items'], `${id}:items`, key === 'sections' ? 1000 : 300)
+			list([key, index, 'items'], [`${key}Ar`, index, 'items'], key === 'sections' ? 1000 : 300)
 		})
 	}
 	switch (type) {
-		case 'product': scalar(['name'], ['nameAr'], 120); scalar(['description'], ['descriptionAr'], 2000); list(['ingredients'], ['ingredientsAr'], 'ingredients', 60); break
+		case 'product': scalar(['name'], ['nameAr'], 120); scalar(['description'], ['descriptionAr'], 2000); list(['ingredients'], ['ingredientsAr'], 60); break
 		case 'productSize': case 'mainCategory': case 'articleCategory': case 'articleSubCategory': scalar(['name'], ['nameAr'], 60); break
-		case 'category': scalar(['name'], ['nameAr'], 60); list(['sizeNames'], ['sizeNamesAr'], 'sizeNames', 40); break
+		case 'category': scalar(['name'], ['nameAr'], 60); list(['sizeNames'], ['sizeNamesAr'], 40); break
 		case 'article': scalar(['title'], ['titleAr'], 160); scalar(['excerpt'], ['excerptAr'], 1000); scalar(['content'], ['contentAr'], 100000); sections('processes'); break
 		case 'about': scalar(['heroTitle'], ['heroTitleAr'], 120); scalar(['heroText'], ['heroTextAr'], 2000); scalar(['teamTitle'], ['teamTitleAr'], 120); scalar(['teamAlt'], ['teamAltAr'], 200); if (record(row.location)) scalar(['location', 'address'], ['location', 'addressAr'], 500); break
 		case 'terms': sections('sections'); break
@@ -171,8 +251,8 @@ export function contentTranslationFields(type: ContentEntityType, row: unknown):
 	const hasState = record(row) && row.translationState !== undefined && row.translationState !== null
 	return definitions(type, row).map(field => {
 		const state = proof.get(field.fieldId)
-		const raw = at(row, field.arabicPath)
-		const changed = state && (state.sourceText !== field.sourceText || !samePath(state.fieldPath, field.fieldPath))
+		const raw = at(row, state ? field.arabicPath.map((key, index) => typeof field.fieldPath[index] === 'number' ? state.fieldPath[index] ?? key : key) : field.arabicPath)
+		const changed = state && state.sourceText !== field.sourceText
 		const origin = state?.origin ?? (filled(raw) ? 'legacy' : 'automatic')
 		const status: ContentTranslationStatus = changed ? origin === 'automatic' ? 'needs-retranslation' : 'needs-review'
 			: state?.status ?? (filled(raw) ? hasState ? 'needs-review' : 'translated' : 'missing')
@@ -187,6 +267,7 @@ export function contentTranslationFields(type: ContentEntityType, row: unknown):
 /** The result never writes Persian/structural properties. Pass the next complete source row under its DB row lock. */
 export function reconcileContentTranslation<T extends object>(
 	type: ContentEntityType, entityId: string, previous: T | null | undefined, next: T, edits: TranslationEdit[] = [],
+	identities?: ContentCollectionIdentity[],
 ): T & { translationState: ContentTranslationState } {
 	const out = structuredClone(next) as Row
 	// Legacy arrays gain exact source identities before matching a reordered next document.
@@ -197,6 +278,7 @@ export function reconcileContentTranslation<T extends object>(
 		...previous,
 		translationState: {
 			version: 1, entityType: type, entityId: record(previous) && previous.id !== undefined ? String(previous.id) : entityId,
+			collections: collectionTranslationIdentities(type, previous),
 			fields: definitions(type, previous).map(field => previousState.get(field.fieldId) ?? {
 				fieldId: field.fieldId, fieldPath: field.fieldPath, sourceText: field.sourceText,
 				origin: filled(at(previous, field.arabicPath)) ? 'legacy' : 'automatic',
@@ -210,36 +292,17 @@ export function reconcileContentTranslation<T extends object>(
 	const proofById = new Map(edits.map(edit => [edit.fieldId, edit]))
 	// Database UUIDs are canonicalized by PostgreSQL; bind to the actual row identity.
 	// A valid uppercase URL parameter must not invalidate every unrelated field.
-	const state: ContentTranslationState = { version: 1, entityType: type, entityId: out.id !== undefined ? String(out.id) : entityId, fields: [] }
-	const nextDefinitions = definitions(type, next, boundPrevious ?? next)
-	for (const original of nextDefinitions) {
-		let field = original
-		const collection = field.fieldPath[0]
-		const nestedItems = (collection === 'sections' || collection === 'processes') && field.fieldPath[2] === 'items'
-		const parent = nestedItems ? state.fields.find(entry => samePath(entry.fieldPath, [collection, field.fieldPath[1] as number, 'title'])) : undefined
-		if (parent) {
-			const itemMarker = field.fieldId.lastIndexOf(':items:')
-			if (itemMarker >= 0) field = { ...field, fieldId: `${parent.fieldId}${field.fieldId.slice(itemMarker)}` }
-		}
-		if (field.fieldPath.some(key => typeof key === 'number') && !beforeById.has(field.fieldId)) {
-			const proposed = edits.find(edit => samePath(edit.fieldPath, field.fieldPath) && edit.sourceText === field.sourceText && !beforeById.has(edit.fieldId))
-			const prefix = collection === 'ingredients' ? 'ingredients:' : collection === 'sizeNames' ? 'sizeNames:'
-				: nestedItems ? parent ? `${parent.fieldId}:items:` : null
-					: collection === 'sections' ? 'sections:' : collection === 'processes' ? 'processes:' : null
-			if (proposed && prefix && proposed.fieldId.startsWith(prefix)
-				&& !state.fields.some(entry => entry.fieldId === proposed.fieldId)
-				&& !nextDefinitions.some(candidate => candidate !== original && candidate.fieldId === proposed.fieldId)) field = { ...field, fieldId: proposed.fieldId }
-		}
-		original.fieldId = field.fieldId
-		if ((collection === 'sections' || collection === 'processes') && field.fieldPath.at(-1) === 'title') {
-			// Reserve every child ID in the resolved namespace before accepting an item proof.
-			// Otherwise an early item could claim a later sibling's rebased generated identity.
-			for (const candidate of nextDefinitions) {
-				if (candidate.fieldPath[0] !== collection || candidate.fieldPath[1] !== field.fieldPath[1] || candidate.fieldPath[2] !== 'items') continue
-				const itemMarker = candidate.fieldId.lastIndexOf(':items:')
-				if (itemMarker >= 0) candidate.fieldId = `${field.fieldId}${candidate.fieldId.slice(itemMarker)}`
-			}
-		}
+	const previousSidecar = record(previous) && record(previous.translationState) ? previous.translationState : undefined
+	const writeRevision = Number.isSafeInteger(previousSidecar?.writeRevision) && Number(previousSidecar?.writeRevision) >= 0 ? Number(previousSidecar?.writeRevision) : 0
+	if (writeRevision >= Number.MAX_SAFE_INTEGER) throw new Error('Content write revision exhausted')
+	const collections = resolvedCollections(type, next, previous, identities)
+	const activeItemIds = new Set(collections.flatMap(entry => entry.itemIds))
+	const retiredItemIds = [...new Set([...array(previousSidecar?.retiredItemIds).map(string),
+		...collectionTranslationIdentities(type, previous).flatMap(entry => entry.itemIds).filter(id => !activeItemIds.has(id))])].filter(Boolean)
+	const state: ContentTranslationState = { version: 1, entityType: type, entityId: out.id !== undefined ? String(out.id) : entityId,
+		fields: [], collections, writeRevision: writeRevision + 1, ...(retiredItemIds.length ? { retiredItemIds } : {}) }
+	const nextDefinitions = definitions(type, next, undefined, collections)
+	for (const field of nextDefinitions) {
 		const before = beforeById.get(field.fieldId)
 		const saved = oldState.get(field.fieldId)
 		const oldValue = before ? at(previous, before.arabicPath) : undefined
@@ -289,7 +352,7 @@ export function reconcileContentTranslation<T extends object>(
 		const saved = oldState.get(field.fieldId)
 		const value = at(previous, field.arabicPath)
 		const draft = filled(value) ? value : saved?.staleValue
-		if (saved && filled(draft)) archived.push({ ...saved, value: draft })
+		if (saved && filled(draft)) archived.push({ ...saved, status: 'needs-review', value: draft })
 	}
 	// Legacy documents may contain Arabic placeholders beyond their source shape.
 	// Keep that content recoverable while exposing only fields that actually exist in Persian.
@@ -339,6 +402,7 @@ export function reconcileContentTranslation<T extends object>(
 		})) : null
 	}
 	out.translationState = state
+	delete out.translationIdentities
 	return out as T & { translationState: ContentTranslationState }
 }
 
@@ -363,21 +427,33 @@ export function eligibleContentTranslationFields(type: ContentEntityType, row: u
 		&& !(type === 'article' && record(row) && row.blocks && field.fieldId === 'content'))
 }
 
-/** Only source identity and Arabic revisions participate; structural block edits also fence draft saves. */
+function canonicalRevisionValue(value: unknown): unknown {
+	if (value instanceof Date) return value.toISOString()
+	if (Array.isArray(value)) return value.map(canonicalRevisionValue)
+	if (record(value)) return Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined)
+		.map(key => [key, canonicalRevisionValue(value[key])]))
+	return value
+}
+/** Fence the complete saved source structure and every accepted write, including metadata-only changes. */
 function contentSourceRevisionPayload(type: ContentEntityType, row: unknown): string {
-	const proof = new Map(states(row, type).map(field => [field.fieldId, field]))
-	return JSON.stringify([definitions(type, row).map(field => [field.fieldId, field.fieldPath, field.sourceText, proof.get(field.fieldId)?.revision ?? 0]),
-		(type === 'article' || type === 'about') && record(row) ? row.blocks ?? null : null,
-		(type === 'article' || type === 'about') && record(row) && record(row.blocksAr) ? row.blocksAr.translation ?? null : null])
+	const source = record(row) ? { ...row } : row
+	if (record(source)) {
+		delete source.sourceRevision
+		delete source.translationEdits
+		delete source.translationIdentities
+		// Public counters use their own trusted writes and never replace editable content.
+		if (type === 'product' || type === 'article') delete source.views
+		if (type === 'product') delete source.sales
+	}
+	return JSON.stringify(canonicalRevisionValue([type, source]))
 }
 /** A compact SHA-256 proof avoids duplicating large legacy documents in every admin save. */
 export function contentSourceRevision(type: ContentEntityType, row: unknown): string {
 	return `sha256:${contentSourceFingerprint(contentSourceRevisionPayload(type, row))}`
 }
-export function matchesContentSourceRevision(type: ContentEntityType, row: unknown, revision?: string): boolean {
-	if (revision === undefined) return true
-	return revision.startsWith('sha256:') ? revision === contentSourceRevision(type, row) : revision === contentSourceRevisionPayload(type, row)
+export function matchesContentSourceRevision(type: ContentEntityType, row: unknown, revision?: unknown): boolean {
+	return typeof revision === 'string' && /^sha256:[0-9a-f]{64}$/.test(revision) && revision === contentSourceRevision(type, row)
 }
-export function assertContentSourceRevision(type: ContentEntityType, row: unknown, revision?: string): boolean {
+export function assertContentSourceRevision(type: ContentEntityType, row: unknown, revision?: unknown): boolean {
 	return matchesContentSourceRevision(type, row, revision)
 }

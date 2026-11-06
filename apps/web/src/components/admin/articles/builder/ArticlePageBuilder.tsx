@@ -18,6 +18,7 @@ import type {
 	ArticleBlocksDoc,
 } from '@sinshin/shared'
 import {
+	bindArticleBlockItemIdentities,
 	contrastRatio,
 	getArticleBlockTextFields,
 	readArticleBlockText,
@@ -263,30 +264,27 @@ function BlockFields({ block, patchProps }: FieldCtx) {
 							patchProps((props) => ({
 								images: [
 									...('images' in props ? props.images : []),
-									{ src: url },
+									{ id: crypto.randomUUID(), src: url },
 								],
 							}))
 						}
-						onRemove={(index) =>
-							patchProps({ images: images.filter((_, i) => i !== index) })
-						}
+						onRemove={(index) => {
+							const id = images[index]?.id
+							if (id) patchProps(props => ({ images: 'images' in props ? props.images.filter(image => image.id !== id) : [] }))
+						}}
 					/>
 					{images.length > 0 && (
 						<div className="space-y-1.5">
 							{images.map((im, i) => (
 								<input
-									// biome-ignore lint/suspicious/noArrayIndexKey: عکس تکراری مجاز است — ایندکس بخشی از یکتایی
-									key={`${im.src}-${i}`}
+									key={im.id}
 									className={inputCls}
 									placeholder={`متن جایگزین عکس ${i + 1} (اختیاری)`}
 									maxLength={200}
 									value={im.alt ?? ''}
 									onChange={(e) => {
-										const next = [...images]
-										next[i] = e.target.value
-											? { src: im.src, alt: e.target.value }
-											: { src: im.src }
-										patchProps({ images: next })
+										const alt = e.target.value
+										patchProps(props => ({ images: 'images' in props ? props.images.map(image => image.id === im.id ? { ...image, alt } : image) : [] }))
 									}}
 								/>
 							))}
@@ -349,22 +347,39 @@ function BlockFields({ block, patchProps }: FieldCtx) {
 			)
 		case 'list': {
 			const items = block.props.items ?? []
-			const itemsText = items.join('\n')
+			const itemIds = block.props.itemIds ?? []
+			const moveItem = (itemId: string | undefined, direction: number) => {
+				if (!itemId) return
+				patchProps(props => {
+					if (!('items' in props)) return {}
+					const nextItems = [...props.items], nextIds = [...(props.itemIds ?? [])]
+					const from = nextIds.indexOf(itemId), to = from + direction
+					if (from < 0 || to < 0 || to >= nextItems.length) return {}
+					const [text] = nextItems.splice(from, 1), [id] = nextIds.splice(from, 1)
+					if (text === undefined || id === undefined) return {}
+					nextItems.splice(to, 0, text); nextIds.splice(to, 0, id)
+					return { items: nextItems, itemIds: nextIds }
+				})
+			}
 			return (
 				<div className="space-y-2">
-					<textarea
-						className={cx(inputCls, 'resize-y min-h-18')}
-						placeholder={'هر خط = یک مورد…'}
-						value={itemsText}
-						onChange={(e) =>
-							patchProps({
-								items: e.target.value
-									.split('\n')
-									.map((l) => l.slice(0, 300))
-									.slice(0, 30),
-							})
-						}
-					/>
+					{items.map((text, index) => <div key={itemIds[index]} className="flex gap-1.5">
+						<input className={inputCls} aria-label={`مورد ${index + 1}`} maxLength={300} value={text}
+							onChange={event => {
+								const id = itemIds[index], text = event.target.value
+								if (id) patchProps(props => ({ items: 'items' in props ? props.items.map((value, position) => props.itemIds?.[position] === id ? text : value) : [] }))
+							}} />
+						<button type="button" aria-label="انتقال مورد به بالا" disabled={index === 0} onClick={() => moveItem(itemIds[index], -1)}><ArrowUp size={16} /></button>
+						<button type="button" aria-label="انتقال مورد به پایین" disabled={index === items.length - 1} onClick={() => moveItem(itemIds[index], 1)}><ArrowDown size={16} /></button>
+						<button type="button" aria-label="حذف مورد" onClick={() => {
+							const id = itemIds[index]
+							if (id) patchProps(props => 'items' in props ? { items: props.items.filter((_, position) => props.itemIds?.[position] !== id), itemIds: props.itemIds?.filter(itemId => itemId !== id) } : {})
+						}}><Trash2 size={16} /></button>
+					</div>)}
+					<button type="button" className={inputCls} disabled={items.length >= 30} onClick={() => {
+						const id = crypto.randomUUID()
+						patchProps(props => 'items' in props && props.items.length < 30 ? { items: [...props.items, ''], itemIds: [...(props.itemIds ?? []), id] } : {})
+					}}>افزودن مورد</button>
 					<div className="flex gap-1.5">
 						<Pill
 							active={!block.props.ordered}
@@ -749,7 +764,7 @@ function BlockSettings({
 // ═══════════════ ادیتورِ اصلی ═══════════════
 
 export function ArticlePageBuilder({
-	doc,
+	doc: sourceDoc,
 	onChange,
 	requireText = true,
 	docAr,
@@ -759,6 +774,7 @@ export function ArticlePageBuilder({
 	initialDoc,
 	initialDocAr,
 }: BuilderProps) {
+	const doc = useMemo(() => bindArticleBlockItemIdentities(sourceDoc), [sourceDoc])
 	const showToast = useToastStore((s) => s.showToast)
 	// Upload callbacks can resolve after other edits or a block reorder.
 	const docRef = useRef(doc)
@@ -825,56 +841,65 @@ export function ArticlePageBuilder({
 
 	const addBlock = useCallback(
 		(type: ArticleBlock['type']) => {
-			if (doc.blocks.length >= 200) {
+			const current = docRef.current
+			if (current.blocks.length >= 200) {
 				showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error')
 				return
 			}
 			pushHistory()
 			const block = makeBlock(type)
-			const selectedIndex = doc.blocks.findIndex((b) => b.id === selectedId)
-			const at = selectedIndex >= 0 ? selectedIndex + 1 : doc.blocks.length
-			const blocks = [...doc.blocks]
+			const selectedIndex = current.blocks.findIndex((b) => b.id === selectedId)
+			const at = selectedIndex >= 0 ? selectedIndex + 1 : current.blocks.length
+			const blocks = [...current.blocks]
 			blocks.splice(Math.max(at, 0), 0, block)
-			commitDoc({ ...doc, blocks })
+			commitDoc({ ...current, blocks })
 			setSelectedId(block.id)
 			if (type !== 'hero' && type !== 'divider') setPaletteOpen(false)
 		},
-		[doc, commitDoc, pushHistory, selectedId, showToast],
+		[commitDoc, pushHistory, selectedId, showToast],
 	)
 
 	const removeBlock = useCallback(
-		(index: number) => {
+		(id: string) => {
+			const current = docRef.current
+			if (!current.blocks.some(block => block.id === id)) return
 			pushHistory()
-			const blocks = doc.blocks.filter((_, i) => i !== index)
+			const blocks = current.blocks.filter(block => block.id !== id)
 			commitDoc({
-				...doc,
+				...current,
 				blocks: blocks.length > 0 ? blocks : emptyDoc().blocks,
 			})
 		},
-		[doc, commitDoc, pushHistory],
+		[commitDoc, pushHistory],
 	)
 
 	const move = useCallback(
-		(from: number, to: number) => {
-			const next = moveBlock(doc, from, to)
-			if (next !== doc) {
+		(id: string, direction: number) => {
+			const current = docRef.current
+			const from = current.blocks.findIndex(block => block.id === id)
+			if (from < 0) return
+			const next = moveBlock(current, from, from + direction)
+			if (next !== current) {
 				pushHistory()
 				commitDoc(next)
 			}
 		},
-		[doc, commitDoc, pushHistory],
+		[commitDoc, pushHistory],
 	)
 
 	const duplicate = useCallback(
-		(index: number) => {
-			if (doc.blocks.length >= 200) {
+		(id: string) => {
+			const current = docRef.current
+			const index = current.blocks.findIndex(block => block.id === id)
+			if (index < 0) return
+			if (current.blocks.length >= 200) {
 				showToast('حداکثر ۲۰۰ بلوک مجاز است', 'error')
 				return
 			}
 			pushHistory()
-			commitDoc(duplicateBlock(doc, index))
+			commitDoc(duplicateBlock(current, index))
 		},
-		[doc, commitDoc, pushHistory, showToast],
+		[commitDoc, pushHistory, showToast],
 	)
 
 	const patchProps = useCallback(
@@ -896,10 +921,12 @@ export function ArticlePageBuilder({
 	)
 
 	const patchStyle = useCallback(
-		(index: number, patch: Partial<ArticleBlockStyle>) => {
+		(id: string, patch: Partial<ArticleBlockStyle>) => {
+			const current = docRef.current
+			if (!current.blocks.some(block => block.id === id)) return
 			pushHistory()
-			const blocks = doc.blocks.map((b, i) => {
-				if (i !== index) return b
+			const blocks = current.blocks.map((b) => {
+				if (b.id !== id) return b
 				const style = { ...(b.style ?? {}), ...patch }
 				// undefined ها را پاک کن (حذف رنگ/متن دستی)
 				for (const k of Object.keys(style) as (keyof ArticleBlockStyle)[]) {
@@ -910,30 +937,34 @@ export function ArticlePageBuilder({
 					style: Object.keys(style).length > 0 ? style : undefined,
 				}
 			})
-			commitDoc({ ...doc, blocks })
+			commitDoc({ ...current, blocks })
 		},
-		[doc, commitDoc, pushHistory],
+		[commitDoc, pushHistory],
 	)
 
 	const setWidth = useCallback(
-		(index: number, width: ArticleBlock['width']) => {
+		(id: string, width: ArticleBlock['width']) => {
+			const current = docRef.current
+			if (!current.blocks.some(block => block.id === id)) return
 			pushHistory()
 			commitDoc({
-				...doc,
-				blocks: doc.blocks.map((b, i) => (i === index ? { ...b, width } : b)),
+				...current,
+				blocks: current.blocks.map((b) => (b.id === id ? { ...b, width } : b)),
 			})
 		},
-		[doc, commitDoc, pushHistory],
+		[commitDoc, pushHistory],
 	)
 	const setAnim = useCallback(
-		(index: number, anim: ArticleBlock['anim']) => {
+		(id: string, anim: ArticleBlock['anim']) => {
+			const current = docRef.current
+			if (!current.blocks.some(block => block.id === id)) return
 			pushHistory()
 			commitDoc({
-				...doc,
-				blocks: doc.blocks.map((b, i) => (i === index ? { ...b, anim } : b)),
+				...current,
+				blocks: current.blocks.map((b) => (b.id === id ? { ...b, anim } : b)),
 			})
 		},
-		[doc, commitDoc, pushHistory],
+		[commitDoc, pushHistory],
 	)
 
 	// ── DnD handlers (پاک‌سازی در dragend — درسِ تحقیق #۲) ──
@@ -965,12 +996,16 @@ export function ArticlePageBuilder({
 			const to = dropIndex
 			onHandleDragEnd()
 			if (!dragId || to === null) return
-			const from = doc.blocks.findIndex((b) => b.id === dragId)
+			const current = docRef.current
+			const from = current.blocks.findIndex((b) => b.id === dragId)
 			if (from < 0) return
+			const anchor = doc.blocks[to]?.id
+			const destination = anchor ? current.blocks.findIndex(block => block.id === anchor) : current.blocks.length
+			if (destination < 0) return
 			// جایگاهِ پس از حذفِ خودش اصلاح می‌شود
-			const adjusted = from < to ? to - 1 : to
+			const adjusted = from < destination ? destination - 1 : destination
 			if (adjusted === from) return
-			move(from, adjusted)
+			move(dragId, adjusted - from)
 		},
 		[doc.blocks, dropIndex, move, onHandleDragEnd],
 	)
@@ -1162,7 +1197,7 @@ export function ArticlePageBuilder({
 										type="button"
 										aria-label="انتقال به بالا"
 										disabled={index === 0}
-										onClick={() => move(index, index - 1)}
+										onClick={() => move(block.id, -1)}
 										className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1a0a0e] cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
 									>
 										<ArrowUp />
@@ -1171,7 +1206,7 @@ export function ArticlePageBuilder({
 										type="button"
 										aria-label="انتقال به پایین"
 										disabled={index === doc.blocks.length - 1}
-										onClick={() => move(index, index + 1)}
+										onClick={() => move(block.id, 1)}
 										className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1a0a0e] cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
 									>
 										<ArrowDown />
@@ -1180,7 +1215,7 @@ export function ArticlePageBuilder({
 										type="button"
 										aria-label="دوبل‌کردن بلوک"
 										title="دوبل‌کردن (با شناسه‌ی تازه)"
-										onClick={() => duplicate(index)}
+										onClick={() => duplicate(block.id)}
 										className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1a0a0e] cursor-pointer"
 									>
 										<Copy />
@@ -1188,7 +1223,7 @@ export function ArticlePageBuilder({
 									<button
 										type="button"
 										aria-label="حذف بلوک"
-										onClick={() => removeBlock(index)}
+										onClick={() => removeBlock(block.id)}
 										className="p-1.5 rounded-md text-gray-400 hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-400 cursor-pointer"
 									>
 										<Trash2 />
@@ -1263,10 +1298,10 @@ export function ArticlePageBuilder({
 												&& JSON.stringify(state.fieldPath) === JSON.stringify(field.path))
 											const progress = arabic.fieldState(block.id, field.path)
 											const fieldError = progress.error ?? proof?.error
-											const fieldId = `ar-${encodeURIComponent(block.id)}-${field.path.join('-')}`
+											const fieldId = `ar-${encodeURIComponent(block.id)}-${field.itemId ?? field.path.join('-')}`
 											return (
 												<div
-													key={JSON.stringify(field.path)}
+													key={field.itemId ?? JSON.stringify(field.path)}
 													data-arabic-field={JSON.stringify(field.path)}
 													data-arabic-status={status}
 													className="block my-3 text-xs text-gray-600 dark:text-gray-300"
@@ -1298,7 +1333,7 @@ export function ArticlePageBuilder({
 																!field.text.trim()
 															}
 															onClick={() =>
-																void arabic.translate(block.id, field.path)
+																void arabic.translate(block.id, field.path, field.itemId)
 															}
 															className="px-2 py-1 rounded-md border cursor-pointer disabled:opacity-50"
 														>
@@ -1322,14 +1357,14 @@ export function ArticlePageBuilder({
 														value={readArticleBlockText(translated, field.path)}
 														className={inputCls}
 														onChange={(e) =>
-															arabic.edit(block.id, field.path, e.target.value)
+															arabic.edit(block.id, field.path, e.target.value, field.itemId)
 														}
 														placeholder="خالی = نمایش متن فارسی"
 													/>
 													{status === 'needs-retranslation' && proof?.staleValue && (
 														<div className="mt-2 text-amber-600 whitespace-pre-line">
 															<p>پیش‌نویس ترجمه قبلی: {proof.staleValue}</p>
-															<button type="button" className="underline cursor-pointer" onClick={() => arabic.edit(block.id, field.path, proof.staleValue ?? '')}>
+															<button type="button" className="underline cursor-pointer" onClick={() => arabic.edit(block.id, field.path, proof.staleValue ?? '', field.itemId)}>
 																بازبینی و استفاده از این پیش‌نویس
 															</button>
 														</div>
@@ -1349,9 +1384,9 @@ export function ArticlePageBuilder({
 								{settingsId === block.id && (
 									<BlockSettings
 										block={block}
-										patchStyle={(patch) => patchStyle(index, patch)}
-										onWidth={(w) => setWidth(index, w)}
-										onAnim={(a) => setAnim(index, a)}
+										patchStyle={(patch) => patchStyle(block.id, patch)}
+										onWidth={(w) => setWidth(block.id, w)}
+										onAnim={(a) => setAnim(block.id, a)}
 									/>
 								)}
 							</article>

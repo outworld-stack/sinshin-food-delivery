@@ -50,6 +50,7 @@ import type {
   TranslationStatusDto,
 } from '@sinshin/shared'
 import {
+  articleBlocksContentForLimit,
   getArticleBlockTextFields,
   isArticleBlockTextPath,
   normalizeArticleBlocksTranslation,
@@ -174,7 +175,7 @@ export class TranslationService {
     if (!source || source.version !== 1 || !Array.isArray(source.blocks) || source.blocks.length > 200) {
       throw Err.validation('سند بلوکی مقاله معتبر نیست.')
     }
-    if (Buffer.byteLength(JSON.stringify(source), 'utf8') > 262_144) {
+    if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit(source)), 'utf8') > 262_144) {
       throw Err.validation('حجم محتوای بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
     }
     if (input.blockId !== undefined && !source.blocks.some(block => block?.id === input.blockId)) {
@@ -201,10 +202,10 @@ export class TranslationService {
         ...field, text: translations[index]?.trim() ?? '',
       })), 'automatic') ?? out
     }
-    if (Buffer.byteLength(JSON.stringify({ version: out.version, blocks: out.blocks }), 'utf8') > 262_144) {
+    if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit({ version: out.version, blocks: out.blocks })), 'utf8') > 262_144) {
       throw Err.validation('حجم ترجمه‌ی بلوکی مقاله نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
     }
-    if (Buffer.byteLength(JSON.stringify(out), 'utf8') > 2_097_152) {
+    if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit(out)), 'utf8') > 2_097_152) {
       throw Err.validation('حجم سند ترجمه و وضعیت فیلدهای آن نباید بیشتر از ۲ مگابایت باشد.')
     }
     return out

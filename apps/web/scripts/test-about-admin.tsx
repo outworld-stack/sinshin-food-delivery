@@ -377,6 +377,7 @@ for (const [language, block] of [
 // succeeds. Subsequent edits must use its newer field revisions, not old proof.
 const lifecycleHost = freshHost()
 let serverContent = { ...reconcileContentTranslation('about', '1', null, initial), updatedAt: initial.updatedAt } as AboutContent
+serverContent.sourceRevision = contentSourceRevision('about', serverContent)
 const lifecycleSaves: AboutContentInput[] = []
 const renderLifecycle = () => render(lifecycleHost, AboutContentForm, {
 	initialData: serverContent, isSaving: false,
@@ -385,6 +386,7 @@ const renderLifecycle = () => render(lifecycleHost, AboutContentForm, {
 		lifecycleSaves.push(input)
 		serverContent = { ...reconcileContentTranslation('about', '1', serverContent,
 			{ ...serverContent, ...input }, input.translationEdits), updatedAt: new Date(serverContent.updatedAt.getTime() + 60_000) }
+		serverContent.sourceRevision = contentSourceRevision('about', serverContent)
 	},
 })
 let lifecycleTree = renderLifecycle()

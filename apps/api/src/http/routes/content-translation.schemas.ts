@@ -1,6 +1,11 @@
 import { t } from 'elysia'
 
 export const contentFieldPathSchema = t.Array(t.Union([t.String({ minLength: 1, maxLength: 64 }), t.Integer({ minimum: 0, maximum: 10000 })]), { minItems: 1, maxItems: 6 })
+export const contentSourceRevisionSchema = t.String({ minLength: 71, maxLength: 71, pattern: '^sha256:[a-f0-9]{64}$' })
+export const contentTranslationIdentitiesSchema = t.Array(t.Object({
+  collectionPath: contentFieldPathSchema,
+  itemIds: t.Array(t.String({ minLength: 1, maxLength: 256 }), { maxItems: 10000 }),
+}, { additionalProperties: false }), { maxItems: 102 })
 export const translationEditsSchema = t.Array(t.Object({
   fieldId: t.String({ minLength: 1, maxLength: 256 }),
   fieldPath: contentFieldPathSchema,

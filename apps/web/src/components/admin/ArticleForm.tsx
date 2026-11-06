@@ -7,6 +7,7 @@
 
 import {
 	type ArticleBlocksDoc,
+	collectionTranslationIdentities,
 	isArticleBlockUrl,
 	reconcileArticleBlocksTranslation,
 } from '@sinshin/shared'
@@ -29,6 +30,7 @@ import { Toggle } from '#/components/shared/Toggle'
 import { useToastStore } from '#/stores/toastStore'
 import type { ArticleFormData, ArticleFormProps } from '#/types/forms'
 import { adminArticleCategoriesOptions } from '#/utils/queryOptions'
+import { appendCollectionIdentity, removeCollectionIdentity, moveCollectionIdentity, moveCollectionItem, collectionIds } from '#/utils/contentTranslationDraft'
 
 export function ArticleForm({
 	initialData,
@@ -47,6 +49,7 @@ export function ArticleForm({
 	// Seed the draft once. Query refreshes and mutation status updates must not
 	// replace unsaved edits; the edit route keys this form by article ID.
 	const [formData, setFormData] = useState<ArticleFormData>(() => ({
+		translationIdentities: initialData ? collectionTranslationIdentities('article', initialData) : [{ collectionPath: ['processes'], itemIds: [] }],
 		title: '',
 		author: '', // اضافه شدن استیت نویسنده
 		excerpt: '',
@@ -176,12 +179,14 @@ export function ArticleForm({
 			if (existingIndex !== -1)
 				return {
 					...prev,
+					translationIdentities: appendCollectionIdentity(prev.translationIdentities ?? [], ['processes', existingIndex, 'items']),
 					processes: prev.processes.map((p, index) =>
 						index === existingIndex ? { ...p, items: [...p.items, item] } : p,
 					),
 				}
 			return {
 				...prev,
+				translationIdentities: appendCollectionIdentity(appendCollectionIdentity(prev.translationIdentities ?? [], ['processes']), ['processes', prev.processes.length, 'items']),
 				processes: [...prev.processes, { title, items: [item] }],
 				processesAr: [...prev.processesAr, { title: '', items: [] }],
 			}
@@ -191,12 +196,44 @@ export function ArticleForm({
 	}
 
 	const removeProcess = (index: number) => {
+		const processId = collectionIds(formData.translationIdentities ?? [], ['processes'])[index]
 		// round-34 — حذف هر دو نسخه (فارسی + عربی) با هم — ایندکس‌ها هم‌راستا می‌مانند
-		setFormData((prev) => ({
+		setFormData((prev) => { const currentIndex = collectionIds(prev.translationIdentities ?? [], ['processes']).indexOf(processId)
+			if (currentIndex < 0) return prev
+			return ({
 			...prev,
-			processes: prev.processes?.filter((_, i) => i !== index) || [],
-			processesAr: prev.processesAr?.filter((_, i) => i !== index) || [],
-		}))
+			translationIdentities: removeCollectionIdentity(prev.translationIdentities ?? [], ['processes'], currentIndex),
+			processes: prev.processes?.filter((_, i) => i !== currentIndex) || [],
+			processesAr: prev.processesAr?.filter((_, i) => i !== currentIndex) || [],
+		}) })
+	}
+	const moveProcess = (index: number, to: number) => {
+		const processId = collectionIds(formData.translationIdentities ?? [], ['processes'])[index]
+		setFormData(previous => { const currentIndex = collectionIds(previous.translationIdentities ?? [], ['processes']).indexOf(processId), destination = currentIndex + to - index
+			if (currentIndex < 0) return previous
+			return { ...previous, processes: moveCollectionItem(previous.processes, currentIndex, destination), processesAr: moveCollectionItem(previous.processesAr, currentIndex, destination),
+				translationIdentities: moveCollectionIdentity(previous.translationIdentities ?? [], ['processes'], currentIndex, destination) } })
+	}
+	const changeProcessItem = (sourceProcessIndex: number, sourceItemIndex: number, requestedAction: { text: string } | { remove: true } | { moveTo: number }) => {
+		const processId = collectionIds(formData.translationIdentities ?? [], ['processes'])[sourceProcessIndex]
+		const itemId = collectionIds(formData.translationIdentities ?? [], ['processes', sourceProcessIndex, 'items'])[sourceItemIndex]
+		setFormData(previous => {
+			const processIndex = collectionIds(previous.translationIdentities ?? [], ['processes']).indexOf(processId)
+			const itemIndex = collectionIds(previous.translationIdentities ?? [], ['processes', processIndex, 'items']).indexOf(itemId)
+			if (processIndex < 0 || itemIndex < 0) return previous
+			const action = 'moveTo' in requestedAction ? { moveTo: itemIndex + requestedAction.moveTo - sourceItemIndex } : requestedAction
+			const path = ['processes', processIndex, 'items']
+			let ids = previous.translationIdentities ?? []
+			if ('remove' in action) ids = removeCollectionIdentity(ids, path, itemIndex)
+			if ('moveTo' in action) ids = moveCollectionIdentity(ids, path, itemIndex, action.moveTo)
+			const update = (items: string[], source: boolean) => 'remove' in action ? items.filter((_, at) => at !== itemIndex)
+				: 'moveTo' in action ? moveCollectionItem(items, itemIndex, action.moveTo) : source ? items.map((text, at) => at === itemIndex ? action.text : text) : items
+			return { ...previous, translationIdentities: ids,
+				processes: previous.processes.map((process, at) => at === processIndex ? { ...process, items: update(process.items, true) } : process),
+				processesAr: previous.processes.map((process, at) => ({ title: previous.processesAr[at]?.title ?? '',
+					items: at === processIndex ? update(process.items.map((_, item) => previous.processesAr[at]?.items[item] ?? ''), false)
+						: process.items.map((_, item) => previous.processesAr[at]?.items[item] ?? '') })) }
+		})
 	}
 
 	// round-34 — ویرایش روند عربیِ ایندکس n (هر خط textarea = یک گام)
@@ -204,10 +241,13 @@ export function ArticleForm({
 		index: number,
 		patch: Partial<{ title: string; items: string[] }>,
 	) => {
+		const processId = collectionIds(formData.translationIdentities ?? [], ['processes'])[index]
 		setFormData((prev) => {
+			const currentIndex = collectionIds(prev.translationIdentities ?? [], ['processes']).indexOf(processId)
+			if (currentIndex < 0) return prev
 			const next = [...(prev.processesAr || [])]
-			const cur = next[index] ?? { title: '', items: [] }
-			next[index] = {
+			const cur = next[currentIndex] ?? { title: '', items: [] }
+			next[currentIndex] = {
 				title: patch.title !== undefined ? patch.title : cur.title,
 				items: patch.items ?? cur.items,
 			}
@@ -676,20 +716,24 @@ export function ArticleForm({
 
 					<div className="space-y-3 mb-4">
 						{formData.processes?.map((proc, i) => {
+							const processId = collectionIds(formData.translationIdentities ?? [], ['processes'])[i]
 							const procAr = formData.processesAr?.[i] ?? {
 								title: '',
 								items: [],
 							}
 							return (
 								<div
-									// biome-ignore lint/suspicious/noArrayIndexKey: Legacy processes have no IDs and may contain duplicate titles.
-									key={i}
+									key={collectionIds(formData.translationIdentities ?? [], ['processes'])[i]}
 									className="p-3 rounded-lg bg-gray-50 dark:bg-[#1a0a0e]"
 								>
 									<div className="flex items-center justify-between mb-2">
-										<p className="font-DanaDemiBold text-gray-800 dark:text-white text-sm">
-											{proc.title}
-										</p>
+										<input aria-label="عنوان فارسی روند" maxLength={120} value={proc.title}
+											className="font-DanaDemiBold text-gray-800 dark:text-white text-sm bg-transparent"
+											onChange={event => { const title = event.target.value; setFormData(previous => ({ ...previous,
+												processes: previous.processes.map((process, index) => collectionIds(previous.translationIdentities ?? [], ['processes'])[index] === processId ? { ...process, title } : process) })) }} />
+										{[-1, 1].map(direction => <button key={direction} type="button" aria-label={direction < 0 ? 'انتقال روند به بالا' : 'انتقال روند به پایین'}
+											disabled={i + direction < 0 || i + direction >= formData.processes.length} className="text-xs disabled:opacity-30"
+											onClick={() => moveProcess(i, i + direction)}>{direction < 0 ? '↑' : '↓'}</button>)}
 										<button
 											type="button"
 											onClick={() => removeProcess(i)}
@@ -701,11 +745,14 @@ export function ArticleForm({
 									<ul className="list-disc pr-5 space-y-1">
 										{proc.items.map((item, idx) => (
 											<li
-												// biome-ignore lint/suspicious/noArrayIndexKey: Legacy steps have no IDs and may contain duplicate text.
-												key={idx}
+												key={collectionIds(formData.translationIdentities ?? [], ['processes', i, 'items'])[idx]}
 												className="text-xs text-gray-600 dark:text-gray-400"
 											>
-												{item}
+												<input aria-label="متن فارسی گام" value={item} maxLength={300} className="bg-transparent" onChange={event => changeProcessItem(i, idx, { text: event.target.value })} />
+												{[-1, 1].map(direction => <button key={direction} type="button" aria-label={direction < 0 ? 'انتقال گام به بالا' : 'انتقال گام به پایین'}
+													disabled={idx + direction < 0 || idx + direction >= proc.items.length} className="px-1 disabled:opacity-30"
+													onClick={() => changeProcessItem(i, idx, { moveTo: idx + direction })}>{direction < 0 ? '↑' : '↓'}</button>)}
+												<button type="button" aria-label="حذف گام" className="text-red-400 px-1" onClick={() => changeProcessItem(i, idx, { remove: true })}>×</button>
 											</li>
 										))}
 									</ul>
@@ -723,10 +770,12 @@ export function ArticleForm({
 											label={`گام ${index + 1}`} value={procAr.items[index] ?? ''} faReference={item}
 											translation={translation.field(['processes', i, 'items', index])}
 											onChange={value => {
+												const itemId = collectionIds(formData.translationIdentities ?? [], ['processes', i, 'items'])[index]
 												setFormData(previous => {
 													const arabic = previous.processes.map((process, processIndex) => ({
 														title: previous.processesAr[processIndex]?.title ?? '',
-														items: process.items.map((_, itemIndex) => processIndex === i && itemIndex === index
+														items: process.items.map((_, itemIndex) => collectionIds(previous.translationIdentities ?? [], ['processes'])[processIndex] === processId
+															&& collectionIds(previous.translationIdentities ?? [], ['processes', processIndex, 'items'])[itemIndex] === itemId
 															? value : previous.processesAr[processIndex]?.items[itemIndex] ?? ''),
 													}))
 													return { ...previous, processesAr: arabic }

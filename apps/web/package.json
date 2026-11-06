@@ -49,7 +49,7 @@
     "test:articles": "bun scripts/test-articles-client.tsx && bun scripts/test-articles-api-client.ts && bun scripts/test-articles-admin.tsx && bun scripts/test-article-rendering.tsx && bun scripts/test-article-route.tsx",
     "test:seo": "bun scripts/test-seo-head.tsx && bun scripts/test-sitemap.ts && bun scripts/test-geo-gate.ts && bun scripts/test-header-ssr.tsx && bun scripts/test-article-seo.tsx",
     "test:about": "bun scripts/test-about-client.tsx && bun scripts/test-about-admin.tsx",
-    "test:content-translations": "bun scripts/test-content-translations-client.tsx && bun scripts/test-content-translation-api-client.ts && bun scripts/test-content-queue-refresh.ts && bun scripts/test-content-block-translations-client.tsx"
+    "test:content-translations": "bun scripts/test-content-translations-client.tsx && bun scripts/test-content-translation-api-client.ts && bun scripts/test-content-queue-refresh.ts && bun scripts/test-content-block-translations-client.tsx && bun scripts/test-content-collection-editors.tsx && bun scripts/test-content-save-conflicts.tsx"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",

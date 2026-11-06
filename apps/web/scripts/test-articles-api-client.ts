@@ -19,9 +19,9 @@ mock.module('#/lib/api-fetch', () => ({
 const { updateArticle, updateArticleCategory, getArticleById, getAdminArticleCategories } = await import('../src/server/articles')
 const { translateArticleBlocksPreview, translateArticleBlockField } = await import('../src/server/translation')
 const id = '01234567-89ab-cdef-0123-456789abcdef'
-const input = { id, title: 'Title', excerpt: 'Excerpt', content: 'Body', categoryId: id }
+const input = { id, title: 'Title', excerpt: 'Excerpt', content: 'Body', categoryId: id, sourceRevision: 'saved-article-token' }
 await updateArticle(input)
-assert.deepEqual(requests.at(-1)?.body, { title: 'Title', excerpt: 'Excerpt', content: 'Body', categoryId: id },
+assert.deepEqual(requests.at(-1)?.body, { title: 'Title', excerpt: 'Excerpt', content: 'Body', categoryId: id, sourceRevision: input.sourceRevision },
   'omitted translations, images, blocks and processes must not be cleared by PATCH')
 await updateArticle({ ...input, titleAr: '  ', excerptAr: null, contentAr: ' translated ', processesAr: [], profileImage: null, blocks: null })
 const body = requests.at(-1)!.body!
@@ -55,9 +55,9 @@ assert.deepEqual(requests.at(-1), { path: '/admin/translate/block-field', method
 assert.equal(fieldPreview.sourceText, 'عنوان تازه')
 assert.equal(fieldPreview.translation, 'عنوان جديد')
 
-await updateArticleCategory({ id, name: 'Category', hasSubCategories: true, subCategories: ['Sub'] })
-assert.deepEqual(requests.at(-1)?.body, { name: 'Category', hasSubCategories: true, subCategories: ['Sub'] })
-await updateArticleCategory({ id, name: 'Category', hasSubCategories: false, subCategories: [], nameAr: '', subCategoriesAr: null })
+await updateArticleCategory({ id, name: 'Category', hasSubCategories: true, subCategories: ['Sub'], sourceRevision: 'saved-category-token' })
+assert.deepEqual(requests.at(-1)?.body, { name: 'Category', hasSubCategories: true, subCategories: ['Sub'], sourceRevision: 'saved-category-token' })
+await updateArticleCategory({ id, name: 'Category', hasSubCategories: false, subCategories: [], nameAr: '', subCategoriesAr: null, sourceRevision: 'saved-category-token' })
 assert.equal(requests.at(-1)?.body?.nameAr, null)
 assert.equal(requests.at(-1)?.body?.subCategoriesAr, null)
 

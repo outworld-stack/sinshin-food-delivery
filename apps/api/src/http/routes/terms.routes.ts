@@ -12,7 +12,7 @@ import type { SessionService } from '#/domain/auth/session.service'
 import type { TermsService } from '#/domain/terms/terms.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { langFromHeaders } from '#/domain/shared/lang'
-import { translationEditsSchema } from './content-translation.schemas'
+import { contentSourceRevisionSchema, contentTranslationIdentitiesSchema, translationEditsSchema } from './content-translation.schemas'
 
 export interface TermsRoutesDeps {
   sessions: SessionService
@@ -45,10 +45,11 @@ export const termsRoutes = (deps: TermsRoutesDeps) => {
     })
     .post(
       '/',
-      ({ body }) => deps.termsService.update(body.sections, body.sectionsAr, body.translationEdits, body.sourceRevision),
+      ({ body }) => deps.termsService.update(body.sections, body.sectionsAr, body.translationEdits, body.sourceRevision, body.translationIdentities),
       {
         body: t.Object({
-        sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+        sourceRevision: t.Optional(contentSourceRevisionSchema),
+        translationIdentities: t.Optional(contentTranslationIdentitiesSchema),
         translationEdits: t.Optional(translationEditsSchema),
         sections: t.Array(
           t.Object({

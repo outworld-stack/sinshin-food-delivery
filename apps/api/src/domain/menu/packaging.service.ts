@@ -20,7 +20,7 @@ import type { Db } from '#/infra/db/client'
 import { packagingItems, productPackagingItems } from '#/infra/db/schema'
 import type { ProductId } from '#/domain/shared/brand'
 import { Err } from '#/domain/shared/errors'
-import { assertContentSourceRevision, reconcileContentTranslation, type PackagingItemDto, type TranslationEdit } from '@sinshin/shared'
+import { assertContentSourceRevision, contentSourceRevision, reconcileContentTranslation, type PackagingItemDto, type TranslationEdit } from '@sinshin/shared'
 
 /** TTL کش لیست — آینه‌ی SettingsService */
 const LIST_CACHE_TTL_MS = 30_000
@@ -93,7 +93,7 @@ export class PackagingService {
       price?: number
       titleAr?: string | null
       translationEdits?: TranslationEdit[]
-      sourceRevision?: string
+      sourceRevision: string
       isActive?: boolean
       sortOrder?: number
     },
@@ -186,6 +186,7 @@ export class PackagingService {
       title: r.title,
       titleAr: r.titleAr,
       translationState: r.translationState,
+      sourceRevision: contentSourceRevision('packagingItem', r),
       price: r.price,
       isActive: r.isActive,
       sortOrder: r.sortOrder,

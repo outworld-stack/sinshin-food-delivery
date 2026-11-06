@@ -1,3 +1,4 @@
+import { contentFixtureProof, fixtureUpdateProduct, fixtureUpdatePackaging } from './content-save-fixtures'
 /** Product/packaging/checkout regression tests. Only disposable local PostgreSQL. */
 import assert from 'node:assert/strict'
 import { SQL } from 'bun'
@@ -70,32 +71,34 @@ try {
   assert.equal((await db.select().from(products)).length, 1)
   passed('failed sizes and deleted packaging selections never leave partially created products')
 
-  await assert.rejects(menu.updateProduct({ ...base, id: pid, name: 'Failed update', originalPrice: 900_000,
+  await assert.rejects(fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'Failed update', originalPrice: 900_000,
     packagingItemIds: [bag.id], sizesEnabled: true, sizes: sizeDupes }), validation)
   assert.equal((await read())!.name, 'Meal')
   assert.equal((await read())!.originalPrice, 100_000)
   assert.equal((await read())!.sizesEnabled, false)
   assert.deepEqual(await selected(), [box.id], 'link deletion/insertion must roll back with a later size failure')
-  await assert.rejects(menu.updateProduct({ ...base, id: pid, packagingItemIds: [crypto.randomUUID()] }), validation)
+  await assert.rejects(fixtureUpdateProduct(menu, db, { ...base, id: pid, packagingItemIds: [crypto.randomUUID()] }), validation)
   assert.deepEqual(await selected(), [box.id])
-  assert.equal((await menu.updateProduct({ ...base, id: crypto.randomUUID() })).success, false)
+  assert.equal((await fixtureUpdateProduct(menu, db, { ...base, id: crypto.randomUUID() })).success, false)
   passed('failed updates preserve base pricing, packaging selections and size configuration')
 
-  await menu.updateProduct({ ...base, id: pid, sizesEnabled: true, sizes: [{ name: 'Same', price: 100_000 }] })
-  await assert.rejects(menu.updateProduct({ ...base, id: pid, name: 'Duplicate existing size',
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, sizesEnabled: true, sizes: [{ name: 'Same', price: 100_000 }] })
+  await assert.rejects(fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'Duplicate existing size',
     sizesEnabled: true, sizes: sizeDupes }), validation)
   assert.equal((await read())!.name, 'Meal')
-  await menu.updateProduct({ ...base, id: pid, sizesEnabled: false })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, sizesEnabled: false })
   passed('duplicate names reject both existing and new variants without partial updates')
 
-  await Promise.all([
-    menu.updateProduct({ ...base, id: pid, name: 'Box meal', packagingItemIds: [box.id] }),
-    menu.updateProduct({ ...base, id: pid, name: 'Bag meal', packagingItemIds: [bag.id] }),
+  const sameRevisionRace = await Promise.allSettled([
+    fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'Box meal', packagingItemIds: [box.id] }),
+    fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'Bag meal', packagingItemIds: [bag.id] }),
   ])
+  assert.equal(sameRevisionRace.filter(result => result.status === 'fulfilled').length, 1)
+  assert.equal(sameRevisionRace.filter(result => result.status === 'rejected').length, 1)
   assert.deepEqual(await selected(), [(await read())!.name === 'Box meal' ? box.id : bag.id])
-  assert.equal((await menu.updateProduct({ ...base, id: pid, packagingItemIds: [box.id, bag.id, box.id] })).success, true)
+  assert.equal((await fixtureUpdateProduct(menu, db, { ...base, id: pid, packagingItemIds: [box.id, bag.id, box.id] })).success, true)
   assert.equal((await selected()).length, 2, 'duplicate IDs are deduplicated')
-  await menu.updateProduct({ id: pid, name: 'Meal', description: '', originalPrice: 100_000, discountPercentage: 0, prepTime: 15 })
+  await fixtureUpdateProduct(menu, db, { id: pid, name: 'Meal', description: '', originalPrice: 100_000, discountPercentage: 0, prepTime: 15 })
   assert.equal((await selected()).length, 2, 'omitted selections preserve old clients')
   passed('concurrent saves keep product and packaging in one version; omitted selections remain intact')
 
@@ -129,18 +132,18 @@ try {
     notifications: { notifyUser: async () => undefined } as never,
   })
   const checkout: CheckoutInput = { items: [{ productId: pid, quantity: 2 }], deliveryType: 'PICKUP', useWallet: false, gatewayId: 'ZARINPAL' }
-  await packaging.update(bag.id, { isActive: false })
+  await fixtureUpdatePackaging(packaging, db, bag.id, { isActive: false })
   assert.equal((await orderService.preview(buyer!.id, checkout)).breakdown.packagingFee, 10_000)
   const paid = await orderService.checkout(buyer!.id, checkout)
   assert.equal(paid.breakdown.packagingFee, 10_000)
   const persisted = (await db.select().from(orders).where(eq(orders.displayId, paid.displayId)))[0]!
   assert.equal(persisted.breakdown.packagingFee, 10_000)
-  await packaging.update(box.id, { price: 6_000 })
+  await fixtureUpdatePackaging(packaging, db, box.id, { price: 6_000 })
   assert.equal((await orderService.preview(buyer!.id, checkout)).breakdown.packagingFee, 12_000)
   assert.equal((await db.select().from(orders).where(eq(orders.id, persisted.id)))[0]!.breakdown.packagingFee, 10_000)
-  await packaging.update(box.id, { isActive: false })
+  await fixtureUpdatePackaging(packaging, db, box.id, { isActive: false })
   assert.equal((await orderService.preview(buyer!.id, checkout)).breakdown.packagingFee, 0)
-  await menu.updateProduct({ ...base, id: pid, packagingItemIds: [] })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, packagingItemIds: [] })
   assert.equal((await orderService.preview(buyer!.id, checkout)).breakdown.packagingFee, 1_554)
   assert.equal((await orderService.preview(buyer!.id, { ...checkout, deliveryType: 'DINE_IN' })).breakdown.packagingFee, 0)
   passed('active packaging prices stay live; saved orders retain snapshots; empty selections use legacy fallback')
@@ -169,10 +172,16 @@ try {
     admin2: { permissionsOf: async () => ({ productsRead: true, productsWrite: true, canEditPackagingFee: feePermission }) } as never,
     audit: { log: async () => undefined } as never,
   })).compile()
-  const request = (method: string, path: string, body?: unknown, token = 'editor') => app.handle(new Request(`http://localhost/admin/menu${path}`, {
-    method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  }))
+  const request = async (method: string, path: string, body?: unknown, token = 'editor') => {
+    const type = path.startsWith('/products/') ? 'product' : path.startsWith('/packaging-items/') ? 'packagingItem' : undefined
+    const contentId = path.split('/')[2]
+    const payload = method === 'PATCH' && type && contentId && body && typeof body === 'object'
+      ? { ...await contentFixtureProof(db, type, contentId), ...body } : body
+    return app.handle(new Request(`http://localhost/admin/menu${path}`, {
+      method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+    }))
+  }
   let response = await request('POST', '/products', { ...base, name: 'Restricted create', packagingCost: 999, packagingItemIds: [bag.id] })
   assert.equal(response.status, 200)
   const restricted = await response.json() as { id: typeof products.$inferSelect.id }

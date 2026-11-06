@@ -7,6 +7,7 @@
 
 // src/server/terms.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
+import { requireContentSourceRevision } from '#/utils/contentTranslationDraft'
 import type { TermsContentDto, TranslationEdit } from '@sinshin/shared'
 
 // ─── عمومی ───
@@ -18,16 +19,17 @@ export async function getAdminTerms(): Promise<TermsContentDto> {
   return authJson<TermsContentDto>('/admin/terms', 'GET')
 }
 
-// ─── ادمین — هر ذخیره نسخه جدید ───
-export async function updateTerms(input: {
-  sourceRevision?: string
+type TermsSaveInput = {
+  translationIdentities?: import('@sinshin/shared').ContentCollectionIdentity[]
   translationEdits?: TranslationEdit[]
   sections: { title: string; items: string[] }[]
   /** round-34 — بندهای عربی (ساختار موازی sections؛ خالی = بازگشت به فارسی) */
   sectionsAr?: { title: string; items: string[] }[] | null
-}): Promise<{ success: boolean; version: number }> {
-  return authJson<{ success: boolean; version: number }>('/admin/terms', 'POST', {
-    sourceRevision: input.sourceRevision,
+}
+
+function termsPayload(input: TermsSaveInput) {
+  return {
+    ...(input.translationIdentities ? { translationIdentities: input.translationIdentities } : {}),
     translationEdits: input.translationEdits,
     sections: input.sections,
     sectionsAr:
@@ -37,6 +39,19 @@ export async function updateTerms(input: {
             items: s.items.map((i) => i.trim()),
           }))
         : null,
+  }
+}
+
+/** Explicit first creation; the API rejects this if another saved version already exists. */
+export async function createTerms(input: TermsSaveInput): Promise<{ success: boolean; version: number }> {
+  return authJson<{ success: boolean; version: number }>('/admin/terms', 'POST', termsPayload(input))
+}
+
+// ─── ادمین — هر ذخیره نسخه جدید ───
+export async function updateTerms(input: TermsSaveInput & { sourceRevision?: string }): Promise<{ success: boolean; version: number }> {
+  requireContentSourceRevision(input.sourceRevision)
+  return authJson<{ success: boolean; version: number }>('/admin/terms', 'POST', {
+    ...termsPayload(input), sourceRevision: input.sourceRevision,
   })
 }
 

@@ -74,12 +74,12 @@ const app = new Elysia()
   .compile()
 
 const request = async (body: unknown, role: string | null = 'admin') => {
-  let payload = body
+  const current = await settings.readTemporaryCloseContent()
+  let payload: Record<string, unknown> = { sourceRevision: current.sourceRevision, ...body as object }
   const input = body as { closed?: boolean; reason?: string; reasonAr?: string | null }
   if (input.closed && input.reasonAr !== undefined) {
-    const current = await settings.readTemporaryCloseContent()
     const field = contentTranslationFields('temporaryClose', current)[0]!
-    payload = { ...input, translationEdits: [{ fieldId: 'reason', fieldPath: ['reason'], sourceText: typeof input.reason === 'string' ? input.reason.trim() : '',
+    payload = { ...payload, ...input, translationEdits: [{ fieldId: 'reason', fieldPath: ['reason'], sourceText: typeof input.reason === 'string' ? input.reason.trim() : '',
       revision: field.revision, value: typeof input.reasonAr === 'string' ? input.reasonAr.trim() : '', origin: 'manual' }] }
   }
   return app.handle(new Request(
@@ -141,7 +141,7 @@ assert(blockedCloseWrites.findIndex(({ key }) => key === SETTING_KEYS.temporaryP
   < blockedCloseWrites.findIndex(({ key }) => key === SETTING_KEYS.temporarilyClosed),
   'payment policy is saved before publishing the closed state')
 assert.equal((audit.at(-1) as { metadata: { disablePayments: boolean } }).metadata.disablePayments, true)
-await service.setTemporaryClose(actorId, 'admin', true, boundary)
+await service.setTemporaryClose(actorId, 'admin', true, boundary, null, undefined, false, [], (await settings.readTemporaryCloseContent()).sourceRevision)
 assert.equal(stored.get(SETTING_KEYS.temporaryPaymentsDisabled), false, 'direct callers retain the default-enabled payment behavior')
 
 for (const role of [null, 'user', 'courier']) {
@@ -187,7 +187,9 @@ for (const key of [SETTING_KEYS.temporaryCloseReason, SETTING_KEYS.temporaryClos
 assert.deepEqual(activity, ['TEMP_CLOSE', 'TOUCH', 'TEMP_OPEN', 'TOUCH'])
 assert.equal((await (await adminStatus()).json() as { temporaryCloseReasonAr: string | null }).temporaryCloseReasonAr, null,
   'the admin translation field is cleared when the restaurant reopens')
-await settings.set(SETTING_KEYS.temporaryCloseReasonAr, arabicBoundary)
+await assert.rejects(settings.set(SETTING_KEYS.temporaryCloseReasonAr, arabicBoundary), isValidation)
+stored.set(SETTING_KEYS.temporaryCloseReasonAr, arabicBoundary)
+settings.invalidateContentTranslationCache()
 assert.equal((await (await adminStatus()).json() as { temporaryCloseReasonAr: string | null }).temporaryCloseReasonAr, null,
   'an old translation cannot leak into the editing context while the restaurant is open')
 

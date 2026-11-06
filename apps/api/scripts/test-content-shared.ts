@@ -1,6 +1,8 @@
 /** Pure source/identity/provenance regressions. No network or paid translator calls. */
 import assert from 'node:assert/strict'
 import {
+  collectionTranslationIdentities,
+  createContentCollectionItemId,
   contentSourceRevision,
   contentTranslationFields,
   contentTranslationValue,
@@ -11,6 +13,7 @@ import {
   type ContentEntityType,
   type ContentFieldPath,
   type TranslationEdit,
+  type ContentCollectionIdentity,
 } from '@sinshin/shared'
 
 const requireValue = <T>(value: T | null | undefined): T => {
@@ -22,6 +25,24 @@ let count = 0
 const test = (name: string, run: () => void) => { run(); count++; console.log(`PASS ${name}`) }
 const id = 'content-shared-test'
 const bind = <T extends object>(type: ContentEntityType, row: T) => reconcileContentTranslation(type, id, null, row)
+const mapped = (type: ContentEntityType, before: unknown, next: Record<string, unknown>, order: number[], itemOrders?: number[][]): ContentCollectionIdentity[] => {
+  const saved = collectionTranslationIdentities(type, before)
+  const top = requireValue(saved[0])
+  const key = String(top.collectionPath[0])
+  const parentIds = order.map(index => index < 0 ? createContentCollectionItemId(key) : requireValue(top.itemIds[index]))
+  const result: ContentCollectionIdentity[] = [{ collectionPath: [key], itemIds: parentIds }]
+  if (key === 'sections' || key === 'processes') {
+    const sections = next[key] as { title: string; items: string[] }[]
+    sections.forEach((section, index) => {
+      const previousItems = saved.find(entry => JSON.stringify(entry.collectionPath) === JSON.stringify([key, order[index], 'items']))
+      result.push({ collectionPath: [key, index, 'items'], itemIds: section.items.map((_item, item) => {
+        const previousIndex = itemOrders?.[index]?.[item] ?? item
+        return previousIndex >= 0 && previousItems?.itemIds[previousIndex] || createContentCollectionItemId(`${parentIds[index]}:items`)
+      }) })
+    })
+  }
+  return result
+}
 const proof = (type: ContentEntityType, row: unknown, path: ContentFieldPath, value: string,
   origin: 'manual' | 'automatic' = 'manual'): TranslationEdit => {
   const field = contentTranslationFields(type, row).find(item => JSON.stringify(item.fieldPath) === JSON.stringify(path))
@@ -115,17 +136,18 @@ test('late automatic results cannot replace a newer source or newer manual trans
   assert.equal(reconcileContentTranslation('product', id, manual, manual, [pending]).descriptionAr, 'يدوي')
 })
 
-test('metadata-only mutations preserve translations and exact source revisions', () => {
+test('metadata-only mutations preserve translations while advancing the required save revision', () => {
   const before = bind('product', source)
   const next = reconcileContentTranslation('product', id, before, { ...before, price: 999999, image: '/new.webp', styles: { color: '#000000' } })
   assert.equal(next.nameAr, 'وجبة')
-  assert.equal(contentSourceRevision('product', before), contentSourceRevision('product', next))
+  assert.notEqual(contentSourceRevision('product', before), contentSourceRevision('product', next))
   const sourceChanged = reconcileContentTranslation('product', id, next, { ...next, description: 'متن تازه' })
   assert.equal(matchesContentSourceRevision('product', sourceChanged, contentSourceRevision('product', before)), false)
 })
 
 test('legacy ingredient reordering preserves every populated Arabic value without assuming automatic origin', () => {
-  const next = reconcileContentTranslation('product', id, source, { ...source, ingredients: ['سس', 'پنیر', 'قارچ'] })
+  const row = { ...source, ingredients: ['سس', 'پنیر', 'قارچ'] }
+  const next = reconcileContentTranslation('product', id, source, row, [], mapped('product', source, row, [2, 0, 1]))
   assert.deepEqual(next.ingredientsAr, ['صلصة', 'جبن', 'فطر'])
   assert(contentTranslationFields('product', next).every(field => field.origin === 'legacy'))
   assert.equal(eligibleContentTranslationFields('product', next).length, 0)
@@ -135,7 +157,8 @@ for (const type of ['product', 'category'] as const) {
   const key = type === 'product' ? 'ingredients' : 'sizeNames'
   test(`${type} nested insert/delete/reorder/replacement preserves exact-source identities`, () => {
     const before = bind(type, { id, name: 'عنوان', nameAr: 'عنوان عربي', [key]: ['یک', 'دو', 'سه'], [`${key}Ar`]: ['أ', 'ب', 'ج'] })
-    const next = reconcileContentTranslation(type, id, before, { ...before, [key]: ['سه', 'چهار', 'یک'] })
+    const row = { ...before, [key]: ['سه', 'چهار', 'یک'] }
+    const next = reconcileContentTranslation(type, id, before, row, [], mapped(type, before, row, [2, -1, 0]))
     assert.deepEqual((next as Record<string, unknown>)[`${key}Ar`], ['ج', '', 'أ'])
     const archived = next.translationState.orphanedFields
     assert(archived?.some(field => field.sourceText === 'دو' && field.value === 'ب')
@@ -147,7 +170,8 @@ for (const type of ['product', 'category'] as const) {
     const before = bind(type, { id, name: 'عنوان', price: 100, [key]: ['یک', 'یک', 'دو'], [`${key}Ar`]: ['أول', 'ثان', 'ب'] })
     const same = reconcileContentTranslation(type, id, before, { ...before, price: 200 })
     assert.deepEqual((same as Record<string, unknown>)[`${key}Ar`], ['أول', 'ثان', 'ب'])
-    const next = reconcileContentTranslation(type, id, before, { ...before, [key]: ['دو', 'یک', 'یک', 'یک'] })
+    const row = { ...before, [key]: ['دو', 'یک', 'یک', 'یک'] }
+    const next = reconcileContentTranslation(type, id, before, row, [], mapped(type, before, row, [2, -1, -1, -1]))
     assert.deepEqual((next as Record<string, unknown>)[`${key}Ar`], ['ب', '', '', ''])
     assert.equal(new Set(next.translationState.fields.map(field => field.fieldId)).size, next.translationState.fields.length)
     assert.deepEqual(requireValue(next.translationState.orphanedFields).map(field => field.value).sort(), ['أول', 'ثان'].sort())
@@ -160,33 +184,37 @@ for (const type of ['terms', 'article'] as const) {
     [key]: [{ title: 'اول', items: ['یک', 'دو'] }, { title: 'دوم', items: ['سه'] }],
     [`${key}Ar`]: [{ title: 'الأول', items: ['أ', 'ب'] }, { title: 'الثاني', items: ['ج'] }] }
   test(`${type} legacy section and item reorder preserves translations independently`, () => {
-    const next = reconcileContentTranslation(type, id, row, { ...row,
+    const update = { ...row,
       [key]: [{ title: 'دوم', items: ['سه'] }, { title: 'اول', items: ['دو', 'یک'] }],
-    })
+    }
+    const next = reconcileContentTranslation(type, id, row, update, [], mapped(type, row, update, [1, 0], [[0], [1, 0]]))
     assert.deepEqual((next as Record<string, unknown>)[`${key}Ar`], [{ title: 'الثاني', items: ['ج'] }, { title: 'الأول', items: ['ب', 'أ'] }])
   })
   test(`${type} one nested source item invalidates only its matching Arabic item`, () => {
     const before = bind(type, row)
-    const next = reconcileContentTranslation(type, id, before, { ...before,
+    const update = { ...before,
       [key]: [{ title: 'اول', items: ['یک تازه', 'دو'] }, { title: 'دوم', items: ['سه'] }],
-    })
+    }
+    const next = reconcileContentTranslation(type, id, before, update, [], mapped(type, before, update, [0, 1]))
     assert.deepEqual((next as Record<string, unknown>)[`${key}Ar`], [{ title: 'الأول', items: ['', 'ب'] }, { title: 'الثاني', items: ['ج'] }])
     assert.equal(contentTranslationFields(type, next).filter(field => field.status === 'needs-review').length, 1)
   })
-  test(`${type} sections sharing a title follow their full source fingerprint through reordering`, () => {
+  test(`${type} sections sharing a title follow explicit stable identities through reordering`, () => {
     const duplicated = { ...row, [key]: [{ title: 'مشترک', items: ['یک'] }, { title: 'مشترک', items: ['دو'] }],
       [`${key}Ar`]: [{ title: 'عنوان أ', items: ['أ'] }, { title: 'عنوان ب', items: ['ب'] }] }
     const before = bind(type, duplicated)
-    const next = reconcileContentTranslation(type, id, before, { ...before,
+    const update = { ...before,
       [key]: [{ title: 'مشترک', items: ['دو'] }, { title: 'مشترک', items: ['یک'] }],
-    })
+    }
+    const next = reconcileContentTranslation(type, id, before, update, [], mapped(type, before, update, [1, 0]))
     assert.deepEqual((next as Record<string, unknown>)[`${key}Ar`], [{ title: 'عنوان ب', items: ['ب'] }, { title: 'عنوان أ', items: ['أ'] }])
   })
   test(`${type} insertion/deletion preserves sibling sections and archives removed manual drafts`, () => {
     const before = bind(type, row)
-    const next = reconcileContentTranslation(type, id, before, { ...before,
+    const update = { ...before,
       [key]: [{ title: 'جدید', items: ['متن جدید'] }, { title: 'دوم', items: ['سه'] }],
-    })
+    }
+    const next = reconcileContentTranslation(type, id, before, update, [], mapped(type, before, update, [-1, 1]))
     assert.deepEqual((next as Record<string, unknown>)[`${key}Ar`], [{ title: '', items: [''] }, { title: 'الثاني', items: ['ج'] }])
     assert(next.translationState.orphanedFields?.some(field => field.value === 'أ'))
     assert(next.translationState.orphanedFields?.some(field => field.value === 'ب'))
@@ -210,12 +238,12 @@ for (const path of [['heroTitle'], ['heroText'], ['teamTitle'], ['teamAlt'], ['l
     assert.equal(next.heroGradient, about.heroGradient)
   })
 }
-test('About coordinate-only updates leave every Arabic field valid and source revision unchanged', () => {
+test('About coordinate-only updates leave every Arabic field valid while fencing later stale saves', () => {
   const before = bind('about', about)
   const next = reconcileContentTranslation('about', id, before, { ...before, location: { ...before.location, lat: 1.234567890123, lng: 9.876543210987 } })
   assert(contentTranslationFields('about', next).every(field => field.status === 'translated'))
   assert.equal(next.location.addressAr, 'عنوان')
-  assert.equal(contentSourceRevision('about', before), contentSourceRevision('about', next))
+  assert.notEqual(contentSourceRevision('about', before), contentSourceRevision('about', next))
 })
 
 test('arAuto does not affect conservative legacy origin or block translation of missing sibling fields', () => {
@@ -324,17 +352,19 @@ for (const type of ['terms', 'article'] as const) {
     const key = type === 'terms' ? 'sections' : 'processes'
     const before = bind(type, { id, [key]: [], [`${key}Ar`]: null })
     const row = { ...before, [key]: [{ title: 'new section', items: ['new item'] }] }
-    const parentId = `${key}:client-parent`
+    const parentId = createContentCollectionItemId(key)
+    const itemId = createContentCollectionItemId(`${parentId}:items`)
+    const identities: ContentCollectionIdentity[] = [{ collectionPath: [key], itemIds: [parentId] }, { collectionPath: [key, 0, 'items'], itemIds: [itemId] }]
     const titleEdit: TranslationEdit = { fieldId: parentId, fieldPath: [key, 0, 'title'], sourceText: 'new section', value: 'manual Arabic title', revision: 0, origin: 'manual' }
-    const itemEdit: TranslationEdit = { fieldId: `${parentId}:items:client-item`, fieldPath: [key, 0, 'items', 0], sourceText: 'new item', value: 'manual Arabic item', revision: 0, origin: 'manual' }
-    const accepted = reconcileContentTranslation(type, id, before, row, [titleEdit, itemEdit])
+    const itemEdit: TranslationEdit = { fieldId: itemId, fieldPath: [key, 0, 'items', 0], sourceText: 'new item', value: 'manual Arabic item', revision: 0, origin: 'manual' }
+    const accepted = reconcileContentTranslation(type, id, before, row, [titleEdit, itemEdit], identities)
     const values = () => contentTranslationFields(type, accepted).filter(field => field.fieldPath[0] === key)
     assert.deepEqual(values().map(field => field.value), ['manual Arabic title', 'manual Arabic item'])
     assert.deepEqual(values().map(field => field.fieldId), [parentId, itemEdit.fieldId])
     assert(values().every(field => field.status === 'translated' && field.origin === 'manual'))
     const later = reconcileContentTranslation(type, id, accepted, accepted)
     assert.deepEqual(contentTranslationFields(type, later).filter(field => field.fieldPath[0] === key).map(field => field.value), ['manual Arabic title', 'manual Arabic item'])
-    const rejected = reconcileContentTranslation(type, id, before, row, [titleEdit, { ...itemEdit, fieldId: `${key}:wrong-parent:items:client-item` }])
+    const rejected = reconcileContentTranslation(type, id, before, row, [titleEdit, { ...itemEdit, fieldId: `${key}:wrong-parent:items:client-item` }], identities)
     const fields = contentTranslationFields(type, rejected).filter(field => field.fieldPath[0] === key)
     assert.equal(fields[0]?.value, 'manual Arabic title')
     assert.equal(fields[1]?.value, null)
@@ -367,11 +397,12 @@ test('whitelist excludes coordinates, IDs, URLs, images, styles and arbitrary ob
 })
 test('source-bound client identities for newly inserted fields remain stable without collisions', () => {
   const before = bind('product', { ...source, ingredients: ['پنیر'], ingredientsAr: ['جبن'] })
+  const newId = createContentCollectionItemId('ingredients')
   const next = reconcileContentTranslation('product', id, before, { ...before, ingredients: ['پنیر', 'قارچ'] }, [{
-    fieldId: 'ingredients:new-client-id', fieldPath: ['ingredients', 1], sourceText: 'قارچ', revision: 0, value: 'فطر', origin: 'manual',
-  }])
+    fieldId: newId, fieldPath: ['ingredients', 1], sourceText: 'قارچ', revision: 0, value: 'فطر', origin: 'manual',
+  }], [{ collectionPath: ['ingredients'], itemIds: [requireValue(collectionTranslationIdentities('product', before)[0]?.itemIds[0]), newId] }])
   assert.deepEqual(next.ingredientsAr, ['جبن', 'فطر'])
-  assert.equal(requireValue(contentTranslationFields('product', next).find(field => field.sourceText === 'قارچ')).fieldId, 'ingredients:new-client-id')
+  assert.equal(requireValue(contentTranslationFields('product', next).find(field => field.sourceText === 'قارچ')).fieldId, newId)
   const collided = reconcileContentTranslation('product', id, before, { ...before, ingredients: ['پنیر', 'قارچ', 'سس'] }, [{
     fieldId: 'ingredients:2', fieldPath: ['ingredients', 1], sourceText: 'قارچ', revision: 0, value: 'فطر', origin: 'manual',
   }])
@@ -381,9 +412,10 @@ test('new terms version identity preserves existing source-bound field origins a
   const before = bind('terms', { id, sections: [{ title: 'اول', items: ['یک'] }, { title: 'دوم', items: ['دو'] }],
     sectionsAr: [{ title: 'الأول', items: ['أ'] }, { title: 'الثاني', items: ['ب'] }] })
   const nextId = 'next-terms-version'
-  const next = reconcileContentTranslation('terms', nextId, before, { ...before, id: nextId,
+  const update = { ...before, id: nextId,
     sections: [{ title: 'دوم', items: ['دو'] }, { title: 'اول', items: ['یک'] }],
-  })
+  }
+  const next = reconcileContentTranslation('terms', nextId, before, update, [], mapped('terms', before, update, [1, 0]))
   assert.equal(next.translationState.entityId, nextId)
   assert.deepEqual(next.sectionsAr, [{ title: 'الثاني', items: ['ب'] }, { title: 'الأول', items: ['أ'] }])
   assert(contentTranslationFields('terms', next).every(field => field.origin === 'manual' && field.status === 'translated'))

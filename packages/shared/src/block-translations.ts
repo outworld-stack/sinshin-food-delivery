@@ -9,6 +9,7 @@ import type {
 export type ArticleBlockTextPath = (string | number)[]
 export interface ArticleBlockTextField {
 	path: ArticleBlockTextPath
+	itemId?: string
 	text: string
 	label: string
 	maxLength: number
@@ -50,6 +51,118 @@ const fieldKey = (
 	blockType: string,
 	path: ArticleBlockTextPath,
 ): string => JSON.stringify([blockId, blockType, path])
+
+const validItemId = (value: unknown): value is string => typeof value === 'string'
+	&& value.length > 0 && value.length <= 180 && /^[a-zA-Z0-9:_-]+$/.test(value)
+const canonicalValue = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalValue)
+	: isRecord(value) ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, canonicalValue(value[key])])) : value
+
+/** Apply existing content limits without counting the newly added identity/recovery bookkeeping. */
+export function articleBlocksContentForLimit(input: unknown): unknown {
+	if (!isRecord(input)) return input
+	const out = { ...input }
+	if (Array.isArray(input.blocks)) out.blocks = input.blocks.map(raw => {
+		if (!isRecord(raw) || !isRecord(raw.props)) return raw
+		const props = { ...raw.props }
+		if (raw.type === 'list') delete props.itemIds
+		if (raw.type === 'gallery' && Array.isArray(props.images)) props.images = props.images.map(image => {
+			if (!isRecord(image)) return image
+			const value = { ...image }; delete value.id; return value
+		})
+		return { ...raw, props }
+	})
+	if (isRecord(input.translation)) {
+		const translation = { ...input.translation }
+		delete translation.orphanedFields
+		delete translation.retiredItemIds
+		if (Array.isArray(translation.fields)) translation.fields = translation.fields.map(field => {
+			if (!isRecord(field)) return field
+			const value = { ...field }; delete value.itemId; return value
+		})
+		out.translation = translation
+	}
+	return out
+}
+
+/** Positional legacy IDs bind only an unchanged persisted snapshot, never a mutated collection. */
+export function getArticleBlockItemId(block: ArticleBlock, path: ArticleBlockTextPath): string | undefined {
+	if (!isRecord(block) || !isRecord(block.props)) return undefined
+	const index = path[1]
+	if (typeof index !== 'number') return undefined
+	if (block.type === 'list' && Array.isArray(block.props.items) && path[0] === 'items' && index < block.props.items.length)
+		return validItemId(block.props.itemIds?.[index]) ? block.props.itemIds[index] : `legacy:${block.id}:items:${index}`
+	if (block.type === 'gallery' && Array.isArray(block.props.images) && path[0] === 'images' && index < block.props.images.length)
+		return validItemId(block.props.images[index]?.id) ? block.props.images[index]?.id : `legacy:${block.id}:images:${index}`
+	return undefined
+}
+
+export function articleBlockTextPathForIdentity(block: ArticleBlock | undefined, path: ArticleBlockTextPath, itemId?: string): ArticleBlockTextPath | undefined {
+	if (!block) return undefined
+	if (!itemId) return getArticleBlockTextFields(block).some(field => JSON.stringify(field.path) === JSON.stringify(path)) ? path : undefined
+	return getArticleBlockTextFields(block).find(field => field.itemId === itemId)?.path
+}
+
+/** Initialize editor identities once. IDs subsequently travel with rows through edits and moves. */
+export function bindArticleBlockItemIdentities(source: ArticleBlocksDoc): ArticleBlocksDoc {
+	const out = structuredClone(source)
+	let changed = false
+	const seen = new Set<string>()
+	const bind = (id: string | undefined) => {
+		const value = id && !seen.has(id) ? id : crypto.randomUUID()
+		seen.add(value)
+		return value
+	}
+	for (const block of out.blocks) {
+		if (block.type === 'list') {
+			const ids = block.props.items.map((_, index) => bind(getArticleBlockItemId(block, ['items', index])))
+			if (JSON.stringify(block.props.itemIds) !== JSON.stringify(ids)) changed = true
+			block.props.itemIds = ids
+		}
+		if (block.type === 'gallery') block.props.images = block.props.images.map((image, index) => {
+			const id = bind(getArticleBlockItemId(block, ['images', index, 'alt']))
+			if (image.id !== id) changed = true
+			return { ...image, id }
+		})
+	}
+	return changed ? out : source
+}
+
+/** A changed legacy array must supply identities; neither text nor its new index proves ownership. */
+export function validateArticleBlockItemIdentities(previous: ArticleBlocksDoc | null | undefined, input: unknown, translation?: unknown): boolean {
+	if (!isRecord(input) || !Array.isArray(input.blocks)) return true // Normalizer validates the document shape.
+	const old = new Map((previous?.blocks ?? []).filter(Boolean).map(block => [block.id, block]))
+	const owners = new Map<string, string>()
+	for (const block of old.values()) for (const field of getArticleBlockTextFields(block)) if (field.itemId) owners.set(field.itemId, block.id)
+	const seen = new Set<string>()
+	const retired = new Set(isRecord(translation) && isRecord(translation.translation) && Array.isArray(translation.translation.retiredItemIds)
+		? translation.translation.retiredItemIds.filter(validItemId) : [])
+	for (const raw of input.blocks) {
+		if (!isRecord(raw) || !isRecord(raw.props) || typeof raw.id !== 'string') continue
+		if (raw.type !== 'list' && raw.type !== 'gallery') continue
+		const before = old.get(raw.id)
+		const values = raw.type === 'list' ? raw.props.items : raw.props.images
+		if (!Array.isArray(values)) continue
+		const ids = raw.type === 'list' ? raw.props.itemIds : values.map(image => isRecord(image) ? image.id : undefined)
+		const complete = Array.isArray(ids) && ids.length === values.length && ids.every(validItemId)
+		if (!complete) {
+			const oldValues = before?.type === raw.type ? raw.type === 'list' && before.type === 'list' ? before.props.items : before.type === 'gallery' ? before.props.images : undefined : undefined
+			if (before && JSON.stringify(canonicalValue(oldValues)) !== JSON.stringify(canonicalValue(values))) return false
+			// Newly created blocks and unchanged legacy snapshots can bind fresh IDs in normalization.
+			continue
+		}
+		for (const id of ids) {
+			if (!validItemId(id) || seen.has(id) || retired.has(id) || owners.has(id) && owners.get(id) !== raw.id) return false
+			if (id.startsWith('legacy:') && owners.get(id) !== raw.id && before) return false
+			seen.add(id)
+		}
+	}
+	return true
+}
+
+function matchingText(block: ArticleBlock | undefined, field: ArticleBlockTextField): string {
+	const path = articleBlockTextPathForIdentity(block, field.path, field.itemId)
+	return path ? readArticleBlockText(block, path) : ''
+}
 
 /** Closed path whitelist, including numeric list/gallery slots; never accepts structural keys. */
 export function isArticleBlockTextPath(
@@ -117,7 +230,10 @@ function fieldStates(
 			)
 		)
 			continue
-		const path = raw.fieldPath
+		const translated = translationsById(translation).get(block.id) as unknown as ArticleBlock | undefined
+		const itemId = validItemId(raw.itemId) ? raw.itemId : translated ? getArticleBlockItemId(translated, raw.fieldPath) : undefined
+		const path = articleBlockTextPathForIdentity(block, raw.fieldPath, itemId)
+		if (!path) continue
 		if (
 			!getArticleBlockTextFields(block).some(
 				(field) => JSON.stringify(field.path) === JSON.stringify(path),
@@ -130,6 +246,7 @@ function fieldStates(
 				blockId: block.id,
 				blockType: block.type,
 				fieldPath: [...path],
+				...(itemId ? { itemId } : {}),
 				sourceText: raw.sourceText,
 				status: raw.status as ArticleBlockTranslationStatus,
 				...(['manual', 'automatic', 'legacy'].includes(String(raw.origin)) ? { origin: raw.origin as 'manual' | 'automatic' | 'legacy' } : {}),
@@ -144,9 +261,13 @@ function fieldStates(
 function attachStates(
 	doc: ArticleBlocksDoc,
 	states: Map<string, ArticleBlockTranslationState>,
+	orphanedFields: ArticleBlockTranslationState[] = doc.translation?.orphanedFields ?? [],
+	retiredItemIds: string[] = doc.translation?.retiredItemIds ?? [],
 ): void {
 	delete doc.translation
-	if (states.size) doc.translation = { fields: [...states.values()] }
+	if (states.size || orphanedFields.length || retiredItemIds.length) doc.translation = { fields: [...states.values()],
+		...(orphanedFields.length ? { orphanedFields: orphanedFields.slice(-1000) } : {}),
+		...(retiredItemIds.length ? { retiredItemIds: [...new Set(retiredItemIds)] } : {}) }
 }
 
 export function readArticleBlockText(
@@ -182,7 +303,7 @@ export function getArticleBlockTextFields(
 	const keys = Object.hasOwn(ARTICLE_BLOCK_TEXT_KEYS, block.type)
 		? ARTICLE_BLOCK_TEXT_KEYS[block.type]
 		: []
-	const fields = keys.map((key) => ({
+	const fields: ArticleBlockTextField[] = keys.map((key) => ({
 		path: [key] as ArticleBlockTextPath,
 		text: readArticleBlockText(block, [key]),
 		label: labels[key] ?? key,
@@ -192,6 +313,7 @@ export function getArticleBlockTextFields(
 		block.props.items.forEach((_, index) => {
 			fields.push({
 				path: ['items', index],
+				itemId: getArticleBlockItemId(block, ['items', index]),
 				text: readArticleBlockText(block, ['items', index]),
 				label: `مورد ${index + 1}`,
 				maxLength: 300,
@@ -203,6 +325,7 @@ export function getArticleBlockTextFields(
 			if (isRecord(im))
 				fields.push({
 					path: ['images', index, 'alt'],
+					itemId: getArticleBlockItemId(block, ['images', index, 'alt']),
 					text: readArticleBlockText(block, ['images', index, 'alt']),
 					label: `متن جایگزین تصویر ${index + 1}`,
 					maxLength: 200,
@@ -306,7 +429,7 @@ function rebase(
 		for (const field of getArticleBlockTextFields(block)) {
 			let value =
 				translated?.type === block.type
-					? readArticleBlockText(translated, field.path)
+					? matchingText(translated as unknown as ArticleBlock, field)
 					: ''
 			const state = states.get(fieldKey(block.id, block.type, field.path))
 			if (state) {
@@ -324,7 +447,28 @@ function rebase(
 			else if (!fallback) writeText(block, field.path, '')
 		}
 	}
-	if (!fallback) attachStates(out, states)
+	if (!fallback) {
+		const orphaned = isRecord(translation) && isRecord(translation.translation) && Array.isArray(translation.translation.orphanedFields)
+			? translation.translation.orphanedFields.filter((field): field is ArticleBlockTranslationState => isRecord(field)
+				&& typeof field.blockId === 'string' && typeof field.sourceText === 'string' && Array.isArray(field.fieldPath)
+				&& typeof field.staleValue === 'string' && field.staleValue.length <= 30000) : []
+		for (const rawBlock of byId.values()) {
+			const oldBlock = rawBlock as unknown as ArticleBlock
+			const currentBlock = source.blocks.find(block => block?.id === oldBlock.id && block.type === oldBlock.type)
+			for (const field of getArticleBlockTextFields(oldBlock)) {
+				if (!field.itemId || currentBlock && articleBlockTextPathForIdentity(currentBlock, field.path, field.itemId)) continue
+				const rawProof = isRecord(translation) && isRecord(translation.translation) && Array.isArray(translation.translation.fields)
+					? translation.translation.fields.find(proof => isRecord(proof) && proof.blockId === oldBlock.id && JSON.stringify(proof.fieldPath) === JSON.stringify(field.path)) : undefined
+				const value = field.text.trim() ? field.text : isRecord(rawProof) && typeof rawProof.staleValue === 'string' ? rawProof.staleValue : ''
+				if (value.trim()) orphaned.push({ blockId: oldBlock.id, blockType: oldBlock.type, fieldPath: [...field.path], itemId: field.itemId,
+					sourceText: isRecord(rawProof) && typeof rawProof.sourceText === 'string' ? rawProof.sourceText : '',
+					origin: isRecord(rawProof) && rawProof.origin === 'automatic' ? 'automatic' : 'legacy', status: 'needs-retranslation', staleValue: value })
+			}
+		}
+		const retired = isRecord(translation) && isRecord(translation.translation) && Array.isArray(translation.translation.retiredItemIds)
+			? translation.translation.retiredItemIds.filter(validItemId) : []
+		attachStates(out, states, orphaned, retired)
+	}
 	return out
 }
 
@@ -375,7 +519,7 @@ export function fillMissingArticleBlocksTranslation(
 			)
 				continue
 			if (states.has(key) && !proof) continue
-			const value = readArticleBlockText(suggestion, field.path)
+			const value = matchingText(suggestion as unknown as ArticleBlock, field)
 			if (value.trim()) {
 				writeText(block, field.path, value.slice(0, field.maxLength))
 				if (proof) states.set(key, { ...proof, status: 'translated' })
@@ -390,6 +534,7 @@ export interface ArticleBlockSourceChange {
 	blockId: string
 	blockType: ArticleBlockType
 	fieldPath: ArticleBlockTextPath
+	itemId?: string
 	previousText?: string
 	text: string
 }
@@ -409,14 +554,13 @@ export function getChangedArticleBlockTextFields(
 		const fields =
 			before?.type === block.type ? getArticleBlockTextFields(before) : []
 		for (const field of getArticleBlockTextFields(block)) {
-			const former = fields.find(
-				(item) => JSON.stringify(item.path) === JSON.stringify(field.path),
-			)
+			const former = fields.find(item => field.itemId ? item.itemId === field.itemId : JSON.stringify(item.path) === JSON.stringify(field.path))
 			if (!former || former.text !== field.text)
 				changes.push({
 					blockId: block.id,
 					blockType: block.type,
 					fieldPath: field.path,
+					...(field.itemId ? { itemId: field.itemId } : {}),
 					previousText: former?.text,
 					text: field.text,
 				})
@@ -454,6 +598,7 @@ export function setArticleBlockTranslations(
 			blockId: block.id,
 			blockType: block.type,
 			fieldPath: [...field.path],
+			...(field.itemId ? { itemId: field.itemId } : {}),
 			sourceText: field.text,
 			origin,
 			revision: (states.get(key)?.revision ?? 0) + 1,
@@ -517,7 +662,7 @@ export function createArticleBlockTranslationStatusReader(
 		}
 		const translated = translations.get(block.id)
 		return translated?.type === block.type &&
-			readArticleBlockText(translated, path).trim()
+			matchingText(translated as unknown as ArticleBlock, { path, itemId: getArticleBlockItemId(block, path), text: '', label: '', maxLength: 30000 }).trim()
 			? 'translated'
 			: 'missing'
 	}
@@ -542,9 +687,13 @@ export function reconcileArticleBlocksTranslation(
 	current: unknown,
 	incoming?: unknown,
 ): ArticleBlocksDoc | null {
+	if (!validateArticleBlockItemIdentities(previous, next, current))
+		throw new Error('Changed block collections require stable item identities. Reload the content before saving.')
 	if (incoming === null) return null
 	const changes = getChangedArticleBlockTextFields(previous, next)
-	if (current == null && incoming === undefined && changes.length === 0)
+	const nextIds = new Set((next?.blocks ?? []).filter(Boolean).flatMap(block => getArticleBlockTextFields(block).flatMap(field => field.itemId ? [field.itemId] : [])))
+	const newlyRetired = (previous?.blocks ?? []).filter(Boolean).flatMap(block => getArticleBlockTextFields(block).flatMap(field => field.itemId && !nextIds.has(field.itemId) ? [field.itemId] : []))
+	if (current == null && incoming === undefined && changes.length === 0 && newlyRetired.length === 0)
 		return null
 	const out = normalizeArticleBlocksTranslation(next, current)
 	if (!out || !next) return out
@@ -573,7 +722,7 @@ export function reconcileArticleBlocksTranslation(
 			const priorBlock = previousBlocks.get(block.id)
 			const previousBlock = priorBlock?.type === block.type ? priorBlock : undefined
 			const priorTranslation = savedTranslations.get(block.id)
-			const priorValue = priorTranslation?.type === block.type ? readArticleBlockText(priorTranslation, field.path) : ''
+			const priorValue = priorTranslation?.type === block.type ? matchingText(priorTranslation as unknown as ArticleBlock, field) : ''
 			const validProof =
 				proof &&
 				proof.sourceText === field.text &&
@@ -586,7 +735,7 @@ export function reconcileArticleBlocksTranslation(
 					proof.revision === saved.revision + 1 + (change && previousBlock ? 1 : 0))
 			const value =
 				candidate?.type === block.type
-					? readArticleBlockText(candidate, field.path)
+					? matchingText(candidate as unknown as ArticleBlock, field)
 					: ''
 			if (change) {
 				writeText(target, field.path, '')
@@ -595,6 +744,7 @@ export function reconcileArticleBlocksTranslation(
 					blockId: block.id,
 					blockType: block.type,
 					fieldPath: [...field.path],
+					...(field.itemId ? { itemId: field.itemId } : {}),
 					sourceText: change.previousText ?? field.text,
 					origin: saved?.origin ?? (priorValue.trim() ? 'legacy' : 'automatic'),
 					revision: (saved?.revision ?? 0) + 1,
@@ -615,7 +765,7 @@ export function reconcileArticleBlocksTranslation(
 			// Absent fields in a partial/outdated document are not an instruction to erase saved Arabic.
 			if (
 				candidate?.type !== block.type ||
-				!hasTextField(candidate, field.path)
+				!hasTextField(candidate, articleBlockTextPathForIdentity(candidate as unknown as ArticleBlock, field.path, field.itemId) ?? [])
 			)
 				continue
 			if (proof && !validProof) continue
@@ -644,7 +794,7 @@ export function reconcileArticleBlocksTranslation(
 			}
 		}
 	}
-	attachStates(out, states)
+	attachStates(out, states, out.translation?.orphanedFields, [...(out.translation?.retiredItemIds ?? []), ...newlyRetired])
 	return out
 }
 

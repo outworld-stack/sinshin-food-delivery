@@ -1,9 +1,10 @@
+import { fixtureUpdateProduct, fixtureUpdateCategory, fixtureUpdateMainCategory, fixtureUpdatePackaging } from './content-save-fixtures'
 /** Field provenance/product persistence regressions. Disposable local PostgreSQL only; no translator network calls. */
 import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
-import { contentSourceRevision, contentTranslationFields, type TranslationEdit } from '@sinshin/shared'
+import { collectionTranslationIdentities, contentSourceRevision, contentTranslationFields, createContentCollectionItemId, type TranslationEdit } from '@sinshin/shared'
 import { Database } from '../src/infra/db/client'
 import { MenuService } from '../src/domain/menu/menu.service'
 import { PackagingService } from '../src/domain/menu/packaging.service'
@@ -62,7 +63,7 @@ try {
 
   const version = Number(cache.get('menu:ver'))
   await menu.productById(pid, 'ar')
-  await menu.updateProduct({ ...base, id: pid, description: 'توضیح تازه', nameAr: 'وجبة', descriptionAr: 'وصف يدوي' })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, description: 'توضیح تازه', nameAr: 'وجبة', descriptionAr: 'وصف يدوي' })
   let row = await read()
   assert.equal(row.nameAr, 'وجبة')
   assert.equal(row.descriptionAr, null)
@@ -77,35 +78,41 @@ try {
   const description = await field('description')
   const edit: TranslationEdit = { fieldId: description.fieldId, fieldPath: description.fieldPath, sourceText: description.sourceText,
     revision: description.revision, value: 'وصف مراجع', origin: 'manual' }
-  await menu.updateProduct({ ...base, id: pid, description: 'توضیح تازه', translationEdits: [edit] })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, description: 'توضیح تازه', translationEdits: [edit] })
   assert.equal((await read()).descriptionAr, 'وصف مراجع')
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', nameAr: 'وجبة' })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', nameAr: 'وجبة' })
   row = await read()
   assert.equal(row.nameAr, null)
   assert.equal(row.descriptionAr, 'وصف مراجع')
   assert.deepEqual(row.ingredientsAr, ['جبن', 'فطر', 'صلصة'])
   passed('manual review binds to current source; name edit invalidates only name')
 
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
-    ingredients: ['سس', 'پنیر', 'قارچ'], ingredientsAr: ['جبن', 'فطر', 'صلصة'] })
+  const originalIngredientIds = requireValue(collectionTranslationIdentities('product', await read())[0]).itemIds
+  const ingredientIds = (itemIds: string[]) => [{ collectionPath: ['ingredients'], itemIds }]
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
+    ingredients: ['سس', 'پنیر', 'قارچ'], ingredientsAr: ['جبن', 'فطر', 'صلصة'],
+    translationIdentities: ingredientIds([requireValue(originalIngredientIds[2]), requireValue(originalIngredientIds[0]), requireValue(originalIngredientIds[1])]) })
   assert.deepEqual((await read()).ingredientsAr, ['صلصة', 'جبن', 'فطر'])
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', ingredients: ['سس', 'پنیر', 'قارچ تازه'] })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', ingredients: ['سس', 'پنیر', 'قارچ تازه'] })
   assert.deepEqual((await read()).ingredientsAr, ['صلصة', 'جبن', ''])
   assert.equal(contentTranslationFields('product', await read()).filter(item => item.status === 'needs-review').length, 2)
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', ingredients: ['تازه', 'پنیر', 'سس', 'قارچ تازه'] })
+  const freshIngredientId = createContentCollectionItemId('ingredients')
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', ingredients: ['تازه', 'پنیر', 'سس', 'قارچ تازه'],
+    translationIdentities: ingredientIds([freshIngredientId, requireValue(originalIngredientIds[0]), requireValue(originalIngredientIds[2]), requireValue(originalIngredientIds[1])]) })
   assert.deepEqual((await read()).ingredientsAr, ['', 'جبن', 'صلصة', ''])
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', ingredients: ['پنیر', 'سس'] })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', ingredients: ['پنیر', 'سس'],
+    translationIdentities: ingredientIds([requireValue(originalIngredientIds[0]), requireValue(originalIngredientIds[2])]) })
   assert.deepEqual((await read()).ingredientsAr, ['جبن', 'صلصة'])
   passed('ingredient reorders, source edits, insertion and deletion never misassign Arabic values')
 
   const originalSizes = await sizes()
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
     sizes: originalSizes.slice().reverse().map(size => ({ id: size.id, name: size.name, price: size.price + 1,
       image: '/uploads/new.webp', discountPercentage: 5 })) })
   assert.deepEqual((await sizes()).map(size => [size.id, size.nameAr]), originalSizes.slice().reverse().map(size => [size.id, size.nameAr]))
   assert((await sizes()).every(size => requireValue(contentTranslationFields('productSize', size)[0]).status === 'translated'))
   const reordered = await sizes()
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', sizes: reordered.map((size, index) => ({
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', sizes: reordered.map((size, index) => ({
     id: size.id, name: index === 0 ? 'خیلی بزرگ' : size.name, nameAr: size.nameAr, price: size.price,
   })) })
   const renamed = await sizes()
@@ -115,22 +122,22 @@ try {
   assert.equal(requireValue(contentTranslationFields('productSize', renamed[0])[0]).staleValue, requireValue(requireValue(reordered[0]).nameAr))
   passed('size IDs survive reordering and rename; prices/images/discounts never invalidate names')
 
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', sizes: renamed.map((size, index) => ({
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', sizes: renamed.map((size, index) => ({
     id: size.id, name: requireValue(renamed[1 - index]).name, price: size.price,
   })) })
   assert.deepEqual((await sizes()).map(size => size.id), renamed.map(size => size.id))
-  await assert.rejects(menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
+  await assert.rejects(fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
     sizes: [{ id: crypto.randomUUID(), name: 'ناشناخته', price: 1 }] }), validation)
-  await assert.rejects(menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
+  await assert.rejects(fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه',
     sizes: [{ id: requireValue(renamed[0]).id, name: 'یک', price: 1 }, { id: requireValue(renamed[0]).id, name: 'دو', price: 2 }] }), validation)
   passed('exchanging size names retains IDs; foreign and duplicate size IDs are rejected atomically')
 
   row = await read()
   const missingName = requireValue(contentTranslationFields('product', row).find(item => item.fieldId === 'name'))
   const nameProof: TranslationEdit = { ...missingName, value: 'اسم مراجع', origin: 'manual' }
-  await menu.updateProduct({ ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', translationEdits: [nameProof] })
-  await menu.updateProduct({ ...base, id: pid, name: 'آخرین غذا', description: 'توضیح تازه' })
-  await menu.updateProduct({ ...base, id: pid, name: 'آخرین غذا', description: 'توضیح تازه',
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'غذای تازه', description: 'توضیح تازه', translationEdits: [nameProof] })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'آخرین غذا', description: 'توضیح تازه' })
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'آخرین غذا', description: 'توضیح تازه',
     nameAr: 'اسم مراجع', translationEdits: [nameProof] })
   assert.equal((await read()).nameAr, null)
   assert.equal((await read()).descriptionAr, 'وصف مراجع')
@@ -140,13 +147,13 @@ try {
   const automaticId = requireValue(simple.id) as typeof products.$inferSelect.id
   const autoRow = requireValue((await db.select().from(products).where(eq(products.id, automaticId)))[0])
   const autoDescription = requireValue(contentTranslationFields('product', autoRow).find(item => item.fieldId === 'description'))
-  await menu.updateProduct({ ...base, id: automaticId, name: autoRow.name, description: requireValue(autoRow.description), sizesEnabled: false,
+  await fixtureUpdateProduct(menu, db, { ...base, id: automaticId, name: autoRow.name, description: requireValue(autoRow.description), sizesEnabled: false,
     translationEdits: [{ ...autoDescription, value: 'وصف آلي', origin: 'automatic' }] })
-  await menu.updateProduct({ ...base, id: automaticId, name: autoRow.name, description: 'توضیح جدید', sizesEnabled: false })
+  await fixtureUpdateProduct(menu, db, { ...base, id: automaticId, name: autoRow.name, description: 'توضیح جدید', sizesEnabled: false })
   const changedAuto = requireValue((await db.select().from(products).where(eq(products.id, automaticId)))[0])
   const changedField = requireValue(contentTranslationFields('product', changedAuto).find(item => item.fieldId === 'description'))
   assert.equal(changedField.status, 'needs-retranslation')
-  await menu.updateProduct({ ...base, id: automaticId, name: autoRow.name, description: 'توضیح جدید', sizesEnabled: false,
+  await fixtureUpdateProduct(menu, db, { ...base, id: automaticId, name: autoRow.name, description: 'توضیح جدید', sizesEnabled: false,
     translationEdits: [{ ...changedField, value: 'وصف جديد آلي', origin: 'automatic' }] })
   assert.equal(requireValue((await db.select().from(products).where(eq(products.id, automaticId)))[0]).descriptionAr, 'وصف جديد آلي')
   passed('completed automatic field can be invalidated and filled again without changing sibling fields')
@@ -164,12 +171,14 @@ try {
   assert.equal('translationState' in listed, false)
   passed('product list, detail and cart localize the same valid fields without public provenance')
 
-  await menu.updateCategory({ id: requireValue(category).id, name: 'غذای تازه' })
+  await fixtureUpdateCategory(menu, db, { id: requireValue(category).id, name: 'غذای تازه' })
   const cat = requireValue((await db.select().from(categories).where(eq(categories.id, requireValue(category).id)))[0])
   assert.equal(cat.nameAr, null)
   assert.deepEqual(cat.sizeNames, ['کوچک', 'بزرگ'])
   assert.deepEqual(cat.sizeNamesAr, ['صغير', 'كبير'])
-  await menu.updateCategory({ id: requireValue(category).id, name: cat.name, sizeNames: ['بزرگ', 'کوچک تازه'] })
+  const categorySizeIds = requireValue(collectionTranslationIdentities('category', cat)[0]).itemIds
+  await fixtureUpdateCategory(menu, db, { id: requireValue(category).id, name: cat.name, sizeNames: ['بزرگ', 'کوچک تازه'],
+    translationIdentities: [{ collectionPath: ['sizeNames'], itemIds: [requireValue(categorySizeIds[1]), requireValue(categorySizeIds[0])] }] })
   const changedCategory = requireValue((await db.select().from(categories).where(eq(categories.id, requireValue(category).id)))[0])
   assert.deepEqual(changedCategory.sizeNamesAr, ['كبير', ''])
   assert.equal(requireValue((await menu.productById(pid, 'ar'))).categoryName, 'غذای تازه')
@@ -178,7 +187,7 @@ try {
   assert.equal('translationState' in publicCategory, false)
   passed('category name and individual size template lifecycle preserves omitted templates and partial fallback')
 
-  await menu.updateMainCategory({ id: requireValue(main).id, name: 'رستوران تازه', nameAr: 'مطعم' })
+  await fixtureUpdateMainCategory(menu, db, { id: requireValue(main).id, name: 'رستوران تازه', nameAr: 'مطعم' })
   const publicMain = requireValue((await menu.activeMainCategories('ar'))[0])
   assert.equal(publicMain.name, 'رستوران تازه')
   assert.equal(publicMain.nameAr, null)
@@ -186,9 +195,9 @@ try {
   passed('main category name invalidates independently and public fallback strips provenance')
 
   const box = await packaging.add({ title: 'جعبه', titleAr: 'صندوق', price: 500 })
-  await packaging.update(box.id, { price: 600, isActive: false })
+  await fixtureUpdatePackaging(packaging, db, box.id, { price: 600, isActive: false })
   assert.equal(requireValue((await packaging.adminList()).find(item => item.id === box.id)).titleAr, 'صندوق')
-  const changedBox = await packaging.update(box.id, { title: 'جعبه تازه', titleAr: 'صندوق' })
+  const changedBox = await fixtureUpdatePackaging(packaging, db, box.id, { title: 'جعبه تازه', titleAr: 'صندوق' })
   assert.equal(changedBox.titleAr, null)
   assert.equal(changedBox.price, 600)
   assert.equal(requireValue(contentTranslationFields('packagingItem', changedBox)[0]).staleValue, 'صندوق')
@@ -196,32 +205,32 @@ try {
 
   const initialSource = await read()
   const revision = contentSourceRevision('product', initialSource)
-  await menu.updateProduct({ ...base, id: pid, name: initialSource.name, description: requireValue(initialSource.description), originalPrice: 150000,
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: initialSource.name, description: requireValue(initialSource.description), originalPrice: 150000,
     sourceRevision: revision })
-  assert.equal(contentSourceRevision('product', await read()), revision, 'price edits do not invalidate source revision')
-  await menu.updateProduct({ ...base, id: pid, name: 'نام جدید سرور', description: requireValue(initialSource.description), sourceRevision: revision })
-  await assert.rejects(menu.updateProduct({ ...base, id: pid, name: initialSource.name, description: 'فرم قدیمی', sourceRevision: revision }), validation)
+  assert.notEqual(contentSourceRevision('product', await read()), revision, 'price edits advance the save revision without invalidating text')
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'نام جدید سرور', description: requireValue(initialSource.description) })
+  await assert.rejects(fixtureUpdateProduct(menu, db, { ...base, id: pid, name: initialSource.name, description: 'فرم قدیمی', sourceRevision: revision }), validation)
   assert.equal((await read()).name, 'نام جدید سرور')
   const sizeBefore = requireValue((await sizes())[0])
   const oldSizeRevision = contentSourceRevision('productSize', sizeBefore)
-  await menu.updateProduct({ ...base, id: pid, name: 'نام جدید سرور', description: requireValue(initialSource.description),
+  await fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'نام جدید سرور', description: requireValue(initialSource.description),
     sizes: (await sizes()).map((size, index) => ({ id: size.id, name: index === 0 ? 'سایز جدید' : size.name, price: size.price })) })
-  await assert.rejects(menu.updateProduct({ ...base, id: pid, name: 'نام جدید سرور', description: requireValue(initialSource.description),
+  await assert.rejects(fixtureUpdateProduct(menu, db, { ...base, id: pid, name: 'نام جدید سرور', description: requireValue(initialSource.description),
     sizes: (await sizes()).map((size, index) => ({ id: size.id, name: size.name, price: size.price,
       ...(index === 0 ? { sourceRevision: oldSizeRevision } : {}) })) }), validation)
-  passed('stale full product/size forms reject source changes, while metadata-only edits keep source revisions valid')
+  passed('stale full product/size forms reject every intervening save, including metadata-only edits')
 
   const catBefore = requireValue((await db.select().from(categories).where(eq(categories.id, requireValue(category).id)))[0])
-  await menu.updateCategory({ id: requireValue(category).id, name: 'نام تازه دسته', sourceRevision: contentSourceRevision('category', catBefore) })
-  await assert.rejects(menu.updateCategory({ id: requireValue(category).id, name: catBefore.name,
+  await fixtureUpdateCategory(menu, db, { id: requireValue(category).id, name: 'نام تازه دسته', sourceRevision: contentSourceRevision('category', catBefore) })
+  await assert.rejects(fixtureUpdateCategory(menu, db, { id: requireValue(category).id, name: catBefore.name,
     sourceRevision: contentSourceRevision('category', catBefore) }), validation)
   const mainBefore = requireValue((await db.select().from(mainCategories).where(eq(mainCategories.id, requireValue(main).id)))[0])
-  await menu.updateMainCategory({ id: requireValue(main).id, name: 'نام تازه والد', sourceRevision: contentSourceRevision('mainCategory', mainBefore) })
-  await assert.rejects(menu.updateMainCategory({ id: requireValue(main).id, name: mainBefore.name,
+  await fixtureUpdateMainCategory(menu, db, { id: requireValue(main).id, name: 'نام تازه والد', sourceRevision: contentSourceRevision('mainCategory', mainBefore) })
+  await assert.rejects(fixtureUpdateMainCategory(menu, db, { id: requireValue(main).id, name: mainBefore.name,
     sourceRevision: contentSourceRevision('mainCategory', mainBefore) }), validation)
-  await packaging.update(box.id, { title: 'عنوان تازه', sourceRevision: contentSourceRevision('packagingItem', changedBox) })
-  await assert.rejects(packaging.update(box.id, { title: changedBox.title,
-    sourceRevision: contentSourceRevision('packagingItem', changedBox) }), validation)
+  await fixtureUpdatePackaging(packaging, db, box.id, { title: 'عنوان تازه', sourceRevision: changedBox.sourceRevision })
+  await assert.rejects(fixtureUpdatePackaging(packaging, db, box.id, { title: changedBox.title,
+    sourceRevision: changedBox.sourceRevision }), validation)
   passed('category/main/packaging source revisions reject outdated admin drafts independently')
   console.log(`Content product regressions: ${count} passed`)
 } finally {

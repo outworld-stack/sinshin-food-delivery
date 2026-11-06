@@ -46,6 +46,7 @@ interface AdminProductCardProps {
 		finalPrice: number
 		status: string
 		categoryId: string
+		sourceRevision?: string
 		/** stage-48 — موجودی فروش (نیامد = موجود) */
 		isAvailable?: boolean
 		/** stage-86 — امکان خرید زنجیره‌ی دسته (نیامد = روشن) */
@@ -94,7 +95,7 @@ export const AdminProductCard = memo(function AdminProductCard({
 	// stage-48 — موجود/ناموجود سریع + نامعتبرسازی کش‌های وابسته (منو/سبد/چک‌اوت)
 	const availabilityMut = useMutation({
 		mutationFn: (available: boolean) =>
-			setProductAvailability({ data: { id: product.id, available } }),
+			setProductAvailability({ data: { id: product.id, available, sourceRevision: product.sourceRevision } }),
 		onSuccess: async (res, available) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')

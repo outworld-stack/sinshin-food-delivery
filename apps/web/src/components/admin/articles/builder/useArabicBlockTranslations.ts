@@ -1,4 +1,6 @@
 import {
+	articleBlockTextPathForIdentity,
+	getArticleBlockItemId,
 	createArticleBlockTranslationStatusReader,
 	getArticleBlockTranslationStatus,
 	getChangedArticleBlockTextFields,
@@ -53,22 +55,37 @@ export function useArabicBlockTranslations({
 	const activeFields = useRef(new Set<string>())
 	const failures = useRef(new Map<string, string>())
 	const [, refreshFields] = useState(0)
+	const draftForReconciliation = (draft: ArticleBlocksDoc | null | undefined) => draft?.translation ? {
+		...draft, translation: { ...draft.translation,
+			// Undo restores an unsaved logical item. Only persisted tombstones prohibit ID reuse.
+			retiredItemIds: initialDocAr?.translation?.retiredItemIds ?? initialArabic.current?.translation?.retiredItemIds ?? [],
+		},
+	} : draft
 	const keyFor = (
 		id: string,
 		type: ArticleBlockType,
 		path: ArticleBlockTextPath,
-	) => JSON.stringify([id, type, path])
+		itemId?: string,
+		identitySource: ArticleBlocksDoc = doc.current,
+	) => {
+		const block = identitySource.blocks.find(block => block.id === id && block.type === type)
+		return JSON.stringify([id, type, itemId ?? (block && getArticleBlockItemId(block, path)) ?? path])
+	}
+	const readMatching = (block: ArticleBlocksDoc['blocks'][number] | undefined, path: ArticleBlockTextPath, itemId?: string) => {
+		const matched = articleBlockTextPathForIdentity(block, path, itemId)
+		return matched ? readArticleBlockText(block, matched) : ''
+	}
 	const refresh = () => { if (mounted.current) refreshFields(value => value + 1) }
 	const protectedFields = (translation: ArticleBlocksDoc | null | undefined) => new Set(
 		(translation?.translation?.fields ?? []).filter(field => field.origin === 'manual' || field.origin === 'legacy')
-			.map(field => keyFor(field.blockId, field.blockType, field.fieldPath)),
+			.map(field => keyFor(field.blockId, field.blockType, field.fieldPath, field.itemId, translation ?? doc.current)),
 	)
 	const countSourceChanges = (
 		before: ArticleBlocksDoc,
 		after: ArticleBlocksDoc,
 	) => {
 		for (const change of getChangedArticleBlockTextFields(before, after)) {
-			const key = keyFor(change.blockId, change.blockType, change.fieldPath)
+			const key = keyFor(change.blockId, change.blockType, change.fieldPath, change.itemId, after)
 			revisions.current.set(key, (revisions.current.get(key) ?? 0) + 1)
 			failures.current.delete(key)
 		}
@@ -77,16 +94,16 @@ export function useArabicBlockTranslations({
 	draftRef.current = reconcileArticleBlocksTranslation(
 		seenSource.current,
 		doc.current,
-		docAr === seenArabic.current ? draftRef.current : docAr,
+		draftForReconciliation(docAr === seenArabic.current ? draftRef.current : docAr),
 	)
 	if (docAr === null && seenArabic.current) {
 		manuallyCleared.current = true
 		draftRef.current = setArticleBlockTranslations(doc.current, null, doc.current.blocks.flatMap(block =>
 			getArticleBlockTextFields(block).map(field => ({ blockId: block.id, path: field.path, text: '' }))), 'manual')
 		for (const proof of draftRef.current?.translation?.fields ?? []) {
-			const saved = (initialDocAr ?? initialArabic.current)?.translation?.fields.find(field => keyFor(field.blockId, field.blockType, field.fieldPath) === keyFor(proof.blockId, proof.blockType, proof.fieldPath))
+			const saved = (initialDocAr ?? initialArabic.current)?.translation?.fields.find(field => keyFor(field.blockId, field.blockType, field.fieldPath, field.itemId, initialDoc ?? initialSource.current) === keyFor(proof.blockId, proof.blockType, proof.fieldPath, proof.itemId))
 			const before = (initialDoc ?? initialSource.current).blocks.find(block => block.id === proof.blockId && block.type === proof.blockType)
-			proof.revision = (saved?.revision ?? 0) + 1 + (before && readArticleBlockText(before, proof.fieldPath) !== proof.sourceText ? 1 : 0)
+			proof.revision = (saved?.revision ?? 0) + 1 + (before && readMatching(before, proof.fieldPath, proof.itemId) !== proof.sourceText ? 1 : 0)
 		}
 	}
 	if (!manuallyCleared.current && initialDocAr !== initialArabic.current && initialDocAr) {
@@ -104,15 +121,15 @@ export function useArabicBlockTranslations({
 				for (const field of getArticleBlockTextFields(block)) {
 					const key = keyFor(block.id, block.type, field.path)
 					const proof = latest.translation?.fields.find(state => keyFor(state.blockId, state.blockType, state.fieldPath) === key)
-					if (revisions.current.has(key) || readArticleBlockText(before, field.path) !== field.text
-						|| readArticleBlockText(target, field.path) !== readArticleBlockText(oldArabic, field.path)
+					if (revisions.current.has(key) || readMatching(before, field.path, field.itemId) !== field.text
+						|| readArticleBlockText(target, field.path) !== readMatching(oldArabic, field.path, field.itemId)
 						|| !proof || proof.sourceText !== field.text) continue
 					const updated = setArticleBlockTexts({ version: 1, blocks: [target] }, [{ blockId: block.id, path: field.path, text: readArticleBlockText(incoming, field.path) }])
 					Object.assign(target, updated.blocks[0])
 					states.set(key, proof)
 				}
 			}
-			current.translation = { fields: [...states.values()] }
+			current.translation = { ...current.translation, fields: [...states.values()] }
 			draftRef.current = current
 		}
 	}
@@ -130,9 +147,9 @@ export function useArabicBlockTranslations({
 			const block = source.blocks.find(item => item.id === proof.blockId && item.type === proof.blockType)
 			if (!block) continue
 			const before = savedSource.blocks.find(item => item.id === block.id && item.type === block.type)
-			const saved = savedArabic?.translation?.fields.find(field => keyFor(field.blockId, field.blockType, field.fieldPath) === keyFor(proof.blockId, proof.blockType, proof.fieldPath))
+			const saved = savedArabic?.translation?.fields.find(field => keyFor(field.blockId, field.blockType, field.fieldPath, field.itemId, savedSource) === keyFor(proof.blockId, proof.blockType, proof.fieldPath, proof.itemId, source))
 			const sourceText = readArticleBlockText(block, proof.fieldPath)
-			const invalidatedRevision = (saved?.revision ?? 0) + (before && readArticleBlockText(before, proof.fieldPath) !== sourceText ? 1 : 0)
+			const invalidatedRevision = (saved?.revision ?? 0) + (before && readMatching(before, proof.fieldPath, proof.itemId) !== sourceText ? 1 : 0)
 			const reviewed = proof.sourceText === sourceText && (proof.revision ?? 0) > invalidatedRevision
 			proof.revision = invalidatedRevision + (reviewed ? 1 : 0)
 			if (reviewed && proof.origin === 'manual') proof.status = readArticleBlockText(next.blocks.find(item => item.id === block.id && item.type === block.type), proof.fieldPath).trim() ? 'translated' : 'missing'
@@ -145,17 +162,18 @@ export function useArabicBlockTranslations({
 		countSourceChanges(seenSource.current, next)
 		const previous = seenSource.current
 		seenSource.current = next
-		publish(reconcileArticleBlocksTranslation(previous, next, draftRef.current), next)
+		publish(reconcileArticleBlocksTranslation(previous, next, draftForReconciliation(draftRef.current)), next)
 	}
-	const edit = (blockId: string, path: ArticleBlockTextPath, text: string) => {
+	const edit = (blockId: string, path: ArticleBlockTextPath, text: string, itemId?: string) => {
 		const block = doc.current.blocks.find((item) => item.id === blockId)
-		if (!block) return
-		const key = keyFor(block.id, block.type, path)
+		const currentPath = articleBlockTextPathForIdentity(block, path, itemId)
+		if (!block || !currentPath) return
+		const key = keyFor(block.id, block.type, currentPath, itemId)
 		revisions.current.set(key, (revisions.current.get(key) ?? 0) + 1)
 		failures.current.delete(key)
 		publish(
 			setArticleBlockTranslations(doc.current, draftRef.current, [
-				{ blockId, path, text },
+				{ blockId, path: currentPath, text },
 			]),
 		)
 	}
@@ -193,20 +211,22 @@ export function useArabicBlockTranslations({
 				(item) => JSON.stringify(item.path) === JSON.stringify(path),
 			)
 		if (!block || !field?.text.trim()) return
-		const key = keyFor(block.id, block.type, path)
+		const key = keyFor(block.id, block.type, path, field.itemId, source)
 		const currentBlock = doc.current.blocks.find(
 			(item) => item.id === block.id && item.type === block.type,
 		)
+		const currentPath = articleBlockTextPathForIdentity(currentBlock, path, field.itemId)
 		if (
 			!currentBlock ||
-			readArticleBlockText(currentBlock, path) !== field.text ||
+			!currentPath ||
+			readMatching(currentBlock, path, field.itemId) !== field.text ||
 			revisions.current.get(key) !== before.get(key) ||
 			!allowManual && protectedFields(draftRef.current).has(key) ||
 			getArticleBlockTranslationStatus(
 				doc.current,
 				draftRef.current,
 				block.id,
-				path,
+				currentPath,
 			) === 'translated'
 		)
 			return
@@ -214,6 +234,7 @@ export function useArabicBlockTranslations({
 		const storedState = initialDocAr?.translation?.fields.find(item => item.blockId === blockId && item.blockType === block.type
 			&& JSON.stringify(item.fieldPath) === JSON.stringify(path))
 		const storedContext = translationEntityType && translationEntityId && storedBlock && readArticleBlockText(storedBlock, path) === field.text
+			&& getArticleBlockItemId(storedBlock, path) === field.itemId
 			? { entityType: translationEntityType, entityId: translationEntityId, revision: storedState?.revision ?? 0 } : undefined
 		activeFields.current.add(key)
 		failures.current.delete(key)
@@ -237,10 +258,11 @@ export function useArabicBlockTranslations({
 		const latest = doc.current.blocks.find(
 			(item) => item.id === block.id && item.type === block.type,
 		)
+		const latestPath = articleBlockTextPathForIdentity(latest, path, field.itemId)
 		if (
 			!mounted.current ||
 			!latest ||
-			readArticleBlockText(latest, path) !== field.text ||
+			!latestPath || readArticleBlockText(latest, latestPath) !== field.text ||
 			revisions.current.get(key) !== before.get(key) ||
 			result.blockId !== block.id ||
 			result.blockType !== block.type ||
@@ -251,18 +273,18 @@ export function useArabicBlockTranslations({
 				doc.current,
 				draftRef.current,
 				block.id,
-				path,
+				latestPath,
 			) === 'translated'
 		)
 			return
 		if (result.translation.trim())
 			publish(
 				setArticleBlockTranslations(doc.current, draftRef.current, [
-					{ blockId, path, text: result.translation },
+					{ blockId, path: latestPath, text: result.translation },
 				]),
 			)
 	}
-	const translate = (blockId?: string, fieldPath?: ArticleBlockTextPath) =>
+	const translate = (blockId?: string, fieldPath?: ArticleBlockTextPath, itemId?: string) =>
 		run(async () => {
 			const source = doc.current
 			const previous = draftRef.current
@@ -272,7 +294,8 @@ export function useArabicBlockTranslations({
 				previous,
 			)
 			if (blockId !== undefined && fieldPath !== undefined) {
-				await translateField(source, blockId, fieldPath, before)
+				const path = articleBlockTextPathForIdentity(source.blocks.find(block => block.id === blockId), fieldPath, itemId)
+				if (path) await translateField(source, blockId, path, before)
 				return
 			}
 			// Initial block/all previews omit completed source fields and Arabic values.
@@ -334,15 +357,16 @@ export function useArabicBlockTranslations({
 					continue
 				for (const field of getArticleBlockTextFields(block)) {
 					const key = keyFor(block.id, block.type, field.path)
+					const originalPath = articleBlockTextPathForIdentity(original, field.path, field.itemId)
 					if (
 						!requestedKeys.has(key) || protectedCurrent.has(key) ||
-						readArticleBlockText(original, field.path) !== field.text ||
+						readMatching(original, field.path, field.itemId) !== field.text ||
 						revisions.current.get(key) !== before.get(key) ||
-						previousStatus(block.id, field.path) === 'translated' ||
+						!originalPath || previousStatus(block.id, originalPath) === 'translated' ||
 						currentStatus(block.id, field.path) === 'translated'
 					)
 						continue
-					const value = readArticleBlockText(suggestion, field.path)
+					const value = readMatching(suggestion, field.path, field.itemId)
 					if (value.trim())
 						accepted.push({ blockId: block.id, path: field.path, text: value })
 				}
@@ -362,7 +386,7 @@ export function useArabicBlockTranslations({
 			const protectedBefore = protectedFields(draftRef.current)
 			for (const block of source.blocks)
 				for (const field of getArticleBlockTextFields(block)) {
-					if (sourceStatus(block.id, field.path) === 'needs-retranslation' && !protectedBefore.has(keyFor(block.id, block.type, field.path))) {
+					if (sourceStatus(block.id, field.path) === 'needs-retranslation' && !protectedBefore.has(keyFor(block.id, block.type, field.path, field.itemId, source))) {
 						await translateField(source, block.id, field.path, before, false)
 					}
 				}

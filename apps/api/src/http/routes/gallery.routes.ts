@@ -11,7 +11,7 @@ import type { GalleryService } from '#/domain/gallery/gallery.service'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { UUID_PATTERN } from '#/domain/shared/ids'
-import { translationEditsSchema } from './content-translation.schemas'
+import { contentSourceRevisionSchema, translationEditsSchema } from './content-translation.schemas'
 
 
 export interface GalleryRoutesDeps {
@@ -56,7 +56,7 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
           translationEdits: t.Optional(translationEditsSchema),
           span: t.Optional(t.Union([t.Literal('wide'), t.Literal('normal')])),
           isActive: t.Optional(t.Boolean()),
-          sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+          sourceRevision: contentSourceRevisionSchema,
         }),
         detail: { summary: 'Patch image' },
       },
@@ -68,10 +68,12 @@ export const galleryRoutes = (deps: GalleryRoutesDeps) => {
     )
     .post(
       '/:id/reorder',
-      ({ params, body }) => deps.gallery.reorder(params.id, body.direction),
+      ({ params, body }) => deps.gallery.reorder(params.id, body.direction, body.sourceRevisions),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        body: t.Object({ direction: t.Union([t.Literal('up'), t.Literal('down')]) }),
+        body: t.Object({ direction: t.Union([t.Literal('up'), t.Literal('down')]),
+          sourceRevisions: t.Record(t.String({ pattern: UUID_PATTERN }), contentSourceRevisionSchema, { maxProperties: 1000 }),
+        }),
         detail: { summary: 'Swap sortOrder with neighbor' },
       },
     )

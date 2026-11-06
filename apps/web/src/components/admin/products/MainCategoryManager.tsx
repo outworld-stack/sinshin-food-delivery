@@ -13,6 +13,7 @@ import { ArField } from '#/components/admin/ArField'
 import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
 import type { MainCategory, TranslationEdit } from '@sinshin/shared'
 import { updateMainCategory } from '#/server/products'
+import { contentRevisionMap } from '#/utils/contentTranslationDraft'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Can } from '#/components/shared/PermissionGate'
 import { Toggle } from '#/components/shared/Toggle'
@@ -62,6 +63,7 @@ const AddMainModal = memo(function AddMainModal({
 			showToast(initialMain ? 'دسته اصلی ویرایش شد' : 'دسته اصلی ساخته شد — برای نمایش فعالش کنید')
 			onClose()
 		},
+		onError: error => setError(error.message || 'ذخیره انجام نشد؛ پیش‌نویس شما حفظ شده است'),
 	})
 
 	const handleSubmit = useCallback(
@@ -197,7 +199,7 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 	)
 
 	const toggleMutation = useMutation({
-		mutationFn: (id: string) => toggleMainCategory({ data: { id } }),
+		mutationFn: (id: string) => toggleMainCategory({ data: { id, sourceRevision: mains?.find(main => main.id === id)?.sourceRevision } }),
 		onSuccess: async () => {
 			await invalidateAll()
 			showToast('وضعیت تغییر کرد')
@@ -205,7 +207,7 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 	})
 
 	const defaultMutation = useMutation({
-		mutationFn: (id: string) => setDefaultMainCategory({ data: { id } }),
+		mutationFn: (id: string) => setDefaultMainCategory({ data: { id, sourceRevisions: contentRevisionMap(mains ?? []) } }),
 		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
@@ -218,7 +220,7 @@ export const MainCategoryManager = memo(function MainCategoryManager({
 
 	const reorderMutation = useMutation({
 		mutationFn: (data: { id: string; direction: 'up' | 'down' }) =>
-			reorderMainCategory({ data }),
+			reorderMainCategory({ data: { ...data, sourceRevisions: contentRevisionMap(mains ?? []) } }),
 		onSuccess: () => invalidateAll(),
 	})
 

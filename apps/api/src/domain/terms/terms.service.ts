@@ -11,7 +11,7 @@ import { desc, eq, sql } from 'drizzle-orm'
 import type { Db } from '#/infra/db/client'
 import { terms } from '#/infra/db/schema'
 import type { Lang } from '#/domain/shared/lang'
-import { assertContentSourceRevision, localizeContentRecord, reconcileContentTranslation, type TermsContentDto, type TermsSection, type TranslationEdit } from '@sinshin/shared'
+import { assertContentSourceRevision, assertContentTranslationIdentities, collectionTranslationIdentities, contentSourceRevision, localizeContentRecord, reconcileContentTranslation, type ContentCollectionIdentity, type TermsContentDto, type TermsSection, type TranslationEdit } from '@sinshin/shared'
 import { Err } from '#/domain/shared/errors'
 
 // رارد ۴۶ — TermsSection به قرارداد مشترک (@sinshin/shared) منتقل شد.
@@ -76,7 +76,8 @@ export class TermsService {
     }) : row.sections
     return {
       sections,
-      ...(includeState ? { id: row.id, sectionsAr: row.sectionsAr ?? null, translationState: row.translationState } : {}),
+      ...(includeState ? { id: row.id, sectionsAr: row.sectionsAr ?? null, translationState: row.translationState,
+        sourceRevision: contentSourceRevision('terms', row), translationIdentities: collectionTranslationIdentities('terms', row) } : {}),
       arAuto: row.arAuto,
       version: row.version,
       updatedAt: row.createdAt,
@@ -90,6 +91,7 @@ export class TermsService {
     sectionsAr?: TermsSection[] | null,
     translationEdits: TranslationEdit[] = [],
     sourceRevision?: string,
+    translationIdentities?: ContentCollectionIdentity[],
   ): Promise<{ version: number }> {
     if (sections.length === 0) {
       throw new Error('حداقل یک بخش لازم است')
@@ -101,14 +103,17 @@ export class TermsService {
       // Keep accepted historical versions immutable, while serializing allocation of the next version.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('content:terms'))`)
       const [latest] = await tx.select().from(terms).orderBy(desc(terms.version)).limit(1).for('update')
-      if (!assertContentSourceRevision('terms', latest ?? { sections: [] }, sourceRevision)) throw Err.validation('قوانین تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+      if (latest && !assertContentSourceRevision('terms', latest, sourceRevision)) throw Err.validation('قوانین تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+      if (latest && !assertContentTranslationIdentities('terms', { ...latest, sections }, translationIdentities, latest)) {
+        throw Err.validation('شناسه بندهای قوانین معتبر نیست؛ فرم را دوباره بارگذاری کنید.')
+      }
       const id = crypto.randomUUID()
       const next = reconcileContentTranslation('terms', id, latest ?? null, {
         ...latest, id, version: (latest?.version ?? 0) + 1, sections,
         sectionsAr: sectionsAr === undefined ? latest?.sectionsAr ?? null : sectionsAr,
         translationState: latest?.translationState ?? null,
         createdAt: new Date(), arAuto: false,
-      }, translationEdits)
+      }, translationEdits, translationIdentities)
       await tx.insert(terms).values(next)
       return { version: next.version }
     })

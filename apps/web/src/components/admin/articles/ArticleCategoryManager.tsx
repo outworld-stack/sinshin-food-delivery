@@ -16,7 +16,7 @@ import { useToastStore } from '#/stores/toastStore'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { ArField } from '#/components/admin/ArField'
 import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
-import { contentSourceRevision, type TranslationEdit } from '@sinshin/shared'
+import type { TranslationEdit } from '@sinshin/shared'
 import { Toggle } from '#/components/shared/Toggle'
 import { Pen, Trash2, X } from 'reicon-react'
 
@@ -33,6 +33,7 @@ interface ArticleCategoryFormState {
   subTagsAr: string[]
   subIds: (string | undefined)[]
   subKeys: string[]
+  subRevisions: (string | undefined)[]
   subInput: string
   confirmDeleteId: string | null
 }
@@ -47,6 +48,7 @@ const EMPTY_FORM: ArticleCategoryFormState = {
   subTagsAr: [],
   subIds: [],
   subKeys: [],
+  subRevisions: [],
   subInput: '',
   confirmDeleteId: null,
 }
@@ -54,7 +56,7 @@ const EMPTY_FORM: ArticleCategoryFormState = {
 function SubCategoryArabicField({ name, nameAr, initialRow, onChange }: {
   name: string
   nameAr: string
-  initialRow?: { id: string; name: string; nameAr?: string | null }
+  initialRow?: { id: string; name: string; nameAr?: string | null; sourceRevision?: string }
   onChange: (value: string, edits: TranslationEdit[], sourceRevision?: string) => void
 }) {
   const translation = useContentTranslationDraft({ entityType: 'articleSubCategory', entityId: initialRow?.id,
@@ -98,6 +100,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       showToast('دسته‌بندی ایجاد شد')
     },
     onSettled: () => { mutationLock.current = false },
+    onError: error => showToast(error.message, 'error'),
   })
 
   const updateMut = useMutation({
@@ -119,6 +122,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       showToast('ویرایش شد')
     },
     onSettled: () => { mutationLock.current = false },
+    onError: error => showToast(error.message, 'error'),
   })
 
   const deleteMut = useMutation({
@@ -150,10 +154,11 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
         subTagsAr: (cat.subCategories ?? []).map(s => s.nameAr ?? ''),
         subIds: (cat.subCategories ?? []).map(s => s.id),
         subKeys: (cat.subCategories ?? []).map(s => s.id),
+        subRevisions: (cat.subCategories ?? []).map(s => s.sourceRevision),
         subInput: '',
       })
     } else {
-      set({ isModalOpen: true, editingId: null, name: '', nameAr: '', hasSub: false, subTags: [], subTagsAr: [], subIds: [], subKeys: [], subInput: '' })
+      set({ isModalOpen: true, editingId: null, name: '', nameAr: '', hasSub: false, subTags: [], subTagsAr: [], subIds: [], subKeys: [], subRevisions: [], subInput: '' })
     }
   }, [canWrite, set, translation])
 
@@ -167,20 +172,27 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       if (mutationLock.current) return
       const tag = form.subInput.trim()
       if (form.subTags.length >= 12) { showToast('حداکثر ۱۲ زیردسته مجاز است', 'error'); return }
-      if (!form.subTags.includes(tag)) set({ subTags: [...form.subTags, tag], subTagsAr: [...form.subTagsAr, ''], subIds: [...form.subIds, undefined], subKeys: [...form.subKeys, crypto.randomUUID()], subInput: '' })
+      const key = crypto.randomUUID()
+      setForm(previous => previous.subTags.includes(tag) || previous.subTags.length >= 12 ? previous : {
+        ...previous, subTags: [...previous.subTags, tag], subTagsAr: [...previous.subTagsAr, ''],
+        subIds: [...previous.subIds, undefined], subKeys: [...previous.subKeys, key], subRevisions: [...previous.subRevisions, undefined], subInput: '' })
     }
-  }, [form, set, showToast])
+  }, [form, showToast])
 
-  const removeSubTag = useCallback((tag: string) => {
-    const idx = form.subTags.indexOf(tag)
-    set({
-      subTags: form.subTags.filter(t => t !== tag),
+  const removeSubTag = useCallback((idx: number) => {
+    const key = form.subKeys[idx]
+    setForm(previous => { const currentIndex = previous.subKeys.indexOf(key)
+      if (currentIndex < 0) return previous
+      return { ...previous,
+      subTags: previous.subTags.filter((_, i) => i !== currentIndex),
       // round-34 — جفت عربی هم‌ایندکس حذف می‌شود
-      subTagsAr: idx === -1 ? form.subTagsAr : form.subTagsAr.filter((_, i) => i !== idx),
-      subIds: form.subIds.filter((_, i) => i !== idx),
-      subKeys: form.subKeys.filter((_, i) => i !== idx),
+      subTagsAr: previous.subTagsAr.filter((_, i) => i !== currentIndex),
+      subIds: previous.subIds.filter((_, i) => i !== currentIndex),
+      subKeys: previous.subKeys.filter((_, i) => i !== currentIndex),
+      subRevisions: previous.subRevisions.filter((_, i) => i !== currentIndex),
+      }
     })
-  }, [form, set])
+  }, [form])
 
   // round-34 — ویرایش نام عربی ساب‌دسته‌ی ایندکس n
   const setSubTagAr = useCallback((key: string, value: string) => {
@@ -198,9 +210,8 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
       translationEdits: translation.getEdits(),
       sourceRevision: translation.sourceRevision,
       subCategoryEntries: subCategories.map((name, index) => {
-        const initial = originalCategory?.subCategories?.find(entry => entry.id === form.subIds[index])
         return { id: form.subIds[index], name,
-          nameAr: form.subTagsAr[index]?.trim() ?? '', sourceRevision: initial ? contentSourceRevision('articleSubCategory', initial) : undefined,
+          nameAr: form.subTagsAr[index]?.trim() ?? '', sourceRevision: form.subRevisions[index],
           ...subEdits.current.get(form.subKeys[index]) }
       }),
       name: form.name.trim(),
@@ -212,7 +223,7 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
     mutationLock.current = true
     if (form.editingId) updateMut.mutate({ id: form.editingId, ...payload })
     else createMut.mutate(payload)
-  }, [canWrite, form, showToast, updateMut, createMut, translation, originalCategory])
+  }, [canWrite, form, showToast, updateMut, createMut, translation])
 
   return (
     <div className="w-full bg-white dark:bg-[#2a1015] p-6 rounded-2xl border border-gray-200 dark:border-[#3a151c] shadow-sm h-fit">
@@ -280,8 +291,9 @@ export const ArticleCategoryManager = memo(function ArticleCategoryManager({ can
                     <div key={form.subKeys[i]} className="flex flex-wrap items-center gap-2">
                       <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary text-xs shrink-0">
                         <input value={t} maxLength={60} aria-label="نام فارسی زیردسته" className="bg-transparent outline-none"
-                          onChange={event => set({ subTags: form.subTags.map((value, index) => index === i ? event.target.value : value) })} />
-                        <button type="button" onClick={() => removeSubTag(t)} className="hover:opacity-70 cursor-pointer"><X size={10} /></button>
+                          onChange={event => { const text = event.target.value, key = form.subKeys[i]; setForm(previous => ({ ...previous,
+                            subTags: previous.subTags.map((value, index) => previous.subKeys[index] === key ? text : value) })) }} />
+                        <button type="button" onClick={() => removeSubTag(i)} className="hover:opacity-70 cursor-pointer"><X size={10} /></button>
                       </div>
                       {/* round-34 — نام عربی همین ساب‌دسته */}
                       <SubCategoryArabicField name={t} nameAr={form.subTagsAr[i] ?? ''}

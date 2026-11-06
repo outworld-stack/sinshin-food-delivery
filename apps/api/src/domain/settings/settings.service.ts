@@ -12,7 +12,7 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '#/infra/db/client'
 import type { AppConfig } from '#/infra/config/env'
 import { settings, SETTING_KEYS } from '#/infra/db/schema'
-import { assertContentSourceRevision, DEFAULT_RESTAURANT_HOURS, isRestaurantHours, localizeContentRecord, reconcileContentTranslation, type ContentTranslationState, type RestaurantHoursDto, type RestaurantStatusDto, type TranslationEdit } from '@sinshin/shared'
+import { assertContentSourceRevision, contentSourceRevision, DEFAULT_RESTAURANT_HOURS, isRestaurantHours, localizeContentRecord, reconcileContentTranslation, type ContentTranslationState, type RestaurantHoursDto, type RestaurantStatusDto, type TranslationEdit } from '@sinshin/shared'
 import type { Lang } from '#/domain/shared/lang'
 import { Err, OrderPaymentsDisabledError } from '#/domain/shared/errors'
 
@@ -81,6 +81,9 @@ export class SettingsService {
   }
 
   async set<T>(key: string, value: T): Promise<void> {
+    if (key === SETTING_KEYS.temporaryCloseReason || key === SETTING_KEYS.temporaryCloseReasonAr) {
+      throw Err.validation('متن دوزبانه علت بسته بودن باید از مسیر ویرایش دارای نسخه ذخیره شود.')
+    }
     await this.deps.db
       .insert(settings)
       .values({ key, value: value as never })
@@ -101,9 +104,9 @@ export class SettingsService {
     this.cache.delete(SETTING_KEYS.temporaryCloseReasonAr)
   }
 
-  async readTemporaryCloseContent(db?: DbOrTx): Promise<{ id: string; reason: string; reasonAr: string; translationState: ContentTranslationState | null }> {
+  async readTemporaryCloseContent(db?: DbOrTx): Promise<{ id: string; reason: string; reasonAr: string; translationState: ContentTranslationState | null; sourceRevision: string }> {
     const hit = this.closeContentCache
-    if (!db && hit && Date.now() - hit.at < SETTINGS_CACHE_TTL_MS) return structuredClone(hit.row)
+    if (!db && hit && Date.now() - hit.at < SETTINGS_CACHE_TTL_MS) return { ...structuredClone(hit.row), sourceRevision: contentSourceRevision('temporaryClose', hit.row) }
     const revision = this.closeContentRevision
     const queryDb = db ?? this.deps.db
     const rows = await queryDb.select().from(settings).where(inArray(settings.key, [SETTING_KEYS.temporaryCloseReason, SETTING_KEYS.temporaryCloseReasonAr]))
@@ -115,7 +118,7 @@ export class SettingsService {
       if (revision !== this.closeContentRevision) return this.readTemporaryCloseContent()
       this.closeContentCache = { at: Date.now(), row }
     }
-    return structuredClone(row)
+    return { ...structuredClone(row), sourceRevision: contentSourceRevision('temporaryClose', row) }
   }
 
   /** Serialize the bilingual message with the existing closure/payment policy in one transaction. */
@@ -125,13 +128,14 @@ export class SettingsService {
   }): Promise<void> {
     const writes = await this.deps.db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('content:temporaryClose'))`)
+      const [originalSource] = await tx.select().from(settings).where(eq(settings.key, SETTING_KEYS.temporaryCloseReason)).for('update')
       await tx.insert(settings).values({ key: SETTING_KEYS.temporaryCloseReason, value: '' }).onConflictDoNothing()
       const [source] = await tx.select().from(settings).where(eq(settings.key, SETTING_KEYS.temporaryCloseReason)).for('update')
       const [arabic] = await tx.select().from(settings).where(eq(settings.key, SETTING_KEYS.temporaryCloseReasonAr))
       const current = { id: 'temporaryCloseReason', reason: typeof source?.value === 'string' ? source.value : '',
         reasonAr: typeof arabic?.value === 'string' ? arabic.value : '', translationState: source?.translationState ?? null }
-      if (!assertContentSourceRevision('temporaryClose', current, input.sourceRevision)) throw Err.validation('علت بسته بودن تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
-      const previous = !current.reason && !current.reasonAr && !current.translationState ? null : current
+      if (originalSource && !assertContentSourceRevision('temporaryClose', current, input.sourceRevision)) throw Err.validation('علت بسته بودن تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+      const previous = originalSource ? current : null
       const next = reconcileContentTranslation('temporaryClose', current.id, previous, { ...current,
         reason: input.closed ? input.reason : '', reasonAr: input.closed ? input.reasonAr ?? current.reasonAr : '',
       }, input.closed ? input.translationEdits : [])

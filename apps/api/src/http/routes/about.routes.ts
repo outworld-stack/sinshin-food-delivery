@@ -1,4 +1,4 @@
-import { assertContentSourceRevision, getArticleBlockTextFields, localizeContentRecord, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, reconcileArticleBlocksTranslation, reconcileContentTranslation, setArticleBlockTranslations, type AboutLocationDto, type ArticleBlocksDoc } from '@sinshin/shared'
+import { articleBlocksContentForLimit, assertContentSourceRevision, contentSourceRevision, getArticleBlockTextFields, localizeContentRecord, mergeArticleBlocksTranslation, normalizeArticleBlocksTranslation, reconcileArticleBlocksTranslation, reconcileContentTranslation, setArticleBlockTranslations, validateArticleBlockItemIdentities, type AboutLocationDto, type ArticleBlocksDoc } from '@sinshin/shared'
 import { isDeepStrictEqual } from 'node:util'
 import { eq, sql } from 'drizzle-orm'
 import { Elysia, t } from 'elysia'
@@ -11,7 +11,7 @@ import { requireAdmin } from '#/http/hooks/require-auth'
 import type { Db } from '#/infra/db/client'
 import { contentAbout } from '#/infra/db/schema'
 import { blocksArDocSchema } from './articles.routes'
-import { translationEditsSchema } from './content-translation.schemas'
+import { contentSourceRevisionSchema, translationEditsSchema } from './content-translation.schemas'
 
 export interface AboutRoutesDeps {
   db: Db
@@ -34,7 +34,7 @@ const blocksDocSchema = t.Nullable(t.Object({
 }))
 
 function normalizeAboutBlocks(input: unknown): ArticleBlocksDoc | null {
-  if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 262_144) {
+  if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit(input)), 'utf8') > 262_144) {
     throw Err.validation('حجم هر بخش محتوای درباره ما نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
   }
   return normalizeBlocksDoc(input)
@@ -42,9 +42,9 @@ function normalizeAboutBlocks(input: unknown): ArticleBlocksDoc | null {
 
 function normalizeAboutArabicBlocks(source: ArticleBlocksDoc | null, input: unknown): ArticleBlocksDoc | null {
   if (input == null) return null
-  if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 2_097_152) throw Err.validation('حجم سند ترجمه درباره ما بیش از حد مجاز است.')
+  if (Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit(input)), 'utf8') > 2_097_152) throw Err.validation('حجم سند ترجمه درباره ما بیش از حد مجاز است.')
   const out = normalizeArticleBlocksTranslation(source, input)
-  if (out && Buffer.byteLength(JSON.stringify({ version: out.version, blocks: out.blocks }), 'utf8') > 262_144) {
+  if (out && Buffer.byteLength(JSON.stringify(articleBlocksContentForLimit({ version: out.version, blocks: out.blocks })), 'utf8') > 262_144) {
     throw Err.validation('حجم ترجمه بلوکی درباره ما نباید بیشتر از ۲۵۶ کیلوبایت باشد.')
   }
   return out
@@ -80,8 +80,9 @@ const emptyContent: typeof contentAbout.$inferSelect = {
 }
 
 export const aboutRoutes = (deps: AboutRoutesDeps) => {
+  const readStoredContent = async () => (await deps.db.select().from(contentAbout).limit(1))[0] ?? emptyContent
   const readContent = async () => {
-    const row = (await deps.db.select().from(contentAbout).limit(1))[0] ?? emptyContent
+    const row = await readStoredContent()
     return { ...row, location: validCoordinates(row.location) ? row.location : null }
   }
 
@@ -118,8 +119,9 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
     // Never feed localized public text back into the Persian editor fields.
     // Keep the stored override separate so unrelated edits do not freeze the default.
     .get('/', async () => {
-      const [row, defaultLocation] = await Promise.all([readContent(), readDefaultLocation()])
-      return { ...row, defaultLocation }
+      const [row, defaultLocation] = await Promise.all([readStoredContent(), readDefaultLocation()])
+      return { ...row, location: validCoordinates(row.location) ? row.location : null,
+        defaultLocation, sourceRevision: contentSourceRevision('about', row) }
     }, { detail: { summary: 'Original About content (main admin)' } })
     .patch('/', async ({ body }) => {
       const heroTitle = body.heroTitle.trim()
@@ -129,13 +131,12 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext('content:about'))`)
         const [existing] = await tx.select().from(contentAbout).limit(1).for('update')
         const current = existing ?? emptyContent
-        if (!assertContentSourceRevision('about', current, body.sourceRevision)) throw Err.validation('محتوای درباره ما تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+        if (existing && !assertContentSourceRevision('about', current, body.sourceRevision)) throw Err.validation('محتوای درباره ما تغییر کرده است؛ فرم را دوباره بارگذاری کنید.')
+        if (body.blocks !== undefined && !validateArticleBlockItemIdentities(existing?.blocks ?? null, body.blocks, existing?.blocksAr)) {
+          throw Err.validation('شناسه آیتم‌های بلوک معتبر نیست؛ فرم را دوباره بارگذاری کنید.')
+        }
         const blocks = body.blocks === undefined || isDeepStrictEqual(body.blocks, current.blocks)
           ? current.blocks : normalizeAboutBlocks(body.blocks)
-        if (blocks && body.blocksAr === null && body.sourceRevision === undefined
-          && current.blocksAr?.blocks.some(block => getArticleBlockTextFields(block).some(field => field.text.trim()))) {
-          throw Err.validation('برای حذف ترجمه‌های عربی، فرم درباره ما را دوباره بارگذاری کنید.')
-        }
         const blocksAr = body.blocksAr !== undefined || blocks !== current.blocks
           ? normalizeAboutArabicBlocks(blocks, body.blocksAr === null ? setArticleBlockTranslations(blocks, current.blocksAr,
             (blocks?.blocks ?? []).flatMap(block => getArticleBlockTextFields(block).map(field => ({ blockId: block.id, path: field.path, text: '' }))), 'manual') : reconcileArticleBlocksTranslation(
@@ -170,7 +171,7 @@ export const aboutRoutes = (deps: AboutRoutesDeps) => {
       return { success: true }
     }, {
       body: t.Object({
-        sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+        sourceRevision: t.Optional(contentSourceRevisionSchema),
         heroTitle: t.String({ minLength: 1, maxLength: 120 }),
         heroText: t.String({ maxLength: 2000 }),
         heroGradient: t.String({ maxLength: 2048 }),

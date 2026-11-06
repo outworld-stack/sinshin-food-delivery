@@ -4,6 +4,7 @@ import type { TranslationEdit } from '@sinshin/shared'
 import type { ProductFormData } from '../src/types/forms'
 
 const calls: { path: string; method: string; body?: Record<string, unknown> }[] = []
+let requestError: Error | undefined
 function popBody() {
 	const call = calls.pop()
 	assert(call, 'Expected a captured API request')
@@ -11,15 +12,16 @@ function popBody() {
 	return call.body
 }
 mock.module('#/lib/api-fetch', () => ({
-	authJson: async (path: string, method: string, body?: Record<string, unknown>) => { calls.push({ path, method, body }); return { success: true, version: 2 } },
+	authJson: async (path: string, method: string, body?: Record<string, unknown>) => { calls.push({ path, method, body }); if (requestError) throw requestError; return { success: true, version: 2 } },
 	getJson: async () => null, postJson: async () => null,
 }))
 const proof: TranslationEdit = { fieldId: 'description', fieldPath: ['description'], sourceText: 'متن دقیق', value: 'نص دقيق', revision: 4, origin: 'manual' }
 const revision = 'validated-persisted-source'
-const { getAdminCategories, updateAdminProduct, updateCategory, updateMainCategory, updatePackagingItem } = await import('../src/server/products')
-const { getAdminTerms, updateTerms } = await import('../src/server/terms')
-const { updateGalleryImage } = await import('../src/server/gallery')
-const { updateArticle, updateArticleCategory } = await import('../src/server/articles')
+const { getAdminCategories, updateAdminProduct, updateCategory, updateMainCategory, updatePackagingItem, toggleMainCategory, setDefaultMainCategory,
+	reorderMainCategory, toggleProductStatus, setMainPurchaseState, setCategoryPurchaseState, setProductAvailability, createMainCategory } = await import('../src/server/products')
+const { createTerms, getAdminTerms, updateTerms } = await import('../src/server/terms')
+const { updateGalleryImage, reorderGalleryImage } = await import('../src/server/gallery')
+const { updateArticle, updateArticleCategory, toggleArticleStatus } = await import('../src/server/articles')
 const { updateAboutContent } = await import('../src/server/about')
 const { setTemporaryClose } = await import('../src/server/admin')
 const { translateContentField, translateArticleBlockField } = await import('../src/server/translation')
@@ -50,11 +52,66 @@ await updateCategory({ data: { id: 'category-one', name: 'دسته', mainCategor
 assert.deepEqual(popBody(), { name: 'دسته', mainCategoryIds: ['main-one'], nameAr: 'فئة', sizeNames: ['کوچک', 'بزرگ'], sizeNamesAr: ['', 'كبير'], sourceRevision: revision, translationEdits: [proof], courierEnabled: true, takeawayEnabled: true, dineInEnabled: true })
 await updateMainCategory({ data: { id: 'main-one', name: 'رستوران', nameAr: 'مطعم', sourceRevision: revision, translationEdits: [proof] } })
 assert.equal(popBody().sourceRevision, revision)
+
+const revisions = { 'entity-one': revision, 'entity-two': 'second-saved-token' }
+for (const action of [
+	() => toggleMainCategory({ data: { id: 'entity-one', sourceRevision: revision } }),
+	() => toggleProductStatus({ data: { id: 'entity-one', sourceRevision: revision } }),
+	() => setMainPurchaseState({ data: { id: 'entity-one', purchaseEnabled: false, sourceRevision: revision } }),
+	() => setCategoryPurchaseState({ data: { id: 'entity-one', purchaseEnabled: true, sourceRevision: revision } }),
+	() => setProductAvailability({ data: { id: 'entity-one', available: false, sourceRevision: revision } }),
+	() => toggleArticleStatus('entity-one', revision),
+	() => updateGalleryImage({ id: 'entity-one', isActive: false, sourceRevision: revision }),
+	() => updatePackagingItem({ id: 'entity-one', data: { price: 50, sourceRevision: revision } }),
+]) { await action(); assert.equal(popBody().sourceRevision, revision, 'metadata-only mutations carry the exact saved token too') }
+for (const action of [
+	() => setDefaultMainCategory({ data: { id: 'entity-one', sourceRevisions: revisions } }),
+	() => reorderMainCategory({ data: { id: 'entity-one', direction: 'up', sourceRevisions: revisions } }),
+	() => reorderGalleryImage({ id: 'entity-one', direction: 'down', sourceRevisions: revisions }),
+]) { await action(); assert.deepEqual(popBody().sourceRevisions, revisions, 'multi-row updates carry source proofs for each affected row') }
+
+const updatesWithoutProof = [
+	() => updateMainCategory({ data: { id: 'main', name: 'نام' } }),
+	() => updateCategory({ data: { id: 'category', name: 'نام', mainCategoryIds: ['main'] } }),
+	() => updateAdminProduct({ data: { id: 'product', sizes: [] } as unknown as ProductFormData & { id: string } }),
+	() => updateAdminProduct({ data: { id: 'product', sourceRevision: revision, sizes: [{ id: 'saved-size' }] } as unknown as ProductFormData & { id: string } }),
+	() => updatePackagingItem({ id: 'item', data: { price: 100 } }),
+	() => updateGalleryImage({ id: 'image', isActive: false }),
+	() => updateArticle({ id: 'article', title: 'عنوان', excerpt: 'خلاصه', content: 'متن', categoryId: 'category' }),
+	() => updateArticleCategory({ id: 'category', name: 'نام', hasSubCategories: false, subCategories: [] }),
+	() => updateArticleCategory({ id: 'category', sourceRevision: revision, name: 'نام', hasSubCategories: true, subCategories: ['فرعی'], subCategoryEntries: [{ id: 'saved-sub', name: 'فرعی' }] }),
+	() => updateTerms({ sections: [] }),
+	() => updateAboutContent({} as Parameters<typeof updateAboutContent>[0]),
+	() => setTemporaryClose({ data: { closed: false, reason: 'علت' } }),
+	() => toggleMainCategory({ data: { id: 'main' } }),
+	() => toggleProductStatus({ data: { id: 'product' } }),
+	() => setMainPurchaseState({ data: { id: 'main', purchaseEnabled: false } }),
+	() => setCategoryPurchaseState({ data: { id: 'category', purchaseEnabled: false } }),
+	() => setProductAvailability({ data: { id: 'product', available: false } }),
+	() => toggleArticleStatus('article'),
+	() => setDefaultMainCategory({ data: { id: 'main' } }),
+	() => reorderMainCategory({ data: { id: 'main', direction: 'up', sourceRevisions: {} } }),
+	() => reorderGalleryImage({ id: 'image', direction: 'down' }),
+]
+const beforeMissingProof = calls.length
+for (const action of updatesWithoutProof) await assert.rejects(action, error => error instanceof Error
+	&& 'status' in error && error.status === 409 && /پیش‌نویس/.test(error.message))
+assert.equal(calls.length, beforeMissingProof, 'missing saved revisions are rejected before sending any mutation')
+await createMainCategory({ data: { name: 'تازه', slug: 'new-main' } })
+assert.equal(popBody().sourceRevision, undefined, 'creation does not require an existing-record revision')
 await updatePackagingItem({ id: 'packaging-one', data: { title: 'جعبه', titleAr: 'صندوق', sourceRevision: revision, translationEdits: [proof] } })
 assert.deepEqual(popBody().translationEdits, [proof])
 
 await updateTerms({ sections: [{ title: 'قوانین', items: ['بند اول', 'بند دوم'] }], sectionsAr: [{ title: '', items: ['', 'بند عربي'] }], sourceRevision: revision, translationEdits: [proof] })
 assert.deepEqual(popBody(), { sections: [{ title: 'قوانین', items: ['بند اول', 'بند دوم'] }], sectionsAr: [{ title: '', items: ['', 'بند عربي'] }], sourceRevision: revision, translationEdits: [proof] }, 'terms serialization preserves every empty nested slot and its explicit edit proof')
+const firstTerms = { sections: [{ title: 'قوانین تازه', items: ['بند تازه'] }], sectionsAr: [{ title: ' قواعد ', items: [' بند جديد '] }],
+	translationIdentities: [{ collectionPath: ['sections'], itemIds: ['sections:first'] }, { collectionPath: ['sections', 0, 'items'], itemIds: ['sections:first:items:first'] }], translationEdits: [proof] }
+await createTerms(firstTerms)
+assert.deepEqual(popBody(), { ...firstTerms, sectionsAr: [{ title: 'قواعد', items: ['بند جديد'] }] }, 'explicit first creation retains identities and manual proofs without inventing a saved revision')
+requestError = Object.assign(new Error('Reload the existing saved Terms'), { status: 409 })
+await assert.rejects(() => createTerms(firstTerms), requestError)
+assert.equal(popBody().sourceRevision, undefined, 'a concurrent first-create conflict propagates instead of becoming an unguarded update')
+requestError = undefined
 await updateGalleryImage({ id: 'gallery-one', alt: 'عکس', altAr: 'صورة', src: '/photo.png', sourceRevision: revision, translationEdits: [proof] })
 assert.deepEqual(popBody().translationEdits, [proof])
 await updateArticle({ id: 'article-one', title: 'عنوان', excerpt: 'خلاصه', content: 'متن', categoryId: 'category', sourceRevision: revision, translationEdits: [proof] })

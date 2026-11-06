@@ -17,7 +17,7 @@ import type { RegistrationPermitService } from '#/domain/auth/registration-permi
 import { SETTING_KEYS } from '#/infra/db/schema'
 import { requireAdmin } from '#/http/hooks/require-auth'
 import { requireAdmin2 } from '#/http/hooks/require-admin2'
-import { translationEditsSchema } from './content-translation.schemas'
+import { contentSourceRevisionSchema, translationEditsSchema } from './content-translation.schemas'
 
 export interface AdminSettingsRoutesDeps {
   sessions: SessionService
@@ -61,6 +61,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
           ...status,
           temporaryCloseReasonAr: status.temporarilyClosed ? content.reasonAr || null : null,
           translationState: content.translationState,
+          sourceRevision: content.sourceRevision,
         }
       },
       { detail: { summary: 'Full status — schedule + temporary + busy' } },
@@ -123,7 +124,7 @@ export const adminSettingsRoutes = (deps: AdminSettingsRoutesDeps) => {
         body: t.Object({
           closed: t.Boolean(),
             translationEdits: t.Optional(translationEditsSchema),
-            sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+            sourceRevision: t.Optional(contentSourceRevisionSchema),
           /** Closing requires 20 trimmed characters; reopening requires 3 for the audit trail. */
           reason: t.String({ minLength: 3, maxLength: 120 }),
           /** Optional legacy metadata; temporary checkout warnings show only the reason. */

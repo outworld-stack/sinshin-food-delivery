@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // src/components/admin/settings/GalleryImageRow.tsx
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { FileUploader } from '#/components/FileUploader'
 import { Toggle } from '#/components/shared/Toggle'
 import { ArField, arBadgeOf } from '#/components/admin/ArField'
@@ -31,7 +31,7 @@ interface GalleryImageRowProps {
         canMoveDown: boolean
         isBusy: boolean
         onToggleActive: (id: string, isActive: boolean) => void
-        onSave: (id: string, fields: GalleryImageEditFields) => void
+        onSave: (id: string, fields: GalleryImageEditFields) => Promise<unknown>
         onMove: (id: string, direction: 'up' | 'down') => void
         onRequestDelete: (id: string) => void
 }
@@ -73,6 +73,12 @@ export const GalleryImageRow = memo(function GalleryImageRow({
         const [altAr, setAltAr] = useState(image.altAr ?? '')
         const [span, setSpan] = useState<GallerySpan>(image.span)
         const [src, setSrc] = useState(image.src)
+        const [saving, setSaving] = useState(false)
+        const [saveError, setSaveError] = useState('')
+        const submitting = useRef(false)
+        const mounted = useRef(true)
+        const busy = isBusy || saving
+        useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
         const translation = useContentTranslationDraft({ entityType: 'gallery', entityId: image.id,
                 initialRow: { ...image }, row: { ...image, alt: alt.trim(), altAr } })
 
@@ -82,15 +88,27 @@ export const GalleryImageRow = memo(function GalleryImageRow({
                 setAltAr(image.altAr ?? '')
                 setSpan(image.span)
                 setSrc(image.src)
+                setSaveError('')
                 setIsEditing(true)
         }, [image, translation])
 
-        const cancelEdit = useCallback(() => setIsEditing(false), [])
+        const cancelEdit = useCallback(() => { if (!submitting.current) setIsEditing(false) }, [])
 
-        const handleSave = useCallback(() => {
-                onSave(image.id, { alt: alt.trim(), altAr: altAr.trim(), span, src, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
-                setIsEditing(false)
-        }, [image.id, alt, altAr, span, src, onSave, translation])
+        const handleSave = useCallback(async () => {
+                if (busy || submitting.current || !alt.trim()) return
+                submitting.current = true
+                setSaving(true)
+                setSaveError('')
+                try {
+                        await onSave(image.id, { alt: alt.trim(), altAr: altAr.trim(), span, src, translationEdits: translation.getEdits(), sourceRevision: translation.sourceRevision })
+                        if (mounted.current) setIsEditing(false)
+                } catch (error) {
+                        if (mounted.current) setSaveError(error instanceof Error ? error.message : 'ذخیره انجام نشد؛ پیش‌نویس شما حفظ شده است')
+                } finally {
+                        submitting.current = false
+                        if (mounted.current) setSaving(false)
+                }
+        }, [image.id, alt, altAr, span, src, onSave, translation, busy])
 
         return (
                 <li className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-200 dark:border-[#3a151c]">
@@ -126,12 +144,14 @@ export const GalleryImageRow = memo(function GalleryImageRow({
                                                 />
                                                 <div className="flex flex-col sm:flex-row gap-3">
                                                         <input
+                                                                disabled={busy}
                                                                 value={alt}
                                                                 onChange={(e) => setAlt(e.target.value)}
                                                                 className="flex-1 px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary"
                                                                 placeholder="متن جایگزین"
                                                         />
                                                         <select
+                                                                disabled={busy}
                                                                 value={span}
                                                                 onChange={(e) => setSpan(e.target.value as GallerySpan)}
                                                                 className="px-3 py-2 rounded-lg bg-white dark:bg-[#2a1015] border border-gray-200 dark:border-[#3a151c] text-sm text-gray-800 dark:text-white outline-none focus:border-primary"
@@ -143,8 +163,9 @@ export const GalleryImageRow = memo(function GalleryImageRow({
                                                 {/* round-34 — متن جایگزین عربی + بج وضعیت */}
                                                 <div className="flex items-center gap-2">
                                                         <ArField label="متن جایگزین" value={altAr} onChange={setAltAr}
-                                                                faReference={alt.trim()} translation={translation.field(['alt'])} maxLength={200} disabled={isBusy} />
+                                                                faReference={alt.trim()} translation={translation.field(['alt'])} maxLength={200} disabled={busy} />
                                                 </div>
+                                                {saveError && <p role="alert" className="text-xs text-red-500">{saveError}</p>}
                                         </div>
                                 ) : (
                                         <>
@@ -169,7 +190,7 @@ export const GalleryImageRow = memo(function GalleryImageRow({
                                                 <button
                                                         type="button"
                                                         onClick={handleSave}
-                                                        disabled={isBusy || !alt.trim()}
+                                                        disabled={busy || !alt.trim()}
                                                         className={`${btnCls} bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-400`}
                                                 >
                                                         تایید
@@ -177,6 +198,7 @@ export const GalleryImageRow = memo(function GalleryImageRow({
                                                 <button
                                                         type="button"
                                                         onClick={cancelEdit}
+                                                        disabled={busy}
                                                         className={`${btnCls} bg-gray-200 dark:bg-[#2a1015] text-gray-600 dark:text-gray-300`}
                                                 >
                                                         انصراف

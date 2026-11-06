@@ -10,11 +10,12 @@
 // فیلدهای الزامی — فرم‌ها همیشه مقدار اولیه‌ی کامل می‌سازن؛
 // اختیاری بودن تاریخی بود و مانع تایپ‌شدن میوتیشن‌ها (data: any) می‌شد.
 // نتیجه: createArticle/createAdminProduct الان ورودی کاملاً تایپ‌دار می‌گیرن.
-import type { ArticleBlocksDoc, Product, ContentTranslationState, TranslationEdit } from '@sinshin/shared'
+import type { ArticleBlocksDoc, Product, ContentTranslationState, TranslationEdit, ContentCollectionIdentity } from '@sinshin/shared'
 // stage-101 — قرارداد انیمیشن صفحه‌ی محصول ویژه (اختصاصیِ هر محصول)
 import type { FeaturedAnimation } from '#/types/site/featured-animation'
 
 export interface ArticleFormData {
+	translationIdentities?: ContentCollectionIdentity[]
 	sourceRevision?: string
 	id?: string
 	translationState?: ContentTranslationState | null
@@ -78,6 +79,7 @@ export interface ProductFormSize {
 }
 
 export interface ProductFormData {
+	translationIdentities?: ContentCollectionIdentity[]
 	sourceRevision?: string
 	translationEdits?: TranslationEdit[]
 	name: string

@@ -97,6 +97,7 @@ function render(instance: Host, component: any, props: any = {}) {
 const instance = (): Host => ({ cells: [], cursor: 0, effects: [] })
 const size = (id: string, name: string, price: number) => ({ id: id as SizeId, name, price, finalPrice: price, discountPercentage: 0, discountActive: false })
 const product = (overrides: Partial<Product> = {}): Product => ({
+	sourceRevision: 'saved-product-token',
 	id: 'product' as ProductId, name: 'Pizza', description: 'Description', originalPrice: 100, finalPrice: 100,
 	discountPercentage: 0, prepTime: 15, packagingCost: 50, categoryId: 'category' as CategoryId,
 	categoryIds: ['category' as CategoryId], ingredients: ['Cheese', 'Tomato'], profileImage: '/pizza.png',

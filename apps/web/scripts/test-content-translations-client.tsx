@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
-import { contentTranslationFields, matchesContentSourceRevision, reconcileContentTranslation, type ContentEntityType } from '@sinshin/shared'
+import { collectionTranslationIdentities, contentSourceRevision, contentTranslationFields, matchesContentSourceRevision, reconcileContentTranslation, type ContentEntityType } from '@sinshin/shared'
+import { moveCollectionIdentity, appendCollectionIdentity } from '../src/utils/contentTranslationDraft'
 
 function required<T>(value: T | null | undefined): T {
 	assert(value != null, 'Expected a required translation fixture value')
@@ -27,9 +28,18 @@ mock.module('#/server/translation', () => ({
 	translateContentField: async (request: Record<string, unknown>) => { requests.push(structuredClone(request)); return { ...request, value: await work(String(request.sourceText)) } },
 }))
 const { useContentTranslationDraft } = await import('../src/hooks/admin/useContentTranslationDraft')
+const missingRevisionHost = fresh()
+host = missingRevisionHost
+function MissingProofEditor() {
+	return useContentTranslationDraft({ entityType: 'gallery', entityId: 'existing-image',
+		initialRow: { alt: 'متن سرور', altAr: null }, row: { alt: 'متن ویرایش‌شده', altAr: '' } })
+}
+const noSavedProof = MissingProofEditor()
+assert.equal(noSavedProof.sourceRevision, undefined, 'an existing DTO without a server token never gets a fabricated revision')
 function editor(type: ContentEntityType, initial: Record<string, unknown>, id = 'entity-one') {
 	const active = fresh()
-	let row = structuredClone(initial)
+	initial = { ...initial, sourceRevision: initial.sourceRevision ?? contentSourceRevision(type, initial) }
+	let row = { ...structuredClone(initial), translationIdentities: collectionTranslationIdentities(type, initial) }
 	let persisted = initial
 	const render = () => { host = active; active.cursor = 0; return useContentTranslationDraft({ entityType: type, entityId: id, initialRow: persisted, row }) }
 	return { render, change: (patch: Record<string, unknown>) => { row = { ...row, ...patch } }, row: () => row,
@@ -37,10 +47,13 @@ function editor(type: ContentEntityType, initial: Record<string, unknown>, id = 
 		unmount: () => { for (const cleanup of active.cleanups) cleanup() } }
 }
 function automatic(type: ContentEntityType, source: Record<string, unknown>) {
-	return reconcileContentTranslation(type, 'entity-one', null, source, contentTranslationFields(type, source).map(field => ({
+	const seeded = reconcileContentTranslation(type, 'entity-one', null, source)
+	return reconcileContentTranslation(type, 'entity-one', seeded, seeded, contentTranslationFields(type, seeded).map(field => ({
 		fieldId: field.fieldId, fieldPath: field.fieldPath, sourceText: field.sourceText, value: `عربي ${field.sourceText}`, revision: 0, origin: 'automatic' as const,
 	})))
 }
+const suppliedRevision = editor('gallery', { alt: 'متن سرور', altAr: null, sourceRevision: 'opaque-raw-server-proof', derivedDisplayProperty: true })
+assert.equal(suppliedRevision.render().sourceRevision, 'opaque-raw-server-proof', 'display DTO transformations never replace the supplied raw-row source token')
 
 const product = automatic('product', { name: 'نام اصلی', description: 'توضیح اصلی', ingredients: ['پنیر', 'قارچ'], ingredientsAr: [] })
 const productEditor = editor('product', product)
@@ -60,30 +73,30 @@ assert.equal(required(draft.field(['name'])).status, 'translated')
 assert.equal(draft.getEdits()[0].fieldId, originalNameId)
 assert.equal(draft.sourceRevision, initialDraft.sourceRevision, 'keystrokes cannot rebind the persisted source revision')
 assert.equal(draft.getEdits().length, 1)
-const savedProduct = reconcileContentTranslation('product', 'entity-one', product, productEditor.row(), draft.getEdits())
+const savedProduct = reconcileContentTranslation<Record<string, unknown>>('product', 'entity-one', product, productEditor.row(), draft.getEdits())
 assert.equal(savedProduct.nameAr, newName)
 assert.equal(savedProduct.descriptionAr, product.descriptionAr)
 assert.deepEqual(savedProduct.ingredientsAr, product.ingredientsAr)
 
 // Reorder carries translated values by identity, even with an outdated parallel Arabic array.
-productEditor.change({ ingredients: ['قارچ', 'پنیر'] })
+productEditor.change({ ingredients: ['قارچ', 'پنیر'], translationIdentities: moveCollectionIdentity(productEditor.row().translationIdentities, ['ingredients'], 0, 1) })
 draft = productEditor.render()
 assert.equal(required(draft.field(['ingredients', 0])).field.value, 'عربي قارچ')
 assert.equal(required(draft.field(['ingredients', 1])).field.value, 'عربي پنیر')
 required(draft.field(['ingredients', 1])).edit('جبن يدوي', 'manual')
-productEditor.change({ ingredients: ['پنیر', 'قارچ'] })
+productEditor.change({ ingredients: ['پنیر', 'قارچ'], translationIdentities: moveCollectionIdentity(productEditor.row().translationIdentities, ['ingredients'], 0, 1) })
 draft = productEditor.render()
 assert.deepEqual(draft.getEdits().find(edit => edit.fieldId.startsWith('ingredients:'))?.fieldPath, ['ingredients', 0], 'manual proof follows its stable item through reorder')
-const reorderedSave = reconcileContentTranslation('product', 'entity-one', product, productEditor.row(), draft.getEdits())
+const reorderedSave = reconcileContentTranslation<Record<string, unknown>>('product', 'entity-one', product, productEditor.row(), draft.getEdits())
 assert.deepEqual(reorderedSave.ingredientsAr, ['جبن يدوي', 'عربي قارچ'])
-productEditor.change({ ingredients: ['پنیر', 'پنیر', 'قارچ'] })
+productEditor.change({ ingredients: ['پنیر', 'پنیر', 'قارچ'], translationIdentities: moveCollectionIdentity(appendCollectionIdentity(productEditor.row().translationIdentities, ['ingredients']), ['ingredients'], 2, 1) })
 draft = productEditor.render()
-assert.equal(required(draft.field(['ingredients', 0])).field.value, null)
+assert.equal(required(draft.field(['ingredients', 0])).field.value, 'جبن يدوي', 'a duplicate draft keeps the original item identity and manual translation')
 assert.equal(required(draft.field(['ingredients', 1])).field.value, null, 'ambiguous copies never steal a saved Arabic value')
 const duplicateId = required(draft.field(['ingredients', 1])).field.fieldId
 assert.equal(required(productEditor.render().field(['ingredients', 1])).field.fieldId, duplicateId, 'new draft identities remain stable across renders')
 required(draft.field(['ingredients', 1])).edit('جبن جديد', 'manual')
-const copySave = reconcileContentTranslation('product', 'entity-one', product, productEditor.row(), draft.getEdits())
+const copySave = reconcileContentTranslation<Record<string, unknown>>('product', 'entity-one', product, productEditor.row(), draft.getEdits())
 assert.equal((copySave.ingredientsAr as string[])[1], 'جبن جديد', 'the server safely accepts an explicit new collection identity')
 
 // Persisted missing fields use the validated entity operation; duplicate clicks dedupe before a rerender.
@@ -174,17 +187,23 @@ for (const [type, collection] of [['terms', 'sections'], ['article', 'processes'
 	nested.render()
 	const added = { title: 'بخش تازه اول', items: ['بند تازه اول'] }
 	const sibling = { title: 'بخش تازه دوم', items: ['بند تازه دوم'] }
-	nested.change({ [collection]: [added, ...initial[collection]], [`${collection}Ar`]: [{ title: '', items: [''] }, ...initial[`${collection}Ar`]] })
+	let nestedIds = appendCollectionIdentity(nested.row().translationIdentities, [collection])
+	nestedIds = appendCollectionIdentity(nestedIds, [collection, 1, 'items'])
+	nestedIds = moveCollectionIdentity(nestedIds, [collection], 1, 0)
+	nested.change({ translationIdentities: nestedIds, [collection]: [added, ...initial[collection]], [`${collection}Ar`]: [{ title: '', items: [''] }, ...initial[`${collection}Ar`]] })
 	let state = nested.render()
 	required(state.field([collection, 0, 'items', 0])).edit('بند يدوي جديد', 'manual')
-	nested.change({ [collection]: [sibling, added, ...initial[collection]] })
+	nestedIds = appendCollectionIdentity(nested.row().translationIdentities, [collection])
+	nestedIds = appendCollectionIdentity(nestedIds, [collection, 2, 'items'])
+	nestedIds = moveCollectionIdentity(nestedIds, [collection], 2, 0)
+	nested.change({ translationIdentities: nestedIds, [collection]: [sibling, added, ...initial[collection]] })
 	state = nested.render()
-	nested.change({ [collection]: [sibling, ...initial[collection], added] })
+	nested.change({ translationIdentities: moveCollectionIdentity(nestedIds, [collection], 1, 2), [collection]: [sibling, ...initial[collection], added] })
 	state = nested.render()
 	const proofs = state.getEdits()
 	assert.equal(proofs.length, 2, `${type} sends just the explicit item proof and its new parent identity hint`)
 	assert(proofs.some(edit => edit.fieldPath.join('.') === `${collection}.2.title` && edit.value === '' && edit.origin === 'automatic'))
-	const saved = reconcileContentTranslation(type, 'entity-one', initial, nested.row(), proofs)
+	const saved = reconcileContentTranslation<Record<string, unknown>>(type, 'entity-one', initial, nested.row(), proofs)
 	const savedArabic = saved[`${collection}Ar`]
 	assert(Array.isArray(savedArabic), 'saved nested Arabic retains its collection structure')
 	assert.equal(savedArabic[2].items[0], 'بند يدوي جديد', `${type} child-only manual edits survive new sibling insertion and reorder`)

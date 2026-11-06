@@ -7,6 +7,7 @@
 
 // src/server/gallery.ts — تماماً API
 import { authJson, getJson } from '#/lib/api-fetch'
+import { requireContentSourceRevision, requireContentSourceRevisions } from '#/utils/contentTranslationDraft'
 import type { GalleryImageDto, GallerySpan, TranslationEdit } from '@sinshin/shared'
 
 // رارد ۴۶ — دو یونیون درون‌خطی «wide | normal» در امضاهای ادمین با
@@ -47,6 +48,7 @@ export async function updateGalleryImage(input: {
   span?: GallerySpan
   isActive?: boolean
 }): Promise<{ success: boolean }> {
+  requireContentSourceRevision(input.sourceRevision)
   return authJson<{ success: boolean }>(`/admin/gallery/${input.id}`, 'PATCH', {
     ...input,
     ...(input.altAr !== undefined ? { altAr: (input.altAr ?? '').trim() || null } : {}),
@@ -58,8 +60,9 @@ export async function deleteGalleryImage(id: string): Promise<{ success: boolean
 }
 
 export async function reorderGalleryImage(input: {
+  sourceRevisions?: Record<string, string>
   id: string
   direction: 'up' | 'down'
 }): Promise<{ success: boolean }> {
-  return authJson<{ success: boolean }>(`/admin/gallery/${input.id}/reorder`, 'POST', input)
+  return authJson<{ success: boolean }>(`/admin/gallery/${input.id}/reorder`, 'POST', { ...input, sourceRevisions: requireContentSourceRevisions(input.sourceRevisions) })
 }

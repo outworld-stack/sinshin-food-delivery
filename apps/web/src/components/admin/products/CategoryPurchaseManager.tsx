@@ -47,7 +47,7 @@ export const CategoryPurchaseManager = memo(function CategoryPurchaseManager({
 
 	const mainMutation = useMutation({
 		mutationFn: (data: { id: string; purchaseEnabled: boolean }) =>
-			setMainPurchaseState({ data }),
+			setMainPurchaseState({ data: { ...data, sourceRevision: state?.mains.find(main => main.id === data.id)?.sourceRevision } }),
 		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')
@@ -62,7 +62,7 @@ export const CategoryPurchaseManager = memo(function CategoryPurchaseManager({
 
 	const categoryMutation = useMutation({
 		mutationFn: (data: { id: string; purchaseEnabled: boolean }) =>
-			setCategoryPurchaseState({ data }),
+			setCategoryPurchaseState({ data: { ...data, sourceRevision: state?.categories.find(category => category.id === data.id)?.sourceRevision } }),
 		onSuccess: async (res) => {
 			if (!res.success) {
 				showToast(res.message ?? 'خطا', 'error')

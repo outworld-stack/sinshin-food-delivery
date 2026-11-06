@@ -12,6 +12,7 @@
  *   (یا: bun run db:test:purchase)
  */
 import assert from 'node:assert/strict'
+import { contentFixtureProof } from './content-save-fixtures'
 import { SQL } from 'bun'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
 import { Database } from '../src/infra/db/client'
@@ -119,7 +120,9 @@ try {
   passed('پیش‌فرض stage-86: خرید روشن — purchasable=true و سبد بدون قفل')
 
   // ── ۲) غیرفعال‌سازی زیردسته: purchasable=false در همه‌ی پاسخ‌ها ──
-  const offCat = await menu.setCategoryPurchase(kebab!.id, false)
+  assert(kebab)
+  assert(main)
+  const offCat = await menu.setCategoryPurchase(kebab!.id, false, (await contentFixtureProof(db, 'category', kebab.id)).sourceRevision)
   assert.equal(offCat.success, true)
   const cheloLocked = await menu.productById(chelo!.id)
   assert.equal(cheloLocked?.purchasable, false)
@@ -134,7 +137,7 @@ try {
   passed('زیردسته‌ی غیرفعال: purchasable=false در جزئیات/لیست عمومی/لیست ادمین')
 
   // ایدمپوتنت: دوباره همان مقدار → پیام، بدون خطا
-  const again = await menu.setCategoryPurchase(kebab!.id, false)
+  const again = await menu.setCategoryPurchase(kebab!.id, false, (await contentFixtureProof(db, 'category', kebab.id)).sourceRevision)
   assert.equal(again.success, true)
   assert.match(again.message ?? '', /از قبل/)
   passed('سوئیچ ایدمپوتنت است (پیام «از قبل» بدون خطا)')
@@ -174,8 +177,8 @@ try {
   passed('چک‌اوت: پیش‌نمایش هشدار + ثبت سفارش با نامِ دسته رد می‌شود')
 
   // ── ۵) غیرفعال‌سازی والد: قفلِ کلِ زنجیره (حتی با دسته‌ی روشن) ──
-  await menu.setCategoryPurchase(kebab!.id, true)
-  await menu.setMainPurchase(main!.id, false)
+  await menu.setCategoryPurchase(kebab!.id, true, (await contentFixtureProof(db, 'category', kebab.id)).sourceRevision)
+  await menu.setMainPurchase(main!.id, false, (await contentFixtureProof(db, 'mainCategory', main.id)).sourceRevision)
   const cheloMainLocked = await menu.productById(chelo!.id)
   assert.equal(cheloMainLocked?.purchasable, false, 'والدِ خاموش = قفلِ زنجیره')
   const dooghMainLocked = await menu.productById(doogh!.id)
@@ -194,7 +197,7 @@ try {
   passed('والدِ غیرفعال: کلِ زنجیره قفل + پیام با نامِ والد')
 
   // ── ۶) برگشت به حالت عادی: سفارش موفق (رفع قفل لحظه‌ای) ──
-  await menu.setMainPurchase(main!.id, true)
+  await menu.setMainPurchase(main!.id, true, (await contentFixtureProof(db, 'mainCategory', main.id)).sourceRevision)
   const restored = await menu.productById(chelo!.id)
   assert.equal(restored?.purchasable, true)
   const state = await menu.adminPurchaseState()

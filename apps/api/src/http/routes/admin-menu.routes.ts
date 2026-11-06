@@ -45,8 +45,9 @@ import type { PackagingService } from '#/domain/menu/packaging.service'
 import type { AuditService } from '#/domain/audit/audit.service'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { UUID_PATTERN } from '#/domain/shared/ids'
-import { translationEditsSchema } from './content-translation.schemas'
+import { contentSourceRevisionSchema, contentTranslationIdentitiesSchema, translationEditsSchema } from './content-translation.schemas'
 
+const sourceRevisionsSchema = t.Record(t.String({ pattern: UUID_PATTERN }), contentSourceRevisionSchema, { minProperties: 1, maxProperties: 10000 })
 
 /**
  * stage-47 — ورودی سایز: قیمت + تخفیف مستقل (درصد + پنجره‌ی ISO).
@@ -58,7 +59,7 @@ const sizeInput = t.Object({
   // round-34 — نام عربی سایز (اختیاری؛ خالی = پشتیبان فارسی)
   nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
   translationEdits: t.Optional(translationEditsSchema),
-  sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
+  sourceRevision: t.Optional(contentSourceRevisionSchema),
   price: t.Number({ minimum: 0 }),
   // stage-47 — تخفیف مستقِ این سایز
   discountPercentage: t.Optional(t.Numeric({ minimum: 0, maximum: 100 })),
@@ -67,6 +68,11 @@ const sizeInput = t.Object({
   // stage-56 — تصویر مستقل این variant (آپلودی؛ خالی = تصویر مشترک محصول)
   image: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
 })
+
+const updateSizeInput = t.Union([
+  t.Object({ ...sizeInput.properties, id: t.String({ pattern: UUID_PATTERN }), sourceRevision: contentSourceRevisionSchema }),
+  t.Object({ ...sizeInput.properties, id: t.Optional(t.Never()), sourceRevision: t.Optional(t.Never()) }),
+])
 
 /**
  * stage-101 — اتحادیه‌ی سفیدِ انیمیشن پس‌زمینه‌ی صفحه‌ی اختصاصیِ
@@ -131,28 +137,30 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         name: t.String({ minLength: 1, maxLength: 60 }),
         nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
         translationEdits: t.Optional(translationEditsSchema),
-        sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
+        sourceRevision: contentSourceRevisionSchema,
       }),
       detail: { summary: 'Update main category name and its Arabic field' },
     })
-    .post('/mains/:id/toggle', ({ params }) => deps.menu.toggleMainCategory(params.id), {
+    .post('/mains/:id/toggle', ({ params, body }) => deps.menu.toggleMainCategory(params.id, body.sourceRevision), {
       params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+      body: t.Object({ sourceRevision: contentSourceRevisionSchema }),
       detail: { summary: 'Toggle main category visibility' },
     })
     .post(
       '/mains/:id/default',
-      ({ params }) => deps.menu.setDefaultMainCategory(params.id),
+      ({ params, body }) => deps.menu.setDefaultMainCategory(params.id, body.sourceRevisions),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+        body: t.Object({ sourceRevisions: sourceRevisionsSchema }),
         detail: { summary: 'Set default main (must be active)' },
       },
     )
     .post(
       '/mains/:id/reorder',
-      ({ params, body }) => deps.menu.reorderMainCategory(params.id, body.direction),
+      ({ params, body }) => deps.menu.reorderMainCategory(params.id, body.direction, body.sourceRevisions),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        body: t.Object({ direction: t.Union([t.Literal('up'), t.Literal('down')]) }),
+        body: t.Object({ direction: t.Union([t.Literal('up'), t.Literal('down')]), sourceRevisions: sourceRevisionsSchema }),
         detail: { summary: 'Swap sortOrder with neighbor' },
       },
     )
@@ -177,6 +185,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           nameAr: body.nameAr,
           sizeNamesAr: body.sizeNamesAr ?? null,
           translationEdits: body.translationEdits,
+          translationIdentities: body.translationIdentities,
           // stage-48 — حالت‌های سفارش پایه (پیش‌فرض روشن)
           courierEnabled: body.courierEnabled ?? true,
           takeawayEnabled: body.takeawayEnabled ?? true,
@@ -197,6 +206,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
           sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
           translationEdits: t.Optional(translationEditsSchema),
+          translationIdentities: t.Optional(contentTranslationIdentitiesSchema),
           // stage-48 — حالت‌های سفارش محصولاتِ این دسته
           courierEnabled: t.Optional(t.Boolean()),
           takeawayEnabled: t.Optional(t.Boolean()),
@@ -220,6 +230,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           sizeNamesAr: body.sizeNamesAr,
           translationEdits: body.translationEdits,
           sourceRevision: body.sourceRevision,
+          translationIdentities: body.translationIdentities,
           // stage-48 — حالت‌های سفارش (undefined = دست‌نخورده)
           courierEnabled: body.courierEnabled,
           takeawayEnabled: body.takeawayEnabled,
@@ -241,7 +252,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
           sizeNamesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 40 }), { maxItems: 12 }))),
           translationEdits: t.Optional(translationEditsSchema),
-          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
+          sourceRevision: contentSourceRevisionSchema,
+          translationIdentities: t.Optional(contentTranslationIdentitiesSchema),
           // stage-48 — حالت‌های سفارش (اختیاری — نیامد = دست‌نخورده)
           courierEnabled: t.Optional(t.Boolean()),
           takeawayEnabled: t.Optional(t.Boolean()),
@@ -352,7 +364,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
           translationEdits: t.Optional(translationEditsSchema),
-          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
+          sourceRevision: t.Optional(contentSourceRevisionSchema),
+          translationIdentities: t.Optional(contentTranslationIdentitiesSchema),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           // stage-47 — پنجره‌ی زمانی تخفیف محصول (ISO | null = بدون محدودیت)
@@ -435,7 +448,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
           ingredientsAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 }))),
           translationEdits: t.Optional(translationEditsSchema),
-          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
+          sourceRevision: contentSourceRevisionSchema,
+          translationIdentities: t.Optional(contentTranslationIdentitiesSchema),
           originalPrice: t.Number({ minimum: 0 }),
           discountPercentage: t.Number({ minimum: 0, maximum: 100 }),
           // stage-47 — پنجره‌ی زمانی تخفیف محصول (ISO | null = بدون محدودیت)
@@ -450,7 +464,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           profileImage: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
           galleryImages: t.Optional(t.Array(t.String({ maxLength: 500 }), { maxItems: 12 })),
           sizesEnabled: t.Optional(t.Boolean()),
-          sizes: t.Optional(t.Array(sizeInput, { maxItems: 8 })),
+          sizes: t.Optional(t.Array(updateSizeInput, { maxItems: 8 })),
           ingredients: t.Optional(t.Array(t.String({ maxLength: 60 }), { maxItems: 30 })),
           // stage-48 — موجودی فروش (نیامد = دست‌نخورده)
           isAvailable: t.Optional(t.Boolean()),
@@ -479,8 +493,8 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     )
     .post(
       '/products/:id/toggle',
-      async ({ params, user }) => {
-        await deps.menu.toggleProductStatus(params.id)
+      async ({ params, body, user }) => {
+        await deps.menu.toggleProductStatus(params.id, body.sourceRevision)
         if (user.role === 'admin') {
           await deps.audit.log({
             actorId: user.id,
@@ -492,6 +506,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
         return { success: true }
       }, {
       params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+      body: t.Object({ sourceRevision: contentSourceRevisionSchema }),
       detail: { summary: 'Toggle product ACTIVE / INACTIVE' },
     })
     // stage-63 — حذف کامل محصول (سایزها/لینک‌های M2M/نقدی‌ها با cascade DB)
@@ -580,7 +595,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
           title: t.Optional(t.String({ minLength: 1, maxLength: 60 })),
           titleAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
           translationEdits: t.Optional(translationEditsSchema),
-          sourceRevision: t.Optional(t.String({ maxLength: 1000000 })),
+          sourceRevision: contentSourceRevisionSchema,
           price: t.Optional(t.Number({ minimum: 0, maximum: 100000000 })),
           isActive: t.Optional(t.Boolean()),
           sortOrder: t.Optional(t.Numeric({ minimum: 0, maximum: 999 })),
@@ -622,7 +637,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .post(
       '/mains/:id/purchase',
       async ({ params, body, user }) => {
-        const res = await deps.menu.setMainPurchase(params.id, body.purchaseEnabled)
+        const res = await deps.menu.setMainPurchase(params.id, body.purchaseEnabled, body.sourceRevision)
         if (res.success && user.role === 'admin') {
           await deps.audit.log({
             actorId: user.id,
@@ -635,7 +650,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        body: t.Object({ purchaseEnabled: t.Boolean() }),
+        body: t.Object({ purchaseEnabled: t.Boolean(), sourceRevision: contentSourceRevisionSchema }),
         detail: {
           summary: 'Enable/disable purchase of a main category (productsWrite)',
           description:
@@ -647,7 +662,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .post(
       '/categories/:id/purchase',
       async ({ params, body, user }) => {
-        const res = await deps.menu.setCategoryPurchase(params.id, body.purchaseEnabled)
+        const res = await deps.menu.setCategoryPurchase(params.id, body.purchaseEnabled, body.sourceRevision)
         if (res.success && user.role === 'admin') {
           await deps.audit.log({
             actorId: user.id,
@@ -660,7 +675,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        body: t.Object({ purchaseEnabled: t.Boolean() }),
+        body: t.Object({ purchaseEnabled: t.Boolean(), sourceRevision: contentSourceRevisionSchema }),
         detail: {
           summary: 'Enable/disable purchase of a category (productsWrite)',
           description:
@@ -678,7 +693,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
     .post(
       '/products/:id/availability',
       async ({ params, body, user }) => {
-        const res = await deps.menu.setProductAvailability(params.id, body.available)
+        const res = await deps.menu.setProductAvailability(params.id, body.available, body.sourceRevision)
         if (!res.success) {
           return res
         }
@@ -694,7 +709,7 @@ export const adminMenuRoutes = (deps: AdminMenuRoutesDeps) => {
       },
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        body: t.Object({ available: t.Boolean() }),
+        body: t.Object({ available: t.Boolean(), sourceRevision: contentSourceRevisionSchema }),
         detail: {
           summary: 'Set product availability (main admin or admin2 with productsAvailability)',
           description:

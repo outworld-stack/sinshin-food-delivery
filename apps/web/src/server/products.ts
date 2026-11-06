@@ -28,8 +28,10 @@ import type {
         PurchaseStateDto,
         SimilarProductsDto,
         TranslationEdit,
+        ContentCollectionIdentity,
 } from '@sinshin/shared'
 import { authJson, getJson, postJson } from '#/lib/api-fetch'
+import { requireContentSourceRevision, requireContentSourceRevisions } from '#/utils/contentTranslationDraft'
 import { similarProductExclusions, type SimilarProductsOptions } from '#/lib/similar-products'
 import type { ProductFormData } from '#/types/forms'
 // stage-100 — قرارداد انیمیشن صفحه‌ی محصول ویژه
@@ -145,34 +147,37 @@ export async function createMainCategory(input: {
 }
 
 export async function updateMainCategory(input: { data: { id: string; name: string; nameAr?: string | null; translationEdits?: TranslationEdit[]; sourceRevision?: string } }): Promise<AdminMutationResult> {
+        requireContentSourceRevision(input.data.sourceRevision)
         const { id, ...body } = input.data
         return authJson<AdminMutationResult>(`/admin/menu/mains/${id}`, 'PATCH', body)
 }
 
 export async function toggleMainCategory(input: {
-        data: { id: string }
+        data: { id: string; sourceRevision?: string }
 }): Promise<{ success: boolean }> {
-        await authJson<unknown>(`/admin/menu/mains/${input.data.id}/toggle`, 'POST')
+        await authJson<unknown>(`/admin/menu/mains/${input.data.id}/toggle`, 'POST', { sourceRevision: requireContentSourceRevision(input.data.sourceRevision) })
         return { success: true }
 }
 
 export async function setDefaultMainCategory(input: {
-        data: { id: string }
+        data: { id: string; sourceRevisions?: Record<string, string> }
 }): Promise<AdminMutationResult> {
         return authJson<AdminMutationResult>(
                 `/admin/menu/mains/${input.data.id}/default`,
                 'POST',
+                { sourceRevisions: requireContentSourceRevisions(input.data.sourceRevisions) },
         )
 }
 
 export async function reorderMainCategory(input: {
-        data: { id: string; direction: 'up' | 'down' }
+        data: { id: string; direction: 'up' | 'down'; sourceRevisions?: Record<string, string> }
 }): Promise<{ success: boolean }> {
         await authJson<unknown>(
                 `/admin/menu/mains/${input.data.id}/reorder`,
                 'POST',
                 {
                         direction: input.data.direction,
+                        sourceRevisions: requireContentSourceRevisions(input.data.sourceRevisions),
                 },
         )
         return { success: true }
@@ -191,6 +196,7 @@ export async function deleteMainCategory(input: {
 
 export async function createCategory(input: {
         data: {
+                translationIdentities?: ContentCollectionIdentity[]
                 translationEdits?: TranslationEdit[]
                 sourceRevision?: string
                 sizeNames?: string[]
@@ -207,6 +213,7 @@ export async function createCategory(input: {
         }
 }): Promise<AdminMutationResult> {
         return authJson<AdminMutationResult>('/admin/menu/categories', 'POST', {
+                ...(input.data.translationIdentities ? { translationIdentities: input.data.translationIdentities } : {}),
                 translationEdits: input.data.translationEdits,
                 sourceRevision: input.data.sourceRevision,
                 sizeNames: input.data.sizeNames,
@@ -224,6 +231,7 @@ export async function createCategory(input: {
 
 export async function updateCategory(input: {
         data: {
+                translationIdentities?: ContentCollectionIdentity[]
                 translationEdits?: TranslationEdit[]
                 sourceRevision?: string
                 sizeNames?: string[]
@@ -240,7 +248,9 @@ export async function updateCategory(input: {
                 nameAr?: string | null
         }
 }): Promise<AdminMutationResult> {
+        requireContentSourceRevision(input.data.sourceRevision)
         await authJson<unknown>(`/admin/menu/categories/${input.data.id}`, 'PATCH', {
+                ...(input.data.translationIdentities ? { translationIdentities: input.data.translationIdentities } : {}),
                 translationEdits: input.data.translationEdits,
                 sourceRevision: input.data.sourceRevision,
                 sizeNames: input.data.sizeNames,
@@ -299,6 +309,7 @@ function productModePayload(data: ProductFormData) {
 
 function productArPayload(data: ProductFormData) {
         return {
+                translationIdentities: data.translationIdentities,
                 sourceRevision: data.sourceRevision,
                 translationEdits: data.translationEdits,
                 nameAr: data.nameAr.trim() || null,
@@ -352,11 +363,12 @@ export async function getAdminProducts(input: {
 }
 
 export async function toggleProductStatus(input: {
-        data: { id: string }
+        data: { id: string; sourceRevision?: string }
 }): Promise<{ success: boolean }> {
         await authJson<unknown>(
                 `/admin/menu/products/${input.data.id}/toggle`,
                 'POST',
+                { sourceRevision: requireContentSourceRevision(input.data.sourceRevision) },
         )
         return { success: true }
 }
@@ -429,6 +441,8 @@ export async function createAdminProduct(input: {
 export async function updateAdminProduct(input: {
         data: ProductFormData & { id?: string }
 }): Promise<{ success: boolean; message?: string }> {
+        requireContentSourceRevision(input.data.sourceRevision)
+        for (const size of input.data.sizes) if (size.id) requireContentSourceRevision(size.sourceRevision)
         const ar = productArPayload(input.data)
         return authJson<{ success: boolean; message?: string }>(
                 `/admin/menu/products/${input.data.id}`,
@@ -505,6 +519,7 @@ export async function updatePackagingItem(input: {
                 sortOrder?: number
         }
 }): Promise<PackagingItemDto> {
+        requireContentSourceRevision(input.data.sourceRevision)
         return authJson<PackagingItemDto>(
                 `/admin/menu/packaging-items/${input.id}`,
                 'PATCH',
@@ -533,23 +548,23 @@ export async function getAdminPurchaseState(): Promise<PurchaseStateDto> {
 
 /** خریدِ همه‌ی محصولاتِ این والد را فعال/غیرفعال می‌کند */
 export async function setMainPurchaseState(input: {
-        data: { id: string; purchaseEnabled: boolean }
+        data: { id: string; purchaseEnabled: boolean; sourceRevision?: string }
 }): Promise<{ success: boolean; message?: string }> {
         return authJson<{ success: boolean; message?: string }>(
                 `/admin/menu/mains/${input.data.id}/purchase`,
                 'POST',
-                { purchaseEnabled: input.data.purchaseEnabled },
+                { purchaseEnabled: input.data.purchaseEnabled, sourceRevision: requireContentSourceRevision(input.data.sourceRevision) },
         )
 }
 
 /** خریدِ محصولاتِ این زیردسته را فعال/غیرفعال می‌کند */
 export async function setCategoryPurchaseState(input: {
-        data: { id: string; purchaseEnabled: boolean }
+        data: { id: string; purchaseEnabled: boolean; sourceRevision?: string }
 }): Promise<{ success: boolean; message?: string }> {
         return authJson<{ success: boolean; message?: string }>(
                 `/admin/menu/categories/${input.data.id}/purchase`,
                 'POST',
-                { purchaseEnabled: input.data.purchaseEnabled },
+                { purchaseEnabled: input.data.purchaseEnabled, sourceRevision: requireContentSourceRevision(input.data.sourceRevision) },
         )
 }
 
@@ -558,11 +573,11 @@ export async function setCategoryPurchaseState(input: {
  * گارد سرور: ادمین اصلی یا ادمین۲ با productsAvailability.
  */
 export async function setProductAvailability(input: {
-        data: { id: string; available: boolean }
+        data: { id: string; available: boolean; sourceRevision?: string }
 }): Promise<{ success: boolean; message?: string }> {
         return authJson<{ success: boolean; message?: string }>(
                 `/admin/menu/products/${input.data.id}/availability`,
                 'POST',
-                { available: input.data.available },
+                { available: input.data.available, sourceRevision: requireContentSourceRevision(input.data.sourceRevision) },
         )
 }

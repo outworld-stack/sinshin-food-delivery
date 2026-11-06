@@ -24,7 +24,7 @@ import type { ArticleService } from '#/domain/article/article.service'
 import { requireAdmin2Permission } from '#/http/hooks/require-admin2'
 import { langFromHeaders } from '#/domain/shared/lang'
 import { UUID_PATTERN } from '#/domain/shared/ids'
-import { translationEditsSchema } from './content-translation.schemas'
+import { contentSourceRevisionSchema, contentTranslationIdentitiesSchema, translationEditsSchema } from './content-translation.schemas'
 
 const HEX_COLOR = '^#[0-9a-fA-F]{6}$'
 
@@ -68,18 +68,23 @@ export const articleBlockFieldPathSchema = t.Array(
   t.Union([t.String({ minLength: 1, maxLength: 32 }), t.Integer({ minimum: 0, maximum: 29 })]),
   { minItems: 1, maxItems: 3 },
 )
-const articleBlockTranslationSchema = t.Object({
-  fields: t.Array(t.Object({
+const articleBlockItemIdSchema = t.String({ minLength: 1, maxLength: 180, pattern: '^[a-zA-Z0-9:_-]+$' })
+const articleBlockTranslationFieldSchema = t.Object({
     blockId: t.String({ minLength: 1, maxLength: 64 }),
     blockType: articleBlockTypeSchema,
     fieldPath: articleBlockFieldPathSchema,
+    itemId: t.Optional(articleBlockItemIdSchema),
     sourceText: t.String({ maxLength: 30000 }),
     status: t.Union([t.Literal('translated'), t.Literal('missing'), t.Literal('needs-retranslation')]),
     origin: t.Optional(t.Union([t.Literal('manual'), t.Literal('automatic'), t.Literal('legacy')])),
     staleValue: t.Optional(t.String({ maxLength: 30000 })),
     revision: t.Optional(t.Integer({ minimum: 0 })),
     error: t.Optional(t.String({ maxLength: 500 })),
-  }), { maxItems: 6000 }),
+})
+const articleBlockTranslationSchema = t.Object({
+  fields: t.Array(articleBlockTranslationFieldSchema, { maxItems: 6000 }),
+  orphanedFields: t.Optional(t.Array(articleBlockTranslationFieldSchema, { maxItems: 1000 })),
+  retiredItemIds: t.Optional(t.Array(articleBlockItemIdSchema)),
 })
 const blockSchema = t.Object({
   id: t.Optional(t.String({ maxLength: 64 })),
@@ -113,7 +118,8 @@ export const blocksArDocSchema = t.Nullable(
 )
 
 const articleBody = t.Object({
-  sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+  sourceRevision: t.Optional(contentSourceRevisionSchema),
+  translationIdentities: t.Optional(contentTranslationIdentitiesSchema),
   title: t.String({ minLength: 1, maxLength: 160 }),
   excerpt: t.String({ minLength: 1, maxLength: 1000 }),
   content: t.String({ minLength: 1 }),
@@ -138,7 +144,7 @@ const articleBody = t.Object({
 })
 
 const categoryBody = t.Object({
-  sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+  sourceRevision: t.Optional(contentSourceRevisionSchema),
   name: t.String({ minLength: 1, maxLength: 60 }),
   hasSubCategories: t.Boolean(),
   subCategories: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 60 }), { maxItems: 12 })),
@@ -147,13 +153,32 @@ const categoryBody = t.Object({
   subCategoriesAr: t.Optional(t.Nullable(t.Array(t.String({ maxLength: 60 }), { maxItems: 12 }))),
   translationEdits: t.Optional(translationEditsSchema),
   subCategoryEntries: t.Optional(t.Array(t.Object({
-    sourceRevision: t.Optional(t.String({ maxLength: 2097152 })),
+    sourceRevision: t.Optional(contentSourceRevisionSchema),
     id: t.Optional(t.String({ pattern: UUID_PATTERN })),
     name: t.String({ minLength: 1, maxLength: 60 }),
     nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
     translationEdits: t.Optional(translationEditsSchema),
   }), { maxItems: 12 })),
 })
+
+const articleUpdateBody = t.Composite([articleBody, t.Object({ sourceRevision: contentSourceRevisionSchema })])
+const categoryUpdateBody = t.Composite([categoryBody, t.Object({
+  sourceRevision: contentSourceRevisionSchema,
+  subCategoryEntries: t.Optional(t.Array(t.Union([
+    t.Object({
+      id: t.String({ pattern: UUID_PATTERN }), sourceRevision: contentSourceRevisionSchema,
+      name: t.String({ minLength: 1, maxLength: 60 }),
+      nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+      translationEdits: t.Optional(translationEditsSchema),
+    }),
+    t.Object({
+      id: t.Optional(t.Never()), sourceRevision: t.Optional(t.Never()),
+      name: t.String({ minLength: 1, maxLength: 60 }),
+      nameAr: t.Optional(t.Nullable(t.String({ maxLength: 60 }))),
+      translationEdits: t.Optional(translationEditsSchema),
+    }),
+  ]), { maxItems: 12 })),
+})])
 
 export interface ArticlesRoutesDeps {
   sessions: SessionService
@@ -223,7 +248,7 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
       ({ params, body }) => deps.articles.update(params.id, body),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        body: articleBody,
+        body: articleUpdateBody,
         detail: { summary: 'Update article — author optional (untouched = preserved)' },
       },
     )
@@ -235,8 +260,9 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
         detail: { summary: 'Delete article' },
       },
     )
-    .post('/:id/toggle', ({ params }) => deps.articles.toggle(params.id), {
+    .post('/:id/toggle', ({ params, body }) => deps.articles.toggle(params.id, body.sourceRevision), {
       params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
+      body: t.Object({ sourceRevision: contentSourceRevisionSchema }),
       detail: { summary: 'Toggle ACTIVE / INACTIVE' },
     })
 
@@ -251,8 +277,8 @@ export const articlesRoutes = (deps: ArticlesRoutesDeps) => {
       ({ params, body }) => deps.articles.updateCategory(params.id, body),
       {
         params: t.Object({ id: t.String({ pattern: UUID_PATTERN }) }),
-        body: categoryBody,
-        detail: { summary: 'Update category — subs synced by name; slug immutable' },
+        body: categoryUpdateBody,
+        detail: { summary: 'Update category — sub-categories synced by stable ID; slug immutable' },
       },
     )
     .delete(

@@ -4,8 +4,8 @@ import { SQL } from 'bun'
 import { and, eq, getTableColumns } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
 import type { AnyPgTable } from 'drizzle-orm/pg-core'
-import { contentTranslationFields, eligibleContentTranslationFields, reconcileArticleBlocksTranslation, reconcileContentTranslation, setArticleBlockText, setArticleBlockTranslation,
-  type ArticleBlocksDoc, type ContentEntityType, type TranslationEdit } from '@sinshin/shared'
+import { bindArticleBlockItemIdentities, collectionTranslationIdentities, contentTranslationFields, eligibleContentTranslationFields, reconcileArticleBlocksTranslation, reconcileContentTranslation, setArticleBlockText, setArticleBlockTranslation,
+  type ArticleBlocksDoc, type ContentCollectionIdentity, type ContentEntityType, type TranslationEdit } from '@sinshin/shared'
 import { ContentTranslationWorker } from '../src/domain/translation/content-translation.worker'
 import { readContentRow, type ContentRow } from '../src/domain/translation/content-translation.store'
 import { TranslationService } from '../src/domain/translation/translation.service'
@@ -73,9 +73,10 @@ try {
     const id = type === 'about' ? 1 : ids[type]
     await db.insert(table).values(reconcileContentTranslation(type, ids[type], null, { ...row, id }))
   }
-  const mutate = async (type: ContentEntityType, patch: ContentRow, edits: TranslationEdit[] = []) => db.transaction(async tx => {
+  const mutate = async (type: ContentEntityType, patch: ContentRow, edits: TranslationEdit[] = [], identities?: ContentCollectionIdentity[]) => db.transaction(async tx => {
     const current = await readContentRow(tx, type, ids[type], true); assert(current)
-    const next = reconcileContentTranslation(type, ids[type], current, { ...current, ...patch }, edits)
+    const next = reconcileContentTranslation(type, ids[type], current, { ...current, ...patch }, edits,
+      identities ?? collectionTranslationIdentities(type, current))
     const table = tables[type]; assert(table)
     const columns = getTableColumns(table)
     assert(columns.id)
@@ -95,13 +96,13 @@ try {
   await insert('articleSubCategory', { name: 'دانستنی‌ها', slug: 'facts', categoryId: ids.articleCategory })
   await insert('article', { title: 'عنوان مقاله', excerpt: 'خلاصه مقاله', content: 'متن مقاله', categoryId: ids.articleCategory,
     processes: [{ title: 'آماده‌سازی', items: ['گام اول', 'گام دوم'] }] })
-  const blocks: ArticleBlocksDoc = { version: 1, blocks: [
+  const blocks: ArticleBlocksDoc = bindArticleBlockItemIdentities({ version: 1, blocks: [
     { id: 'heading', type: 'heading', width: 'md', anim: 'fade', style: { bg: '#123456' }, props: { text: 'داستان ما', level: 2 } },
     { id: 'list', type: 'list', props: { items: ['عضو اول', 'عضو دوم'] } },
     { id: 'gallery', type: 'gallery', props: { images: [{ src: '/gallery.webp', alt: 'توضیح عکس' }], layout: 'grid' } },
     { id: 'branch-one', type: 'location', props: { title: 'شعبه اول', address: 'نشانی اول', lat: 37.4822056789, lng: 49.4418273456 } },
     { id: 'branch-two', type: 'location', props: { title: 'شعبه دوم', address: 'نشانی دوم', lat: 35.123456789, lng: 51.987654321 } },
-  ] }
+  ] })
   await insert('about', { heroTitle: 'درباره ما', heroText: 'متن داستان', heroGradient: '/hero.webp', teamTitle: 'تیم ما', teamAlt: 'تصویر تیم', teamGradient: '/team.webp',
     blocks, blocksAr: null, location: { address: 'نشانی رستوران', lat: 37.4822056789, lng: 49.4418273456 } })
   await insert('gallery', { src: '/gallery-one.webp', alt: 'تصویر سالن', span: 'wide' })
@@ -158,7 +159,8 @@ try {
   }
   pass('About heading, nested list item and location address changes each translate exactly their one field')
   const productBeforeReorder = await row('product')
-  await mutate('product', { ingredients: ['قارچ تازه', 'پنیر'] })
+  await mutate('product', { ingredients: ['قارچ تازه', 'پنیر'] }, [],
+    collectionTranslationIdentities('product', productBeforeReorder).map(collection => ({ ...collection, itemIds: collection.itemIds.toReversed() })))
   const reorderedProduct = await row('product')
   assert.deepEqual(reorderedProduct.ingredientsAr, (productBeforeReorder.ingredientsAr as string[]).toReversed())
   const nonTextStart = calls.length
@@ -220,7 +222,8 @@ try {
   const reorderGate = { entered: deferred(), release: deferred() }; gate = reorderGate
   const reorderStart = calls.length
   const reorderingWork = worker.run('product', ids.product); await reorderGate.entered.promise
-  await mutate('product', { ingredients: ['پنیر هنگام جابه‌جایی', 'قارچ تازه'] })
+  await mutate('product', { ingredients: ['پنیر هنگام جابه‌جایی', 'قارچ تازه'] }, [],
+    collectionTranslationIdentities('product', await row('product')).map(collection => ({ ...collection, itemIds: collection.itemIds.toReversed() })))
   reorderGate.release.resolve(); await reorderingWork
   assert.deepEqual(calls.slice(reorderStart), [['پنیر هنگام جابه‌جایی']])
   assert.deepEqual((await row('product')).ingredientsAr, ['عربي پنیر هنگام جابه‌جایی', 'عربي قارچ تازه'])
@@ -431,27 +434,44 @@ try {
     categoryId: asCategoryId(ids.category), profileImage: '/outage.webp',
   }))
   const outageCalls: string[][] = []
+  const outageBefore = await readContentRow(db, 'product', outageId)
+  let outageInvalidations = 0
   const outageWorker = new ContentTranslationWorker({ db, translate: async texts => { outageCalls.push([...texts]); throw Err.serviceUnavailable('Mock translator offline') },
-    invalidate: async () => { assert.fail('failed translation cannot invalidate a persisted content value') } })
+    invalidate: async () => {
+      const persisted = await readContentRow(db, 'product', outageId)
+      assert.equal(contentTranslationFields('product', persisted).find(field => field.fieldId === 'name')?.error, 'Mock translator offline', 'failure status is committed before cache invalidation')
+      assert.equal(persisted?.nameAr, null, 'failed output never becomes an Arabic value')
+      outageInvalidations++
+    } })
   await assert.rejects(outageWorker.run('product', outageId), error => error instanceof AppError && error.code === 'SERVICE_UNAVAILABLE')
   assert.deepEqual(outageCalls, [['نام هنگام قطع مترجم']])
   const outageFields = contentTranslationFields('product', await readContentRow(db, 'product', outageId))
   assert.equal(outageFields.find(field => field.fieldId === 'name')?.error, 'Mock translator offline')
   assert(outageFields.filter(field => field.fieldId !== 'name').every(field => !field.error && field.value === null))
+  assert.equal(outageInvalidations, 1)
+  assert.equal((await readContentRow(db, 'product', outageId))?.translationState?.writeRevision, (outageBefore?.translationState?.writeRevision ?? 0) + 1)
   pass('translator outages stop after exactly one field and never request or mark unattempted siblings as failed')
 
   await mutate('packagingItem', { title: 'عنوان برای نتیجه بیش از حد' })
   const oversizedInput = await request('packagingItem', 'عنوان برای نتیجه بیش از حد')
   const oversizedField = contentTranslationFields('packagingItem', await row('packagingItem')).find(field => field.fieldId === oversizedInput.fieldId); assert(oversizedField)
   const oversizedCalls: string[][] = []
+  let oversizedInvalidations = 0
   const oversizedWorker = new ContentTranslationWorker({ db, translate: async texts => { oversizedCalls.push([...texts]); return ['ا'.repeat(oversizedField.maxLength + 1)] },
-    invalidate: async () => { assert.fail('oversized output must never be saved') } })
+    invalidate: async () => {
+      const persisted = contentTranslationFields('packagingItem', await row('packagingItem')).find(field => field.fieldId === oversizedInput.fieldId)
+      assert.equal(persisted?.value, null)
+      assert.match(persisted?.error ?? '', /translation exceeds/, 'only rejection metadata is committed before invalidation')
+      oversizedInvalidations++
+    } })
   await assert.rejects(oversizedWorker.previewField(oversizedInput), /translation exceeds/)
+  assert.equal(oversizedInvalidations, 0, 'read-only preview failures do not invalidate caches')
   await assert.rejects(oversizedWorker.run('packagingItem', ids.packagingItem), /translation exceeds/)
   assert.deepEqual(oversizedCalls, [[oversizedInput.sourceText], [oversizedInput.sourceText]])
   const oversizedSaved = contentTranslationFields('packagingItem', await row('packagingItem')).find(field => field.fieldId === oversizedInput.fieldId)
   assert.equal(oversizedSaved?.value, null)
   assert.match(oversizedSaved?.error ?? '', /translation exceeds/)
+  assert.equal(oversizedInvalidations, 1)
   pass('oversized Arabic output rejects in previews and workers without truncating or persisting content')
 
   const longSource = 'م'.repeat(40_000)
@@ -493,7 +513,7 @@ try {
   assert(latestSections[0]?.items[0]); latestSections[0].items[0] = latestSource
   await db.insert(terms).values(reconcileContentTranslation('terms', latestTermsId, historicalTerms, {
     ...historicalTerms, id: latestTermsId, version: historicalTerms.version + 1, sections: latestSections,
-  }))
+  }, [], collectionTranslationIdentities('terms', historicalTerms)))
   const obsoleteStart = calls.length
   assert.equal(await queue.processNext(), 'done')
   assert.equal(calls.length, obsoleteStart, 'obsolete queued terms never enter the translator')
@@ -522,7 +542,7 @@ try {
     assert(replacementSections[0]?.items[0]); replacementSections[0].items[0] = 'بند آخرین نسخه پس از درخواست ترجمه'
     await db.insert(terms).values(reconcileContentTranslation('terms', replacementId, inFlightSnapshot, {
       ...inFlightSnapshot, id: replacementId, version: inFlightSnapshot.version + 1, sections: replacementSections,
-    }))
+    }, [], collectionTranslationIdentities('terms', inFlightSnapshot)))
     obsoleteGate.release.resolve(); await lateTermsWork
     assert.deepEqual((await db.select().from(terms).where(eq(terms.id, latestTermsId)))[0], inFlightSnapshot)
     const replacement = await readContentRow(db, 'terms', replacementId); assert(replacement)

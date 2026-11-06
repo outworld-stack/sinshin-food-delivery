@@ -46,7 +46,7 @@ import type {
   AddressId, CampaignId, CategoryId, ConditionId, CourierId, DeviceId,
   MainCategoryId, OrderId, ProductId, SizeId, UserId,
 } from './brand'
-import type { ContentTranslationState } from './content-translations'
+import type { ContentCollectionIdentity, ContentTranslationState } from './content-translations'
 
 // ═══════════ زبان ═══════════
 
@@ -96,6 +96,8 @@ export interface VerifyOtpResponse {
 
 export interface MainCategory {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: MainCategoryId
   name: string
   /** round-34 — نام عربی (NULL = پشتیبان فارسی)؛ فقط ادمین پر می‌کند */
@@ -114,6 +116,8 @@ export interface MainCategory {
 
 export interface Category {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: CategoryId
   mainCategoryId: MainCategoryId
   /**
@@ -146,6 +150,8 @@ export interface Category {
 
 export interface ProductSize {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: SizeId
   name: string
   price: number
@@ -173,6 +179,8 @@ export interface ProductSize {
 
 export interface Product {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: ProductId
   name: string
   /**
@@ -305,6 +313,8 @@ export interface SimilarProductsDto {
  */
 export interface PackagingItemDto {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: string
   title: string
   /** round-34 — عنوان عربی (NULL = پشتیبان فارسی؛ فقط پنل ادمین) */
@@ -318,6 +328,7 @@ export interface PackagingItemDto {
 
 /** والد (تب) — ردیفِ GET /admin/menu/purchase-state */
 export interface MainPurchaseStateDto {
+  sourceRevision?: string
   id: string
   name: string
   slug: string
@@ -332,6 +343,7 @@ export interface MainPurchaseStateDto {
  * GET /admin/menu/purchase-state این‌ها را کنار mains برمی‌گرداند.
  */
 export interface CategoryPurchaseStateDto {
+  sourceRevision?: string
   id: string
   name: string
   /** والدِ اولیه (گروه‌بندی پنل) */
@@ -700,6 +712,8 @@ import type { ArticleBlocksDoc } from './blocks'
 
 export interface ArticleSubCategoryDto {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: string
   name: string
   /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = پشتیبان فارسی) */
@@ -709,6 +723,8 @@ export interface ArticleSubCategoryDto {
 
 export interface ArticleCategoryDto {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: string
   name: string
   /** round-34 — نام عربی (فقط برای فرم ادمین؛ NULL = پشتیبان فارسی) */
@@ -721,6 +737,8 @@ export interface ArticleCategoryDto {
 
 export interface ArticleDto {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: string
   title: string
   excerpt: string
@@ -798,6 +816,8 @@ export interface RestaurantStatusDto {
 /** Untranslated editing fields are exposed only to restaurant administrators. */
 export interface AdminRestaurantStatusDto extends RestaurantStatusDto {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   temporaryCloseReasonAr: string | null
 }
 
@@ -900,6 +920,8 @@ export type GallerySpan = 'wide' | 'normal'
 
 export interface GalleryImageDto {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: string
   src: string
   alt: string
@@ -922,6 +944,8 @@ export interface TermsSection {
 export interface TermsContentDto {
   id?: string
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   sections: TermsSection[]
   /** round-34 — بندهای عربی (NULL = پشتیبان فارسی)؛ ساختار موازی sections */
   sectionsAr?: TermsSection[] | null
@@ -942,6 +966,8 @@ export interface AboutLocationDto {
 
 export interface AboutContentDto {
   translationState?: ContentTranslationState | null
+  sourceRevision?: string
+  translationIdentities?: ContentCollectionIdentity[]
   id: number
   heroTitle: string
   heroText: string

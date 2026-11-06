@@ -140,6 +140,7 @@ const paymentToggle = () => find((node) => node.props.label === 'غیرفعال 
 const previewButton = () => find((node) => node.props.title?.startsWith('ترجمه‌ی خودکار'))
 const confirmButton = () => find((node) => node.type === 'button' && ['ثبت و بستن موقت', 'ثبت و باز شدن', 'ذخیره تغییرات', 'در حال ثبت...'].includes(node.props.children))
 const makeStatus = (closed = false): AdminRestaurantStatusDto => ({
+	sourceRevision: 'saved-status-token',
 	isOpen: true, temporarilyClosed: closed, paymentsDisabled: false,
 	temporaryCloseReason: null, temporaryCloseReasonAr: null, temporaryReopenTime: '',
 	nextOpenTime: '11:00', anyClosed: closed, isBusy: false,

@@ -1,6 +1,7 @@
 /** About content CRUD, authorization and localization against disposable local PostgreSQL. */
 import assert from 'node:assert/strict'
-import { contentSourceRevision, contentTranslationFields, mergeArticleBlocksTranslation, readArticleBlockText, setArticleBlockTranslation, type AboutContentDto, type ArticleBlocksDoc } from '@sinshin/shared'
+import { maximumBlockTranslationFixture } from './content-save-fixtures'
+import { bindArticleBlockItemIdentities, contentSourceRevision, contentTranslationFields, mergeArticleBlocksTranslation, readArticleBlockText, setArticleBlockTranslation, type AboutContentDto, type ArticleBlocksDoc } from '@sinshin/shared'
 import { SQL } from 'bun'
 import { eq, sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/bun-sql/migrator'
@@ -62,7 +63,11 @@ try {
     assert.equal(response.status, 200)
     return response.json() as Promise<AboutContentDto>
   }
-  const save = (body: unknown, token = 'main') => request('PATCH', '/admin/about', body, token)
+  const save = async (body: unknown, token = 'main') => {
+    const [current] = await db.select().from(contentAbout).limit(1)
+    return request('PATCH', '/admin/about', body && typeof body === 'object'
+      ? { sourceRevision: current ? contentSourceRevision('about', current) : undefined, ...body } : body, token)
+  }
   const legacy = {
     heroTitle: 'داستان سین شین', heroText: 'خوش آمدید',
     heroGradient: `/uploads/${'a'.repeat(250)}.webp`, teamTitle: 'تیم ما',
@@ -136,7 +141,7 @@ try {
   ] }
   const titleField = contentTranslationFields('about', preserved).find(field => field.fieldId === 'heroTitle')!
   assert.equal((await save({ ...legacy, blocks: edited, blocksAr: null, heroTitleAr: '  ',
-    sourceRevision: contentSourceRevision('about', preserved),
+    sourceRevision: preserved.sourceRevision,
     translationEdits: [{ ...titleField, value: '', origin: 'manual' }],
     location: { ...destination, address: ' نشانی جدید ', addressAr: ' ' } })).status, 200)
   const changed = await get('ar')
@@ -184,11 +189,11 @@ try {
   assert.equal((await db.select().from(contentAbout)).length, 1)
   passed('empty documents and optional fixed sections can be removed; resetting the map restores the restaurant destination')
 
-  const lifecycleBlocks: ArticleBlocksDoc = { version: 1, blocks: [
+  const lifecycleBlocks: ArticleBlocksDoc = bindArticleBlockItemIdentities({ version: 1, blocks: [
     { id: 'list', type: 'list', props: { items: ['اول', 'دوم'], ordered: true }, style: { bg: '#ffffff' }, width: 'md', anim: 'fade' },
     { id: 'branch-one', type: 'location', props: { title: 'شعبه اول', address: 'نشانی اول', lat: 37.4822056789, lng: 49.4418273456 } },
     { id: 'branch-two', type: 'location', props: { title: 'شعبه دوم', address: 'نشانی دوم', lat: 35.123456789, lng: 51.987654321 } },
-  ] }
+  ] })
   let lifecycleArabic = setArticleBlockTranslation(lifecycleBlocks, null, 'list', ['items', 0], 'الأول')!
   lifecycleArabic = setArticleBlockTranslation(lifecycleBlocks, lifecycleArabic, 'list', ['items', 1], 'الثاني')!
   lifecycleArabic = setArticleBlockTranslation(lifecycleBlocks, lifecycleArabic, 'branch-one', ['address'], 'العنوان الأول')!
@@ -200,7 +205,7 @@ try {
     .map(field => ({ fieldId: field.fieldId, fieldPath: field.fieldPath, sourceText: field.sourceText, revision: field.revision, value: scalarValues[field.fieldId]!, origin: 'manual' as const }))
   assert.equal((await save({ ...lifecycleInput, translationEdits: scalarEdits })).status, 200)
   const reviewed = await get('fa', true)
-  assert.equal((await save({ ...lifecycleInput, blocksAr: null })).status, 422)
+  assert.equal((await request('PATCH', '/admin/about', { ...lifecycleInput, blocksAr: null }, 'main')).status, 422)
   assert.deepEqual((await get('fa', true)).blocksAr, reviewed.blocksAr, 'unproved nulls cannot erase reviewed block translations')
   assert.equal((await save({ ...lifecycleInput, heroTitle: 'عنوان تازه', heroTitleAr: reviewed.heroTitleAr })).status, 200)
   const titleChanged = await get('fa', true)
@@ -244,15 +249,49 @@ try {
   assert.equal(readArticleBlockText(publicNested.blocks?.blocks.find(block => block.id === 'list'), ['items', 1]), 'مورد تازه')
   const approvedList = setArticleBlockTranslation(changedNested, nestedChanged.blocksAr, 'list', ['items', 1], 'المورد الجديد')!
   assert.equal((await save({ ...lifecycleInput, heroTitle: titleChanged.heroTitle, blocks: changedNested, blocksAr: approvedList,
-    location: nestedChanged.location, sourceRevision: contentSourceRevision('about', nestedChanged) })).status, 200)
+    location: nestedChanged.location, sourceRevision: nestedChanged.sourceRevision })).status, 200)
   assert.equal(readArticleBlockText((await get('ar')).blocks?.blocks.find(block => block.id === 'list'), ['items', 1]), 'المورد الجديد')
-  assert.equal((await save({ ...lifecycleInput, sourceRevision: contentSourceRevision('about', reviewed) })).status, 422)
+  assert.equal((await save({ ...lifecycleInput, sourceRevision: reviewed.sourceRevision })).status, 422)
   assert.equal((await get('fa', true)).heroTitle, titleChanged.heroTitle)
   passed('one nested About list field and location address invalidate separately; manual review fills only the field and stale full forms are rejected')
 
+  await db.update(contentAbout).set({ location: { lat: 91, lng: 51, address: 'نشانی قدیمی', addressAr: 'عنوان قديم' } })
+  const legacyLocationRow = (await db.select().from(contentAbout))[0]
+  assert(legacyLocationRow)
+  const invalidLocationEditor = await get('fa', true)
+  assert.equal(invalidLocationEditor.location, null, 'invalid legacy coordinates stay out of the editor location control')
+  assert.equal(invalidLocationEditor.sourceRevision, contentSourceRevision('about', legacyLocationRow), 'admin proof binds the original persisted row before sanitizing coordinates')
+  assert.deepEqual((await get('ar')).location, initial.location)
+  const repairResponse = await request('PATCH', '/admin/about', { heroTitle: invalidLocationEditor.heroTitle,
+    heroText: invalidLocationEditor.heroText, heroGradient: invalidLocationEditor.heroGradient,
+    teamTitle: invalidLocationEditor.teamTitle, teamGradient: invalidLocationEditor.teamGradient, teamAlt: invalidLocationEditor.teamAlt, location: null,
+    sourceRevision: invalidLocationEditor.sourceRevision }, 'main')
+  assert.equal(repairResponse.status, 200)
+  const repaired = (await db.select().from(contentAbout))[0]
+  assert(repaired)
+  assert.equal(repaired.location, null)
+  assert.deepEqual(repaired.blocks, legacyLocationRow.blocks)
+  assert.deepEqual(repaired.blocksAr, legacyLocationRow.blocksAr)
+  assert.equal(repaired.heroTitleAr, legacyLocationRow.heroTitleAr)
+  passed('legacy invalid location can be repaired using the admin-issued raw-row proof without rebuilding existing blocks')
+
+  const maximumAbout = maximumBlockTranslationFixture()
+  assert(Buffer.byteLength(JSON.stringify(maximumAbout.source)) > 262_144)
+  assert(Buffer.byteLength(JSON.stringify(maximumAbout.arabic)) > 2_097_152)
+  assert.equal((await save({ ...legacy, blocks: maximumAbout.source, blocksAr: maximumAbout.arabic })).status, 200)
+  const maximumAboutSaved = await get('fa', true)
+  assert.equal(maximumAboutSaved.blocksAr?.translation?.fields.length, 6000)
+  assert.equal((await request('PATCH', '/admin/about', { ...legacy, blocks: maximumAboutSaved.blocks,
+    blocksAr: maximumAboutSaved.blocksAr, sourceRevision: maximumAboutSaved.sourceRevision }, 'main')).status, 200)
+  const maximumAboutResaved = await get('fa', true)
+  assert.deepEqual(maximumAboutResaved.blocks, maximumAboutSaved.blocks)
+  assert.deepEqual(maximumAboutResaved.blocksAr, maximumAboutSaved.blocksAr)
+  passed('6000 About field IDs and source proofs do not reduce legacy content limits or prevent HTTP review and saves')
+
   await db.delete(contentAbout)
   const concurrent = await Promise.all([save(legacy), save(legacy)])
-  assert(concurrent.every(response => response.status === 200))
+  assert.equal(concurrent.filter(response => response.status === 200).length, 1)
+  assert.equal(concurrent.filter(response => response.status === 422).length, 1)
   assert.equal((await db.select().from(contentAbout)).length, 1)
   passed('concurrent first saves preserve the singleton row')
   console.log(`${count} About API checks passed`)

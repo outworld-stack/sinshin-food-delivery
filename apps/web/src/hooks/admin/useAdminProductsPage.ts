@@ -91,7 +91,7 @@ export function useAdminProductsPage() {
   // حالا: کلیک → همان لحظه کلید وضعیت عوض می‌شه → سرور تأیید می‌کنه؛
   // اگر خطا شد، تصویر لحظه‌ای برمی‌گرده (و MutationCache سراسری پیام شناور می‌دهد)
   const toggleMutation = useMutation({
-    mutationFn: (id: string) => toggleProductStatus({ data: { id } }),
+    mutationFn: (id: string) => toggleProductStatus({ data: { id, sourceRevision: data?.products.find(product => product.id === id)?.sourceRevision } }),
     onMutate: async (id) => {
       // ریفچ‌های در جریانِ همین لیست را متوقف کن تا تصویر لحظه‌ای تمیز باشد
       await queryClient.cancelQueries({ queryKey: qk.adminProductsAll })

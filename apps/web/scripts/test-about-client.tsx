@@ -98,6 +98,7 @@ await getAdminAboutContent()
 assert.deepEqual(calls.slice(0, 2), [{ path: '/about' }, { path: '/admin/about', method: 'GET', body: undefined }])
 const doc: ArticleBlocksDoc = { version: 1, blocks: [] }
 await updateAboutContent({
+	sourceRevision: 'saved-about-token',
 	heroTitle: 'Edited', heroText: '', heroGradient: '', teamTitle: '', teamGradient: '', teamAlt: '',
 	heroTitleAr: '  عنوان  ', heroTextAr: ' ', teamTitleAr: '', teamAltAr: '',
 	blocks: doc, blocksAr: null, location: base.location,
@@ -105,6 +106,7 @@ await updateAboutContent({
 assert.equal(calls.at(-1)?.path, '/admin/about')
 assert.equal(calls.at(-1)?.method, 'PATCH')
 assert.deepEqual(calls.at(-1)?.body, {
+	sourceRevision: 'saved-about-token',
 	heroTitle: 'Edited', heroText: '', heroGradient: '', teamTitle: '', teamGradient: '', teamAlt: '',
 	heroTitleAr: 'عنوان', heroTextAr: null, teamTitleAr: null, teamAltAr: null,
 	blocks: doc, blocksAr: null, location: base.location,

@@ -15,7 +15,7 @@ import { Bag, Bicycle, Chair, Pen, Trash2 } from 'reicon-react'
 import { ArField } from '#/components/admin/ArField'
 import { ContentTranslationTools } from '#/components/admin/ContentTranslationTools'
 import { useContentTranslationDraft } from '#/hooks/admin/useContentTranslationDraft'
-import type { TranslationEdit } from '@sinshin/shared'
+import { collectionTranslationIdentities, type TranslationEdit, type ContentCollectionIdentity } from '@sinshin/shared'
 import { ConfirmModal } from '#/components/ConfirmModal'
 import { Toggle } from '#/components/shared/Toggle'
 import {
@@ -27,9 +27,11 @@ import {
 import { useToastStore } from '#/stores/toastStore'
 import { invalidateCategoryQueries } from '#/utils/productCache'
 import { adminMainCategoriesOptions } from '#/utils/queryOptions'
+import { collectionIds, appendCollectionIdentity, removeCollectionIdentity, moveCollectionIdentity, moveCollectionItem } from '#/utils/contentTranslationDraft'
 
 // فرم واحد به‌جای استیت‌های پراکنده
 interface CategoryFormState {
+	translationIdentities: ContentCollectionIdentity[]
 	isModalOpen: boolean
 	editingId: string | null
 	name: string
@@ -47,6 +49,7 @@ interface CategoryFormState {
 }
 
 const EMPTY_FORM: CategoryFormState = {
+	translationIdentities: [{ collectionPath: ['sizeNames'], itemIds: [] }],
 	isModalOpen: false,
 	editingId: null,
 	name: '',
@@ -108,6 +111,7 @@ export const CategoryManager = memo(function CategoryManager({
 			name: string
 			nameAr?: string | null
 			translationEdits?: TranslationEdit[]
+			translationIdentities?: ContentCollectionIdentity[]
 			sourceRevision?: string
 			sizeNames?: string[]
 			sizeNamesAr?: string[]
@@ -125,6 +129,7 @@ export const CategoryManager = memo(function CategoryManager({
 			set({ isModalOpen: false })
 			showToast('دسته‌بندی افزوده شد')
 		},
+		onError: error => showToast(error.message, 'error'),
 	})
 
 	const updateMut = useMutation({
@@ -133,6 +138,7 @@ export const CategoryManager = memo(function CategoryManager({
 			name: string
 			nameAr?: string | null
 			translationEdits?: TranslationEdit[]
+			translationIdentities?: ContentCollectionIdentity[]
 			sourceRevision?: string
 			sizeNames?: string[]
 			sizeNamesAr?: string[]
@@ -150,6 +156,7 @@ export const CategoryManager = memo(function CategoryManager({
 			set({ isModalOpen: false })
 			showToast('دسته‌بندی ویرایش شد')
 		},
+		onError: error => showToast(error.message, 'error'),
 	})
 
 	const deleteMut = useMutation({
@@ -171,6 +178,7 @@ export const CategoryManager = memo(function CategoryManager({
 			translation.reset()
 			if (cat) {
 				set({
+					translationIdentities: collectionTranslationIdentities('category', cat),
 					isModalOpen: true,
 					editingId: cat.id,
 					name: cat.name,
@@ -188,6 +196,7 @@ export const CategoryManager = memo(function CategoryManager({
 				})
 			} else {
 				set({
+					translationIdentities: [{ collectionPath: ['sizeNames'], itemIds: [] }],
 					isModalOpen: true,
 					editingId: null,
 					name: '',
@@ -218,6 +227,7 @@ export const CategoryManager = memo(function CategoryManager({
 			return
 		}
 		const payload = {
+			translationIdentities: form.translationIdentities,
 			sourceRevision: translation.sourceRevision,
 			translationEdits: translation.getEdits(),
 			sizeNames: form.sizeNames,
@@ -296,6 +306,7 @@ export const CategoryManager = memo(function CategoryManager({
 						</div>
 						<div className="flex items-center gap-1">
 							<button
+								aria-label="ویرایش دسته"
 								onClick={() => openModal(cat)}
 								className="p-1.5 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer"
 							>
@@ -394,17 +405,37 @@ export const CategoryManager = memo(function CategoryManager({
 							maxLength={60}
 						/>
 						<ContentTranslationTools translation={translation} disabled={createMut.isPending || updateMut.isPending} />
-						{form.sizeNames.length > 0 && <div className="space-y-3">
+						<div className="space-y-3">
 							<p className="text-sm">قالب نام سایزها</p>
-							{form.sizeNames.map((name, index) => <div key={translation.field(['sizeNames', index])?.field.fieldId ?? index} className="space-y-2">
-								<input value={name} maxLength={60} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#3a151c]"
-									onChange={event => set({ sizeNames: form.sizeNames.map((value, item) => item === index ? event.target.value : value) })} />
+							{form.sizeNames.map((name, index) => {
+								const templateId = collectionIds(form.translationIdentities, ['sizeNames'])[index]
+								return <div key={templateId} className="space-y-2">
+								<input value={name} maxLength={40} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#3a151c]"
+									onChange={event => { const text = event.target.value; setForm(previous => ({ ...previous,
+										sizeNames: previous.sizeNames.map((value, item) => collectionIds(previous.translationIdentities, ['sizeNames'])[item] === templateId ? text : value) })) }} />
+								{[-1, 1].map(direction => <button key={direction} type="button" aria-label={direction < 0 ? 'انتقال قالب به بالا' : 'انتقال قالب به پایین'}
+									disabled={index + direction < 0 || index + direction >= form.sizeNames.length} className="text-xs px-1 disabled:opacity-30"
+									onClick={() => setForm(previous => { const currentIndex = collectionIds(previous.translationIdentities, ['sizeNames']).indexOf(templateId)
+										if (currentIndex < 0) return previous
+										return { ...previous, sizeNames: moveCollectionItem(previous.sizeNames, currentIndex, currentIndex + direction),
+											sizeNamesAr: moveCollectionItem(previous.sizeNames.map((_, at) => previous.sizeNamesAr[at] ?? ''), currentIndex, currentIndex + direction),
+											translationIdentities: moveCollectionIdentity(previous.translationIdentities, ['sizeNames'], currentIndex, currentIndex + direction) }
+									})}>{direction < 0 ? '↑' : '↓'}</button>)}
+								<button type="button" aria-label="حذف قالب" className="text-xs text-red-400" onClick={() => setForm(previous => {
+									const currentIndex = collectionIds(previous.translationIdentities, ['sizeNames']).indexOf(templateId)
+									if (currentIndex < 0) return previous
+									return { ...previous, sizeNames: previous.sizeNames.filter((_, at) => at !== currentIndex), sizeNamesAr: previous.sizeNamesAr.filter((_, at) => at !== currentIndex),
+										translationIdentities: removeCollectionIdentity(previous.translationIdentities, ['sizeNames'], currentIndex) }
+								})}>×</button>
 								<ArField label={`قالب سایز ${index + 1}`} faReference={name} value={form.sizeNamesAr[index] ?? ''}
-									translation={translation.field(['sizeNames', index])} maxLength={60}
-									onChange={value => setForm(previous => ({ ...previous,
-										sizeNamesAr: previous.sizeNames.map((_, item) => item === index ? value : previous.sizeNamesAr[item] ?? '') }))} />
-							</div>)}
-						</div>}
+									translation={translation.field(['sizeNames', index])} maxLength={40}
+										onChange={value => setForm(previous => ({ ...previous,
+											sizeNamesAr: previous.sizeNames.map((_, item) => collectionIds(previous.translationIdentities, ['sizeNames'])[item] === templateId ? value : previous.sizeNamesAr[item] ?? '') }))} />
+								</div>})}
+							<button type="button" className="text-xs text-primary" disabled={form.sizeNames.length >= 12}
+								onClick={() => setForm(previous => ({ ...previous, sizeNames: [...previous.sizeNames, ''], sizeNamesAr: [...previous.sizeNamesAr, ''],
+									translationIdentities: appendCollectionIdentity(previous.translationIdentities, ['sizeNames']) }))}>افزودن قالب سایز</button>
+						</div>
 
 						{/* stage-48 — حالت‌های سفارش (به‌جای سوئیچ سایز بندی) */}
 						<div className="p-3 rounded-xl bg-gray-50 dark:bg-[#1a0a0e] border border-gray-100 dark:border-[#3a151c]">

@@ -1,9 +1,10 @@
+import { fixtureUpdateArticle, fixtureUpdateArticleCategory, maximumBlockTranslationFixture } from './content-save-fixtures'
 /** Articles integration regressions. Creates/drops only a uniquely named scratch database on local PostgreSQL. */
 import assert from 'node:assert/strict'
 import { SQL } from 'bun'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
-import { contentSourceRevision, contentTranslationFields, getArticleBlockTextFields, getArticleBlockTranslationStatus, readArticleBlockText, setArticleBlockText, setArticleBlockTranslation, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockTextPath } from '@sinshin/shared'
+import { articleBlocksContentForLimit, bindArticleBlockItemIdentities, contentTranslationFields, createContentCollectionItemId, getArticleBlockTextFields, getArticleBlockTranslationStatus, readArticleBlockText, reconcileArticleBlocksTranslation, setArticleBlockText, setArticleBlockTranslation, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockTextPath } from '@sinshin/shared'
 import { ArticleService, type ArticleInput } from '../src/domain/article/article.service'
 import { AppError } from '../src/domain/shared/errors'
 import { Database } from '../src/infra/db/client'
@@ -32,6 +33,7 @@ const check = (condition: unknown, message: string) => {
   console.log(`  ✓ ${message}`)
 }
 const errorCode = (code: string) => (error: unknown) => error instanceof AppError && error.code === code
+const required = <T>(value: T | null | undefined): T => { assert(value != null); return value }
 const blockText = (doc: ArticleBlocksDoc | null | undefined, id: string, path: ArticleBlockTextPath) =>
   readArticleBlockText(doc?.blocks.find(block => block.id === id), path)
 
@@ -99,7 +101,7 @@ try {
   assert.ok(id)
   const publishedAt = new Date('2026-01-01T10:00:00.000Z')
   await db.update(articles).set({ arAuto: true, createdAt: publishedAt, updatedAt: publishedAt }).where(eq(articles.id, id))
-  await articlesService.update(id, { title: 'ویرایش', excerpt: 'خلاصه جدید', content: 'ignored for blocks', categoryId: category.id })
+  await fixtureUpdateArticle(articlesService, db, id, { title: 'ویرایش', excerpt: 'خلاصه جدید', content: 'ignored for blocks', categoryId: category.id })
   const edited = (await articlesService.adminDetail(id))!
   const summary = (await articlesService.listPublic()).find((article) => article.id === id)!
   check(edited.publishedAt === publishedAt.toISOString()
@@ -156,7 +158,7 @@ try {
   const translatedGallery = blockTranslations.blocks[4]!
   assert.equal(translatedGallery.type, 'gallery')
   translatedGallery.props.images = [{ src: '/changed.webp', alt: 'الصورة الأولى' }, { src: '/changed-two.webp', alt: '' }]
-  await articlesService.update(translatedId, {
+  await fixtureUpdateArticle(articlesService, db, translatedId, {
     title: 'مقاله قدیمی', excerpt: input.excerpt, content: input.content, categoryId: category.id,
     blocks: legacyBlocks, blocksAr: blockTranslations,
   })
@@ -193,14 +195,14 @@ try {
   check(publicLink.props.href === '/products?branch=one' && publicLink.props.variant === 'button'
     && publicGallery.props.images[0]?.src === '/uploads/one.webp' && publicGallery.props.images[1]?.src === '/uploads/two.webp',
     'translation payloads cannot alter links, image URLs or display variants')
-  await articlesService.update(translatedId, {
+  await fixtureUpdateArticle(articlesService, db, translatedId, {
     title: 'حفظ ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id,
   })
   assert.deepEqual((await articlesService.adminDetail(translatedId))!.blocksAr, oldEdited.blocksAr)
   check(true, 'omitting Arabic blocks preserves all saved manual block translations')
   const reorderedBlocks = structuredClone(legacyBlocks)
   reorderedBlocks.blocks.reverse()
-  await articlesService.update(translatedId, {
+  await fixtureUpdateArticle(articlesService, db, translatedId, {
     title: 'تغییر ترتیب', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocks: reorderedBlocks,
   })
   const reorderedArabic = (await articlesService.byId(translatedId, 'ar'))!.blocks!
@@ -210,14 +212,14 @@ try {
     && reorderedLocation.props.title === 'الفرع الأول' && reorderedLocation.props.lat === locationOne.props.lat,
     'Persian block reorder rebases Arabic text by stable block IDs while retaining coordinate precision')
 
-  const fieldSource: ArticleBlocksDoc = { version: 1, blocks: [
+  const fieldSource: ArticleBlocksDoc = bindArticleBlockItemIdentities({ version: 1, blocks: [
     { id: 'branch', type: 'location', props: { lat: 37.48220561234, lng: 49.44182739876, title: 'نام شعبه', address: 'آدرس شعبه' } },
     { id: 'note', type: 'callout', props: { title: 'عنوان نکته', text: 'متن نکته' } },
     { id: 'items', type: 'list', props: { items: ['اول', 'دوم', 'سوم'], ordered: true } },
     { id: 'images', type: 'gallery', props: { images: [{ src: '/uploads/a.webp', alt: 'تصویر اول' }, { src: '/uploads/b.webp', alt: 'تصویر دوم' }], layout: 'grid' } },
     { id: 'body-field', type: 'paragraph', props: { text: 'متن ثابت' } },
     { id: 'menu-link', type: 'link', props: { title: 'عنوان پیوند', text: 'متن پیوند', label: 'منو', href: '/products', variant: 'button' } },
-  ] }
+  ] })
   const fieldArabic = setArticleBlockTranslations(fieldSource, null, fieldSource.blocks.flatMap(block =>
     getArticleBlockTextFields(block).map(field => ({ blockId: block.id, path: field.path, text: `عربي ${field.text}` }))))!
   const fieldInput = { ...input, blocks: fieldSource, blocksAr: fieldArabic }
@@ -227,7 +229,7 @@ try {
   assert.ok(legacyFieldId)
   const legacyChangedTitle = setArticleBlockText(fieldSource, 'branch', ['title'], 'نام جدید شعبه قدیمی')
   const legacyStaleArabic = setArticleBlockText(legacyFieldArabic, 'branch', ['address'], '')
-  await articlesService.update(legacyFieldId, { ...fieldInput, blocks: legacyChangedTitle, blocksAr: legacyStaleArabic })
+  await fixtureUpdateArticle(articlesService, db, legacyFieldId, { ...fieldInput, blocks: legacyChangedTitle, blocksAr: legacyStaleArabic })
   const legacyFieldSaved = (await articlesService.adminDetail(legacyFieldId))!
   check(blockText(legacyFieldSaved.blocksAr, 'branch', ['title']) === ''
     && blockText(legacyFieldSaved.blocksAr, 'branch', ['address']) === 'عربي آدرس شعبه'
@@ -237,7 +239,7 @@ try {
   assert.ok(fieldId)
   const beforeFieldEdit = (await articlesService.adminDetail(fieldId))!
   const changedTitle = setArticleBlockText(beforeFieldEdit.blocks!, 'branch', ['title'], 'نام جدید شعبه')
-  await articlesService.update(fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: beforeFieldEdit.blocksAr })
+  await fixtureUpdateArticle(articlesService, db, fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: beforeFieldEdit.blocksAr })
   const afterTitleEdit = (await articlesService.adminDetail(fieldId))!
   assert.deepEqual(afterTitleEdit.blocks, changedTitle)
   check(blockText(afterTitleEdit.blocksAr, 'branch', ['title']) === ''
@@ -251,13 +253,13 @@ try {
   const staleBranch = staleWithoutProof.blocks.find(block => block.id === 'branch')!
   assert.equal(staleBranch.type, 'location')
   staleBranch.props.address = ''
-  await articlesService.update(fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: staleWithoutProof })
+  await fixtureUpdateArticle(articlesService, db, fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: staleWithoutProof })
   const afterUnprovedSave = (await articlesService.adminDetail(fieldId))!
   check(blockText(afterUnprovedSave.blocksAr, 'branch', ['title']) === ''
     && blockText(afterUnprovedSave.blocksAr, 'branch', ['address']) === 'عربي آدرس شعبه',
     'an outdated Arabic document without proof cannot restore changed text or erase a completed sibling')
   const freshArabic = setArticleBlockTranslation(changedTitle, afterUnprovedSave.blocksAr, 'branch', ['title'], 'اسم الفرع الجديد')!
-  await articlesService.update(fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: freshArabic })
+  await fixtureUpdateArticle(articlesService, db, fieldId, { ...fieldInput, blocks: changedTitle, blocksAr: freshArabic })
   const freshlyTranslated = (await articlesService.adminDetail(fieldId))!
   check(blockText(freshlyTranslated.blocksAr, 'branch', ['title']) === 'اسم الفرع الجديد'
     && getArticleBlockTranslationStatus(freshlyTranslated.blocks, freshlyTranslated.blocksAr, 'branch', ['title']) === 'translated'
@@ -280,7 +282,7 @@ try {
   assert.equal(structuralLink.type, 'link')
   structuralLink.props.href = '/articles'
   structuralLink.props.variant = 'card'
-  await articlesService.update(fieldId, { ...fieldInput, blocks: structuralEdit, blocksAr: freshlyTranslated.blocksAr })
+  await fixtureUpdateArticle(articlesService, db, fieldId, { ...fieldInput, blocks: structuralEdit, blocksAr: freshlyTranslated.blocksAr })
   const afterStructuralEdit = (await articlesService.adminDetail(fieldId))!
   assert.deepEqual(afterStructuralEdit.blocks, structuralEdit)
   check(structuralEdit.blocks.every(block => getArticleBlockTextFields(block).every(field =>
@@ -292,7 +294,7 @@ try {
   replacedBody.id = 'replacement-body'
   const replacedType = pathEdit.blocks.find(block => block.id === 'note')!
   Object.assign(replacedType, { type: 'quote', props: { text: 'متن نکته', author: 'نویسنده جدید' } })
-  await articlesService.update(fieldId, { ...fieldInput, blocks: pathEdit, blocksAr: afterStructuralEdit.blocksAr })
+  await fixtureUpdateArticle(articlesService, db, fieldId, { ...fieldInput, blocks: pathEdit, blocksAr: afterStructuralEdit.blocksAr })
   const afterIdentityEdit = (await articlesService.adminDetail(fieldId))!
   check(blockText(afterIdentityEdit.blocksAr, 'items', ['items', 1]) === ''
     && blockText(afterIdentityEdit.blocksAr, 'images', ['images', 1, 'alt']) === ''
@@ -310,7 +312,7 @@ try {
     'public documents omit provenance and fall back independently to the current Persian fields')
   const removedSource = structuredClone(afterIdentityEdit.blocks!)
   removedSource.blocks = removedSource.blocks.filter(block => block.id !== 'replacement-body')
-  await articlesService.update(fieldId, { ...fieldInput, blocks: removedSource, blocksAr: afterIdentityEdit.blocksAr })
+  await fixtureUpdateArticle(articlesService, db, fieldId, { ...fieldInput, blocks: removedSource, blocksAr: afterIdentityEdit.blocksAr })
   const afterRemoval = (await articlesService.adminDetail(fieldId))!
   check(afterRemoval.blocksAr?.blocks.length === removedSource.blocks.length
     && !afterRemoval.blocksAr.blocks.some(block => block.id === 'body-field' || block.id === 'replacement-body')
@@ -330,11 +332,12 @@ try {
   const beforeDocumentClear = (await articlesService.adminDetail(translatedId))!
   await assert.rejects(articlesService.update(translatedId, {
     title: 'بدون ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocksAr: null,
+    sourceRevision: undefined as unknown as string,
   }), errorCode('VALIDATION_ERROR'))
   check((await articlesService.adminDetail(translatedId))!.blocksAr !== null, 'an unproved null clear cannot erase existing block translations')
-  await articlesService.update(translatedId, {
+  await fixtureUpdateArticle(articlesService, db, translatedId, {
     title: 'بدون ترجمه', excerpt: input.excerpt, content: input.content, categoryId: category.id, blocksAr: null,
-    sourceRevision: contentSourceRevision('article', beforeDocumentClear),
+    sourceRevision: beforeDocumentClear.sourceRevision,
   })
   check((await articlesService.adminDetail(translatedId))!.blocksAr?.translation?.fields.every(field => field.origin === 'manual' && field.status !== 'translated')
     && (await articlesService.byId(translatedId, 'ar'))!.blocks?.blocks.length === legacyBlocks.blocks.length,
@@ -345,18 +348,19 @@ try {
   const huge = { version: 1, blocks: Array.from({ length: 30 }, (_, i) => ({
     id: `p${i}`, type: 'paragraph', props: { text: 'م'.repeat(5000) },
   })) }
-  await assert.rejects(articlesService.update(id, { ...input, blocks: huge }), errorCode('VALIDATION_ERROR'))
+  await assert.rejects(fixtureUpdateArticle(articlesService, db, id, { ...input, blocks: huge }), errorCode('VALIDATION_ERROR'))
   check((await articlesService.adminDetail(id))?.blocks?.blocks[0]?.id === 'body', 'oversized UTF-8 documents are rejected without erasing the saved article')
 
   const blank = { ...input, title: '   ' }
   await assert.rejects(articlesService.create(blank), errorCode('VALIDATION_ERROR'))
-  await assert.rejects(articlesService.update(id, blank), errorCode('VALIDATION_ERROR'))
+  await assert.rejects(fixtureUpdateArticle(articlesService, db, id, blank), errorCode('VALIDATION_ERROR'))
   check((await articlesService.adminDetail(id))?.title === 'ویرایش', 'whitespace-only article titles cannot replace saved content')
 
-  await articlesService.update(id, {
+  await fixtureUpdateArticle(articlesService, db, id, {
     title: 'ویرایش', excerpt: 'خلاصه', content: 'مقاله متنی', categoryId: category.id,
     blocks: null, titleAr: null, excerptAr: null, contentAr: null, processesAr: null,
     galleryImages: [], profileImage: null, processes: [], subCategoryId: null, isFeatured: false,
+    translationIdentities: [{ collectionPath: ['processes'], itemIds: [] }],
   })
   const cleared = (await articlesService.adminDetail(id))!
   check(cleared.blocks === null && cleared.content === 'مقاله متنی' && cleared.titleAr === null
@@ -365,33 +369,34 @@ try {
   'explicit null and empty arrays clear optional fields')
 
   await articlesService.listPublic()
-  await articlesService.updateCategory(category.id, { name: 'تغییر نام', hasSubCategories: false })
+  await fixtureUpdateArticleCategory(articlesService, db, category.id, { name: 'تغییر نام', hasSubCategories: false })
   const disabled = await findCategory('تغییر نام')
   check(disabled.subCategories.length === 2 && disabled.nameAr === null && disabled.subCategories.every(sub => sub.nameAr),
     'renaming a category invalidates only its name while disabling sub-categories preserves their names and translations')
   check((await articlesService.listPublic()).find((a) => a.id === id)?.categoryName === 'تغییر نام', 'disabling a category invalidates cached article category names')
-  await articlesService.updateCategory(category.id, { name: 'تغییر نام', hasSubCategories: true })
+  await fixtureUpdateArticleCategory(articlesService, db, category.id, { name: 'تغییر نام', hasSubCategories: true })
   check((await findCategory('تغییر نام')).subCategories.length === 2, 'omitting sub-categories during a rename does not delete them')
-  await articlesService.updateCategory(category.id, {
+  await assert.rejects(fixtureUpdateArticleCategory(articlesService, db, category.id, {
     name: 'تغییر نام', hasSubCategories: true, subCategories: ['بخش', 'دوم'], subCategoriesAr: null,
-  })
+  }), errorCode('VALIDATION_ERROR'))
   check((await findCategory('تغییر نام')).subCategories.every((s) => s.nameAr), 'unproved stale nulls cannot erase manual sub-category translations')
   const beforeClearSubs = (await articlesService.categories('fa', true)).find(row => row.id === category.id)!
-  await articlesService.updateCategory(category.id, { name: 'تغییر نام', hasSubCategories: true,
+  await fixtureUpdateArticleCategory(articlesService, db, category.id, { name: 'تغییر نام', hasSubCategories: true,
     subCategoryEntries: beforeClearSubs.subCategories.map(sub => ({ id: sub.id, name: sub.name, nameAr: null,
       translationEdits: contentTranslationFields('articleSubCategory', sub).map(field => ({ fieldId: field.fieldId, fieldPath: field.fieldPath,
         sourceText: field.sourceText, revision: field.revision, value: '', origin: 'manual' as const })) })),
   })
   check((await findCategory('تغییر نام')).subCategories.every((s) => s.nameAr === null), 'explicit source-bound manual clears remove only selected sub-category translations')
 
-  await Promise.all(Array.from({ length: 10 }, () => articlesService.toggle(id)))
-  check((await articlesService.adminDetail(id))?.status === 'ACTIVE', 'concurrent status toggles each apply exactly once')
-  await articlesService.toggle(id)
+  const toggleRevision = required(required(await articlesService.adminDetail(id)).sourceRevision)
+  const toggles = await Promise.allSettled(Array.from({ length: 10 }, () => articlesService.toggle(id, toggleRevision)))
+  check(toggles.filter(result => result.status === 'fulfilled').length === 1
+    && toggles.filter(result => result.status === 'rejected').length === 9, 'concurrent same-revision status toggles accept exactly one update')
   check(await articlesService.byId(id) === null && !(await articlesService.listPublic()).some((a) => a.id === id),
     'inactive articles are hidden from public detail and lists')
   check((await articlesService.listAdmin()).some((a) => a.id === id), 'administrators can still read inactive articles')
   const missing = crypto.randomUUID()
-  await assert.rejects(articlesService.toggle(missing), errorCode('NOT_FOUND'))
+  await assert.rejects(articlesService.toggle(missing, toggleRevision), errorCode('NOT_FOUND'))
   await assert.rejects(articlesService.deleteCategory(missing), errorCode('NOT_FOUND'))
   check(await articlesService.byId('invalid') === null, 'invalid article identifiers never reach a UUID database query')
 
@@ -403,17 +408,32 @@ try {
   await articlesService.create({ ...input, categoryId: collision2.id, subCategoryId: collision2.subCategories[0]!.id, title: 'tuple two' })
   check((await articlesService.listPublic('a:b', 'c'))[0]?.title === 'tuple one'
     && (await articlesService.listPublic('a', 'b:c'))[0]?.title === 'tuple two', 'category/sub-category cache keys cannot collide through colon-containing slugs')
-  await articlesService.update(id, input)
-  await articlesService.update(id, { title: 'ویرایش', excerpt: 'خلاصه', content: 'متن', categoryId: collision1.id })
+  const restoredProcessIds = (input.processes ?? []).map(() => createContentCollectionItemId('processes'))
+  await fixtureUpdateArticle(articlesService, db, id, { ...input, translationIdentities: [
+    { collectionPath: ['processes'], itemIds: restoredProcessIds },
+    ...(input.processes ?? []).map((process, index) => ({ collectionPath: ['processes', index, 'items'],
+      itemIds: process.items.map(() => createContentCollectionItemId(`${restoredProcessIds[index]}:items`)) })),
+  ] })
+  await fixtureUpdateArticle(articlesService, db, id, { title: 'ویرایش', excerpt: 'خلاصه', content: 'متن', categoryId: collision1.id })
   check((await articlesService.adminDetail(id))?.subCategoryId === null, 'moving articles does not retain a sub-category from the previous category')
 
   const sessions = {
     authenticate: async (token: string) => ({ user: { id: token, role: token === 'admin' ? 'admin' : 'admin2' }, ctx: {} }),
   } as unknown as SessionService
   const admin2 = { permissionsOf: async () => ({ articlesRead: true, articlesWrite: false }) } as unknown as Admin2Service
+  let capturedHttpUpdate: ArticleInput | undefined
+  const httpArticles = new Proxy(articlesService, {
+    get(target, property, receiver) {
+      if (property === 'update') return (articleId: string, submission: ArticleInput & { sourceRevision: string }) => {
+        capturedHttpUpdate = structuredClone(submission)
+        return target.update(articleId, submission)
+      }
+      return Reflect.get(target, property, receiver)
+    },
+  })
   const app = new Elysia().onError(({ error, set }) => {
     if (error instanceof AppError) { set.status = error.status; return error.toJSON() }
-  }).use(articlesRoutes({ sessions, admin2, articles: articlesService })).compile()
+  }).use(articlesRoutes({ sessions, admin2, articles: httpArticles })).compile()
   const body = { ...input, categoryId: category.id, subCategoryId: sub.id,
     processesAr: [{ title: '', items: ['', 'اثنان'] }, { title: '', items: [] }],
     blocksAr: { version: 1, blocks: [{ id: 'body', type: 'paragraph', props: { text: '' } }] } }
@@ -433,6 +453,82 @@ try {
   check(proofArticle.blocksAr?.translation?.fields[0]?.sourceText === 'متن بلوکی'
     && proofArticle.blocksAr.translation.fields[0].status === 'translated' && !proofArticle.blocks?.translation,
     'article HTTP schema preserves validated Arabic provenance while keeping Persian source documents metadata-free')
+  const nestedHttpBlocks = bindArticleBlockItemIdentities({ version: 1, blocks: [
+    { id: 'http-list', type: 'list', props: { items: ['اول', 'دوم', 'حذف'] } },
+    { id: 'http-gallery', type: 'gallery', props: { layout: 'grid', images: [
+      { src: '/uploads/http-one.webp', alt: 'تصویر اول' }, { src: '/uploads/http-two.webp', alt: 'تصویر دوم' },
+    ] } },
+  ] })
+  const nestedHttpArabic = required(setArticleBlockTranslations(nestedHttpBlocks, null, [
+    { blockId: 'http-list', path: ['items', 0], text: 'الأول' },
+    { blockId: 'http-list', path: ['items', 1], text: 'الثاني' },
+    { blockId: 'http-list', path: ['items', 2], text: 'المحذوف' },
+    { blockId: 'http-gallery', path: ['images', 0, 'alt'], text: 'الصورة الأولى' },
+    { blockId: 'http-gallery', path: ['images', 1, 'alt'], text: 'الصورة الثانية' },
+  ]))
+  const nestedHttpBody = { title: 'مقاله با هویت بندها', excerpt: 'خلاصه', content: 'بندها', categoryId: category.id }
+  const nestedCreate = await app.handle(new Request('http://localhost/admin/articles', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer admin' },
+    body: JSON.stringify({ ...nestedHttpBody, blocks: nestedHttpBlocks, blocksAr: nestedHttpArabic }),
+  }))
+  assert.equal(nestedCreate.status, 200)
+  const nestedArticleId = (await nestedCreate.json() as { id: string }).id
+  const nestedCreated = required(await articlesService.adminDetail(nestedArticleId))
+  assert.deepEqual(nestedCreated.blocks?.blocks.map(block => getArticleBlockTextFields(block).map(field => field.itemId)),
+    nestedHttpBlocks.blocks.map(block => getArticleBlockTextFields(block).map(field => field.itemId)))
+  assert.deepEqual(nestedCreated.blocksAr?.translation?.fields.map(field => field.itemId), nestedHttpArabic.translation?.fields.map(field => field.itemId))
+  check(true, 'HTTP article creation preserves list/gallery IDs and exact manual field source proofs')
+  const movedNestedBlocks = structuredClone(required(nestedCreated.blocks))
+  const movedHttpList = required(movedNestedBlocks.blocks[0])
+  const movedHttpGallery = required(movedNestedBlocks.blocks[1])
+  assert(movedHttpList.type === 'list' && movedHttpGallery.type === 'gallery')
+  const movedHttpItemIds = required(movedHttpList.props.itemIds)
+  const deletedHttpListId = required(movedHttpItemIds[2])
+  const deletedHttpImageId = required(required(movedHttpGallery.props.images[1]).id)
+  movedHttpList.props.items = [required(movedHttpList.props.items[1]), required(movedHttpList.props.items[0])]
+  movedHttpList.props.itemIds = [required(movedHttpItemIds[1]), required(movedHttpItemIds[0])]
+  movedHttpGallery.props.images = [required(movedHttpGallery.props.images[0])]
+  const rebasedNestedArabic = required(reconcileArticleBlocksTranslation(nestedCreated.blocks, movedNestedBlocks, nestedCreated.blocksAr))
+  const updatedNestedArabic = required(setArticleBlockTranslation(movedNestedBlocks, rebasedNestedArabic, 'http-list', ['items', 1], 'الأول المراجع'))
+  assert.equal(updatedNestedArabic.translation?.orphanedFields?.length, 2)
+  assert(updatedNestedArabic.translation?.retiredItemIds?.includes(deletedHttpListId))
+  assert(updatedNestedArabic.translation?.retiredItemIds?.includes(deletedHttpImageId))
+  const nestedPatch = await app.handle(new Request(`http://localhost/admin/articles/${nestedArticleId}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json', authorization: 'Bearer admin' },
+    body: JSON.stringify({ ...nestedHttpBody, sourceRevision: nestedCreated.sourceRevision,
+      blocks: movedNestedBlocks, blocksAr: updatedNestedArabic }),
+  }))
+  assert.equal(nestedPatch.status, 200)
+  assert.deepEqual((capturedHttpUpdate?.blocksAr as ArticleBlocksDoc | undefined)?.translation, updatedNestedArabic.translation, 'HTTP validation retains every nested proof, orphaned draft and retired ID before persistence')
+  const nestedPatched = required(await articlesService.adminDetail(nestedArticleId))
+  assert.deepEqual(nestedPatched.blocksAr?.translation?.orphanedFields, updatedNestedArabic.translation?.orphanedFields)
+  assert.deepEqual(nestedPatched.blocksAr?.translation?.retiredItemIds, updatedNestedArabic.translation?.retiredItemIds)
+  assert.equal(readArticleBlockText(nestedPatched.blocksAr?.blocks[0], ['items', 0]), 'الثاني')
+  assert.equal(readArticleBlockText(nestedPatched.blocksAr?.blocks[0], ['items', 1]), 'الأول المراجع')
+  check(true, 'HTTP reordered nested fields retain manual translations and preserve recoverable removed list/gallery drafts and tombstones')
+  const maximum = maximumBlockTranslationFixture()
+  const maximumLegacySource = articleBlocksContentForLimit(maximum.source)
+  const maximumLegacyArabic = articleBlocksContentForLimit(maximum.arabic)
+  assert(Buffer.byteLength(JSON.stringify(maximumLegacySource)) < 262_144)
+  assert(Buffer.byteLength(JSON.stringify(maximumLegacyArabic)) < 2_097_152)
+  assert(Buffer.byteLength(JSON.stringify(maximum.arabic)) > 2_097_152)
+  const maximumCreate = await app.handle(new Request('http://localhost/admin/articles', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer admin' },
+    body: JSON.stringify({ ...nestedHttpBody, blocks: maximumLegacySource, blocksAr: maximumLegacyArabic }),
+  }))
+  assert.equal(maximumCreate.status, 200)
+  const maximumId = (await maximumCreate.json() as { id: string }).id
+  const maximumSaved = required(await articlesService.adminDetail(maximumId))
+  assert.equal(maximumSaved.blocksAr?.translation?.fields.length, 6000)
+  const maximumPatch = await app.handle(new Request(`http://localhost/admin/articles/${maximumId}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json', authorization: 'Bearer admin' },
+    body: JSON.stringify({ ...nestedHttpBody, sourceRevision: maximumSaved.sourceRevision, blocks: maximumSaved.blocks, blocksAr: maximumSaved.blocksAr }),
+  }))
+  assert.equal(maximumPatch.status, 200)
+  const maximumResaved = required(await articlesService.adminDetail(maximumId))
+  assert.deepEqual(maximumResaved.blocks, maximumSaved.blocks)
+  assert.deepEqual(maximumResaved.blocksAr, maximumSaved.blocksAr)
+  check(true, 'legal 6000-field legacy articles remain editable through HTTP after stable IDs exceed old raw metadata size')
   check((await app.handle(request())).status === 401 && (await app.handle(request('reader'))).status === 403,
     'article writes reject unauthenticated users and administrators without write permission')
   check((await app.handle(new Request('http://localhost/articles'))).status === 200,
@@ -445,7 +541,7 @@ try {
     && categoriesForEdit.find((c) => c.id === category.id)?.nameAr === null,
   'administrator category data stays in Persian when the public language cookie is Arabic')
 
-  await articlesService.toggle(id)
+  await articlesService.toggle(id, required(required(await articlesService.adminDetail(id)).sourceRevision))
   const beforeViews = (await articlesService.adminDetail(id))!.views
   await articlesService.byId(id)
   await articlesService.byId(id)
@@ -471,7 +567,7 @@ try {
 
   const { id: associatedId } = await articlesService.create(input)
   assert.ok(associatedId)
-  await articlesService.updateCategory(category.id, { name: 'تغییر نام', hasSubCategories: true, subCategories: [] })
+  await fixtureUpdateArticleCategory(articlesService, db, category.id, { name: 'تغییر نام', hasSubCategories: true, subCategoryEntries: [] })
   check((await articlesService.adminDetail(associatedId))?.subCategoryId === null,
     'removing sub-categories preserves their articles and clears dangling references')
 

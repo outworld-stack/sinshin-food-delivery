@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
-import { getArticleBlockTextFields, normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockType, type ArticleBlockTextPath } from '@sinshin/shared'
+import { bindArticleBlockItemIdentities, getArticleBlockTextFields, normalizeArticleBlocksTranslation, readArticleBlockText, setArticleBlockText, setArticleBlockTranslations, type ArticleBlocksDoc, type ArticleBlockType, type ArticleBlockTextPath } from '@sinshin/shared'
 import type { ArticleFormData } from '../src/types/forms'
 
 // Exercise the real component handlers with a small hook host. Network and
@@ -215,6 +215,71 @@ delayedAdd('/second.png')
 delayedAdd('/third.png')
 assert.deepEqual((doc.blocks[0]!.props as { images: { src: string }[] }).images.map(image => image.src), ['/first.png', '/second.png', '/third.png'], 'overlapping gallery uploads merge rather than overwrite one another')
 
+doc = bindArticleBlockItemIdentities({ version: 1, blocks: [{ id: 'queued-list', type: 'list', props: { items: ['First item', 'Second item', 'Manual sibling'] } }] })
+builderTree = renderBuilder()
+const queuedList = fieldsFor(builderTree, 'queued-list')
+const queuedListTree = (queuedList.type as (props: Record<string, unknown>) => unknown)(queuedList.props)
+const firstListEdit = find(queuedListTree, node => node.type === 'input' && node.props.value === 'First item').props.onChange
+const secondListEdit = find(queuedListTree, node => node.type === 'input' && node.props.value === 'Second item').props.onChange
+const oldListIds = [...(doc.blocks[0]?.type === 'list' ? doc.blocks[0].props.itemIds ?? [] : [])]
+find(queuedListTree, node => node.props['aria-label'] === 'انتقال مورد به پایین' && !node.props.disabled).props.onClick()
+firstListEdit({ target: { value: 'First item changed' } })
+secondListEdit({ target: { value: 'Second item changed' } })
+assert.equal(doc.blocks[0]?.type, 'list')
+assert.deepEqual(doc.blocks[0]?.type === 'list' ? doc.blocks[0].props.items : [], ['Second item changed', 'First item changed', 'Manual sibling'], 'queued reorder and multiple old text handlers edit their original logical list items')
+assert.deepEqual(doc.blocks[0]?.type === 'list' ? doc.blocks[0].props.itemIds : [], [oldListIds[1], oldListIds[0], oldListIds[2]])
+
+doc = bindArticleBlockItemIdentities({ version: 1, blocks: [{ id: 'queued-gallery', type: 'gallery', props: { layout: 'grid', images: [
+  { src: '/first.png', alt: 'First image' }, { src: '/second.png', alt: 'Second image' }, { src: '/manual.png', alt: 'Manual image' },
+] } }] })
+builderTree = renderBuilder()
+const queuedGallery = fieldsFor(builderTree, 'queued-gallery')
+const queuedGalleryTree = (queuedGallery.type as (props: Record<string, unknown>) => unknown)(queuedGallery.props)
+const oldGalleryEdit = find(queuedGalleryTree, node => node.type === 'input' && node.props.value === 'Second image').props.onChange
+const oldGalleryId = doc.blocks[0]?.type === 'gallery' ? doc.blocks[0].props.images[1]?.id : undefined
+const oldManualGalleryId = doc.blocks[0]?.type === 'gallery' ? doc.blocks[0].props.images[2]?.id : undefined
+const queuedImages = find(queuedGalleryTree, node => node.props.multiple === true && typeof node.props.onRemove === 'function')
+queuedImages.props.onRemove(0)
+oldGalleryEdit({ target: { value: 'Second image changed' } })
+assert.deepEqual(doc.blocks[0]?.type === 'gallery' ? doc.blocks[0].props.images.map(image => [image.id, image.src, image.alt]) : [], [
+  [oldGalleryId, '/second.png', 'Second image changed'],
+  [oldManualGalleryId, '/manual.png', 'Manual image'],
+], 'a delayed gallery alt handler preserves deletion and locates the same image ID at its new position')
+
+doc = { version: 1, blocks: [
+  { id: 'queued-a', type: 'heading', props: { text: 'A', level: 2 } },
+  { id: 'queued-b', type: 'heading', props: { text: 'B', level: 2 } },
+  { id: 'queued-c', type: 'heading', props: { text: 'C', level: 2 } },
+] }
+builderTree = renderBuilder()
+const oldBlockMove = nodes(builderTree).filter(node => node.props['aria-label'] === 'انتقال به پایین')[0]?.props.onClick
+const oldBlockDelete = nodes(builderTree).filter(node => node.props['aria-label'] === 'حذف بلوک')[1]?.props.onClick
+const oldBlockDuplicate = nodes(builderTree).filter(node => node.props['aria-label'] === 'دوبل‌کردن بلوک')[2]?.props.onClick
+assert.ok(oldBlockMove && oldBlockDelete && oldBlockDuplicate)
+fieldsFor(builderTree, 'queued-b').props.patchProps({ text: 'B changed' })
+fieldsFor(builderTree, 'queued-c').props.patchProps({ text: 'C changed' })
+oldBlockMove()
+assert.deepEqual(doc.blocks.map(block => [block.id, readArticleBlockText(block, ['text'])]), [['queued-b', 'B changed'], ['queued-a', 'A'], ['queued-c', 'C changed']], 'queued block reordering uses the latest source document')
+oldBlockDelete()
+assert.deepEqual(doc.blocks.map(block => block.id), ['queued-a', 'queued-c'], 'an old block delete callback resolves its original stable ID after reorder')
+oldBlockDuplicate()
+assert.equal(doc.blocks.length, 3)
+assert.equal(readArticleBlockText(doc.blocks[2], ['text']), 'C changed', 'an old duplicate callback copies the current original block without restoring previous text')
+assert.notEqual(doc.blocks[2]?.id, 'queued-c')
+oldBlockDelete()
+assert.equal(doc.blocks.length, 3, 'a deleted block callback cannot remove another block at its old position')
+builderTree = renderBuilder()
+const dragEvent = { preventDefault() {}, clientY: 0, dataTransfer: { setData() {}, effectAllowed: '', dropEffect: '' }, currentTarget: { getBoundingClientRect: () => ({ top: 0, height: 100 }) } }
+find(builderTree, node => typeof node.props.onDragStart === 'function').props.onDragStart(dragEvent)
+const copiedId = doc.blocks[2]?.id
+assert.ok(copiedId)
+find(builderTree, node => typeof node.props.onDragOver === 'function' && nodes(node).some(child => child.props.block?.id === copiedId)).props.onDragOver(dragEvent)
+builderTree = renderBuilder()
+fieldsFor(builderTree, 'queued-c').props.patchProps({ text: 'C newest' })
+find(builderTree, node => typeof node.props.onDrop === 'function').props.onDrop(dragEvent)
+assert.deepEqual(doc.blocks.map(block => block.id), ['queued-c', 'queued-a', copiedId], 'drag-and-drop resolves the current dragged block and its stable gap anchor')
+assert.equal(readArticleBlockText(doc.blocks[0], ['text']), 'C newest', 'a delayed drop never restores the older source snapshot')
+
 const longText = 'x'.repeat(12001)
 const migrated = plainTextToDoc(longText)
 assert.equal(migrated.blocks.length, 3)
@@ -261,7 +326,7 @@ mapPickerElement.props.onValidityChange(true)
 pickerTree = render(pickerHost, Picker, pickerProps as never)
 assert.equal(find(pickerTree, node => node.type === 'button' && node.props['aria-expanded'] === true).props.disabled, false)
 
-const bilingualSource: ArticleBlocksDoc = { version: 1, blocks: [
+const bilingualSource: ArticleBlocksDoc = bindArticleBlockItemIdentities({ version: 1, blocks: [
   { id: 'hero', type: 'hero', props: { title: 'هیرو', text: 'متن' } },
   { id: 'heading', type: 'heading', props: { text: 'عنوان', level: 3 } },
   { id: 'paragraph', type: 'paragraph', props: { text: 'متن اصلی' } },
@@ -275,7 +340,7 @@ const bilingualSource: ArticleBlocksDoc = { version: 1, blocks: [
   { id: 'pin-one', type: 'location', props: { lat: 37.4822056789, lng: 49.4418273456, title: 'اول', address: 'آدرس اول' } },
   { id: 'pin-two', type: 'location', props: { lat: -12.987654321, lng: 0, title: 'دوم', address: 'آدرس دوم' } },
   { id: 'divider', type: 'divider', props: { variant: 'space' } },
-] }
+] })
 const originalSource = structuredClone(bilingualSource)
 let arabicDoc: ArticleBlocksDoc | null = null
 const currentArabicDoc = (): ArticleBlocksDoc | null => arabicDoc

@@ -18,7 +18,7 @@ interface GalleryManagerProps {
   images: GalleryImage[]
   isBusy: boolean
   onAdd: (input: AddGalleryImageInput) => void
-  onPatch: (id: string, fields: Omit<Partial<GalleryImage>, 'id' | 'sortOrder'>) => void
+  onPatch: (id: string, fields: Omit<Partial<GalleryImage>, 'id' | 'sortOrder'>) => Promise<unknown>
   onRemove: (id: string) => void
   onMove: (id: string, direction: 'up' | 'down') => void
 }
@@ -58,8 +58,8 @@ export const GalleryManager = memo(function GalleryManager({
   }, [newAlt, newAltAr, newImage, newSpan, onAdd, translation])
 
   const handleToggleActive = useCallback(
-    (id: string, isActive: boolean) => onPatch(id, { isActive }),
-    [onPatch],
+    (id: string, isActive: boolean) => { void onPatch(id, { isActive, sourceRevision: images.find(image => image.id === id)?.sourceRevision }).catch(() => {}) },
+    [onPatch, images],
   )
   const handleSaveEdit = useCallback(
     (id: string, fields: GalleryImageEditFields) => onPatch(id, fields),

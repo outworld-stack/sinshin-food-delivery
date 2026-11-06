@@ -86,9 +86,13 @@ import { faNum } from '#/domain/report/format'
 import {
   contentTranslationValue,
   assertContentSourceRevision,
+  assertContentTranslationIdentities,
+  collectionTranslationIdentities,
+  contentSourceRevision,
   localizeContentRecord,
   reconcileContentTranslation,
   type TranslationEdit,
+  type ContentCollectionIdentity,
   type Product,
   type PurchaseStateDto,
   type SimilarProductsDto,
@@ -841,7 +845,8 @@ export class MenuService {
   // ── ادمین: Main ها ──
 
   async adminMainCategories() {
-    return this.deps.db.select().from(mainCategories).orderBy(asc(mainCategories.sortOrder))
+    const rows = await this.deps.db.select().from(mainCategories).orderBy(asc(mainCategories.sortOrder))
+    return rows.map(row => ({ ...row, sourceRevision: contentSourceRevision('mainCategory', row) }))
   }
 
   async adminCategories() {
@@ -849,6 +854,8 @@ export class MenuService {
     const links = await this.deps.db.select().from(categoryMains)
     return rows.map((row) => ({
       ...row,
+      sourceRevision: contentSourceRevision('category', row),
+      translationIdentities: collectionTranslationIdentities('category', row),
       mainCategoryIds: [row.mainCategoryId, ...links.filter((link) => link.categoryId === row.id).map((link) => link.mainId)],
     }))
   }
@@ -887,7 +894,7 @@ export class MenuService {
     name: string
     nameAr?: string | null
     translationEdits?: TranslationEdit[]
-    sourceRevision?: string
+    sourceRevision: string
   }): Promise<{ success: boolean; message?: string }> {
     const id = asMainCategoryId(input.id)
     const saved = await this.deps.db.transaction(async (tx) => {
@@ -914,51 +921,63 @@ export class MenuService {
     return { success: true }
   }
 
-  async toggleMainCategory(id: string): Promise<void> {
+  async toggleMainCategory(id: string, sourceRevision: string): Promise<void> {
     const mcId = asMainCategoryId(id)
-    const row = await this.deps.db.query.mainCategories.findFirst({
-      where: eq(mainCategories.id, mcId),
+    const saved = await this.deps.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(mainCategories).where(eq(mainCategories.id, mcId)).for('update')
+      if (!row) return false
+      if (!assertContentSourceRevision('mainCategory', row, sourceRevision)) throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      const next = reconcileContentTranslation('mainCategory', row.id, row, { ...row, isActive: !row.isActive })
+      await tx.update(mainCategories).set({ isActive: next.isActive, translationState: next.translationState }).where(eq(mainCategories.id, row.id))
+      return true
     })
-    if (!row) return
-    await this.deps.db
-      .update(mainCategories)
-      .set({ isActive: !row.isActive })
-      .where(eq(mainCategories.id, mcId))
+    if (!saved) return
     await this.cache.invalidate()
   }
 
-  async setDefaultMainCategory(id: string): Promise<{ success: boolean; message?: string }> {
+  async setDefaultMainCategory(id: string, sourceRevisions: Record<string, string>): Promise<{ success: boolean; message?: string }> {
     const mcId = asMainCategoryId(id)
-    const target = await this.deps.db.query.mainCategories.findFirst({
-      where: eq(mainCategories.id, mcId),
+    const result = await this.deps.db.transaction(async (tx) => {
+      // Lock in a stable order before inspecting peers: two default/reorder writers cannot choose stale targets.
+      const rows = await tx.select().from(mainCategories).orderBy(asc(mainCategories.id)).for('update')
+      const target = rows.find(row => row.id.toLowerCase() === mcId.toLowerCase())
+      if (!target) return { success: false, message: 'دسته اصلی پیدا نشد' }
+      const affected = rows.filter(row => row.id === target.id || row.isDefault)
+      for (const row of affected) {
+        if (!assertContentSourceRevision('mainCategory', row, sourceRevisions?.[row.id])) throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      }
+      if (!target.isActive) return { success: false, message: 'پیش‌فرض باید فعال باشد' }
+      for (const row of [...affected.filter(entry => entry.id !== target.id), target]) {
+        const next = reconcileContentTranslation('mainCategory', row.id, row, { ...row, isDefault: row.id === target.id })
+        await tx.update(mainCategories).set({ isDefault: next.isDefault, translationState: next.translationState }).where(eq(mainCategories.id, row.id))
+      }
+      return { success: true }
     })
-    if (!target) return { success: false, message: 'دسته اصلی پیدا نشد' }
-    if (!target.isActive) return { success: false, message: 'پیش‌فرض باید فعال باشد' }
-
-    await this.deps.db.transaction(async (tx) => {
-      await tx.update(mainCategories).set({ isDefault: false })
-      await tx
-        .update(mainCategories)
-        .set({ isDefault: true })
-        .where(eq(mainCategories.id, mcId))
-    })
+    if (!result.success) return result
     await this.cache.invalidate()
-    return { success: true }
+    return result
   }
 
-  async reorderMainCategory(id: string, direction: 'up' | 'down'): Promise<void> {
-    const sorted = await this.adminMainCategories()
-    const idx = sorted.findIndex((m) => m.id === id)
-    if (idx === -1) return
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (swapIdx < 0 || swapIdx >= sorted.length) return
-
-    const a = sorted[idx]!
-    const b = sorted[swapIdx]!
-    await this.deps.db.transaction(async (tx) => {
-      await tx.update(mainCategories).set({ sortOrder: b.sortOrder }).where(eq(mainCategories.id, a.id))
-      await tx.update(mainCategories).set({ sortOrder: a.sortOrder }).where(eq(mainCategories.id, b.id))
+  async reorderMainCategory(id: string, direction: 'up' | 'down', sourceRevisions: Record<string, string>): Promise<void> {
+    const saved = await this.deps.db.transaction(async (tx) => {
+      const rows = await tx.select().from(mainCategories).orderBy(asc(mainCategories.id)).for('update')
+      const sorted = rows.sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id))
+      const index = sorted.findIndex(row => row.id.toLowerCase() === id.toLowerCase())
+      const target = sorted[index]
+      if (!target) return false
+      const peer = sorted[direction === 'up' ? index - 1 : index + 1]
+      const affected = peer ? [target, peer] : [target]
+      for (const row of affected) {
+        if (!assertContentSourceRevision('mainCategory', row, sourceRevisions?.[row.id])) throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      }
+      for (const row of affected) {
+        const sortOrder = peer ? row.id === target.id ? peer.sortOrder : target.sortOrder : row.sortOrder
+        const next = reconcileContentTranslation('mainCategory', row.id, row, { ...row, sortOrder })
+        await tx.update(mainCategories).set({ sortOrder, translationState: next.translationState }).where(eq(mainCategories.id, row.id))
+      }
+      return true
     })
+    if (!saved) return
     await this.cache.invalidate()
   }
 
@@ -985,72 +1004,69 @@ export class MenuService {
   /** وضعیت خریدِ همه‌ی والدها + زیردسته‌ها برای پنل محصولات (بدون کش) */
   async adminPurchaseState(): Promise<PurchaseStateDto> {
     const mains = await this.deps.db
-      .select({
-        id: mainCategories.id,
-        name: mainCategories.name,
-        slug: mainCategories.slug,
-        isActive: mainCategories.isActive,
-        purchaseEnabled: mainCategories.purchaseEnabled,
-      })
+      .select()
       .from(mainCategories)
       .orderBy(asc(mainCategories.sortOrder))
     const cats = await this.deps.db
       .select({
-        id: categories.id,
-        name: categories.name,
-        mainCategoryId: categories.mainCategoryId,
+        category: categories,
         mainName: mainCategories.name,
-        purchaseEnabled: categories.purchaseEnabled,
       })
       .from(categories)
       .innerJoin(mainCategories, eq(mainCategories.id, categories.mainCategoryId))
       .orderBy(asc(mainCategories.sortOrder), asc(categories.name))
-    return { mains, categories: cats }
+    return {
+      mains: mains.map(row => ({ id: row.id, name: row.name, slug: row.slug, isActive: row.isActive,
+        purchaseEnabled: row.purchaseEnabled, sourceRevision: contentSourceRevision('mainCategory', row) })),
+      categories: cats.map(({ category, mainName }) => ({ id: category.id, name: category.name,
+        mainCategoryId: category.mainCategoryId, mainName, purchaseEnabled: category.purchaseEnabled,
+        sourceRevision: contentSourceRevision('category', category) })),
+    }
   }
 
   /** خریدِ همه‌ی محصولاتِ این والد را خاموش/روشن می‌کند */
   async setMainPurchase(
     id: string,
     enabled: boolean,
-  ): Promise<{ success: boolean; message?: string }> {
+    sourceRevision: string,
+  ): Promise<{ success: boolean; message?: string; sourceRevision?: string }> {
     const mcId = asMainCategoryId(id)
-    const row = await this.deps.db.query.mainCategories.findFirst({
-      where: eq(mainCategories.id, mcId),
+    const saved = await this.deps.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(mainCategories).where(eq(mainCategories.id, mcId)).for('update')
+      if (!row) return null
+      if (!assertContentSourceRevision('mainCategory', row, sourceRevision)) throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      const next = reconcileContentTranslation('mainCategory', row.id, row, { ...row, purchaseEnabled: enabled })
+      const [updated] = await tx.update(mainCategories).set({ purchaseEnabled: enabled, translationState: next.translationState }).where(eq(mainCategories.id, row.id)).returning()
+      return updated ? { row: updated, changed: row.purchaseEnabled !== enabled } : null
     })
-    if (!row) return { success: false, message: 'دسته اصلی پیدا نشد' }
-    if (row.purchaseEnabled === enabled) {
-      return { success: true, message: enabled ? 'خرید از قبل فعال است' : 'خرید از قبل غیرفعال است' }
-    }
-    await this.deps.db
-      .update(mainCategories)
-      .set({ purchaseEnabled: enabled })
-      .where(eq(mainCategories.id, mcId))
+    if (!saved) return { success: false, message: 'دسته اصلی پیدا نشد' }
     await this.cache.invalidate()
     // سبد/چک‌اوتِ باز همان لحظه رفرش شوند (مصرف‌کننده‌های menu:live)
-    await this.publishMenuLive({ productId: null, reason: 'category' })
-    return { success: true }
+    if (saved.changed) await this.publishMenuLive({ productId: null, reason: 'category' })
+    return { success: true, sourceRevision: contentSourceRevision('mainCategory', saved.row),
+      ...(!saved.changed ? { message: enabled ? 'خرید از قبل فعال است' : 'خرید از قبل غیرفعال است' } : {}) }
   }
 
   /** خریدِ محصولاتِ این زیردسته را خاموش/روشن می‌کند */
   async setCategoryPurchase(
     id: string,
     enabled: boolean,
-  ): Promise<{ success: boolean; message?: string }> {
+    sourceRevision: string,
+  ): Promise<{ success: boolean; message?: string; sourceRevision?: string }> {
     const catId = asCategoryId(id)
-    const row = await this.deps.db.query.categories.findFirst({
-      where: eq(categories.id, catId),
+    const saved = await this.deps.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(categories).where(eq(categories.id, catId)).for('update')
+      if (!row) return null
+      if (!assertContentSourceRevision('category', row, sourceRevision)) throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      const next = reconcileContentTranslation('category', row.id, row, { ...row, purchaseEnabled: enabled })
+      const [updated] = await tx.update(categories).set({ purchaseEnabled: enabled, translationState: next.translationState }).where(eq(categories.id, row.id)).returning()
+      return updated ? { row: updated, changed: row.purchaseEnabled !== enabled } : null
     })
-    if (!row) return { success: false, message: 'دسته‌بندی پیدا نشد' }
-    if (row.purchaseEnabled === enabled) {
-      return { success: true, message: enabled ? 'خرید از قبل فعال است' : 'خرید از قبل غیرفعال است' }
-    }
-    await this.deps.db
-      .update(categories)
-      .set({ purchaseEnabled: enabled })
-      .where(eq(categories.id, catId))
+    if (!saved) return { success: false, message: 'دسته‌بندی پیدا نشد' }
     await this.cache.invalidate()
-    await this.publishMenuLive({ productId: null, reason: 'category' })
-    return { success: true }
+    if (saved.changed) await this.publishMenuLive({ productId: null, reason: 'category' })
+    return { success: true, sourceRevision: contentSourceRevision('category', saved.row),
+      ...(!saved.changed ? { message: enabled ? 'خرید از قبل فعال است' : 'خرید از قبل غیرفعال است' } : {}) }
   }
 
   // ── ادمین: دسته‌ها ──
@@ -1066,6 +1082,7 @@ export class MenuService {
     nameAr?: string | null
     sizeNamesAr?: string[] | null
     translationEdits?: TranslationEdit[]
+    translationIdentities?: ContentCollectionIdentity[]
     /** stage-48 — حالت‌های سفارش پایه (پیش‌فرض هر سه روشن) */
     courierEnabled?: boolean
     takeawayEnabled?: boolean
@@ -1099,7 +1116,7 @@ export class MenuService {
       courierEnabled: input.courierEnabled ?? true,
       takeawayEnabled: input.takeawayEnabled ?? true,
       dineInEnabled: input.dineInEnabled ?? true,
-    }, input.translationEdits)
+    }, input.translationEdits, input.translationIdentities)
     const [created] = await this.deps.db
       .insert(categories)
       .values(values as typeof categories.$inferInsert)
@@ -1126,7 +1143,8 @@ export class MenuService {
     nameAr?: string | null
     sizeNamesAr?: string[] | null
     translationEdits?: TranslationEdit[]
-    sourceRevision?: string
+    sourceRevision: string
+    translationIdentities?: ContentCollectionIdentity[]
     /** stage-48 — حالت‌های سفارش پایه (undefined = دست‌نخورده) */
     courierEnabled?: boolean
     takeawayEnabled?: boolean
@@ -1149,6 +1167,11 @@ export class MenuService {
         throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
       }
       const hasSizes = input.hasSizes ?? previous.hasSizes
+      if (input.sizeNames !== undefined && !assertContentTranslationIdentities('category', {
+        ...previous, sizeNames: hasSizes ? input.sizeNames : [],
+      }, input.translationIdentities, previous)) {
+        throw Err.validation('شناسه قالب سایزها معتبر نیست؛ فرم را تازه‌سازی کنید.')
+      }
       const next = reconcileContentTranslation('category', catId, previous, {
         ...previous,
         name: input.name.trim(),
@@ -1156,7 +1179,7 @@ export class MenuService {
         hasSizes,
         sizeNames: hasSizes ? input.sizeNames ?? previous.sizeNames ?? [] : [],
         ...(input.sizeNamesAr !== undefined ? { sizeNamesAr: input.sizeNamesAr } : {}),
-      }, input.translationEdits)
+      }, input.translationEdits, input.translationIdentities)
       contentChanged = JSON.stringify([previous.name, previous.nameAr, previous.sizeNames, previous.sizeNamesAr])
         !== JSON.stringify([next.name, next.nameAr, next.sizeNames, next.sizeNamesAr])
       await tx
@@ -1413,6 +1436,7 @@ export class MenuService {
     descriptionAr?: string | null
     ingredientsAr?: string[] | null
     translationEdits?: TranslationEdit[]
+    translationIdentities?: ContentCollectionIdentity[]
     /** stage-48 — موجودی فروش (پیش‌فرض true) */
     isAvailable?: boolean
     /** stage-48 — پرچم‌های حالت سفارش (پیش‌فرض true = ارث کامل از دسته) */
@@ -1500,7 +1524,7 @@ export class MenuService {
             // stage-101 — انیمیشن اختصاصی صفحه‌ی همین محصول ویژه
             // (نامعتبر/غایب ⇒ NULL = ارث از تنظیم سراسری)
             featuredAnimation: normalizeFeaturedAnimation(input.featuredAnimation),
-          }, input.translationEdits) as typeof products.$inferInsert)
+          }, input.translationEdits, input.translationIdentities) as typeof products.$inferInsert)
           .returning()
 
         if (!created) return
@@ -1567,7 +1591,8 @@ export class MenuService {
     descriptionAr?: string | null
     ingredientsAr?: string[] | null
     translationEdits?: TranslationEdit[]
-    sourceRevision?: string
+    sourceRevision: string
+    translationIdentities?: ContentCollectionIdentity[]
     /** stage-48 — موجودی فروش (undefined = دست‌نخورده) */
     isAvailable?: boolean
     /** stage-48 — پرچم‌های حالت سفارش (undefined = دست‌نخورده) */
@@ -1648,6 +1673,11 @@ export class MenuService {
         if (!assertContentSourceRevision('product', previous, input.sourceRevision)) {
           throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
         }
+        if (input.ingredients !== undefined && !assertContentTranslationIdentities('product', {
+          ...previous, ingredients: input.ingredients,
+        }, input.translationIdentities, previous)) {
+          throw Err.validation('شناسه مواد اولیه معتبر نیست؛ فرم را تازه‌سازی کنید.')
+        }
         await this.validatePackagingItems(tx, input.packagingItemIds)
         const translated = reconcileContentTranslation('product', pid, previous, {
           ...previous,
@@ -1657,7 +1687,7 @@ export class MenuService {
           ...(input.nameAr !== undefined ? { nameAr: nullIfEmpty(input.nameAr) } : {}),
           ...(input.descriptionAr !== undefined ? { descriptionAr: nullIfEmpty(input.descriptionAr) } : {}),
           ...(input.ingredientsAr !== undefined ? { ingredientsAr: input.ingredientsAr } : {}),
-        }, input.translationEdits)
+        }, input.translationEdits, input.translationIdentities)
         contentChanged = JSON.stringify([previous.name, previous.description, previous.ingredients, previous.nameAr, previous.descriptionAr, previous.ingredientsAr])
           !== JSON.stringify([translated.name, translated.description, translated.ingredients, translated.nameAr, translated.descriptionAr, translated.ingredientsAr])
         const [updated] = await tx
@@ -1759,7 +1789,7 @@ export class MenuService {
           }
         }
 
-        // Stable IDs survive renames/reordering. Legacy clients may match an exact unique name.
+        // Existing sizes are matched only by their persistent IDs.
         // Disabled sizes remain stored for later reactivation.
         if (input.sizesEnabled && input.sizes) {
           const sizes = input.sizes // ← رفع خطای TS: narrowing برای داخل callback
@@ -1769,11 +1799,10 @@ export class MenuService {
             .from(productSizes)
             .where(eq(productSizes.productId, pid))
             .for('update')
-          const byName = new Map(existing.map((s) => [s.name, s]))
           const byId = new Map(existing.map((s) => [s.id as string, s]))
           const keepIds = new Set<string>()
           const resolved = sizes.map((s) => {
-            const match = s.id !== undefined ? byId.get(s.id) : byName.get(s.name)
+            const match = s.id !== undefined ? byId.get(s.id) : undefined
             if (s.id !== undefined && !match) throw Err.validation('سایز انتخاب‌شده متعلق به این محصول نیست یا حذف شده است.')
             if (match && keepIds.has(match.id)) throw Err.validation('شناسه سایز تکراری است.')
             if (match) {
@@ -1888,18 +1917,21 @@ export class MenuService {
     return { success: true }
   }
 
-  async toggleProductStatus(id: string): Promise<void> {
-    const row = await this.deps.db.query.products.findFirst({
-      where: eq(products.id, asProductId(id)),
+  async toggleProductStatus(id: string, sourceRevision: string): Promise<void> {
+    const saved = await this.deps.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(products).where(eq(products.id, asProductId(id))).for('update')
+      if (!row) return null
+      if (!assertContentSourceRevision('product', row, sourceRevision)) throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      const next = reconcileContentTranslation('product', row.id, row, { ...row,
+        status: row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE', updatedAt: new Date() })
+      const [updated] = await tx.update(products).set({ status: next.status, updatedAt: next.updatedAt,
+        translationState: next.translationState }).where(eq(products.id, row.id)).returning()
+      return updated ?? null
     })
-    if (!row) return
-    await this.deps.db
-      .update(products)
-      .set({ status: row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE', updatedAt: new Date() })
-      .where(eq(products.id, row.id))
+    if (!saved) return
     await this.cache.invalidate()
     // stage-48 — سبد/چک‌اوتِ باز باید فوراً بداند (محصول از منو رفت/برگشت)
-    await this.publishProductLive({ ...row, status: row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' })
+    await this.publishProductLive(saved)
   }
 
   /**
@@ -1907,22 +1939,24 @@ export class MenuService {
    * جدا از toggleProductStatus (وضعیت منو) است: ناموجود = از فروش موقتاً خارج
    * ولی در منو می‌ماند (کارت تار + هشدار نارنجی).
    */
-  async setProductAvailability(id: string, available: boolean): Promise<{ success: boolean; message?: string }> {
+  async setProductAvailability(id: string, available: boolean, sourceRevision: string): Promise<{ success: boolean; message?: string; sourceRevision?: string }> {
     const pid = asProductId(id)
-    const row = await this.deps.db.query.products.findFirst({
-      where: eq(products.id, pid),
+    const saved = await this.deps.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(products).where(eq(products.id, pid)).for('update')
+      if (!row) return null
+      if (!assertContentSourceRevision('product', row, sourceRevision)) throw Err.validation('محتوا تغییر کرده است؛ فرم را تازه‌سازی کنید.')
+      const changed = row.isAvailable !== available
+      const next = reconcileContentTranslation('product', row.id, row, { ...row, isAvailable: available,
+        updatedAt: changed ? new Date() : row.updatedAt })
+      const [updated] = await tx.update(products).set({ isAvailable: available, updatedAt: next.updatedAt,
+        translationState: next.translationState }).where(eq(products.id, row.id)).returning()
+      return updated ? { row: updated, changed } : null
     })
-    if (!row) return { success: false, message: 'محصول پیدا نشد' }
-    if (row.isAvailable === available) {
-      return { success: true, message: available ? 'از قبل موجود است' : 'از قبل ناموجود است' }
-    }
-    await this.deps.db
-      .update(products)
-      .set({ isAvailable: available, updatedAt: new Date() })
-      .where(eq(products.id, pid))
+    if (!saved) return { success: false, message: 'محصول پیدا نشد' }
     await this.cache.invalidate()
-    await this.publishProductLive({ ...row, isAvailable: available })
-    return { success: true }
+    if (saved.changed) await this.publishProductLive(saved.row)
+    return { success: true, sourceRevision: contentSourceRevision('product', saved.row),
+      ...(!saved.changed ? { message: available ? 'از قبل موجود است' : 'از قبل ناموجود است' } : {}) }
   }
 
   /**
@@ -2103,7 +2137,8 @@ export class MenuService {
         // stage-56 — تصویر مستقل این variant (null = تصویر مشترک محصول)
         image: s.image ?? null,
         // round-34 — فقط پاسخ ادمین: نام عربی خام سایز برای فرم ویرایش
-        ...(opts?.includeAr ? { nameAr: s.nameAr ?? null, translationState: s.translationState } : {}),
+        ...(opts?.includeAr ? { nameAr: s.nameAr ?? null, translationState: s.translationState,
+          sourceRevision: contentSourceRevision('productSize', s) } : {}),
       })),
       ingredients: pickArArr(lang, localizeContentRecord('product', r).ingredientsAr, r.ingredients ?? []),
       prepTime: r.prepTime,
@@ -2132,6 +2167,8 @@ export class MenuService {
             ingredientsAr: r.ingredientsAr ?? null,
             arAuto: r.arAuto,
             translationState: r.translationState,
+            sourceRevision: contentSourceRevision('product', r),
+            translationIdentities: collectionTranslationIdentities('product', r),
             /** stage-48 — قفل سوئیچ‌های فرم: دسته خاموش ⇒ محصول نمی‌تواند روشن کند */
             categoryCourierEnabled: opts.catModes?.get(r.categoryId)?.courier ?? true,
             categoryTakeawayEnabled: opts.catModes?.get(r.categoryId)?.takeaway ?? true,

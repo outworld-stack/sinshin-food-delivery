@@ -64,7 +64,7 @@ function AdminArticlesPage() {
         >(null)
 
         const toggleMut = useMutation({
-                mutationFn: (id: string) => toggleArticleStatus(id),
+                mutationFn: (id: string) => toggleArticleStatus(id, articles?.find(article => article.id === id)?.sourceRevision),
                 onSuccess: async () => {
                         await invalidateArticleQueries(queryClient)
                         await router.invalidate()

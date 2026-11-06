@@ -1,6 +1,6 @@
 import {
 	contentTranslationFields,
-	contentSourceRevision,
+	withContentTranslationIdentities,
 	reconcileContentTranslation,
 	type ContentTranslationField,
 	type TranslationEdit,
@@ -58,9 +58,7 @@ export function useContentTranslationDraft({
 				},
 			},
 			fields: firstFields,
-			sourceRevision: initialRow
-				? contentSourceRevision(entityType, initialRow)
-				: undefined,
+			sourceRevision: typeof initialRow?.sourceRevision === 'string' ? initialRow.sourceRevision : undefined,
 		}
 	}
 	const original = baseline.current.fields
@@ -69,9 +67,12 @@ export function useContentTranslationDraft({
 		fields: original,
 	})
 	if (working.current.key !== key) working.current = { key, fields: original }
+	const identifiedRow = Array.isArray(row.translationIdentities)
+		? withContentTranslationIdentities(entityType, row, row.translationIdentities) : row
 	const identities = contentTranslationFields(entityType, {
-		...row,
+		...identifiedRow,
 		translationState: {
+			...(typeof identifiedRow.translationState === 'object' && identifiedRow.translationState !== null ? identifiedRow.translationState : {}),
 			version: 1,
 			entityType,
 			entityId: entityId ?? '',
@@ -109,7 +110,7 @@ export function useContentTranslationDraft({
 		entityType,
 		entityId ?? '',
 		baseline.current.row,
-		row,
+		identifiedRow,
 		[...currentEdits, ...newIdentities],
 	)
 	const persistedFields = initialRow ? contentTranslationFields(entityType, initialRow) : []
@@ -343,7 +344,7 @@ export function useContentTranslationDraft({
 							fields: firstFields,
 						},
 					},
-					sourceRevision: contentSourceRevision(entityType, firstRow),
+					sourceRevision: typeof nextInitialRow.sourceRevision === 'string' ? nextInitialRow.sourceRevision : undefined,
 				}
 			} else baseline.current = null
 			working.current.key = ''

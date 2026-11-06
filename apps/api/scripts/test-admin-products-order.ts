@@ -1,3 +1,4 @@
+import { contentFixtureProof, fixtureUpdateProduct } from './content-save-fixtures'
 /** stage-98 — تستِ «آخرین تغییر، اولِ صف» در لیستِ محصولاتِ پنل ادمین — روی PostgreSQL واقعی.
  *
  * پوشش (خواستهٔ صاحبِ کسب‌وکار):
@@ -96,7 +97,7 @@ try {
   passed('پایه: جدیدترین اول — ترتیبِ پایدار روی ردیف‌های هم‌تاریخ')
 
   // ── ۲) ویرایشِ قدیمی‌ترین → فوراً صدرِ صفحه‌ی ۱ ──
-  await menu.updateProduct({
+  await fixtureUpdateProduct(menu, db, {
     id: pOld!.id, name: 'چلوکباب ویرایش‌شده', description: '', originalPrice: 210_000,
     discountPercentage: 0, prepTime: 15,
   })
@@ -108,11 +109,12 @@ try {
   passed('ویرایش = پرشِ فوری به صدرِ صفحه‌ی ۱ (updated_at DESC)')
 
   // ── ۳) toggle وضعیت هم مثل ویرایش صدر می‌آورد ──
-  await menu.toggleProductStatus(pMid!.id)
+  assert(pMid)
+  await menu.toggleProductStatus(pMid!.id, (await contentFixtureProof(db, 'product', pMid.id)).sourceRevision)
   const afterToggle = await menu.adminProducts({ page: 1, limit: 10 })
   assert.equal(afterToggle.products[0]!.id, pMid!.id, 'تغییرِ وضعیت هم updatedAt را تازه می‌کند → صدر')
   assert.equal(afterToggle.products.find((p) => p.id === pMid!.id)!.status, 'INACTIVE')
-  await menu.toggleProductStatus(pMid!.id)
+  await menu.toggleProductStatus(pMid!.id, (await contentFixtureProof(db, 'product', pMid.id)).sourceRevision)
   passed('تغییرِ وضعیت هم مثل ویرایش صدر می‌آورد (رفتارِ یکسانِ آدمین)')
 
   // ── ۴) گریدِ عمومیِ سایت عمداً created_at DESC ماند ──
@@ -133,7 +135,8 @@ try {
     'تساویِ updated_at با تای‌بریکرِ created_at DESC شکسته می‌شود (نه با ترتیبِ heap)')
   passed('تای‌بریکرِ created_at: تساوی‌ها پایدار مرتب می‌شوند')
 
-  await menu.setProductAvailability(pOld!.id, false)
+  assert(pOld)
+  await menu.setProductAvailability(pOld!.id, false, (await contentFixtureProof(db, 'product', pOld.id)).sourceRevision)
   const afterAvailability = await menu.adminProducts({ page: 1, limit: 10 })
   assert.equal(afterAvailability.products[0]!.id, pOld!.id)
   assert.equal(afterAvailability.products[0]!.isAvailable, false)
@@ -162,7 +165,7 @@ try {
     'A unique ID tie-break prevents duplicates/skipped products between tied pages')
   passed('Identical timestamps remain deterministic across three pages')
 
-  await menu.updateProduct({ id: bulkIds[0]!, name: 'Edited on page three', description: '',
+  await fixtureUpdateProduct(menu, db, { id: bulkIds[0]!, name: 'Edited on page three', description: '',
     originalPrice: 100, discountPercentage: 0, prepTime: 15 })
   const editedBulk = await menu.adminProducts({ page: 1, limit: 10, categoryId: bulkCategory!.id })
   assert.equal(editedBulk.products[0]!.id, bulkIds[0], 'A product from page three moves to page one')
