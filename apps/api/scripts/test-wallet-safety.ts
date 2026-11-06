@@ -57,8 +57,12 @@ try {
     NODE_ENV: 'development', DATABASE_URL: scratchUrl.toString(), GATEWAY_MODE: 'direct',
     JWT_SECRET: 'wallet-safety-test-'.repeat(3), SITE_URL: 'https://sinshin.example', REFERRAL_PERCENT: '10',
   })
+  let transactionStatus: Awaited<ReturnType<SettingsService['restaurantStatus']>> | undefined
   const services = (database: Db) => {
     const settingService = new SettingsService({ db: database, config })
+    const readRestaurantStatus = settingService.restaurantStatus.bind(settingService)
+    settingService.restaurantStatus = (lang = 'fa', readDb) => readDb && transactionStatus
+      ? Promise.resolve(transactionStatus) : readRestaurantStatus(lang, readDb)
     const zones = new DeliveryZoneService({ db: database, settings: settingService, neshan: {
       distanceMatrix: async () => [[{ status: 'Ok', distanceMeters: 1000, durationSeconds: 60 }]],
     } })
@@ -99,6 +103,11 @@ try {
     { key: SETTING_KEYS.restaurantLocation, value: { lat: 35.7, lng: 51.4 } },
   ])
   await db.insert(deliveryZones).values([{ radiusKm: 2, fee: 20_000 }, { radiusKm: 10, fee: 40_000 }])
+  // The fixture's closure/hours stay unchanged throughout this suite. Bun 1.3.14
+  // can stall Promise.all settings reads on a reserved transaction connection;
+  // calculate this status once outside money locks. Wallet/referral lock races,
+  // all fresh payment guards, tracking, zones and coupon services remain real.
+  transactionStatus = await main.settings.restaurantStatus('fa', db)
   const deliveryInput = async (userId: string): Promise<CheckoutInput> => {
     const [address] = await db.insert(addresses).values({ userId, title: 'Home', address: 'Local regression address', lat: 35.7, lng: 51.4 }).returning()
     return { ...dineIn, deliveryType: 'DELIVERY', addressId: address!.id }

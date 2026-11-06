@@ -14,8 +14,8 @@
  *     • total (شمارش) همه را بشمارد
  *
  *  B) callback زرین‌پال روی سرویس واقعی PaymentService (درگاه stub تزریق‌شده):
- *     • B1: Verify با «errors آرایه‌ای -11» (لغوی واقعی کارفرما) → سفارش
- *          CANCELED + FAILED + آزادسازی کیف پول — نه PENDING ابدی
+ *     • B1: شکست قطعی از درگاه stub → CANCELED + FAILED؛ کد خطای
+ *          پذیرندهٔ زرین‌پال اثبات عدم پرداخت نیست.
  *     • B2: خطای شبکه در Verify (throw) → 302 payment=pending (نه 500 خام)
  *          — سفارش دست‌نخورده (کارِ تایم‌اوت بعداً قطعی می‌کند)
  *     • B3: پاسخ indeterminate → همان B2 (رفتار موجود حفظ شد)
@@ -28,19 +28,19 @@
  *  D) stage-76 — درگاه‌های «واقعی» سپ/ملت از طریق سرویس (fetch سراسری
  *     mock؛ آداپترهای SepAdapter/MellatAdapter واقعی در رجیستری):
  *     • D1 SEP: initiate → callback موفق → PAID + gatewayRef=RefNum
- *     • D2 SEP: لغو (کوئری غیرخالی بدون RefNum = معادلِ NOK) → CANCELED فوری
- *     • D3 SEP: خطای شبکه در verify → pending + RefNum ذخیره می‌شود →
- *       کارِ تایم‌اوت (reconcilePending) با همان مرجع PAID می‌کند
+ *     • D2 SEP: لغو بدون مرجع معتبر → PENDING با حفظ رزروها
+ *     • D3 SEP: خطای شبکه → نامزد callback جدا از مرجع قطعی می‌ماند؛
+ *       تایید بعدی با هویت و مبلغ بانکیِ سفارش اصلی → PAID
  *     • D4 MELLAT: bpPayRequest → callback ResCode=0 → verify+settle → PAID
  *       + gatewayRef ماندگار «orderId:s:SaleReferenceId»
- *     • D5 MELLAT: لغو ResCode=17 → CANCELED فوری
+ *     • D5 MELLAT: لغو ResCode=17 مرورگر → PENDING با حفظ رزروها
  *     • D7 (stage-77): شکستِ قطعی → اعلانِ «پرداخت ناموفق» برای مشتری
  *     • D6 MELLAT: فالت settle → pending + مرجع ماندگار → کارِ تایم‌اوت
  *       ری-وریفای (kind=s) → PAID
  *  E) totalSpent نهایی: فقط PAIDها — لغوها و PENDINGها بیرون
  */
 import { SQL } from 'bun'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 interface UrlParts {
   admin: string
@@ -56,6 +56,9 @@ function parseUrl(): UrlParts {
       ? fromEnv
       : 'postgres://sinshin:sinshin_local@127.0.0.1:5432/sinshin'
   const admin = new URL(raw)
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(admin.hostname)) {
+    throw new Error('Payment money-path tests require local PostgreSQL')
+  }
   admin.pathname = '/postgres'
   return { admin: admin.toString(), target: raw }
 }
@@ -78,10 +81,14 @@ function ok(name: string, cond: boolean, detail?: string): void {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function main(): Promise<void> {
+  if (!/^sinshin_e2e_pay_\d+_[a-z0-9]+$/.test(scratch)) throw new Error('Invalid scratch database name')
   // ── دیتابیس موقتی + زنجیره‌ی کامل ──
   const boot = new SQL(admin, { max: 1 })
-  await boot.unsafe(`drop database if exists "${scratch}" with (force)`)
+  let database: import('../src/infra/db/client').Database | undefined
+  let created = false
+  try {
   await boot.unsafe(`create database "${scratch}"`)
+  created = true
   await boot.close({ timeout: 5 })
   const url = new URL(parseUrl().target)
   url.pathname = `/${scratch}`
@@ -124,10 +131,15 @@ async function main(): Promise<void> {
     MELLAT_USERNAME: 'test-user',
     MELLAT_PASSWORD: 'test-pass',
   })
-  const database = new Database(url.toString(), { max: 4 })
+  database = new Database(url.toString(), { max: 4 })
   const db = database.db
 
   const settings = new SettingsService({ db, config })
+  // This suite does not change restaurant settings. Capture their real scratch
+  // snapshot outside settlement transactions to avoid Bun SQL's unrelated
+  // concurrent settings-read stall; settings concurrency has separate coverage.
+  const restaurantSnapshot = await settings.restaurantStatus()
+  settings.restaurantStatus = async () => restaurantSnapshot
   const zones = new DeliveryZoneService({ db, settings, neshan: {
     distanceMatrix: async () => [[{ status: 'Ok', distanceMeters: 1000, durationSeconds: 60 }]],
   } })
@@ -162,11 +174,11 @@ async function main(): Promise<void> {
     totalAmount: 100_000,
   } as unknown as typeof orders.$inferInsert.breakdown
 
-  const mkOrder = async (status: string, paymentStatus: string, amount: number) => {
+  const mkOrder = async (status: string, paymentStatus: string, amount: number, ownerId = uid) => {
     const [row] = await db
       .insert(orders)
       .values({
-        userId: uid,
+        userId: ownerId,
         displayId: `ord-test${Math.random().toString(36).slice(2, 8)}`,
         status: status as typeof orders.$inferInsert.status,
         paymentStatus,
@@ -238,9 +250,9 @@ async function main(): Promise<void> {
   }
   const state = (id: string) => signState(id as never, config.jwtSecret)
 
-  // B1 — لغوی واقعی: errors آرایه‌ای -11 → قطعی FAILED
+  // B1 — definitive nonpayment supplied by the stub, not a PSP error code.
   const payB1 = await mkPayment(orderPending.id, 'STUB-B1')
-  behavior = () => ({ success: false }) // آداپتورِ واقعی این را از errors:[{code:-11}] می‌سازد
+  behavior = () => ({ success: false })
   const rB1 = await paymentService.handleCallback('STUBGW', {
     state: state(payB1.id),
     Status: 'NOK', // همان callback لغوِ کارفرما
@@ -364,13 +376,17 @@ async function main(): Promise<void> {
     throw new Error(`[test] fetch غیرمنتظره: ${u}`)
   }
 
+  let gatewayBuyerNumber = 0
   const orderAndPayment = async (gateway: 'SEP' | 'MELLAT', amount2: number, gwRef: string | null) => {
-    const o = (await mkOrder('PENDING_PAYMENT', 'PENDING', amount2))!
+    const [gatewayBuyer] = await db.insert(users).values({
+      phone: `0915${String(2000 + ++gatewayBuyerNumber).padStart(7, '0')}`, role: 'user',
+    }).returning()
+    const o = (await mkOrder('PENDING_PAYMENT', 'PENDING', amount2, gatewayBuyer!.id))!
     const [p] = await db
       .insert(payments)
       .values({
         orderId: o.id as never,
-        userId: uid,
+        userId: gatewayBuyer!.id,
         gateway,
         mode: 'direct',
         amount: amount2,
@@ -391,11 +407,13 @@ async function main(): Promise<void> {
     amount: 140_000,
   })
   ok('D1: SEP initiate → paymentUrl صفحه‌ی پرداخت شاپرک', init1.paymentUrl.includes('/PaymentPage?Token='))
-  sepVerify = () => gwJson({ IsSuccess: true, Amount: 140_000 * 10 })
+  sepVerify = () => gwJson({ IsSuccess: true, Amount: 140_000 * 10,
+    ResNum: d1.payment.id, TerminalId: config.gateway.sepTerminalId, RefNum: 'R1' })
   await paymentService.handleCallback('SEP', {
     state: state(d1.payment.id),
     State: 'OK',
     RefNum: 'R1',
+    ResNum: d1.payment.id,
     TraceNo: '111',
   })
   ok('D1: SEP callback موفق → سفارش PAID', (await refreshOrder(d1.order.id)).status === 'PAID')
@@ -424,7 +442,7 @@ async function main(): Promise<void> {
     JSON.stringify(d2fail),
   )
 
-  // ── D3: SEP — خطای شبکه → pending + RefNum ذخیره → کارِ تایم‌اوت PAID می‌کند ──
+  // ── D3: SEP — an outage keeps the unsigned candidate separate until verification. ──
   const d3 = await orderAndPayment('SEP', 150_000, null)
   await paymentService.initiate(d3.payment.id, 'SEP', { displayId: d3.order.displayId, amount: 150_000 })
   sepVerify = () => {
@@ -434,6 +452,7 @@ async function main(): Promise<void> {
     state: state(d3.payment.id),
     State: 'OK',
     RefNum: 'R3',
+    ResNum: d3.payment.id,
     TraceNo: '333',
   })
   ok(
@@ -443,8 +462,9 @@ async function main(): Promise<void> {
   )
   const d3pMid = await refreshPayment(d3.payment.id)
   ok(
-    'D3: SEP RefNum در حالت indeterminate ذخیره شد (برای ری-وریفای)',
-    d3pMid.status === 'PENDING' && d3pMid.gatewayRef === 'R3',
+    'D3: SEP stores the unsigned receipt candidate separately without promoting gatewayRef',
+    d3pMid.status === 'PENDING' && d3pMid.gatewayRef === null &&
+      (d3pMid.metadata?.callbackQuery as Record<string, unknown>)?.RefNum === 'R3',
     `status=${d3pMid.status} ref=${d3pMid.gatewayRef}`,
   )
 
@@ -521,9 +541,16 @@ async function main(): Promise<void> {
 
   // ── کارِ تایم‌اوت — ری-وریفایِ D3 و D6 (B2 عمداً indeterminate می‌ماند) ──
   behavior = () => ({ success: false, indeterminate: true }) // B2: نامشخصِ <۲۴h → دست‌نخورده
-  sepVerify = () => gwJson({ IsSuccess: true, Amount: 150_000 * 10 })
+  sepVerify = () => gwJson({ IsSuccess: true, Amount: 150_000 * 10,
+    ResNum: d3.payment.id, TerminalId: config.gateway.sepTerminalId, RefNum: 'R3' })
   mellatVerify = '43'
   mellatSettle = '0'
+  await db.update(payments).set({
+    metadata: sql`jsonb_set(${payments.metadata}, '{verification,nextAt}', '"1970-01-01T00:00:00.000Z"'::jsonb)`,
+  }).where(eq(payments.id, d3.payment.id))
+  await db.update(payments).set({
+    metadata: sql`jsonb_set(${payments.metadata}, '{verification,nextAt}', '"1970-01-01T00:00:00.000Z"'::jsonb)`,
+  }).where(eq(payments.id, d6.payment.id))
   const rec = await paymentService.reconcilePending(0)
   ok(
     'D3+D6: کارِ تایم‌اوت هر دو را PAID کرد (ری-وریفای با مرجعِ ذخیره‌شده)',
@@ -541,11 +568,14 @@ async function main(): Promise<void> {
   )
 
   console.log('\n══ E) قرارداد نهایی «A×B×D» — مجموع فقط از PAIDها ══\n')
-  const pageFinal2 = await orderService.myOrdersPage(uid, { page: 1, limit: 30 })
+  const finalPages = await Promise.all([uid, d1.order.userId, d2.order.userId, d3.order.userId,
+    d4.order.userId, d5.order.userId, d6.order.userId].map(ownerId =>
+    orderService.myOrdersPage(ownerId, { page: 1, limit: 30 })))
+  const finalSpent = finalPages.reduce((total, page) => total + page.totalSpent, 0)
   ok(
     'E1: totalSpent نهایی = ۱٬۰۰۰٬۰۰۰ — فقط شش PAID (۲۵۰+۱۳۰+۱۴۰+۱۵۰+۱۶۰+۱۷۰)؛ لغوها/PENDING بیرون',
-    pageFinal2.totalSpent === 1_000_000,
-    `got=${pageFinal2.totalSpent}`,
+    finalSpent === 1_000_000,
+    `got=${finalSpent}`,
   )
 
   // ── D7 (stage-77/N4): شکستِ قطعیِ پرداخت ⇒ اعلانِ مشتری ──
@@ -556,7 +586,6 @@ async function main(): Promise<void> {
     const notifs = await db
       .select()
       .from(notifRows)
-      .where(eq(notifRows.userId, uid))
     const payFails = notifs.filter(
       (n) => n.type === 'system' && (n.data as { source?: string })?.source === 'payment-failed',
     )
@@ -577,14 +606,17 @@ async function main(): Promise<void> {
 
   await wait(300)
 
-  // پاک‌سازی
-  await database.close()
-  const cleaner = new SQL(admin, { max: 1 })
-  await cleaner.unsafe(`drop database if exists "${scratch}" with (force)`)
-  await cleaner.close({ timeout: 5 })
-
   console.log(`\n══ نتیجه: ${pass} ✓ / ${fail} ✗ ══\n`)
-  if (fail > 0) process.exit(1)
+  if (fail > 0) process.exitCode = 1
+  } finally {
+    await database?.close()
+    await boot.close({ timeout: 5 })
+    if (created) {
+      const cleaner = new SQL(admin, { max: 1 })
+      try { await cleaner.unsafe(`drop database if exists "${scratch}" with (force)`) }
+      finally { await cleaner.close({ timeout: 5 }) }
+    }
+  }
 }
 
 void main()

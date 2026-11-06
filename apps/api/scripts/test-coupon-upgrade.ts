@@ -21,7 +21,7 @@ import { asCampaignId } from '../src/domain/shared/brand'
 import {
   addresses, categories, couponConditions, couponGrants, couponNudges, couponRedemptions,
   coupons, deliveryZones, firstPurchaseReservations, mainCategories, orderItems, orders,
-  packagingItems, productCategories, productPackagingItems, products, productSizes,
+  packagingItems, payments, productCategories, productPackagingItems, products, productSizes, reconcileFindings,
   settings, SETTING_KEYS, users, walletTransactions,
 } from '../src/infra/db/schema'
 
@@ -61,11 +61,15 @@ try {
     hub: { publish: () => undefined } as never,
     notifications: { notifyUser: async () => undefined, notifyAdminsNewOrder: async () => undefined } as never })
   let verdict: 'success' | 'failed' | 'indeterminate' = 'indeterminate'
+  const verifyCalls = new Map<string, number>()
   const gateway: PaymentGateway = {
     id: 'ZARINPAL', mode: 'direct',
     resumeUrl: input => typeof input.paymentUrl === 'string' ? input.paymentUrl : null,
     init: async input => ({ gatewayRef: `coupon-${input.paymentId}`, paymentUrl: `https://example.test/pay/${input.paymentId}` }),
-    verify: async input => ({ success: verdict === 'success', indeterminate: verdict === 'indeterminate', gatewayRef: input.gatewayRef }),
+    verify: async input => {
+      verifyCalls.set(input.paymentId!, (verifyCalls.get(input.paymentId!) ?? 0) + 1)
+      return { success: verdict === 'success', indeterminate: verdict === 'indeterminate', gatewayRef: input.gatewayRef }
+    },
   }
   ;(paymentService as unknown as { gateways: Map<string, PaymentGateway> }).gateways.set('ZARINPAL', gateway)
   let serial = 0
@@ -130,6 +134,12 @@ try {
     { key: SETTING_KEYS.restaurantOpen, value: true },
   ])
   await db.insert(deliveryZones).values({ radiusKm: 2, fee: 20_000 })
+  // Bun 1.3.14 can stall parallel settings reads on a reserved transaction connection.
+  // Read the unchanged fixture status outside transactions; keep all pricing/payment settings real.
+  const readRestaurantStatus = settingService.restaurantStatus.bind(settingService)
+  const fixtureRestaurantStatus = await readRestaurantStatus()
+  settingService.restaurantStatus = (lang = 'fa', readDb) => readDb
+    ? Promise.resolve(fixtureRestaurantStatus) : readRestaurantStatus(lang)
   const simple: CheckoutInput = { items: [{ productId: plain!.id, quantity: 1 }],
     deliveryType: 'DINE_IN', useWallet: true, gatewayId: 'ZARINPAL' }
   const mixed: CheckoutInput = { ...simple, items: [
@@ -287,11 +297,13 @@ try {
   assert.equal((await reservation(reverseBuyer.id)).length, 1)
   await successful(reversePending)
   assert.equal((await reservation(reverseBuyer.id)).length, 0)
+  assert.equal((await service.preview(reverseBuyer.id, { ...simple, couponCode: reverseOther.code })).coupon?.valid, false)
+  await assert.rejects(() => service.checkout(reverseBuyer.id, { ...simple, couponCode: reverseOther.code }))
   const laterNormal = await service.checkout(reverseBuyer.id, simple)
   assert(laterNormal.requiresPayment)
   assert.equal((await reservation(reverseBuyer.id)).length, 0, 'returning customers never create first-order reservations')
-  assert.equal((await service.preview(reverseBuyer.id, { ...simple, couponCode: reverseOther.code })).coupon?.valid, false)
-  await assert.rejects(() => service.checkout(reverseBuyer.id, { ...simple, couponCode: reverseOther.code }))
+  await assert.rejects(() => service.preview(reverseBuyer.id, simple), firstOrderPending)
+  await assert.rejects(() => service.checkout(reverseBuyer.id, simple), firstOrderPending)
   passed('B FIRST pending blocks any second checkout; success permits normal future orders without a new first reservation')
 
   // D: competing normal/coupon requests share the existing database user lock.
@@ -442,6 +454,7 @@ try {
   const veteran = await service.checkout(historical.id, { ...simple, couponCode: orCoupon.code })
   assert.equal((await reservation(historical.id)).length, 0)
   assert.equal(veteran.breakdown.discount, 16_000)
+  await successful(veteran)
   const alternative = await makeCoupon({ conditionMode: 'OR', rules: [firstRule, { type: 'REGISTERED_DAYS_AGO', params: { days: 1 } }] })
   const alternativeEligibility = await couponService.findUsableCoupon(db, old.id, alternative.code)
   assert(alternativeEligibility.ok && !alternativeEligibility.requiresFirstPurchase, 'independent OR eligibility must not require the FIRST branch')
@@ -574,7 +587,7 @@ try {
   await fund(expiredBuyer.id, 20_000)
   const expiredCoupon = await makeCoupon({ maxUses: 1, rules: [firstRule] })
   const expiredCheckout = await service.checkout(expiredBuyer.id, { ...simple, couponCode: expiredCoupon.code })
-  await startPayment(expiredCheckout)
+  const expiredCallback = await startPayment(expiredCheckout)
   const expiredOrder = await order(expiredCheckout.displayId)
   await db.update(orders).set({ createdAt: new Date(Date.now() - 11 * 60_000) }).where(eq(orders.id, expiredOrder.id))
   verdict = 'indeterminate'
@@ -585,7 +598,7 @@ try {
   assert((await grant(expiredCoupon.id, expiredBuyer.id))?.consumedAt)
   assert.equal(await balance(expiredBuyer.id), 0)
   verdict = 'failed'
-  await paymentService.expirePendingOrders()
+  await expiredCallback()
   assert.equal((await order(expiredCheckout.displayId)).status, 'CANCELED')
   assert.equal((await reservation(expiredBuyer.id)).length, 0)
   assert.equal((await campaign(expiredCoupon.id)).usedCount, 0)
@@ -596,6 +609,126 @@ try {
   await paymentService.expirePendingOrders()
   assert.deepEqual(await ledger(expiredOrder.id), expiredLedger)
   passed('A/C expiry keeps uncertain first-purchase and financial reservations, then releases once on verified failure')
+
+  // Both backend entry points reconcile stale money before checking first-purchase eligibility.
+  for (const entry of ['preview', 'checkout'] as const) {
+    const buyer = await makeUser()
+    await fund(buyer.id, 20_000)
+    const coupon = await makeCoupon({ maxUses: 1, rules: [firstRule] })
+    const input = { ...simple, couponCode: coupon.code }
+    const stale = await service.checkout(buyer.id, input)
+    const staleCallback = await startPayment(stale)
+    const staleRow = await order(stale.displayId)
+    await db.update(orders).set({ createdAt: new Date(Date.now() - 11 * 60_000) }).where(eq(orders.id, staleRow.id))
+    verdict = 'failed'
+    if (entry === 'preview') {
+      const recoveredPreview = await service.preview(buyer.id, input)
+      assert.equal(recoveredPreview.coupon?.valid, true)
+      assert.equal((await reservation(buyer.id)).length, 0)
+      assert.equal((await campaign(coupon.id)).usedCount, 0)
+      assert.equal((await grant(coupon.id, buyer.id))?.consumedAt, null)
+      assert.equal(await balance(buyer.id), 20_000)
+      await service.preview(buyer.id, input)
+    } else {
+      const replacement = await service.checkout(buyer.id, input)
+      assert.notEqual(replacement.displayId, stale.displayId)
+      assert.equal((await reservation(buyer.id))[0]!.orderId, (await order(replacement.displayId)).id)
+      assert.equal((await campaign(coupon.id)).usedCount, 1, 'old capacity releases before replacement reserves it')
+      assert((await grant(coupon.id, buyer.id))?.consumedAt)
+      assert.equal(await balance(buyer.id), 0)
+      await assert.rejects(() => service.checkout(buyer.id, input), firstOrderPending)
+    }
+    assert.equal((await order(stale.displayId)).status, 'CANCELED')
+    assert.equal(verifyCalls.get(stale.paymentId!), 1)
+    const settledLedger = await ledger(staleRow.id)
+    assert.equal(settledLedger.length, 2)
+    assert.equal(settledLedger.filter(row => row.type === 'DEPOSIT').length, 1)
+    await staleCallback()
+    assert.deepEqual(await ledger(staleRow.id), settledLedger)
+    assert.equal(verifyCalls.get(stale.paymentId!), 2, 'late callback still checks PSP evidence without releasing reservations twice')
+    passed(`stale definitive failure reconciles inline in ${entry}, releases every reservation once and permits a new first order`)
+  }
+
+  const uncertainBuyer = await makeUser()
+  await fund(uncertainBuyer.id, 20_000)
+  const uncertainCoupon = await makeCoupon({ maxUses: 1, rules: [firstRule] })
+  const uncertainInput = { ...simple, couponCode: uncertainCoupon.code }
+  const uncertainCheckout = await service.checkout(uncertainBuyer.id, uncertainInput)
+  const lateCallback = await startPayment(uncertainCheckout)
+  const uncertainOrder = await order(uncertainCheckout.displayId)
+  await db.update(orders).set({ createdAt: new Date(Date.now() - 11 * 60_000) }).where(eq(orders.id, uncertainOrder.id))
+  verdict = 'indeterminate'
+  const pendingPreview = await service.preview(uncertainBuyer.id, uncertainInput)
+  assert.equal(pendingPreview.paymentRecovery?.orderId, uncertainCheckout.displayId)
+  assert.equal(pendingPreview.coupon?.valid, false)
+  const [uncertainAttempt] = await db.select().from(payments).where(eq(payments.id, uncertainCheckout.paymentId!))
+  const verification = uncertainAttempt!.metadata?.verification as { nextAt?: string } | undefined
+  assert(Date.parse(verification?.nextAt ?? '') > Date.now(), 'uncertain PSP verification persists a future retry deadline')
+  const [beforeFinding] = await db.select().from(reconcileFindings).where(and(
+    eq(reconcileFindings.checkId, 'R12'), eq(reconcileFindings.entityId, uncertainCheckout.paymentId!),
+  ))
+  assert(beforeFinding)
+  const beforeCalls = verifyCalls.get(uncertainCheckout.paymentId!)
+  await assert.rejects(() => service.checkout(uncertainBuyer.id, uncertainInput), firstOrderPending)
+  const repeatedPendingPreview = await service.preview(uncertainBuyer.id, simple)
+  assert.equal(repeatedPendingPreview.paymentRecovery?.orderId, uncertainCheckout.displayId)
+  await assert.rejects(() => service.checkout(uncertainBuyer.id, simple), firstOrderPending)
+  const [afterFinding] = await db.select().from(reconcileFindings).where(eq(reconcileFindings.id, beforeFinding.id))
+  assert.equal(verifyCalls.get(uncertainCheckout.paymentId!), beforeCalls, 'repeated backend requests respect persisted PSP backoff')
+  assert.equal(afterFinding!.occurrences, beforeFinding.occurrences, 'backoff does not duplicate R12 observations')
+  assert.equal((await order(uncertainCheckout.displayId)).status, 'PENDING_PAYMENT')
+  assert.equal((await reservation(uncertainBuyer.id))[0]!.orderId, uncertainOrder.id)
+  assert.equal((await campaign(uncertainCoupon.id)).usedCount, 1)
+  assert((await grant(uncertainCoupon.id, uncertainBuyer.id))?.consumedAt)
+  assert.equal(await balance(uncertainBuyer.id), 0)
+  const uncertainLedger = await ledger(uncertainOrder.id)
+  assert.equal(uncertainLedger.length, 1)
+  assert.equal((await db.select().from(orders).where(eq(orders.userId, uncertainBuyer.id))).length, 1)
+  passed('stale unknown payment allows preview recovery, blocks checkout, preserves holds and first-purchase, and backs off without repeated R12 findings')
+
+  verdict = 'success'
+  await lateCallback()
+  assert.equal(verifyCalls.get(uncertainCheckout.paymentId!), beforeCalls! + 1, 'callback evidence bypasses scheduled audit backoff')
+  assert.equal((await order(uncertainCheckout.displayId)).status, 'PAID')
+  assert.equal((await reservation(uncertainBuyer.id)).length, 0)
+  assert.equal((await campaign(uncertainCoupon.id)).usedCount, 1)
+  assert((await grant(uncertainCoupon.id, uncertainBuyer.id))?.consumedAt)
+  await Promise.all([lateCallback(), lateCallback()])
+  assert.equal(verifyCalls.get(uncertainCheckout.paymentId!), beforeCalls! + 1)
+  assert.deepEqual(await ledger(uncertainOrder.id), uncertainLedger)
+  const lateRedemptions = await db.select().from(couponRedemptions).where(eq(couponRedemptions.orderId, uncertainOrder.id))
+  assert.equal(lateRedemptions.length, 1)
+  const anotherFirstCoupon = await makeCoupon({ rules: [firstRule] })
+  assert.equal((await service.preview(uncertainBuyer.id, { ...simple, couponCode: anotherFirstCoupon.code })).coupon?.valid, false)
+  const afterLateSuccess = await service.checkout(uncertainBuyer.id, simple)
+  assert.notEqual(afterLateSuccess.displayId, uncertainCheckout.displayId)
+  assert.equal((await reservation(uncertainBuyer.id)).length, 0, 'verified success makes the customer returning')
+  passed('late success bypasses verification backoff, settles exactly once and consumes first-purchase entitlement once')
+
+  const staleRacer = await makeUser()
+  await fund(staleRacer.id, 20_000)
+  const raceCoupon = await makeCoupon({ maxUses: 1, rules: [firstRule] })
+  const raceInput = { ...simple, couponCode: raceCoupon.code }
+  const raceStale = await service.checkout(staleRacer.id, raceInput)
+  const raceCallback = await startPayment(raceStale)
+  const raceStaleOrder = await order(raceStale.displayId)
+  await db.update(orders).set({ createdAt: new Date(Date.now() - 11 * 60_000) }).where(eq(orders.id, raceStaleOrder.id))
+  verdict = 'failed'
+  const replacements = await Promise.allSettled([service.checkout(staleRacer.id, raceInput), service.checkout(staleRacer.id, raceInput)])
+  assert.equal(replacements.filter(result => result.status === 'fulfilled').length, 1)
+  const raceOrders = await db.select().from(orders).where(eq(orders.userId, staleRacer.id))
+  const racePending = raceOrders.filter(row => row.status === 'PENDING_PAYMENT')
+  assert.equal(racePending.length, 1)
+  assert.equal(raceOrders.filter(row => row.status === 'CANCELED').length, 1)
+  assert.equal((await reservation(staleRacer.id))[0]!.orderId, racePending[0]!.id)
+  assert.equal((await campaign(raceCoupon.id)).usedCount, 1)
+  assert((await grant(raceCoupon.id, staleRacer.id))?.consumedAt)
+  assert.equal((await ledger(raceStaleOrder.id)).filter(row => row.type === 'DEPOSIT').length, 1)
+  assert.equal(await balance(staleRacer.id), 0)
+  await raceCallback()
+  assert.equal((await reservation(staleRacer.id))[0]!.orderId, racePending[0]!.id, 'late failure cannot release replacement first-purchase reservation')
+  assert.equal((await campaign(raceCoupon.id)).usedCount, 1)
+  passed('concurrent checkout after stale failure creates one replacement and late original callbacks preserve its reservations')
 
   // A disabled or edited campaign after preview must never reuse the preview decision.
   const editedBuyer = await makeUser()

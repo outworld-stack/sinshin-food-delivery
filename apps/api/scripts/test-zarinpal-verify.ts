@@ -34,16 +34,19 @@ function ok(name: string, cond: boolean, detail?: string): void {
 /** آخرین درخواستی که آداپتور فرستاد — برای ادعاهای پارامتری */
 let lastBody: Record<string, unknown> | null = null
 let lastUrl = ''
+let requestCount = 0
 
 type Responder = () => Response | Promise<Response>
 
 function mockFetch(responder: Responder): void {
   lastBody = null
+  requestCount = 0
   ;(globalThis as Record<string, unknown>).fetch = async (
     url: string | URL | Request,
     init?: RequestInit,
   ) => {
     lastUrl = String(url)
+    requestCount++
     if (init?.body) {
       try {
         lastBody = JSON.parse(String(init.body)) as Record<string, unknown>
@@ -142,9 +145,62 @@ async function main(): Promise<void> {
     query: { Status: 'NOK' },
   })
   ok(
-    'explicit unsuccessful transaction verdict -51 can release payment',
-    !rRealNok.success && !rRealNok.indeterminate,
+    '-51 without terminal inquiry evidence preserves payment even with Status=NOK',
+    !rRealNok.success && rRealNok.indeterminate === true,
   )
+
+  // An unpaid snapshot is not proof that an already-issued authority cannot
+  // capture later. Official inquiry distinguishes an incomplete attempt from
+  // a completed reversal; neither PAID nor VERIFIED substitutes for verify.
+  for (const verifyResponse of [
+    { data: { code: -51 } },
+    { data: {}, errors: [{ code: -51 }] },
+    { data: {}, errors: { code: -51 } },
+  ]) {
+    for (const status of ['FAILED', 'IN_BANK', 'PAID', 'VERIFIED', 'UNKNOWN', 'REVERSED']) {
+      mockFetch(() => jsonResponse(lastUrl.endsWith('/inquiry.json')
+        ? { data: { code: 100, status }, errors: [] }
+        : verifyResponse))
+      const result = await adapter.verify({ gatewayRef: AUTH, amount, query: { Status: 'NOK' } })
+      ok(`-51 ${JSON.stringify(verifyResponse)} + inquiry ${status}: safe outcome`,
+        !result.success && (status === 'REVERSED' ? !result.indeterminate : result.indeterminate === true))
+      ok(`inquiry ${status} uses exactly one verify and one inquiry with stored authority`,
+        requestCount === 2 && lastUrl === 'https://sandbox.zarinpal.com/pg/v4/payment/inquiry.json' &&
+        lastBody?.authority === AUTH && lastBody?.merchant_id === 'test-merchant' && result.gatewayRef === AUTH)
+    }
+  }
+
+  for (const inquiry of [
+    { data: { status: 'REVERSED' } },
+    { data: { code: -54, status: 'REVERSED' } },
+    { data: { code: 101, status: 'REVERSED' } },
+    { data: { code: '100', status: 'REVERSED' } },
+    { data: { code: 100, status: 'reversed' } },
+    { data: { code: 100, status: 'REVERSED' }, errors: [{ code: -10 }] },
+    { data: { code: 100, status: 'REVERSED' }, errors: { code: -54 } },
+    { data: { code: 100, status: 'REVERSED' }, errors: null },
+    { data: {} },
+    null,
+  ]) {
+    mockFetch(() => jsonResponse(lastUrl.endsWith('/inquiry.json') ? inquiry : { data: { code: -51 } }))
+    const result = await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
+    ok(`malformed/error inquiry ${JSON.stringify(inquiry)} preserves payment`,
+      !result.success && result.indeterminate === true)
+  }
+  for (const inquiryFailure of [
+    () => new Response('<html>unavailable</html>', { status: 502 }),
+    () => { throw new Error('inquiry transport unavailable') },
+  ]) {
+    mockFetch(() => lastUrl.endsWith('/inquiry.json') ? inquiryFailure() : jsonResponse({ data: { code: -51 } }))
+    const result = await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
+    ok('inquiry transport failure cannot release payment', !result.success && result.indeterminate === true)
+  }
+
+  for (const code of [100, 101, -9, -10, -11, -50, -54, -55]) {
+    mockFetch(() => jsonResponse({ data: { code } }))
+    await adapter.verify({ gatewayRef: AUTH, amount, query: {} })
+    ok(`verify ${code} does not make an unnecessary inquiry`, requestCount === 1)
+  }
 
   // ── پارامترها ──
   mockFetch(() => jsonResponse({ data: { code: 100 } }))

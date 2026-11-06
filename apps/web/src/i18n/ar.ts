@@ -287,6 +287,14 @@ export const ar: Dict = {
         'checkout.temporaryClosed': 'المطعم مغلق بشكل مؤقت حالياً.',
         'checkout.paymentsPaused': 'الدفع معطّل مؤقتاً',
         'checkout.paymentsPausedHint': 'دفع الطلبات معطّل حتى انتهاء الإغلاق المؤقت للمطعم.',
+        'checkout.paymentRecoveryTitle': 'جارٍ التحقق من دفع الطلب السابق',
+        'checkout.paymentRecoveryHint': 'نتيجة الدفع السابق لم تُحسم بعد. يمكنك تجهيز السلة الجديدة وتعديلها؛ ستبقى سلتك محفوظة. لتجنب الدفع المكرر، يتوقف تسجيل الطلب والدفع الجديد حتى تتضح النتيجة.',
+        'checkout.paymentRecoveryOrder': 'رقم الطلب السابق',
+        'checkout.paymentRecoveryWait': 'يمكن إعادة التحقق لدى البنك خلال {n} ثانية.',
+        'checkout.paymentRecoveryView': 'عرض الطلب السابق',
+        'checkout.paymentRecoverySupport': 'الاتصال بالدعم',
+        'checkout.paymentRecoveryEdit': 'تجهيز السلة وتعديلها',
+        'checkout.paymentRecoveryRefresh': 'إعادة التحقق من الحالة',
         'checkout.closedNote':
                 'بعد الدفع، سيُرسل طلبك في أول وقت ممكن بعد افتتاح المطعم.',
         'checkout.closedSummary':
@@ -471,7 +479,7 @@ export const ar: Dict = {
         'dash.orderDetail.pendingCountdown': 'الوقت المتبقي للدفع: {n}',
         'dash.orderDetail.expiredTitle': 'انتهت نافذة الدفع',
         'dash.orderDetail.expiredHint':
-                'انتهت مهلة متابعة الدفع. لا تزال نتيجة الدفع قيد التحقق؛ ستُحدّث حالة الطلب بعد تأكيد البنك. لا تدفع مرة أخرى حتى تتضح النتيجة.',
+                'انتهت مهلة بدء الدفع. لا تزال نتيجة الدفع السابق قيد التحقق؛ ستُحدّث حالة الطلب بعد تأكيد البنك. لا تدفع مرة أخرى حتى تتضح النتيجة. أبلغ الدعم برقم هذا الطلب لمتابعته؛ يمكنك تجهيز السلة التالية.',
         'dash.orderDetail.courierRoute': 'مسار حركة الساعي',
         'dash.orderDetail.details': 'تفاصيل الطلب',
         'dash.orderDetail.breakdownTitle': 'تفاصيل مبلغ الطلب',

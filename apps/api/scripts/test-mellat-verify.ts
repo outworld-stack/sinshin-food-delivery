@@ -276,7 +276,7 @@ async function main(): Promise<void> {
   })
   ok('verify: کد ناشناخته (۲۵) → indeterminate (پول در خطر نیست)', !v25.success && v25.indeterminate === true)
 
-  // فالت در verify → indeterminate + مرجع ماندگار
+  // Initial verification cannot authenticate a browser-supplied receipt on outage.
   verifyResult = null
   const vFault = await adapter.verify({
     gatewayRef: gwRef,
@@ -284,8 +284,8 @@ async function main(): Promise<void> {
     query: { ResCode: '0', RefId: storedRef, SaleReferenceId: saleRef },
   })
   ok(
-    'verify: فالت ساب → indeterminate و مرجع ماندگار برگردانده می‌شود',
-    !vFault.success && vFault.indeterminate === true && vFault.gatewayRef === gwRef.replace(':t:', ':s:').replace(storedRef, saleRef),
+    'initial verification outage preserves the authenticated initialization reference',
+    !vFault.success && vFault.indeterminate === true && vFault.gatewayRef === gwRef,
   )
 
   // فالت در settle → indeterminate + مرجع ماندگار
@@ -338,6 +338,36 @@ async function main(): Promise<void> {
   })
   ok('verify: <ns:return> با پیشوند namespace هم پارس می‌شود (stage-76)', vNs.success)
   nsReturn = false
+
+  for (const code of ['17', '41', '42', '44', '46', '47', '49', '54', '55']) {
+    verifyResult = code
+    const unconfirmed = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: gwRef, amount,
+      query: { ResCode: '0', RefId: storedRef, SaleOrderId: env1, SaleReferenceId: saleRef } })
+    ok(`verify=${code} cannot prove terminal nonpayment or promote an unbound receipt`,
+      !unconfirmed.success && unconfirmed.indeterminate === true && unconfirmed.gatewayRef === gwRef)
+  }
+
+  // The browser cancellation flag cannot override verified and settled money.
+  verifyResult = '0'; settleResult = '0'
+  const canceledButPaid = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: gwRef, amount,
+    query: { ResCode: '17', RefId: storedRef, SaleOrderId: env1, SaleReferenceId: saleRef } })
+  ok('unsigned ResCode=17 with server verify+settle success still settles', canceledButPaid.success)
+
+  const poisonedReference = `${env1}:s:111111111`
+  verifyResult = '44'
+  const failedRecovery = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: poisonedReference, amount,
+    query: { ResCode: '0', RefId: storedRef, SaleOrderId: env1, SaleReferenceId: saleRef } })
+  ok('a replacement unverified receipt cannot overwrite a saved receipt on a bank mismatch',
+    failedRecovery.indeterminate === true && failedRecovery.gatewayRef === poisonedReference)
+  verifyResult = '0'; settleResult = '0'
+  const recovered = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: poisonedReference, amount,
+    query: { ResCode: '0', RefId: storedRef, SaleOrderId: env1, SaleReferenceId: saleRef } })
+  ok('a later correctly bound callback recovers a historical unverified receipt',
+    recovered.success && recovered.gatewayRef === `${env1}:s:${saleRef}`)
+  const unboundRecovery = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: poisonedReference, amount,
+    query: { SaleReferenceId: saleRef } })
+  ok('a changed receipt needs the matching sale order before re-verification',
+    unboundRecovery.indeterminate === true && unboundRecovery.gatewayRef === poisonedReference)
 
   console.log(`\n══ نتیجه: ${pass} ✓ / ${fail} ✗ ══\n`)
   if (fail > 0) process.exit(1)

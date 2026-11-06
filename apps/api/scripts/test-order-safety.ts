@@ -98,11 +98,12 @@ try {
   ;(paymentService as unknown as { gateways: Map<string, PaymentGateway> }).gateways.set('ZARINPAL', gateway)
   let userNumber = 0
   const makeUser = async (returning = false) => {
-    const user = (await db.insert(users).values({ phone: `0915${String(++userNumber).padStart(7, '0')}` }).returning())[0]!
+    const number = ++userNumber
+    const user = (await db.insert(users).values({ phone: `0915${String(number).padStart(7, '0')}` }).returning())[0]!
     // Coupon-capacity and retry scenarios below exercise established customers
     // with multiple orders, independently of the first-order reservation gate.
     if (returning) await db.insert(orders).values({
-      userId: user.id, displayId: `ord-history-${userNumber}`, status: 'PAID', paymentStatus: 'SUCCESS',
+      userId: user.id, displayId: `ord-history-${number}`, status: 'PAID', paymentStatus: 'SUCCESS',
       deliveryType: 'DINE_IN', totalAmount: 0,
       breakdown: { foodTotal: 0, discount: 0, walletDeduction: 0, deliveryFee: 0,
         packagingFee: 0, totalAmount: 0, amountPaidOnline: 0 },
@@ -186,13 +187,25 @@ try {
   passed('deleted products, removed sizes, empty size sets and overflowing totals are rejected')
 
   const limited = await makeCoupon('LIMITED', 1)
+  const globalBuyers = await Promise.all([makeUser(true), makeUser(true)])
   const another = await makeUser(true)
-  const competing = await Promise.allSettled([indebted.id, another.id].map((uid) => orderService.checkout(uid, { ...input, couponCode: limited.code })))
+  const competing = await Promise.allSettled(globalBuyers.map((user) => orderService.checkout(user.id, { ...input, couponCode: limited.code })))
   assert.equal(competing.filter((r) => r.status === 'fulfilled').length, 1)
   assert.equal((await db.select().from(coupons).where(eq(coupons.id, limited.id)))[0]!.usedCount, 1)
   const personal = await makeCoupon('PERSONAL', 0, 1)
   const personalAttempts = await Promise.allSettled([1, 2].map(() => orderService.checkout(another.id, { ...input, couponCode: personal.code })))
   assert.equal(personalAttempts.filter((r) => r.status === 'fulfilled').length, 1)
+  const personalOrder = personalAttempts.find((r) => r.status === 'fulfilled')!
+  if (personalOrder.status !== 'fulfilled') throw new Error('Personal coupon checkout expected')
+  await paymentService.initiate(personalOrder.value.paymentId!, 'ZARINPAL', {
+    displayId: personalOrder.value.displayId, amount: personalOrder.value.amountPaidOnline,
+  })
+  verdict = 'success'
+  await paymentService.handleCallback('ZARINPAL', { state: signState(personalOrder.value.paymentId!, config.jwtSecret) })
+  verdict = 'failed'
+  await assert.rejects(() => orderService.checkout(another.id, { ...input, couponCode: personal.code }),
+    'the per-user coupon limit still rejects reuse after the pending-order gate is cleared')
+  assert.equal((await db.select().from(coupons).where(eq(coupons.id, personal.id)))[0]!.usedCount, 1)
   passed('concurrent checkouts enforce global and per-user coupon reservation limits')
 
   const disappearing = await makeCoupon('DELETING')
@@ -222,11 +235,24 @@ try {
   passed('even old indeterminate PSP attempts cannot be superseded or charged again')
 
   verdict = 'failed'
-  const verifyBoth = gate()
+  await db.update(payments).set({
+    metadata: sql`jsonb_set(${payments.metadata}, '{verification,nextAt}', '"1970-01-01T00:00:00.000Z"'::jsonb)`,
+  }).where(eq(payments.id, originalPayment.id))
+  const verifyEntered = gate(), verifyResume = gate()
   let verifying = 0
-  verifyHook = async () => { if (++verifying === 2) verifyBoth.release(); await verifyBoth.promise }
-  const race = await Promise.allSettled([1, 2].map(() => paymentService.retryInitiation(indebted.id, pending.displayId, 'ZARINPAL')))
+  verifyHook = async () => { verifying++; verifyEntered.release(); await verifyResume.promise }
+  const beforeRetryInit = initCalls
+  const firstRetry = Promise.allSettled([paymentService.retryInitiation(indebted.id, pending.displayId, 'ZARINPAL')])
+  await verifyEntered.promise
+  let secondRetry: Awaited<typeof firstRetry>
+  try {
+    secondRetry = await Promise.allSettled([paymentService.retryInitiation(indebted.id, pending.displayId, 'ZARINPAL')])
+    assert.equal(secondRetry[0]!.status, 'rejected', 'a leased verification cannot authorize a competing new attempt')
+  } finally { verifyResume.release() }
+  const race = [...await firstRetry, ...secondRetry]
   verifyHook = async () => undefined
+  assert.equal(verifying, 1, 'concurrent retries share one PSP verification lease')
+  assert.equal(initCalls, beforeRetryInit + 1)
   assert.equal(race.filter((r) => r.status === 'fulfilled').length, 1)
   const attempts = await paymentRows(pending.id)
   assert.equal(attempts.filter((p) => p.status === 'PENDING').length, 1)
@@ -335,6 +361,9 @@ try {
   assert.equal(checked.length, 102)
   assert.deepEqual(batchTwo, { reverified: 1, failed: 0 })
   assert.equal((await getOrder(cursorOrders[101]!.displayId)).status, 'PAID')
+  await db.update(payments).set({
+    metadata: sql`jsonb_set(${payments.metadata}, '{verification,nextAt}', '"1970-01-01T00:00:00.000Z"'::jsonb)`,
+  }).where(and(eq(payments.gateway, 'CURSORTEST'), eq(payments.status, 'PENDING')))
   await paymentService.reconcilePending()
   assert.equal(checked.length, 202)
   assert.equal(checked.filter((ref) => ref === 'cursor-0').length, 2)

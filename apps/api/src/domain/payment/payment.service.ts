@@ -34,6 +34,8 @@ import { ZarinpalAdapter } from './zarinpal.adapter'
 import { SepAdapter } from './sep.adapter'
 import { MellatAdapter } from './mellat.adapter'
 import type { PaymentGateway } from './gateway.types'
+import { PaymentVerification } from './payment-verification'
+import type { CheckoutPreviewData } from '@sinshin/shared'
 
 /** stage-58 — درگاه‌های واقعیِ پشتیبانی‌شده (منبع واحد بک‌اند؛ پی‌ایر حذف شد) */
 export const REAL_GATEWAY_IDS = ['MELLAT', 'ZARINPAL', 'SEP'] as const
@@ -47,6 +49,7 @@ class PaymentReviewError extends AppError {
 export class PaymentService {
   private readonly gateways: Map<string, PaymentGateway>
   private readonly settings: SettingsService
+  private readonly verification: PaymentVerification
   private reconcileAfterId: PaymentId | null = null
   private expiryAfterId: OrderRow['id'] | null = null
 
@@ -62,12 +65,14 @@ export class PaymentService {
     },
   ) {
     this.settings = new SettingsService({ db: deps.db })
+    this.verification = new PaymentVerification(deps.db, deps.config.gateway.timeoutMs)
     this.gateways = new Map<string, PaymentGateway>([
       ['MOCK', new MockAdapter(deps.config)],
       ['ZARINPAL', new ZarinpalAdapter(deps.config)],
       ['SEP', new SepAdapter(deps.config)],
       ['MELLAT', new MellatAdapter(deps.config)],
     ])
+    deps.orders.setPendingPaymentReconciler(userId => this.reconcileCustomerPendingOrders(userId))
   }
 
   /** stage-58 — برای روت‌های callback: مقصد امنِ خطا (به‌جای JSON خام در مرورگر مشتری) */
@@ -99,6 +104,11 @@ export class PaymentService {
     const { db } = this.deps
     const initToken = crypto.randomUUID()
     const initiation = await this.moneyTransaction(async (tx) => {
+      const [candidate] = await tx.select().from(payments).where(eq(payments.id, paymentId))
+      if (!candidate) throw Err.notFound('پرداخت پیدا نشد.')
+      await lockWalletAccounts(tx, [candidate.userId])
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, candidate.userId)).for('no key update')
+      await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, candidate.orderId)).for('update')
       const [pending] = await tx.select().from(payments).where(eq(payments.id, paymentId)).for('update')
       if (!pending || pending.status !== 'PENDING' || pending.gatewayRef || pending.metadata?.paymentUrl ||
         (pending.metadata?.initToken && pending.metadata?.initFailed !== true)) {
@@ -109,6 +119,7 @@ export class PaymentService {
       if (this.paymentWindowClosed(order)) throw Err.conflict('مهلت شروع پرداخت این سفارش به پایان رسیده است.')
       const invalid = this.paymentIntegrity(pending, order)
       if (invalid) throw new PaymentReviewError(pending, invalid)
+      await this.assertNoOtherPendingPayment(tx, order.userId, order.id, paymentId)
       const gw = this.gateway(pending.gateway)
       try {
         await this.settings.assertOrderPaymentsAllowed(tx)
@@ -231,6 +242,22 @@ export class PaymentService {
       return { redirect: `${this.deps.config.siteUrl}/dashboard/orders/${order?.displayId ?? ''}` }
     }
 
+    // Retain unsigned provider receipt candidates separately from the PSP
+    // reference. A background retry must validate them with the bank too.
+    const keys = gatewayId.toUpperCase() === 'MELLAT'
+      ? ['ResCode', 'SaleOrderId', 'SaleReferenceId', 'RefId']
+      : gatewayId.toUpperCase() === 'SEP' ? ['State', 'RefNum', 'ResNum', 'TerminalId'] : []
+    const callbackQuery = Object.fromEntries(keys.flatMap(key => {
+      const value = query[key] ?? Object.entries(query).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1]
+      return typeof value === 'string' && value.length <= 120 ? [[key, value]] : []
+    }))
+    if (Object.keys(callbackQuery).length) {
+      await this.deps.db.update(payments).set({
+        metadata: sql`jsonb_set(coalesce(${payments.metadata}, '{}'::jsonb), '{callbackQuery}', ${callbackQuery}::jsonb, true)`,
+      }).where(and(eq(payments.id, payment.id), eq(payments.status, 'PENDING'),
+        sql`${payments.gatewayRef} is not distinct from ${payment.gatewayRef}`))
+    }
+
     // stage-74 — خطای شبکه به درگاه (تایم‌اوت/قطعی/Connection refused) از
     // verify بالا می‌آید؛ قبلاً تا runCallbackSafe سرریز می‌کرد و مشتریِ
     // تازه-پرداخت‌کرده JSON خامِ 500 می‌دید (سناریوی «خطای شبکه‌ی درگاه»
@@ -239,7 +266,7 @@ export class PaymentService {
     // می‌کند (پول در خطر نیست؛ settle/fail فقط با پاسخِ درگاه رخ می‌دهد).
     let v: Awaited<ReturnType<PaymentGateway['verify']>>
     try {
-      v = await gw.verify({ paymentId: payment.id, gatewayRef: payment.gatewayRef, amount: payment.amount, query })
+      v = await this.verification.verify(payment, gw, query, true)
     } catch (e) {
       console.error(`[payments] callback ${gatewayId}: خطای شبکه در verify — indeterminate:`, e)
       v = { success: false, gatewayRef: payment.gatewayRef, indeterminate: true }
@@ -281,6 +308,7 @@ export class PaymentService {
         // امن-۸: منبع/درگاهِ شکست در metadata — قبلاً FAILED کور بود
         v.success ? undefined : { source: 'callback', gateway: gatewayId.toUpperCase() },
         payment.gatewayRef,
+        undefined, false, payment,
       )
       orderDisplayId = r.orderDisplayId
     } catch (e) {
@@ -392,13 +420,13 @@ export class PaymentService {
       if (isRealWithRef && pGw) {
         let verdict: Awaited<ReturnType<PaymentGateway['verify']>> | null = null
         try {
-          verdict = await pGw.verify({ paymentId: p.id, gatewayRef: p.gatewayRef, amount: p.amount, query: {} })
+          verdict = await this.verification.verify(p, pGw)
         } catch {
           verdict = null // استعلام خودش شکست → نامشخص
         }
-        if (verdict?.success) {
+        if (verdict?.success && !verdict.indeterminate) {
           // پول واقعاً گرفته شده بود و callback گم شده بود — همین حالا نهایی کن
-          await this.finalize(p.id, true, verdict.gatewayRef ?? p.gatewayRef, undefined, p.gatewayRef)
+          await this.finalize(p.id, true, verdict.gatewayRef ?? p.gatewayRef, undefined, p.gatewayRef, undefined, false, p)
           throw Err.conflict('این سفارش هم‌اکنون پرداخت شد — وضعیت صفحه به‌روز می‌شود.')
         }
         if (verdict && !verdict.indeterminate) {
@@ -430,6 +458,7 @@ export class PaymentService {
       if (currentOrder?.status !== 'PENDING_PAYMENT') {
         throw Err.conflict('این سفارش در انتظار پرداخت نیست.')
       }
+      await this.assertNoOtherPendingPayment(tx, userId, order.id)
       if (this.paymentWindowClosed(currentOrder)) {
         throw Err.conflict('مهلت شروع پرداخت به پایان رسیده است؛ وضعیت سفارش را به‌روز کنید.')
       }
@@ -441,6 +470,9 @@ export class PaymentService {
       if (settled) throw new PaymentReviewError(settled, 'pending order already has a successful payment')
       const currentPending = await tx.select().from(payments)
         .where(and(eq(payments.orderId, order.id), eq(payments.status, 'PENDING'))).for('update')
+      if (currentPending.some(p => this.hasVerifiedSuccess(p))) {
+        throw Err.conflict('نتیجه موفق پرداخت قبلی در انتظار نهایی‌سازی سفارش اصلی است.')
+      }
       if (currentPending.length !== pendingRows.length || currentPending.some((p) => {
         const checked = pendingRows.find((old) => old.id === p.id)
         return !checked || checked.gatewayRef !== p.gatewayRef || checked.updatedAt.getTime() !== p.updatedAt.getTime() ||
@@ -583,8 +615,8 @@ export class PaymentService {
           continue
         }
 
-        if (isRealGateway && p.gatewayRef) {
-          const v = await gw!.verify({ paymentId: p.id, gatewayRef: p.gatewayRef, amount: p.amount, query: {} })
+        if (isRealGateway && (p.gatewayRef || p.metadata?.callbackQuery)) {
+          const v = await this.verification.verify(p, gw!)
           verifiedRef = v.gatewayRef ?? p.gatewayRef
           if (v.indeterminate) {
             // رارد H6 — پنجره‌ی ۲۴ ساعت: پول ممکن است در PSP گرفته شده باشد.
@@ -618,6 +650,7 @@ export class PaymentService {
                 hadGatewayRef: !!p.gatewayRef,
               },
           p.gatewayRef,
+          undefined, false, p,
         )
         if (success) reverified++
         else failed++
@@ -634,9 +667,81 @@ export class PaymentService {
     return { reverified, failed }
   }
 
-  /** Reconcile orders beyond their payment window. The deadline blocks new
-   * sessions; only conclusive PSP evidence permits releasing reservations.
-   * Rotate bounded batches so unresolved sessions cannot starve other jobs. */
+  /** Reconcile both backend purchase entry points outside money locks.
+   * Elapsed time alone cannot authorize another financial attempt. */
+  async reconcileCustomerPendingOrders(userId: string): Promise<CheckoutPreviewData['paymentRecovery']> {
+    const cutoff = new Date(Date.now() - this.deps.config.pendingOrderExpiryMinutes * 60_000)
+    const stale = await this.deps.db.select().from(orders).where(and(
+      eq(orders.userId, userId), eq(orders.status, 'PENDING_PAYMENT'), lt(orders.createdAt, cutoff),
+    )).orderBy(asc(orders.createdAt)).limit(50)
+    for (const order of stale) {
+      try {
+        await this.expireOnePendingOrder(order)
+      } catch (error) {
+        if (!(error instanceof AppError && error.code === 'CONFLICT')) throw error
+        // Concurrent settlement is decided by a fresh guard below.
+      }
+    }
+    // A paid order can still have an older outstanding attempt. Reconcile its
+    // terminal failures without touching the original settlement; an extra
+    // success requires PSP review/reversal and blocks another charge.
+    const siblings = await this.deps.db.select({ payment: payments, order: orders })
+      .from(payments).innerJoin(orders, eq(payments.orderId, orders.id)).where(and(
+        eq(payments.userId, userId), eq(payments.status, 'PENDING'), ne(orders.status, 'PENDING_PAYMENT'),
+      )).limit(50)
+    for (const { payment, order } of siblings) {
+      const invalid = this.paymentIntegrity(payment, order)
+      if (invalid) { await this.recordR12(payment, invalid); continue }
+      const gateway = this.gateways.get(payment.gateway.toUpperCase())
+      if (!gateway || gateway.mode === 'mock') {
+        await this.recordR12(payment, 'outstanding payment on a closed order — manual PSP review required')
+        continue
+      }
+      const result = await this.verification.verify(payment, gateway)
+      if (result.indeterminate) {
+        await this.recordR12(payment, 'outstanding payment on a closed order — preserve evidence pending PSP review')
+        continue
+      }
+      try {
+        await this.finalize(payment.id, result.success, result.gatewayRef, { source: 'closed-order-review' }, payment.gatewayRef, undefined, false, payment)
+      } catch (error) {
+        if (!(error instanceof AppError && error.code === 'CONFLICT')) throw error
+      }
+    }
+    const [unresolved] = await this.deps.db.select({ displayId: orders.displayId }).from(orders).where(and(
+      eq(orders.userId, userId), eq(orders.status, 'PENDING_PAYMENT'), lt(orders.createdAt, cutoff),
+    )).limit(1)
+    const [unresolvedSibling] = await this.deps.db.select({ displayId: orders.displayId }).from(payments)
+      .innerJoin(orders, eq(payments.orderId, orders.id)).where(and(
+        eq(payments.userId, userId), eq(payments.status, 'PENDING'), ne(orders.status, 'PENDING_PAYMENT'),
+      )).limit(1)
+    if (unresolved || unresolvedSibling) return {
+      orderId: (unresolved ?? unresolvedSibling)!.displayId,
+      message: 'نتیجه پرداخت سفارش قبلی هنوز قطعی نیست. می‌توانید سبد جدید را آماده کنید؛ پرداخت و تخفیف اولین خرید پس از تعیین نتیجه آزاد می‌شود. وضعیت سفارش قبلی را پیگیری کنید یا با پشتیبانی تماس بگیرید.',
+      retryAfterSeconds: 60,
+    }
+    return null
+  }
+
+  /** Owner-only recovery: verification and status, never payment initiation. */
+  async reconcileOwnedOrder(userId: string, displayId: string) {
+    const [order] = await this.deps.db.select().from(orders).where(and(
+      eq(orders.userId, userId), eq(orders.displayId, displayId),
+    ))
+    if (!order) throw Err.notFound('سفارش پیدا نشد.')
+    if (order.status === 'PENDING_PAYMENT') {
+      try { await this.expireOnePendingOrder(order) } catch (error) {
+        if (!(error instanceof AppError && error.code === 'CONFLICT')) throw error
+      }
+    } else {
+      await this.reconcileCustomerPendingOrders(userId)
+    }
+    const [current] = await this.deps.db.select().from(orders).where(eq(orders.id, order.id))
+    return { orderId: order.displayId, status: current!.status, paymentStatus: current!.paymentStatus, retryAfterSeconds: 60 }
+  }
+
+  /** Inspect bounded rotating batches. Age blocks initiation; only conclusive
+   * PSP evidence permits releasing financial reservations. */
   async expirePendingOrders(
     olderThanMinutes: number = this.deps.config.pendingOrderExpiryMinutes,
   ): Promise<{ expired: number; settled: number }> {
@@ -682,6 +787,11 @@ export class PaymentService {
       .orderBy(asc(payments.createdAt))
     const successful = attempts.find(p => p.status === 'SUCCESS')
     if (successful) {
+      if (successful.verifiedAt && successful.gatewayRef && !this.paymentIntegrity(successful, order) &&
+        attempts.filter(p => p.status === 'SUCCESS').length === 1) {
+        await this.finalize(successful.id, true, successful.gatewayRef, undefined, successful.gatewayRef, undefined, true, successful)
+        return 'settled'
+      }
       await this.recordR12(successful, 'pending order already has a successful payment')
       return 'none'
     }
@@ -690,6 +800,7 @@ export class PaymentService {
     if (!active) {
       const last = attempts[attempts.length - 1]
       if (last) await this.recordR12(last, 'pending order has no pending payment — manual review required')
+      else await this.recordMissingPayment(order)
       return 'none'
     }
     let unresolved = false
@@ -710,14 +821,14 @@ export class PaymentService {
       if (gwId === 'MOCK') continue
       // A never-started attempt or a recorded init failure has no payable
       // session. An init currently in flight must finish before we decide.
-      if (!payment.gatewayRef && !payment.metadata?.paymentUrl && !payment.callbackUrl &&
+      if (!payment.gatewayRef && !payment.metadata?.paymentUrl && !payment.callbackUrl && !payment.metadata?.callbackQuery &&
         (!payment.metadata?.initToken || payment.metadata?.initFailed === true)) continue
       let verdict: Awaited<ReturnType<PaymentGateway['verify']>> | null = null
       try {
-        verdict = await gateway.verify({ paymentId: payment.id, gatewayRef: payment.gatewayRef, amount: payment.amount, query: {} })
+        verdict = await this.verification.verify(payment, gateway)
       } catch { /* PSP outages are unresolved, including adapters that throw. */ }
       if (verdict?.success && !verdict.indeterminate) {
-        await this.finalize(payment.id, true, verdict.gatewayRef ?? payment.gatewayRef, undefined, payment.gatewayRef)
+        await this.finalize(payment.id, true, verdict.gatewayRef ?? payment.gatewayRef, undefined, payment.gatewayRef, undefined, false, payment)
         return 'settled'
       }
       if (!verdict || verdict.indeterminate) {
@@ -727,7 +838,7 @@ export class PaymentService {
     }
     if (unresolved) return 'none'
     const failInfo: Record<string, unknown> = {
-      source: 'expiry-job',
+      source: this.paymentWindowClosed(order) ? 'expiry-job' : 'payment-recheck',
       gateway: active.gateway,
       hadGatewayRef: !!active.gatewayRef,
       orderAgeMinutes: Math.round((Date.now() - order.createdAt.getTime()) / 60_000),
@@ -737,6 +848,33 @@ export class PaymentService {
   }
 
   // ── داخلی ──
+
+  private async resolveR12(tx: DbOrTx, paymentId: PaymentId): Promise<void> {
+    await tx.update(reconcileFindings).set({ status: 'auto_fixed', resolvedAt: new Date() })
+      .where(and(eq(reconcileFindings.checkId, 'R12'), eq(reconcileFindings.entityId, paymentId), eq(reconcileFindings.status, 'open')))
+  }
+
+  private async recordMissingPayment(order: OrderRow): Promise<void> {
+    await this.deps.db.insert(reconcileFindings).values({
+      checkId: 'R12', severity: 'critical', entityType: 'order', entityId: order.id,
+      detail: { orderId: order.displayId, note: 'pending order has no payment record; review original PSP records before releasing reservations' },
+    }).onConflictDoUpdate({
+      target: [reconcileFindings.checkId, reconcileFindings.entityId],
+      set: { status: 'open', resolvedAt: null, lastSeenAt: new Date(), occurrences: sql`${reconcileFindings.occurrences} + 1` },
+      setWhere: sql`${reconcileFindings.status} <> 'open' or ${reconcileFindings.lastSeenAt} < now() - interval '1 hour'`,
+    })
+  }
+
+  private async assertNoOtherPendingPayment(tx: DbOrTx, userId: string, orderId: OrderRow['id'], paymentId?: PaymentId): Promise<void> {
+    const [otherOrder] = await tx.select({ id: orders.id }).from(orders).where(and(
+      eq(orders.userId, userId), ne(orders.id, orderId), eq(orders.status, 'PENDING_PAYMENT'),
+    )).limit(1)
+    const [otherAttempt] = await tx.select({ id: payments.id }).from(payments).where(and(
+      eq(payments.userId, userId), eq(payments.status, 'PENDING'),
+      paymentId ? ne(payments.id, paymentId) : ne(payments.orderId, orderId),
+    )).limit(1)
+    if (otherOrder || otherAttempt) throw Err.conflict('پرداخت دیگری هنوز در انتظار تعیین نتیجه است؛ پرداخت جدید تا تعیین نتیجه قبلی ممکن نیست.')
+  }
 
   private paymentWindowClosed(order: Pick<OrderRow, 'createdAt'>): boolean {
     return Date.now() >= order.createdAt.getTime() + this.deps.config.pendingOrderExpiryMinutes * 60_000
@@ -761,9 +899,22 @@ export class PaymentService {
     return null
   }
 
+  /** Verification writes do not bump the business revision. A successful
+   * callback may have persisted evidence while waiting for settlement locks. */
+  private hasVerifiedSuccess(payment: PaymentRow): boolean {
+    const raw = payment.metadata?.verification
+    if (!raw || typeof raw !== 'object') return false
+    const evidence = raw as Record<string, unknown>
+    const result = evidence.result as Record<string, unknown> | undefined
+    return evidence.reference === payment.gatewayRef && evidence.amount === payment.amount &&
+      evidence.gateway === payment.gateway && evidence.mode === payment.mode &&
+      result?.success === true && result.indeterminate !== true
+  }
+
   /** تعویض امن ردیف PENDING → FAILED (برچسب پیش‌فرض retry-superseded برای R11؛
    * stage-98 — انقضای پنجره با برچسبِ expiry-sibling خواهرها را می‌بندد) */
   private async supersedePending(tx: DbOrTx, p: PaymentRow, source = 'retry-superseded'): Promise<void> {
+    if (this.hasVerifiedSuccess(p)) throw Err.conflict('نتیجه موفق پرداخت قبلی در انتظار نهایی‌سازی سفارش اصلی است.')
     await tx
       .update(payments)
       .set({
@@ -783,18 +934,25 @@ export class PaymentService {
    * (occurrences++/lastSeenAt) نه تکراری. خطای ثبت هرگز مسیر را نمی‌شکند.
    */
   private async recordR12(p: PaymentRow, note: string): Promise<void> {
-    console.error(
-      `[payments] R12 UNRESOLVED: ${p.id} gateway=${(p.gateway ?? '').toUpperCase()} — ${note}`,
-    )
+    const [order] = await this.deps.db.select({ displayId: orders.displayId }).from(orders).where(eq(orders.id, p.orderId))
+    const kind = /receipt already settled/.test(note) ? 'duplicate-receipt'
+      : /success/.test(note) ? 'successful-payment-review'
+      : /owner|amount|mode/.test(note) ? 'payment-integrity'
+      : /unknown\/removed gateway/.test(note) ? 'gateway-unavailable' : 'unresolved-payment'
     const detail = {
+      kind,
+      orderId: order?.displayId ?? null,
+      orderInternalId: p.orderId,
+      paymentId: p.id,
       gateway: (p.gateway ?? '').toUpperCase() || null,
       gatewayRef: p.gatewayRef ?? null,
       amount: p.amount,
       note,
       paymentUpdatedAt: p.updatedAt?.toISOString() ?? null,
+      action: 'Check this original transaction in the PSP merchant panel. Only verified payment or terminal nonpayment/reversal permits financial settlement or release; acknowledging this finding does not resolve the payment.',
     }
     try {
-      await this.deps.db
+      const recorded = await this.deps.db
         .insert(reconcileFindings)
         .values({
           checkId: 'R12',
@@ -813,7 +971,14 @@ export class PaymentService {
             lastSeenAt: new Date(),
             occurrences: sql`${reconcileFindings.occurrences} + 1`,
           },
+          setWhere: sql`${reconcileFindings.status} <> 'open'
+            or ${reconcileFindings.lastSeenAt} < now() - interval '1 hour'
+            or ${reconcileFindings.detail}->>'kind' is distinct from ${kind}
+            or ${reconcileFindings.detail}->>'gatewayRef' is distinct from ${p.gatewayRef}
+            or ${reconcileFindings.detail}->>'amount' is distinct from ${String(p.amount)}`,
         })
+        .returning({ id: reconcileFindings.id })
+      if (recorded.length) console.error(`[payments] R12 UNRESOLVED: ${p.id} gateway=${p.gateway} — ${note}`)
     } catch (e) {
       console.error('[payments] ثبت finding R12 ناموفق:', e)
     }
@@ -833,6 +998,8 @@ export class PaymentService {
     failInfo?: Record<string, unknown>,
     expectedReference?: string | null,
     expirySnapshot?: PaymentRow[],
+    recoverVerifiedSuccess = false,
+    verificationSnapshot?: PaymentRow,
   ): Promise<{ orderDisplayId: string; paymentStatus: string; userId: string }> {
     let settledOrderId: string | undefined
     const result = await this.moneyTransaction(async (tx) => {
@@ -855,21 +1022,46 @@ export class PaymentService {
       if (!orderRow) throw Err.notFound('سفارش این پرداخت پیدا نشد.')
       const [current] = await tx.select().from(payments).where(eq(payments.id, paymentId)).for('update')
       if (!current) throw Err.notFound('پرداخت پیدا نشد.')
-      if (current.status !== 'PENDING') {
+      const recovering = recoverVerifiedSuccess && success && current.status === 'SUCCESS' && !!current.verifiedAt && !!current.gatewayRef
+      if (current.status !== 'PENDING' && !recovering) {
         if (success && current.status !== 'SUCCESS') throw new PaymentReviewError({ ...current, gatewayRef: gatewayRef ?? current.gatewayRef }, 'late PSP success for a previously failed payment')
         throw Err.conflict('این پرداخت قبلاً نهایی شده است.')
       }
       if (expectedReference !== undefined && current.gatewayRef !== expectedReference) {
         throw Err.conflict('مرجع پرداخت تغییر کرد؛ استعلام جدید لازم است.')
       }
+      if (verificationSnapshot && (current.gateway !== verificationSnapshot.gateway || current.mode !== verificationSnapshot.mode ||
+        current.amount !== verificationSnapshot.amount || current.userId !== verificationSnapshot.userId || current.orderId !== verificationSnapshot.orderId)) {
+        throw new PaymentReviewError(current, 'payment identity changed during PSP verification')
+      }
+      if (!success && this.hasVerifiedSuccess(current)) {
+        throw Err.conflict('نتیجه موفق پرداخت قبلی در انتظار نهایی‌سازی سفارش اصلی است.')
+      }
       const invalid = this.paymentIntegrity(current, orderRow)
-      if (invalid || orderRow.status !== 'PENDING_PAYMENT') {
-        throw new PaymentReviewError(current, invalid ?? 'payment result for an order that is no longer pending')
+      if (invalid) throw new PaymentReviewError(current, invalid)
+      if (orderRow.status !== 'PENDING_PAYMENT') {
+        if (recovering) throw Err.conflict('این پرداخت قبلاً نهایی شده است.')
+        if (success) throw new PaymentReviewError(current, 'additional PSP success for an already closed order — review/reversal required')
+        // Terminal failure concerns only this outstanding sibling, never the
+        // closed original order's money or coupon/first-purchase entitlement.
+        await tx.update(payments).set({ status: 'FAILED', verifiedAt: new Date(), updatedAt: new Date(),
+          gatewayRef: gatewayRef ?? current.gatewayRef,
+          metadata: { ...(current.metadata ?? {}), fail: { source: 'closed-order-sibling', at: new Date().toISOString() } },
+        }).where(eq(payments.id, current.id))
+        await this.resolveR12(tx, current.id)
+        return { orderDisplayId: orderRow.displayId, paymentStatus: 'RECONCILED', userId: orderRow.userId }
       }
       // MOCK success is a new user payment action, unlike a PSP callback that
       // proves money was already charged. Never block real settlement here.
       if (success && current.gateway === 'MOCK') {
         await this.settings.assertOrderPaymentsAllowed(tx)
+        await this.assertNoOtherPendingPayment(tx, current.userId, orderRow.id, current.id)
+      }
+      if (success) {
+        const [anotherSuccess] = await tx.select().from(payments).where(and(
+          eq(payments.orderId, orderRow.id), ne(payments.id, current.id), eq(payments.status, 'SUCCESS'),
+        )).limit(1)
+        if (anotherSuccess) throw new PaymentReviewError(anotherSuccess, 'pending order already has a successful payment')
       }
       let otherPending = false
       if (!success && !expirySnapshot) {
@@ -897,7 +1089,10 @@ export class PaymentService {
         // These siblings were all proven unpaid above. Close them in the same
         // transaction as cancellation, after checking the full verified set.
         for (const sibling of pending) {
-          if (sibling.id !== current.id) await this.supersedePending(tx, sibling, 'expiry-sibling')
+          if (sibling.id !== current.id) {
+            await this.supersedePending(tx, sibling, 'expiry-sibling')
+            await this.resolveR12(tx, sibling.id)
+          }
         }
       }
       const finalRef = gatewayRef ?? current.gatewayRef
@@ -938,9 +1133,10 @@ export class PaymentService {
                 },
               }),
         })
-        .where(and(eq(payments.id, paymentId), eq(payments.status, 'PENDING')))
+        .where(and(eq(payments.id, paymentId), eq(payments.status, recovering ? 'SUCCESS' : 'PENDING')))
         .returning()
       if (!payment) throw Err.conflict('این پرداخت قبلاً نهایی شده است.')
+      await this.resolveR12(tx, payment.id)
 
       if (success) {
         await this.deps.orders.settlePayment(tx, orderRow)

@@ -44,8 +44,8 @@ const sepCellNumber = (mobile: string | null | undefined): string | undefined =>
  *   توکن سامان فقط برای ساخت صفحه‌ی پرداخت است (کوتاه‌عمر)؛ شناسه‌ی
  *   ماندگارِ تراکنش RefNum است که فقط در callback می‌رسد. پس:
  *   • callback قطعی → RefNum با finalize ذخیره می‌شود؛
- *   • callback نامشخص (خطای گذرای بانک) → سرویس RefNum را همان‌جا
- *     ذخیره می‌کند تا کارِ تایم‌اوت بدون کوئری هم بتواند دوباره تایید کند؛
+ *   • callback نامشخص → RefNum مرورگر فقط یک نامزد است؛ سرویس دادهٔ
+ *     callback را جدا نگه می‌دارد تا دوباره نزد بانک بررسی شود؛
  *   • هیچ callback ای نرسید → gatewayRef=null می‌ماند؛ نبود مرجع
  *     به‌تنهایی عدم برداشت وجه را ثابت نمی‌کند و بررسی دستی لازم است.
  */
@@ -135,7 +135,7 @@ export class SepAdapter implements PaymentGateway {
 
     try {
       // پاسخ غیرقابل‌فهم/شکل ناشناخته (صفحه‌ی خطای بانک، قطعی گذرا) —
-      // قطعی نیست؛ سرویس RefNum را ذخیره می‌کند و کارِ تایم‌اوت دوباره
+      // قطعی نیست؛ سرویس نامزد callback را جدا نگه می‌دارد و دوباره
       // می‌کوشد (هم‌تراز indeterminate زرین‌پال/پی‌ایر) — failPayment
       // بدون اطلاع یعنی بازگشت وجه اشتباه.
       const json = await postGatewayJson<{
@@ -169,7 +169,7 @@ export class SepAdapter implements PaymentGateway {
         console.warn(
           `[sep] verify indeterminate: RefNum=${refNum} State=${input.query.State ?? '-'} TraceNo=${input.query.TraceNo ?? '-'} پاسخ=${JSON.stringify(json)}`,
         )
-        return { success: false, gatewayRef: refNum, indeterminate: true }
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
       }
 
       // Support both the flat VerifyPayment response and SEP's nested
@@ -194,6 +194,13 @@ export class SepAdapter implements PaymentGateway {
         String(value) !== this.terminalId)) {
         return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
       }
+      // Browser ResNum and RefNum are unsigned. A verified amount alone can
+      // belong to another order/customer on this terminal. Require the PSP's
+      // own reservation and terminal identity before binding a new receipt or
+      // settling the original order; absent identity remains reviewable.
+      if (ok && (!input.paymentId || reservations.length === 0 || terminals.length === 0)) {
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+      }
       const references = [json.RefNum, json.refNum, detail?.RefNum]
         .filter((value) => value !== undefined)
       if (references.some((value) => value !== refNum)) {
@@ -207,27 +214,25 @@ export class SepAdapter implements PaymentGateway {
         successReported: ok,
         tag: 'sep',
       }))
-      // stage-58 — پول‌ایمنی: «موفق اعلام شده + مبلغ ناهم‌خوان» وضعیت قطعی
-      // نیست — fail قطعی یعنی failPayment/بازگشت کیف پول در حالی که پولِ
-      // مشتری در PSP گرفته شده (مبلغ واقعاً کم/زیاد واریز شده). indeterminate
-      // می‌ماند تا کارِ تایم‌اوت/R12 پنل PSP قطعی‌اش کند. شکستِ قطعی فقط
-      // وقتی خود بانک پرچم موفقیت را false داده.
+      // An unsuccessful verification request does not establish that the
+      // transaction never captured money: configuration, receipt lookup and
+      // repeated-verification errors can all report a false success flag.
+      // Without documented terminal nonpayment/reversal evidence, preserve
+      // the receipt and reservations for retry or PSP review.
       if (ok && !amountOk) {
-        return { success: false, gatewayRef: refNum, indeterminate: true }
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
       }
       if (!ok) {
-        // stage-76 — شکستِ قطعی با کدِ درگاه لاگ می‌شود (هم‌تراز لاگ‌های
-        // زرین‌پال) — کدهای ترمینال‌های سامان در تست‌های عملی از اینجا
-        // خوانده و در صورتِ «قطعاً پرداخت‌نشده» بودن به تحلیل اضافه می‌شوند.
         console.warn(
-          `[sep] verify قطعی-ناموفق: RefNum=${refNum} State=${input.query.State ?? '-'} ResultCode=${json.ResultCode ?? '-'}`,
+          `[sep] verify indeterminate: RefNum=${refNum} State=${input.query.State ?? '-'} ResultCode=${json.ResultCode ?? '-'}`,
         )
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
       }
       return { success: ok, gatewayRef: refNum }
     } catch (e) {
       // شبکه/تایم‌اوت — وضعیت نامشخص
       console.error(`[sep] verify خطای شبکه — indeterminate: RefNum=${refNum}`, e)
-      return { success: false, gatewayRef: refNum, indeterminate: true }
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
   }
 }

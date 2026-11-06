@@ -310,8 +310,10 @@ export function useCheckoutPage(deps: {
 				? blocked.takeawayBlockedNames
 				: blocked.dineInBlockedNames
 	const isDeliveryBlocked = deliveryBlockedFor.length > 0
+	const paymentRecovery = previewData?.paymentRecovery
 	const isSubmitBlocked =
 		paymentsDisabled ||
+		!!paymentRecovery ||
 		!isPreviewReady ||
 		!isDeliveryQuoteReady ||
 		(state.couponStatus === 'HAVE' && !couponApplied) ||
@@ -383,7 +385,7 @@ export function useCheckoutPage(deps: {
 	const checkoutMutation = useMutation({
 		mutationFn: (payload: CheckoutSubmitPayload) =>
 			processCheckout(payload, checkoutIntentKey(payload)),
-		onSuccess: async (res) => {
+		onSuccess: async (res, payload) => {
 			queryClient.invalidateQueries({ queryKey: qk.userProfile })
 			queryClient.invalidateQueries({ queryKey: qk.restaurantStatus })
 			queryClient.invalidateQueries({ queryKey: qk.admin2LiveOrdersPrefix })
@@ -394,7 +396,7 @@ export function useCheckoutPage(deps: {
 			if (res.orderCompleted && res.orderId) {
 				// Keep this purchase key while navigation is pending and the old
 				// basket is still visible. The matching order page clears it.
-				rememberPendingCheckout(res.orderId)
+				rememberPendingCheckout(res.orderId, payload.items)
 				setActiveOrderId(res.orderId)
 				showToast(t['checkout.orderPlaced'])
 				navigate({
@@ -409,7 +411,7 @@ export function useCheckoutPage(deps: {
 				if (!target) {
 					showToast(t['checkout.payError'], 'error')
 					if (res.orderId) {
-						rememberPendingCheckout(res.orderId)
+						rememberPendingCheckout(res.orderId, payload.items)
 						setActiveOrderId(res.orderId)
 						void navigate({ to: '/dashboard/orders/$orderId', params: { orderId: res.orderId } })
 					}
@@ -420,7 +422,7 @@ export function useCheckoutPage(deps: {
 					try {
 						const payResult = await mockPay(res.paymentUrl, true)
 						if (payResult.paymentStatus === 'SUCCESS') {
-							rememberPendingCheckout(payResult.orderDisplayId)
+							rememberPendingCheckout(payResult.orderDisplayId, payload.items)
 							setActiveOrderId(payResult.orderDisplayId)
 							showToast(t['checkout.paySuccess'])
 							navigate({
@@ -436,7 +438,7 @@ export function useCheckoutPage(deps: {
 						// Network failure is not a confirmed payment failure. Keep
 						// the purchase key and recover through the existing order.
 						if (res.orderId) {
-							rememberPendingCheckout(res.orderId)
+							rememberPendingCheckout(res.orderId, payload.items)
 							setActiveOrderId(res.orderId)
 							void navigate({
 								to: '/dashboard/orders/$orderId',
@@ -456,13 +458,13 @@ export function useCheckoutPage(deps: {
 				// ── درگاه واقعی (URL مطلق) — ریدایرکت؛ سبد پاک «نمی‌شود» ──
 				// برگشت از درگاه → /dashboard/orders/:orderId → پول →
 				// اولین SUCCESS با پرچمِ همین سفارش → سبد پاک می‌شود
-				if (res.orderId) rememberPendingCheckout(res.orderId)
+				if (res.orderId) rememberPendingCheckout(res.orderId, payload.items)
 				navigateToPayment(res.paymentUrl)
 				return
 			}
 
 			if (res.orderId) {
-				rememberPendingCheckout(res.orderId)
+				rememberPendingCheckout(res.orderId, payload.items)
 				setActiveOrderId(res.orderId)
 				void navigate({
 					to: '/dashboard/orders/$orderId',
@@ -483,6 +485,10 @@ export function useCheckoutPage(deps: {
 	const handleFinalSubmit = useCallback(() => {
 		if (paymentsDisabled) {
 			showToast(t['checkout.paymentsPausedHint'], 'error')
+			return
+		}
+		if (paymentRecovery) {
+			showToast(t['checkout.paymentRecoveryHint'], 'error')
 			return
 		}
 		if (
@@ -550,6 +556,7 @@ export function useCheckoutPage(deps: {
 		state,
 		items,
 		paymentsDisabled,
+		paymentRecovery,
 		isSubmitBlocked,
 		isGatewayDisabled,
 		couponApplied,
@@ -572,7 +579,9 @@ export function useCheckoutPage(deps: {
 		state,
 		calc,
 		previewData,
+		paymentRecovery,
 		isDetailsLoading,
+		isPreviewFetching,
 		isPreviewError,
 		couponApplied,
 		isGatewayDisabled,

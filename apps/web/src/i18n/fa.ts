@@ -290,6 +290,14 @@ export const fa = {
         'checkout.temporaryClosed': 'رستوران به‌صورت موقت بسته است.',
         'checkout.paymentsPaused': 'پرداخت موقتاً غیرفعال است',
         'checkout.paymentsPausedHint': 'پرداخت سفارش‌ها تا پایان بسته بودن موقت رستوران غیرفعال است.',
+        'checkout.paymentRecoveryTitle': 'پرداخت سفارش قبلی در حال بررسی است',
+        'checkout.paymentRecoveryHint': 'نتیجه پرداخت قبلی هنوز قطعی نیست. می‌توانید سبد جدید را آماده و ویرایش کنید؛ سبد شما حفظ می‌شود. برای جلوگیری از پرداخت تکراری، ثبت و پرداخت جدید تا مشخص شدن نتیجه متوقف است.',
+        'checkout.paymentRecoveryOrder': 'شماره سفارش قبلی',
+        'checkout.paymentRecoveryWait': 'بررسی بعدی بانک تا {n} ثانیه دیگر امکان‌پذیر است.',
+        'checkout.paymentRecoveryView': 'مشاهده سفارش قبلی',
+        'checkout.paymentRecoverySupport': 'تماس با پشتیبانی',
+        'checkout.paymentRecoveryEdit': 'آماده‌سازی و ویرایش سبد',
+        'checkout.paymentRecoveryRefresh': 'بررسی دوباره وضعیت',
         'checkout.closedNote':
                 'بعد از پرداخت، سفارش شما در اولین زمان ممکن بعد از باز شدن رستوران برایتان ارسال می‌شود.',
         'checkout.closedSummary':
@@ -478,7 +486,7 @@ export const fa = {
         'dash.orderDetail.pendingCountdown': 'زمان باقی‌ماندهٔ پرداخت: {n}',
         'dash.orderDetail.expiredTitle': 'پنجرهٔ پرداخت به پایان رسید',
         'dash.orderDetail.expiredHint':
-                'مهلت ادامهٔ پرداخت تمام شد. نتیجهٔ پرداخت هنوز در حال بررسی است؛ وضعیت سفارش پس از تأیید بانک به‌روز می‌شود. تا مشخص شدن نتیجه، دوباره پرداخت نکنید.',
+                'مهلت شروع پرداخت تمام شد. نتیجهٔ پرداخت قبلی هنوز در حال بررسی است؛ وضعیت سفارش پس از تأیید بانک به‌روز می‌شود. تا مشخص شدن نتیجه، دوباره پرداخت نکنید. برای پیگیری، شماره این سفارش را به پشتیبانی اعلام کنید؛ می‌توانید سبد بعدی را آماده کنید.',
         'dash.orderDetail.courierRoute': 'مسیر حرکت پیک',
         'dash.orderDetail.details': 'جزئیات سفارش',
         'dash.orderDetail.breakdownTitle': 'ریز مبلغ سفارش',

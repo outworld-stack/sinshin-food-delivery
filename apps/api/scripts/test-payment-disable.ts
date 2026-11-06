@@ -52,6 +52,13 @@ try {
     GATEWAY_MODE: 'direct', JWT_SECRET: 'payment-disable-regression'.repeat(3), SITE_URL: 'https://sinshin.example' })
   const settings = new SettingsService({ db })
   const writer = new SettingsService({ db })
+  // Bun 1.3.14 can stall parallel reads on one reserved transaction connection.
+  // Keep the real status calculation outside money locks and refresh its test
+  // snapshot after every closure toggle; fresh payment guards remain untouched.
+  const readRestaurantStatus = settings.restaurantStatus.bind(settings)
+  let transactionStatus = await readRestaurantStatus('fa', db)
+  settings.restaurantStatus = (lang = 'fa', readDb) => readDb
+    ? Promise.resolve(transactionStatus) : readRestaurantStatus(lang)
   const notifications = { notifyUser: async () => undefined, notifyAdminsNewOrder: async () => undefined } as never
   const hub = { publish: () => undefined } as never
   const orderService = new OrderService({ db, config, settings, coupons: new CouponService({ db }),
@@ -76,7 +83,8 @@ try {
   }
   ;(service as unknown as { gateways: Map<string, PaymentGateway> }).gateways.set('ZARINPAL', gateway)
   const [buyer] = await db.insert(users).values({ phone: '09150000001' }).returning()
-  // This suite tests several independent pending payments for a repeat buyer.
+  // Each recovery scenario below gets its own returning buyer; pending payments
+  // now correctly block another checkout even after a previous successful order.
   await db.insert(orders).values({
     userId: buyer!.id, displayId: 'ord-disable-history', status: 'PAID', paymentStatus: 'SUCCESS',
     deliveryType: 'DINE_IN', totalAmount: 0,
@@ -93,6 +101,7 @@ try {
   const setDisabled = async (disabled: boolean, closed = true) => {
     await writer.set(SETTING_KEYS.temporarilyClosed, closed)
     await writer.set(SETTING_KEYS.temporaryPaymentsDisabled, disabled)
+    transactionStatus = await readRestaurantStatus('fa', db)
   }
   const orderBy = async (displayId: string) => (await db.select().from(orders).where(eq(orders.displayId, displayId)))[0]!
   const paymentBy = async (id: typeof payments.$inferSelect.id) => (await db.select().from(payments).where(eq(payments.id, id)))[0]!
@@ -102,8 +111,15 @@ try {
     balance: await orderService.walletBalance(db, buyer!.id),
     couponUses: (await db.select().from(coupons).where(eq(coupons.id, coupon!.id)))[0]!.usedCount,
   })
+  let scenarioUser = 1
   const pending = async () => {
-    const result = await orderService.checkout(buyer!.id, input)
+    const [owner] = await db.insert(users).values({ phone: `0915${String(++scenarioUser).padStart(7, '0')}` }).returning()
+    await db.insert(orders).values({ userId: owner!.id, displayId: `ord-dis-hist-${scenarioUser}`,
+      status: 'PAID', paymentStatus: 'SUCCESS', deliveryType: 'DINE_IN', totalAmount: 0,
+      breakdown: { foodTotal: 0, discount: 0, walletDeduction: 0, deliveryFee: 0,
+        packagingFee: 0, totalAmount: 0, amountPaidOnline: 0 },
+    })
+    const result = await orderService.checkout(owner!.id, input)
     assert(result.paymentId)
     return { order: await orderBy(result.displayId), payment: await paymentBy(result.paymentId) }
   }
@@ -113,6 +129,20 @@ try {
   const callback = (fixture: Awaited<ReturnType<typeof pending>>) => service.handleCallback('ZARINPAL', {
     state: signState(fixture.payment.id, config.jwtSecret),
   })
+  const makeVerificationDue = async (paymentId: typeof payments.$inferSelect.id) => {
+    const row = await paymentBy(paymentId)
+    if (row.metadata?.verification) await db.update(payments).set({ metadata: { ...row.metadata,
+      verification: { ...(row.metadata.verification as Record<string, unknown>), nextAt: new Date(0).toISOString() },
+    } }).where(eq(payments.id, paymentId))
+  }
+  const settleRouted = async (displayId: string) => {
+    const order = await orderBy(displayId)
+    const payment = (await db.select().from(payments).where(eq(payments.orderId, order.id)))
+      .find(row => row.status === 'PENDING')
+    assert(payment)
+    verdict = 'success'
+    await service.handleCallback('ZARINPAL', { state: signState(payment.id, config.jwtSecret) })
+  }
 
   // Public status may still be cached as open, but money enforcement must not be.
   await settings.restaurantStatus()
@@ -164,7 +194,7 @@ try {
   await slowRejected
   initHook = async () => undefined
   assert((await paymentBy(slow.payment.id)).gatewayRef, 'retain PSP reference for callback/reconciliation')
-  assert.equal(await service.paymentReplayState(buyer!.id, slow.order.displayId), 'stale')
+  assert.equal(await service.paymentReplayState(slow.order.userId, slow.order.displayId), 'stale')
   passed('a closure during slow PSP initialization withholds the URL without losing its payment reference')
 
   await setDisabled(false)
@@ -175,19 +205,22 @@ try {
   const beforeRetryInit = initCalls
   for (const nextVerdict of ['pending', 'failed'] as const) {
     verdict = nextVerdict
-    await assert.rejects(service.retryInitiation(buyer!.id, resumable.order.displayId), disabledError)
+    await assert.rejects(service.retryInitiation(resumable.order.userId, resumable.order.displayId), disabledError)
     assert.deepEqual(await snapshot(), beforeRetry)
     assert.equal((await paymentBy(resumable.payment.id)).status, 'PENDING')
   }
   assert.equal(initCalls, beforeRetryInit)
-  assert.equal(await service.paymentReplayState(buyer!.id, resumable.order.displayId, resumedUrl), 'stale')
+  assert.equal(await service.paymentReplayState(resumable.order.userId, resumable.order.displayId, resumedUrl), 'stale')
   passed('disabled retries neither resume a pending session nor supersede it with a fresh charge')
 
   await setDisabled(false)
+  // The prior scenario intentionally received an unknown result. Advance only
+  // its scratch retry schedule so this test exercises an in-flight verification.
+  await makeVerificationDue(resumable.payment.id)
   verdict = 'pending'
   const verifyEntered = gate(), verifyContinue = gate()
   verifyHook = async () => { verifyEntered.release(); await verifyContinue.promise }
-  const racingRetry = service.retryInitiation(buyer!.id, resumable.order.displayId)
+  const racingRetry = service.retryInitiation(resumable.order.userId, resumable.order.displayId)
   const racingRejected = assert.rejects(racingRetry, disabledError)
   await verifyEntered.promise
   await setDisabled(true)
@@ -200,9 +233,10 @@ try {
   verdict = 'success'
   await callback(slow)
   assert.equal((await orderBy(slow.order.displayId)).paymentStatus, 'SUCCESS')
-  await assert.rejects(service.retryInitiation(buyer!.id, resumable.order.displayId), /هم‌اکنون پرداخت شد/)
+  await makeVerificationDue(resumable.payment.id)
+  await assert.rejects(service.retryInitiation(resumable.order.userId, resumable.order.displayId), /هم‌اکنون پرداخت شد/)
   assert.equal((await orderBy(resumable.order.displayId)).paymentStatus, 'SUCCESS')
-  assert.equal(await service.paymentReplayState(buyer!.id, resumable.order.displayId, resumedUrl), 'success')
+  assert.equal(await service.paymentReplayState(resumable.order.userId, resumable.order.displayId, resumedUrl), 'success')
   passed('already-charged callbacks and retry verification settle safely while new payments are disabled')
 
   await setDisabled(false)
@@ -238,6 +272,7 @@ try {
   assert.equal(replay.orderId, original.orderId)
   assert.equal(replay.paymentUrl, undefined)
   await setDisabled(false)
+  await settleRouted(original.orderId)
   const walletBody = { ...input, useWallet: true }
   const wallet = await (await request('paid-wallet-order', walletBody)).json() as { orderId: string; orderCompleted: boolean }
   assert.equal(wallet.orderCompleted, true)
@@ -271,6 +306,7 @@ try {
   assert.equal((await snapshot()).orders, afterPause.orders)
   assert.equal((await snapshot()).balance, afterPause.balance)
   passed('post-commit pauses return durable order recovery and immediately resume safely after reopening')
+  await settleRouted(recovery.orderId)
 
   const mockConfig = new AppConfig({ NODE_ENV: 'development', DATABASE_URL: target.toString(), GATEWAY_MODE: 'mock',
     JWT_SECRET: config.jwtSecret, SITE_URL: config.siteUrl })

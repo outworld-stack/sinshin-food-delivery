@@ -73,6 +73,7 @@ const adapter = new SepAdapter(config)
 const PAYMENT_ID = 'pay-000000000000001' as never // PaymentId برنددار
 const REFNUM = 'REF-SEP-000111'
 const amount = 150_000 // تومان
+const verifiedDetails = { ResNum: PAYMENT_ID, TerminalId: '12345678', RefNum: REFNUM }
 
 async function main(): Promise<void> {
   console.log('\n══ تست آداپتور سامان (SEP) — Token API ══\n')
@@ -167,19 +168,20 @@ async function main(): Promise<void> {
   console.log('\n── verify (VerifyPayment) ──')
 
   // موفق + تطابق مبلغ
-  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10 }))
-  const vOk = await adapter.verify({ gatewayRef: REFNUM, amount, query: { State: 'OK', RefNum: REFNUM, TraceNo: '777' } })
+  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10, ...verifiedDetails }))
+  const vOk = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: { State: 'OK', RefNum: REFNUM, TraceNo: '777' } })
   ok('verify موفق + مبلغ یکسان → success', vOk.success && !vOk.indeterminate)
   ok('verify موفق → gatewayRef=RefNum', vOk.gatewayRef === REFNUM)
 
   // مبلغ رشته‌ای (بعضی استک‌های بانک)
-  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: String(amount * 10) }))
-  const vStr = await adapter.verify({ gatewayRef: REFNUM, amount, query: {} })
+  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: String(amount * 10), ...verifiedDetails }))
+  const vStr = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: {} })
   ok('verify: Amount به شکل رشته هم تطبیق می‌خورد', vStr.success)
 
   const nestedDetail = {
     RRN: '123456789012',
     RefNum: REFNUM,
+    ResNum: PAYMENT_ID,
     TerminalNumber: 12345678,
     OrginalAmount: amount * 10,
     AffectiveAmount: amount * 10,
@@ -225,14 +227,30 @@ async function main(): Promise<void> {
   }
 
   // موفق اعلام‌شده + مبلغ ناهم‌خوان → indeterminate (پول‌ایمنی stage-58)
-  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10 + 500 }))
-  const vAmt = await adapter.verify({ gatewayRef: REFNUM, amount, query: {} })
+  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10 + 500, ...verifiedDetails }))
+  const vAmt = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: {} })
   ok('verify: موفق + مبلغ ناهم‌خوان → indeterminate (نه fail قطعی)', !vAmt.success && vAmt.indeterminate === true)
 
-  // IsSuccess=false → شکست قطعی از زبان خود بانک
+  // A failed verification operation is not terminal transaction evidence.
   mockFetch(() => jsonResponse({ IsSuccess: false, ResultCode: 32 }))
   const vFail = await adapter.verify({ gatewayRef: REFNUM, amount, query: {} })
-  ok('verify: IsSuccess=false → شکست قطعی (بدون indeterminate)', !vFail.success && !vFail.indeterminate)
+  ok('verify: IsSuccess=false preserves an unresolved financial outcome', !vFail.success && vFail.indeterminate === true)
+
+  for (const failure of [
+    { IsSuccess: false },
+    { isSuccess: false, ResultCode: -2 },
+    { Success: false, ResultCode: -6 },
+    { IsSuccess: false, ResultCode: 0 },
+    { IsSuccess: false, ResultCode: 99999 },
+    { Success: false, ResultCode: '32', TransactionDetail: nestedDetail },
+    { IsSuccess: false, Amount: amount * 10, RefNum: REFNUM, ResNum: PAYMENT_ID },
+  ]) {
+    mockFetch(() => jsonResponse(failure))
+    const result = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount,
+      query: { State: 'Canceled By User', ResNum: String(PAYMENT_ID) } })
+    ok(`failed verification ${JSON.stringify(failure)} cannot release original reservations`,
+      !result.success && result.indeterminate === true && result.gatewayRef === REFNUM)
+  }
 
   // شکل ناشناخته (IsSuccess غایب) → indeterminate
   mockFetch(() => jsonResponse({ Weird: 1 }))
@@ -271,14 +289,14 @@ async function main(): Promise<void> {
 
   // RefNum از کوئری وقتی مرجع ذخیره‌شده نیست (هر سه صورت حروف)
   for (const key of ['RefNum', 'refNum', 'refnum']) {
-    mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10 }))
-    const vFromQuery = await adapter.verify({ gatewayRef: null, amount, query: { [key]: REFNUM } })
+    mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10, ...verifiedDetails }))
+    const vFromQuery = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: null, amount, query: { [key]: REFNUM } })
     ok(`verify: RefNum از کوئری (${key}) خوانده می‌شود`, vFromQuery.success && vFromQuery.gatewayRef === REFNUM)
   }
 
   // مرجع ذخیره‌شده مقدم بر کوئری — ضد جعل
-  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10 }))
-  await adapter.verify({ gatewayRef: REFNUM, amount, query: { RefNum: 'REF-FORGED' } })
+  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10, ...verifiedDetails }))
+  await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: REFNUM, amount, query: { RefNum: 'REF-FORGED' } })
   ok(
     'verify: مرجع ذخیره‌شده مقدم بر کوئری است (ضد-جعل)',
     (lastBody?.RefNum as string) === REFNUM,
@@ -287,6 +305,32 @@ async function main(): Promise<void> {
   // پارامترهای verify
   ok('verify: آدرس VerifyPayment شاپرک', lastUrl.includes('sep.shaparak.ir/api/v1/Payment/VerifyPayment'))
   ok('verify: TerminalId در بدنه', lastBody?.TerminalId === '12345678')
+
+  for (const payload of [
+    { IsSuccess: true, Amount: amount * 10 },
+    { IsSuccess: true, Amount: amount * 10, TerminalId: '12345678' },
+    { IsSuccess: true, Amount: amount * 10, ResNum: PAYMENT_ID },
+    { IsSuccess: true, Amount: amount * 10, ...verifiedDetails, ResNum: 'another-order' },
+    { Success: true, TransactionDetail: { ...nestedDetail, ResNum: 'another-order' } },
+    { IsSuccess: false, ResultCode: -2 },
+    { IsSuccess: true, Amount: amount * 10 + 1, ...verifiedDetails },
+    { IsSuccess: true, Amount: amount * 10, ...verifiedDetails, RefNum: 'different-receipt' },
+  ]) {
+    mockFetch(() => jsonResponse(payload))
+    const result = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: null, amount,
+      query: { RefNum: REFNUM, ResNum: String(PAYMENT_ID), State: 'OK' } })
+    ok(`unsigned candidate cannot bind without matching verified identity: ${JSON.stringify(payload)}`,
+      !result.success && result.indeterminate === true && result.gatewayRef === null)
+  }
+  mockFetch(() => jsonResponse({ IsSuccess: true, Amount: amount * 10, ...verifiedDetails }))
+  const unowned = await adapter.verify({ gatewayRef: null, amount, query: { RefNum: REFNUM } })
+  ok('missing internal payment identity cannot authorize receipt attribution',
+    !unowned.success && unowned.indeterminate === true && unowned.gatewayRef === null)
+  mockFetch(() => { throw new Error('candidate receipt verification unavailable') })
+  const candidateOutage = await adapter.verify({ paymentId: PAYMENT_ID, gatewayRef: null, amount,
+    query: { RefNum: REFNUM, ResNum: String(PAYMENT_ID) } })
+  ok('an outage cannot promote an unsigned candidate receipt into authoritative gatewayRef',
+    !candidateOutage.success && candidateOutage.indeterminate === true && candidateOutage.gatewayRef === null)
 
   console.log(`\n══ نتیجه: ${pass} ✓ / ${fail} ✗ ══\n`)
   if (fail > 0) process.exit(1)

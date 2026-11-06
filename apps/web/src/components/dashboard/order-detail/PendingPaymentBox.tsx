@@ -37,6 +37,7 @@
  *    رفتارِ stage-58 — بدونِ شکستگی.
  */
 import { memo, useEffect, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { CreditCard } from 'reicon-react'
 import { useOrderPaymentRetry } from '#/hooks/dashboard/useOrderPaymentRetry'
 import { tpl, useI18n } from '#/i18n'
@@ -141,6 +142,11 @@ export const PendingPaymentBox = memo(function PendingPaymentBox({
 						<p className="text-xs text-yellow-600/80 dark:text-yellow-400/80 font-DanaMedium mt-1 leading-relaxed">
 							{t['dash.orderDetail.expiredHint']}
 						</p>
+						<p className="text-xs mt-2">{t['checkout.paymentRecoveryOrder']}: <span dir="ltr" className="inline-block font-DanaDemiBold">{order.id}</span></p>
+						<div className="flex flex-wrap gap-4 text-sm font-DanaDemiBold mt-3">
+							<a href="tel:01344552313" className="underline">{t['checkout.paymentRecoverySupport']}</a>
+							<Link to="/cart" className="underline">{t['checkout.paymentRecoveryEdit']}</Link>
+						</div>
 					</div>
 				</div>
 			</div>

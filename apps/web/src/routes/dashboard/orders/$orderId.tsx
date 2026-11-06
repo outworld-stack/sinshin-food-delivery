@@ -33,7 +33,7 @@ import { useOrderFinancialSync } from '#/hooks/dashboard/useOrderFinancialSync'
 import { useI18n } from '#/i18n'
 import { useAuthStore } from '#/stores/authStore'
 import { useCartStore } from '#/stores/cartStore'
-import { consumePendingCheckout } from '#/lib/pending-checkout'
+import { consumePendingCheckout, pendingCheckoutMatchesCart } from '#/lib/pending-checkout'
 import { clearCheckoutIntent } from '#/lib/checkout-intent'
 import {
 	liveTrackingOptions,
@@ -93,9 +93,10 @@ const OrderDetailPage = memo(function OrderDetailPage() {
 	// سبد پاک شود. دیدن سفارش‌های قدیمی/سفارش دیگران سبد را پاک نمی‌کند.
 	useEffect(() => {
 		if (!order || !['SUCCESS', 'FAILED', 'REFUNDED'].includes(order.paymentStatus)) return
+		const submittedCartStillPresent = pendingCheckoutMatchesCart(orderId, useCartStore.getState().items)
 		if (!consumePendingCheckout(orderId)) return
 		clearCheckoutIntent()
-		if (order.paymentStatus === 'SUCCESS') clearCart()
+		if (order.paymentStatus === 'SUCCESS' && submittedCartStillPresent) clearCart()
 		setActiveOrderId(orderId)
 	}, [order, orderId, clearCart, setActiveOrderId])
 

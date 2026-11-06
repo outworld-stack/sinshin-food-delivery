@@ -148,6 +148,12 @@ export const paymentRoutes = (deps: PaymentRoutesDeps) => {
   const userRoutes = new Elysia({ prefix: '/payments', tags: ['Payments'] })
     .use(requireAuth(deps.sessions))
 
+    .post('/reconcile', ({ user, body }) => deps.payments.reconcileOwnedOrder(user.id, body.orderId), {
+      beforeHandle: [ipRateLimit({ redis: deps.redis, scope: 'payment-reconcile', limit: 6, windowSeconds: 60 })],
+      body: t.Object({ orderId: t.String({ minLength: 3, maxLength: 40 }) }),
+      detail: { summary: 'Recheck the original payment safely; never start a new payment' },
+    })
+
     // stage-58 — «ادامه‌ی پرداخت» — فقط مالکِ سفارش PENDING_PAYMENT؛
     // درگاه پیش‌فرض = آخرین تلاش خود سفارش. ایمنی پول (استعلام درگاه قبل
     // از تعویض ردیف قبلی) داخل PaymentService.retryInitiation است.

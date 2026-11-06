@@ -120,6 +120,8 @@ export interface CheckoutServiceResult {
 }
 
 export class OrderService {
+        private pendingPaymentReconciler?: (userId: string) => Promise<CheckoutPreviewData['paymentRecovery']>;
+
         constructor(
                 private readonly deps: {
                         db: Db;
@@ -133,6 +135,11 @@ export class OrderService {
                         stats?: ProductStatsService;
                 },
         ) {}
+
+        /** PaymentService registers this after construction to avoid a runtime dependency cycle. */
+        setPendingPaymentReconciler(reconcile: (userId: string) => Promise<CheckoutPreviewData['paymentRecovery']>): void {
+                this.pendingPaymentReconciler = reconcile;
+        }
 
         /** موجودی کیف پول — SUM تراکنش‌ها (منبع حقیقت؛ عدد ذخیره‌شده وجود ندارد) */
         async walletBalance(db: DbOrTx, userId: string): Promise<number> {
@@ -149,6 +156,14 @@ export class OrderService {
 
         /** Read-only in preview; checkout calls this under the existing wallet/user locks. */
         private async needsFirstPurchaseReservation(db: DbOrTx, userId: string): Promise<boolean> {
+                // Outstanding financial attempts block every customer, including returning buyers.
+                const [unresolved] = await db.select({ id: orders.id }).from(orders).where(and(
+                        eq(orders.userId, userId), eq(orders.status, "PENDING_PAYMENT"),
+                )).limit(1);
+                const [unresolvedAttempt] = await db.select({ id: payments.id }).from(payments).where(and(
+                        eq(payments.userId, userId), eq(payments.status, "PENDING"),
+                )).limit(1);
+                if (unresolved || unresolvedAttempt) throw Err.conflict(FIRST_ORDER_PENDING_MESSAGE);
                 const [state] = await db.select({
                         successful: sql<boolean>`exists (
                                 select 1 from orders o where o.user_id = ${userId}::uuid
@@ -181,6 +196,10 @@ export class OrderService {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
                 await this.deps.settings.assertOrderPaymentsAllowed(db);
+                // PSP reconciliation must finish before acquiring checkout's money locks.
+                // Eligibility is checked again inside the transaction below.
+                const recovery = await this.pendingPaymentReconciler?.(userId);
+                if (recovery) throw Err.conflict(recovery.message);
 
                 // A slow maps provider must not hold wallet/user/campaign locks.
                 // Only route measurements are prepared; ownership, coordinates and
@@ -556,7 +575,7 @@ export class OrderService {
         }
 
         /**
-         * phase-2 — پیش‌نمایش چک‌اوت: همان قیمت‌گذاری سروری، بدون قفل/رزرو/ثبت.
+         * Reconcile stale payments first, then preview prices without creating an order or reservation.
          * مرگ SINSHIN20 و هزینه‌ی ارسال فلتِ فرانت — UI از این اعداد زنده نمایش می‌دهد.
          */
         async preview(
@@ -565,7 +584,8 @@ export class OrderService {
         ): Promise<CheckoutPreviewData> {
                 const { db } = this.deps;
                 if (input.items.length === 0) throw Err.validation("سبد خرید خالی است.");
-                await this.needsFirstPurchaseReservation(db, userId);
+                const paymentRecovery = await this.pendingPaymentReconciler?.(userId);
+                if (!paymentRecovery) await this.needsFirstPurchaseReservation(db, userId);
 
                 // Address selection is optional during preview; delivery stays
                 // unquoted until the customer selects an owned address.
@@ -649,6 +669,7 @@ export class OrderService {
                           );
 
                 return {
+                        paymentRecovery,
                         breakdown,
                         items,
                         coupon,

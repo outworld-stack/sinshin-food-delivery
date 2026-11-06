@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { CheckoutInput, DeliveryQuote } from '@sinshin/shared'
+import type { CheckoutInput, CheckoutItemInput, CheckoutPreviewData, DeliveryQuote } from '@sinshin/shared'
 
 const { QueryClient, QueryObserver, keepPreviousData, onlineManager } = await import('@tanstack/react-query')
 
@@ -22,6 +22,7 @@ let previewFetching = false
 let previewPlaceholder = false
 let previewPaused = false
 let previewFailed = false
+let paymentRecovery: CheckoutPreviewData['paymentRecovery']
 let refetches = 0
 const previewAddresses: Array<string | null> = []
 
@@ -38,6 +39,7 @@ mock.module('@tanstack/react-query', () => ({
         breakdown: { foodTotal: 100, discount: 0, totalAmount: 100, amountPaidOnline: onlineAmount, deliveryFee: deliveryQuote?.status === 'ready' || deliveryQuote?.status === 'fallback' ? deliveryQuote.fee : 0 },
         coupon: { valid: Boolean(code), discount: 5 },
         deliveryQuote,
+        paymentRecovery,
       },
       isLoading: false, isFetching: previewFetching, isPlaceholderData: previewPlaceholder,
       isPaused: previewPaused, isError: previewFailed, refetch: async () => { refetches++ },
@@ -47,7 +49,7 @@ mock.module('@tanstack/react-query', () => ({
     isPending: false,
     mutate: (input: CheckoutInput) => {
       pendingMutation = (async () => {
-        try { await options.onSuccess(await options.mutationFn(input)) }
+        try { await options.onSuccess(await options.mutationFn(input), input) }
         catch (error) { await options.onError(error) }
       })()
     },
@@ -75,23 +77,24 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: { locat
 Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get() { throw new DOMException('Storage denied', 'SecurityError') } })
 
 const { useCheckoutPage } = await import('../src/hooks/site/useCheckoutPage')
-const { consumePendingCheckout, rememberPendingCheckout } = await import('../src/lib/pending-checkout')
+const { consumePendingCheckout, rememberPendingCheckout, pendingCheckoutMatchesCart } = await import('../src/lib/pending-checkout')
 const { PENDING_CHECKOUT_KEY } = await import('../src/types/site/checkout')
 const { clearCheckoutIntent } = await import('../src/lib/checkout-intent')
 type Page = ReturnType<typeof useCheckoutPage>
 
 // Render-phase updates exercise React's real reducer and preserve its refs;
 // no hook source extraction, reducer copies, browser APIs or live API calls.
-function renderCheckout(coupon?: string, delivery?: { addressId?: string }, paymentsDisabled = false): Page {
+function renderCheckout(coupon?: string, delivery?: { addressId?: string }, paymentsDisabled = false, draft?: { items: CheckoutItemInput[]; note: string }): Page {
   let page!: Page
   let step = 0
   function Probe() {
-    page = useCheckoutPage({ items: [{ productId: 'product-1', sizeId: 'size-1', quantity: 1 }], isAuthenticated: true, paymentsDisabled })
+    page = useCheckoutPage({ items: draft?.items ?? [{ productId: 'product-1', sizeId: 'size-1', quantity: 1 }], isAuthenticated: true, paymentsDisabled })
     if (step === 0) {
       step++
       page.handleDeliveryTypeChange(delivery ? 'DELIVERY' : 'PICKUP')
       if (delivery?.addressId) page.handleSelectAddress(delivery.addressId)
       page.handleGatewayChange('MOCK')
+      if (draft) page.handleCustomerNoteChange(draft.note)
     } else if (step === 1 && coupon !== undefined) {
       step++
       page.handleCouponStatusChange('HAVE')
@@ -125,6 +128,45 @@ for (const amount of [0, 100]) {
   assert.equal(toasts.at(-1), 'checkout.paymentsPausedHint')
 }
 
+// A stale financial outcome permits editing the persisted cart, but neither a
+// button click nor a direct handler call may create a second order/payment.
+const draftStorage = new Map<string, string>()
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+  getItem: (key: string) => draftStorage.get(key) ?? null,
+  setItem: (key: string, value: string) => draftStorage.set(key, value),
+  removeItem: (key: string) => draftStorage.delete(key),
+} })
+Object.defineProperty(window, 'localStorage', { configurable: true, value: globalThis.localStorage })
+const { useCartStore, cartItemKey } = await import('../src/stores/cartStore')
+const draftProduct = '00000000-0000-4000-8000-000000000099'
+useCartStore.setState({ items: [{ productId: draftProduct, sizeId: null, quantity: 1 }] })
+paymentRecovery = { orderId: 'stale-original-order', message: 'Previous payment is under review', retryAfterSeconds: 60 }
+for (const amount of [0, 100]) {
+  onlineAmount = amount
+  useCartStore.getState().updateQuantity(cartItemKey(draftProduct, null), 3)
+  const draft = { items: useCartStore.getState().items, note: 'New draft note' }
+  const recovering = renderCheckout('NEW20', undefined, false, draft)
+  assert.equal(recovering.paymentRecovery?.orderId, paymentRecovery.orderId)
+  assert.equal(recovering.isSubmitBlocked, true)
+  assert.equal(recovering.state.customerNote, draft.note)
+  assert.equal(recovering.state.deliveryType, 'PICKUP')
+  assert.equal(recovering.state.couponDraft, 'NEW20')
+  const beforeRequests = checkoutRequests.length
+  recovering.handleFinalSubmit()
+  assert.equal(checkoutRequests.length, beforeRequests)
+  assert.equal(toasts.at(-1), 'checkout.paymentRecoveryHint')
+  assert.equal(useCartStore.getState().items[0]!.quantity, 3)
+  assert.equal(JSON.parse(draftStorage.get('sinshin-cart-storage')!).state.items[0].quantity, 3)
+  const beforeRefresh = refetches
+  await recovering.refetchPreview()
+  assert.equal(refetches, beforeRefresh + 1, 'recovery offers a safe preview/status refresh')
+}
+paymentRecovery = undefined
+assert.equal(renderCheckout().isSubmitBlocked, false, 'verified recovery removes the submission block')
+useCartStore.getState().clearCart()
+refetches = 0
+console.log('PASS stale payment recovery blocks wallet/gateway charges, keeps draft edits persisted and permits safe refresh')
+
 // Blocked storage cannot interrupt wallet success, order activation or routing.
 onlineAmount = 0
 checkoutResponse = { orderCompleted: true, orderId: 'wallet-paid' }
@@ -134,6 +176,7 @@ navigationResult = new Promise<void>((resolve) => { finishNavigation = resolve }
 void navigationResult.then(() => { navigationFinished = true })
 const walletPage = renderCheckout()
 await submit(walletPage)
+assert(pendingCheckoutMatchesCart('wallet-paid', checkoutRequests.at(-1)!.input.items), 'marker binds the actual submitted basket')
 assert.equal(navigations.at(-1)?.params?.orderId, 'wallet-paid')
 assert.equal(activeOrders.at(-1), 'wallet-paid')
 const completedWalletKey = checkoutRequests.at(-1)!.key

@@ -122,7 +122,7 @@ const qget = (query: Record<string, string>, name: string): string | undefined =
  *   ۱) init → bpPayRequest (مبلغ ریال؛ orderId = هش عددیِ پایدار از
  *      شناسه‌ی پرداخت) → RefId؛ مرورگر RefId را به startpay.mellat با POST می‌فرستد.
  *   ۲) برگشت بانک به callback با فرم POST (ResCode/RefId/SaleOrderId/
- *      SaleReferenceId) — فقط ResCode=0 مسیر تایید دارد.
+ *      SaleReferenceId) — ResCode امضا ندارد؛ نتیجهٔ سرور بانک ملاک است.
  *   ۳) تایید → bpVerifyRequest و بلافاصله bpSettleRequest سمت سرور؛
  *      مرجع قطعی تراکنش SaleReferenceId است.
  *
@@ -137,9 +137,8 @@ const qget = (query: Record<string, string>, name: string): string | undefined =
  *   و RefId فرم باید با توکنِ init یکی باشد — فرم جعلی نمی‌تواند
  *   تراکنشِ سفارش دیگری را به این پرداخت بچسباند.
  *
- * ریسک پذیرفته‌شده (هم‌تراز سامان): اگر callback هرگز نرسد (تب بسته
- * شده)، تراکنش وریفای نشده و شاپرک خودش مبلغ را آزاد می‌کند؛ کارِ
- * تایم‌اوت سفارش را قطعاً شکست می‌دهد.
+ * callback گم‌شده یا انقضای پنجره، برگشت وجه را ثابت نمی‌کند.
+ * بدون پاسخ قطعی بانک، سفارش و رزرو مالی برای بررسی باقی می‌مانند.
  */
 export class MellatAdapter implements PaymentGateway {
   readonly id = 'MELLAT'
@@ -211,12 +210,21 @@ export class MellatAdapter implements PaymentGateway {
       return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
 
+    const saleReferenceId = qget(input.query, 'SaleReferenceId')
+    const saleOrderId = qget(input.query, 'SaleOrderId')
+    if (saleOrderId !== undefined && saleOrderId !== orderId) {
+      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+    }
     if (kind !== 't') {
       // مرجع ماندگار از callback قبلی — مسیر ری-وریفای کارِ تایم‌اوت
-      return this.verifyAndSettle(orderId, storedRef)
+      // Historical unverified callbacks may have saved an incorrect receipt.
+      // A later callback can recover only by verifying it against our own order.
+      if (saleReferenceId && saleReferenceId !== storedRef && saleOrderId !== orderId) {
+        return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
+      }
+      return this.verifyAndSettle(orderId, saleReferenceId ?? storedRef, input.gatewayRef)
     }
 
-    const saleReferenceId = qget(input.query, 'SaleReferenceId')
     if (!saleReferenceId) {
       // رارد H6 — کوئری خالی = کارِ تایم‌اوت روی پرداختِ بدون callback:
       // کاربر ممکن است در بانک پرداخته و callback نرسیده باشد → پول در PSP
@@ -233,11 +241,7 @@ export class MellatAdapter implements PaymentGateway {
       return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
     }
 
-    const saleOrderId = qget(input.query, 'SaleOrderId')
-    if (saleOrderId !== undefined && saleOrderId !== orderId) {
-      return { success: false, gatewayRef: input.gatewayRef, indeterminate: true }
-    }
-    return this.verifyAndSettle(orderId, saleReferenceId)
+    return this.verifyAndSettle(orderId, saleReferenceId, input.gatewayRef)
   }
 
   // ── داخلی ──
@@ -252,9 +256,9 @@ export class MellatAdapter implements PaymentGateway {
    * تایید و تسویه — کدها از جدول رسمی به‌پرداخت:
    *   ۰ موفق · ۴۳ قبلاً وریفای شده · ۴۵ قبلاً تسویه شده · ۴۸ برگشت خورده
    */
-  private async verifyAndSettle(orderId: string, saleReferenceId: string): Promise<GatewayVerifyResult> {
+  private async verifyAndSettle(orderId: string, saleReferenceId: string, originalReference: string | null): Promise<GatewayVerifyResult> {
     if (!/^[1-9]\d{0,18}$/.test(saleReferenceId) || BigInt(saleReferenceId) > 9223372036854775807n) {
-      return { success: false, gatewayRef: null, indeterminate: true }
+      return { success: false, gatewayRef: originalReference, indeterminate: true }
     }
     const { terminalId, userName, userPassword } = this.creds
     const common: BpParam[] = [
@@ -273,7 +277,7 @@ export class MellatAdapter implements PaymentGateway {
       console.warn(
         `[mellat] verify فالت/شبکه — indeterminate: orderId=${orderId} saleRef=${saleReferenceId}`,
       )
-      return { success: false, gatewayRef: composite, indeterminate: true }
+      return { success: false, gatewayRef: originalReference, indeterminate: true }
     }
     if (verified === '48') {
       // پول به مشتری برگشته — قطعی
@@ -291,7 +295,7 @@ export class MellatAdapter implements PaymentGateway {
       console.warn(
         `[mellat] verify کد ناشناخته ${verified} — indeterminate: orderId=${orderId} saleRef=${saleReferenceId}`,
       )
-      return { success: false, gatewayRef: composite, indeterminate: true }
+      return { success: false, gatewayRef: originalReference, indeterminate: true }
     }
 
     // تسویه — تراکنشِ وریفای‌شده‌ی تسویه‌نشده توسط بانک برگشت می‌خورد

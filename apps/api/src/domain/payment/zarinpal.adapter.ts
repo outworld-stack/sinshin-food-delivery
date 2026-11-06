@@ -25,12 +25,14 @@ export class ZarinpalAdapter implements PaymentGateway {
 
   private readonly requestUrl: string
   private readonly verifyUrl: string
+  private readonly inquiryUrl: string
   private readonly startPay: string
 
   constructor(private readonly config: AppConfig) {
     const host = config.gateway.zarinpalSandbox ? SANDBOX_HOST : PROD_HOST
     this.requestUrl = `${host}/pg/v4/payment/request.json`
     this.verifyUrl = `${host}/pg/v4/payment/verify.json`
+    this.inquiryUrl = `${host}/pg/v4/payment/inquiry.json`
     this.startPay = `${host}/pg/StartPay`
   }
 
@@ -120,20 +122,27 @@ export class ZarinpalAdapter implements PaymentGateway {
       }
       return { success: true, gatewayRef: authority }
     }
-    // Validation, merchant configuration and authorization errors cannot
-    // establish whether an earlier payment captured money (-9/-10/-11).
-    // Only explicit unsuccessful transaction code -51 may release the hold.
-    const DEFINITELY_NOT_PAID = new Set([-51])
-    if (
-      DEFINITELY_NOT_PAID.has(dataCode ?? Number.NaN) ||
-      DEFINITELY_NOT_PAID.has(errCode ?? Number.NaN)
-    ) {
-      if (cbStatus) {
-        console.log(
-          `[zarinpal] verify: authority=${authority} Status=${cbStatus} → data.code=${dataCode ?? '-'} errors.code=${errCode ?? '-'} — شکست قطعی (پول گرفته نشده).`,
-        )
+    // -51 means the session is not an active paid attempt at verification time.
+    // It does not revoke the authority or prove that an in-flight charge cannot
+    // complete later. Inquiry's FAILED is likewise documented as incomplete.
+    // Only an authenticated REVERSED result establishes a completed reversal.
+    // Inquiry is never sufficient to finalize a successful payment: 100/101
+    // from verify above remains the sole success evidence.
+    if (dataCode === -51 || errCode === -51) {
+      const inquiry = await postGatewayJson<{
+        data?: { code?: number; status?: string }
+        errors?: unknown
+      }>(
+        this.inquiryUrl,
+        { merchant_id: this.merchantId, authority },
+        this.config.gateway.timeoutMs,
+      ).catch(() => null)
+      const noErrors = inquiry?.errors === undefined ||
+        (Array.isArray(inquiry.errors) && inquiry.errors.length === 0) ||
+        (inquiry.errors !== null && typeof inquiry.errors === 'object' && Object.keys(inquiry.errors).length === 0)
+      if (inquiry?.data?.code === 100 && inquiry.data.status === 'REVERSED' && noErrors) {
+        return { success: false, gatewayRef: authority }
       }
-      return { success: false, gatewayRef: authority }
     }
     // نامشخص — شکلِ واقعی پاسخ لاگ می‌شود تا کدِ درگاه‌های دیگر در تست‌های
     // عملی دیده و در صورت «قطعاً پرداخت‌نشده» بودن به مجموعه‌ی بالا اضافه شود.

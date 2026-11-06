@@ -82,6 +82,13 @@ try {
   }
   const readOrder = async (id: typeof orders.$inferSelect.id) => (await db.select().from(orders).where(eq(orders.id, id)))[0]!
   const readPayment = async (id: typeof payments.$inferSelect.id) => (await db.select().from(payments).where(eq(payments.id, id)))[0]!
+  // Simulate a scheduled retry becoming due without sleeping or weakening the
+  // production backoff. All writes here target this test's scratch database.
+  const verificationDue = async (id: typeof payments.$inferSelect.id) => {
+    const row = await readPayment(id)
+    const { verification: _verification, ...metadata } = row.metadata ?? {}
+    await db.update(payments).set({ metadata }).where(eq(payments.id, id))
+  }
   const callback = (fixture: Awaited<ReturnType<typeof make>>) => service.handleCallback(fixture.payment.gateway, { state: signState(fixture.payment.id, config.jwtSecret) })
 
   const initiating = await make('FAKE', null)
@@ -176,6 +183,7 @@ try {
   passed('an unresolved payment without a resumable URL cannot create a second charge')
 
   verifyHook = async input => ({ success: true, gatewayRef: input.gatewayRef })
+  await verificationDue(resumable.payment.id)
   await assert.rejects(() => service.retryInitiation(resumable.user.id, resumable.order.displayId))
   assert.equal((await readOrder(resumable.order.id)).status, 'PAID')
   assert.equal(initCalls, beforeResumeInit)
@@ -377,23 +385,23 @@ try {
 
   const sep = new SepAdapter(config), zarinpal = new ZarinpalAdapter(config), mellat = new MellatAdapter(config)
   for (const badAmount of [undefined, null, true, [], {}, '', '800000.0', '8e5', 799_999]) {
-    fetchHandler = async () => json({ IsSuccess: true, Amount: badAmount })
+    fetchHandler = async () => json({ IsSuccess: true, Amount: badAmount, ResNum: unknown.payment.id, TerminalId: '12345678' })
     const result = await sep.verify({ paymentId: unknown.payment.id, gatewayRef: 'receipt', amount: 80_000, query: {} })
     assert.equal(result.success, false)
     assert.equal(result.indeterminate, true)
   }
-  fetchHandler = async () => json({ IsSuccess: true, Amount: '800000' })
+  fetchHandler = async () => json({ IsSuccess: true, Amount: '800000', ResNum: unknown.payment.id, TerminalId: '12345678' })
   assert.equal((await sep.verify({ paymentId: unknown.payment.id, gatewayRef: 'receipt', amount: 80_000, query: {} })).success, true)
   passed('SEP requires an explicit positive integer amount; numeric strings remain compatible')
 
-  fetchHandler = async () => json({ IsSuccess: true, Amount: 800_000, ResNum: 'wrong-reservation' })
+  fetchHandler = async () => json({ IsSuccess: true, Amount: 800_000, ResNum: 'wrong-reservation', TerminalId: '12345678' })
   assert.equal((await sep.verify({ paymentId: unknown.payment.id, gatewayRef: 'receipt', amount: 80_000, query: {} })).indeterminate, true)
   fetchHandler = async () => json({ IsSuccess: 'false', Amount: 800_000 })
   assert.equal((await sep.verify({ gatewayRef: 'receipt', amount: 80_000, query: {} })).indeterminate, true)
   passed('mismatched SEP reservation and malformed success flags cannot finalize money')
 
-  fetchHandler = async () => json({ IsSuccess: true, Amount: 800_000, TerminalId: '99999999' })
-  assert.equal((await sep.verify({ gatewayRef: 'receipt', amount: 80_000, query: {} })).indeterminate, true)
+  fetchHandler = async () => json({ IsSuccess: true, Amount: 800_000, ResNum: unknown.payment.id, TerminalId: '99999999' })
+  assert.equal((await sep.verify({ paymentId: unknown.payment.id, gatewayRef: 'receipt', amount: 80_000, query: {} })).indeterminate, true)
   passed('returned SEP terminal identity must match the configured merchant terminal')
 
   fetchHandler = async () => json({ IsSuccess: true, Amount: 800_000 }, 500)
@@ -527,6 +535,7 @@ try {
     assert.equal(await orderService.walletBalance(db, unreachable.user.id), 80_000,
       'a network outage defers the decision — age alone never moves money on an unanswered question')
     verifyHook = async input => ({ success: false, gatewayRef: input.gatewayRef })
+    await verificationDue(unreachable.payment.id)
     await service.expirePendingOrders(10)
     assert.equal((await readOrder(unreachable.order.id)).status, 'CANCELED')
     passed('a verify outage defers expiry to the next sweep instead of blind-failing')
@@ -594,6 +603,7 @@ try {
     assert.equal(await orderService.walletBalance(db, mixed.user.id), 80_000, 'a failure callback cannot release a sibling charge reservation')
     verifyHook = async input => ({ success: input.paymentId === mixed.payment.id, gatewayRef: input.gatewayRef,
       indeterminate: input.paymentId !== mixed.payment.id })
+    await verificationDue(mixed.payment.id)
     await assert.rejects(() => service.retryInitiation(mixed.user.id, mixed.order.displayId), /هم‌اکنون پرداخت شد/)
     assert.equal((await readOrder(mixed.order.id)).status, 'PAID')
     assert.equal((await readPayment(mixedSibling!.id)).status, 'FAILED')

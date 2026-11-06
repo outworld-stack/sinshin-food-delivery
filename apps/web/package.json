@@ -41,6 +41,7 @@
     "test:checkout-client": "bun scripts/test-checkout-client.tsx",
     "test:coupon-client": "bun scripts/test-coupon-upgrade-client.tsx",
     "test:payment-retry": "bun scripts/test-payment-target.ts && bun scripts/test-payment-retry-client.tsx && bun scripts/test-payment-window-client.tsx",
+    "test:payment-draft": "bun scripts/test-payment-draft-client.tsx",
     "test:checkout-intent": "bun scripts/test-checkout-intent.ts",
     "test:referral-client": "bun scripts/test-referral-client.ts",
     "test:wallet-client": "bun scripts/test-wallet-client.tsx",

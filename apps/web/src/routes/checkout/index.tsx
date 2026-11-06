@@ -23,7 +23,7 @@ import { PaymentSection } from '#/components/site/checkout/PaymentSection'
 import { RestaurantStatusNotice } from '#/components/site/checkout/RestaurantStatusNotice'
 import { useCheckoutPage } from '#/hooks/site/useCheckoutPage'
 import { useHydrated } from '#/hooks/useHydrated'
-import { useI18n } from '#/i18n'
+import { tpl, useI18n } from '#/i18n'
 import { noindexHead } from '#/lib/seo'
 import { useAuthStore } from '#/stores/authStore'
 import { useCartStore } from '#/stores/cartStore'
@@ -54,7 +54,7 @@ function CheckoutPage() {
 		initialData: Route.useLoaderData(),
 	})
 	const hasHydrated = useHydrated()
-	const { t } = useI18n()
+	const { t, fmt } = useI18n()
 
 	const items = useCartStore((s) => s.items)
 	const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -107,6 +107,22 @@ function CheckoutPage() {
 			<h1 className="font-MorabbaBold text-3xl text-gray-800 dark:text-white mb-8">
 				{t['checkout.title']}
 			</h1>
+			{page.paymentRecovery && (
+				<div role="status" className="mb-6 p-5 rounded-2xl bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 text-yellow-700 dark:text-yellow-300">
+					<h2 className="font-DanaDemiBold">{t['checkout.paymentRecoveryTitle']}</h2>
+					<p className="text-sm mt-2 leading-relaxed">{t['checkout.paymentRecoveryHint']}</p>
+					<p className="text-sm mt-2">{t['checkout.paymentRecoveryOrder']}: <span dir="ltr" className="inline-block font-DanaDemiBold">{page.paymentRecovery.orderId}</span></p>
+					{page.paymentRecovery.retryAfterSeconds > 0 && (
+						<p className="text-xs mt-2">{tpl(t['checkout.paymentRecoveryWait'], { n: fmt.num(page.paymentRecovery.retryAfterSeconds) })}</p>
+					)}
+					<div className="flex flex-wrap items-center gap-4 text-sm font-DanaDemiBold mt-4">
+						<Link to="/dashboard/orders/$orderId" params={{ orderId: page.paymentRecovery.orderId }} className="underline">{t['checkout.paymentRecoveryView']}</Link>
+						<a href="tel:01344552313" className="underline">{t['checkout.paymentRecoverySupport']}</a>
+						<Link to="/cart" className="underline">{t['checkout.paymentRecoveryEdit']}</Link>
+						<button type="button" disabled={page.isPreviewFetching} onClick={() => { void page.refetchPreview() }} className="underline cursor-pointer disabled:opacity-50">{t['checkout.paymentRecoveryRefresh']}</button>
+					</div>
+				</div>
+			)}
 
 			{/* Temporary closures are explained only below the payment button. */}
 			{!restaurantStatus.isOpen && !restaurantStatus.temporarilyClosed && (

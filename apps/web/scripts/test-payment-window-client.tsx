@@ -108,6 +108,9 @@ try {
   advance(client, 59_000)
   assert(!hasButton(client))
   assert(text(client).includes('dash.orderDetail.expiredHint'))
+  assert(text(client).includes('order-a'), 'expired financial review identifies the original order for support')
+  assert(nodes(client.tree).some(node => node.props.href === 'tel:01344552313'), 'expired financial review offers the existing support contact')
+  assert(nodes(client.tree).some(node => node.props.to === '/cart'), 'the customer can prepare the next cart while financial review continues')
   assert.equal(timers.size, 0, 'expired windows stop ticking while server verification continues')
 
   // Polling refreshes the time reference; changing the order cannot inherit the
